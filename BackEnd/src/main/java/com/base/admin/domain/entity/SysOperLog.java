@@ -2,6 +2,7 @@ package com.base.admin.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -27,4 +28,7 @@ public class SysOperLog implements Serializable {
     private String errorMsg;
     private LocalDateTime operTime;
     private Long costTime;
+
+    @TableLogic(value = "1", delval = "0")
+    private Integer isActive;
 }

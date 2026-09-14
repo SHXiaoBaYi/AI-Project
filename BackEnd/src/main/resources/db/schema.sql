@@ -19,6 +19,7 @@ CREATE TABLE sys_user (
   update_by     VARCHAR(50)  DEFAULT ''                COMMENT 'Updated by',
   update_time   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated time',
   remark        VARCHAR(500) DEFAULT ''                COMMENT 'Remark',
+  is_active     TINYINT      NOT NULL DEFAULT 1        COMMENT 'Soft delete: 1=active 0=deleted',
   PRIMARY KEY (user_id),
   UNIQUE KEY uk_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='System users';
@@ -36,6 +37,7 @@ CREATE TABLE sys_role (
   update_by     VARCHAR(50)  DEFAULT ''                COMMENT 'Updated by',
   update_time   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated time',
   remark        VARCHAR(500) DEFAULT ''                COMMENT 'Remark',
+  is_active     TINYINT      NOT NULL DEFAULT 1        COMMENT 'Soft delete: 1=active 0=deleted',
   PRIMARY KEY (role_id),
   UNIQUE KEY uk_role_key (role_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='System roles';
@@ -59,6 +61,7 @@ CREATE TABLE sys_menu (
   update_by     VARCHAR(50)  DEFAULT ''                COMMENT 'Updated by',
   update_time   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated time',
   remark        VARCHAR(500) DEFAULT ''                COMMENT 'Remark',
+  is_active     TINYINT      NOT NULL DEFAULT 1        COMMENT 'Soft delete: 1=active 0=deleted',
   PRIMARY KEY (menu_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='System menus and permissions';
 
@@ -67,6 +70,7 @@ DROP TABLE IF EXISTS sys_user_role;
 CREATE TABLE sys_user_role (
   user_id  BIGINT NOT NULL COMMENT 'User ID',
   role_id  BIGINT NOT NULL COMMENT 'Role ID',
+  is_active TINYINT NOT NULL DEFAULT 1 COMMENT 'Soft delete: 1=active 0=deleted',
   PRIMARY KEY (user_id, role_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='User-Role association';
 
@@ -75,6 +79,7 @@ DROP TABLE IF EXISTS sys_role_menu;
 CREATE TABLE sys_role_menu (
   role_id  BIGINT NOT NULL COMMENT 'Role ID',
   menu_id  BIGINT NOT NULL COMMENT 'Menu ID',
+  is_active TINYINT NOT NULL DEFAULT 1 COMMENT 'Soft delete: 1=active 0=deleted',
   PRIMARY KEY (role_id, menu_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Role-Menu association';
 

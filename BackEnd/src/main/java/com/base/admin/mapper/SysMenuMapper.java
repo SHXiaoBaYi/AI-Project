@@ -14,11 +14,11 @@ public interface SysMenuMapper extends BaseMapper<SysMenu> {
 
     @Select("""
             WITH RECURSIVE active_tree AS (
-                SELECT * FROM sys_menu WHERE parent_id = 0 AND status = 0
+                SELECT * FROM sys_menu WHERE parent_id = 0 AND status = 0 AND is_active = 1
                 UNION ALL
                 SELECT m.* FROM sys_menu m
                 INNER JOIN active_tree t ON m.parent_id = t.menu_id
-                WHERE m.status = 0
+                WHERE m.status = 0 AND m.is_active = 1
             )
             SELECT DISTINCT m.perms FROM active_tree m
             LEFT JOIN sys_role_menu rm ON m.menu_id = rm.menu_id
@@ -29,11 +29,11 @@ public interface SysMenuMapper extends BaseMapper<SysMenu> {
 
     @Select("""
             WITH RECURSIVE active_tree AS (
-                SELECT * FROM sys_menu WHERE parent_id = 0 AND status = 0
+                SELECT * FROM sys_menu WHERE parent_id = 0 AND status = 0 AND is_active = 1
                 UNION ALL
                 SELECT m.* FROM sys_menu m
                 INNER JOIN active_tree t ON m.parent_id = t.menu_id
-                WHERE m.status = 0
+                WHERE m.status = 0 AND m.is_active = 1
             )
             SELECT DISTINCT m.menu_id, m.menu_name, m.parent_id, m.sort_order, m.path, m.component,
                    m.menu_type, m.perms, m.icon, m.visible, m.status
@@ -47,11 +47,11 @@ public interface SysMenuMapper extends BaseMapper<SysMenu> {
 
     @Select("""
             WITH RECURSIVE active_tree AS (
-                SELECT * FROM sys_menu WHERE parent_id = 0 AND status = 0
+                SELECT * FROM sys_menu WHERE parent_id = 0 AND status = 0 AND is_active = 1
                 UNION ALL
                 SELECT m.* FROM sys_menu m
                 INNER JOIN active_tree t ON m.parent_id = t.menu_id
-                WHERE m.status = 0
+                WHERE m.status = 0 AND m.is_active = 1
             )
             SELECT * FROM active_tree WHERE menu_type IN ('M', 'C')
             ORDER BY sort_order
@@ -60,11 +60,11 @@ public interface SysMenuMapper extends BaseMapper<SysMenu> {
 
     @Select("""
             WITH RECURSIVE active_tree AS (
-                SELECT * FROM sys_menu WHERE parent_id = 0 AND status = 0
+                SELECT * FROM sys_menu WHERE parent_id = 0 AND status = 0 AND is_active = 1
                 UNION ALL
                 SELECT m.* FROM sys_menu m
                 INNER JOIN active_tree t ON m.parent_id = t.menu_id
-                WHERE m.status = 0
+                WHERE m.status = 0 AND m.is_active = 1
             )
             SELECT menu_id FROM active_tree
             """)

@@ -28,3 +28,4 @@
 deploy/application-prod.yml
 node_modules/
 .DS_Store
+uploads/

@@ -6,6 +6,7 @@ import BasicLayout from '@/layouts';
 import componentMap from './componentMap';
 import type { MenuTree } from '@/types/menu';
 import { PageLoading } from '@ant-design/pro-components';
+import { RouteErrorPage } from '@/components/PageErrorBoundary';
 
 // eslint-disable-next-line react-refresh/only-export-components
 function PagePlaceholder() {
@@ -55,6 +56,7 @@ function buildDynamicRoutes(menus: MenuTree[], parentPath = ''): any[] {
       if (!hasComponent && hasChildren) {
         return {
           path: relativePath,
+          errorElement: <RouteErrorPage />,
           children: buildDynamicRoutes(menu.children, fullPath),
         };
       }
@@ -62,6 +64,7 @@ function buildDynamicRoutes(menus: MenuTree[], parentPath = ''): any[] {
       return {
         path: relativePath,
         element: hasComponent ? withSuspense(componentMap[elementKey]) : <PagePlaceholder />,
+        errorElement: <RouteErrorPage />,
         children: hasChildren ? buildDynamicRoutes(menu.children, fullPath) : undefined,
       };
     });
@@ -115,9 +118,10 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
         {
           path: '/demo',
           element: withSuspense(Demo),
+          errorElement: <RouteErrorPage />,
         },
         ...dynamicRoutes,
-        { path: '*', element: <NotFound /> },
+        { path: '*', element: <NotFound />, errorElement: <RouteErrorPage /> },
       ],
     },
   ]);

@@ -58,6 +58,7 @@ public class OnlineSessionService {
             online.setUserAgent(trimUa(userAgent));
             online.setLoginTime(now);
             online.setExpireTime(expireTime);
+            online.setIsActive(1);
             onlineMapper.insert(online);
         } else {
             online.setUsername(username);

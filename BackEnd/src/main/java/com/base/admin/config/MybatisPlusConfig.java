@@ -31,6 +31,7 @@ public class MybatisPlusConfig {
                 String username = SecurityUtils.getCurrentUsername();
                 this.strictInsertFill(metaObject, "createBy", () -> username, String.class);
                 this.strictInsertFill(metaObject, "updateBy", () -> username, String.class);
+                this.strictInsertFill(metaObject, "isActive", () -> 1, Integer.class);
             }
 
             @Override

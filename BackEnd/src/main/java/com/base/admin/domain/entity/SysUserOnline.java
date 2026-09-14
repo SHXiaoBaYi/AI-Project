@@ -33,4 +33,7 @@ public class SysUserOnline {
 
     @Schema(description = "过期时间")
     private LocalDateTime expireTime;
+
+    @Schema(description = "是否有效（1=有效 0=已删除）", example = "1")
+    private Integer isActive;
 }

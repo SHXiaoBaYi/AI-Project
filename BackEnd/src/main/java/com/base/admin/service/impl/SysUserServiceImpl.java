@@ -235,10 +235,7 @@ public class SysUserServiceImpl implements SysUserService {
         userRoleMapper.deleteByUserId(userId);
         if (roleIds != null) {
             for (Long roleId : roleIds) {
-                SysUserRole ur = new SysUserRole();
-                ur.setUserId(userId);
-                ur.setRoleId(roleId);
-                userRoleMapper.insert(ur);
+                userRoleMapper.insertUserRole(userId, roleId);
             }
         }
     }

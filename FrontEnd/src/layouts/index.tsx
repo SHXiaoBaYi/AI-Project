@@ -10,6 +10,7 @@ import { resetMenus } from '@/store/slices/menuSlice';
 import type { RootState, AppDispatch } from '@/store';
 import type { MenuTree } from '@/types/menu';
 import avatarPng from '@/assets/avatar.png';
+import PageErrorBoundary from '@/components/PageErrorBoundary';
 
 function convertMenusToRoute(menus: MenuTree[], parentPath = ''): any[] {
   return menus.map((item) => {
@@ -137,7 +138,9 @@ export default function BasicLayout() {
       }}
     >
       <PageContainer pageHeaderRender={false}>
-        <Outlet />
+        <PageErrorBoundary key={location.pathname}>
+          <Outlet />
+        </PageErrorBoundary>
       </PageContainer>
     </ProLayout>
   );

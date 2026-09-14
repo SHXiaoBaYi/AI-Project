@@ -39,6 +39,25 @@ public class TreeUtil {
                 }
             }
         }
+        tree.sort((a, b) -> {
+            int pin = Boolean.compare(isWorkbench(b), isWorkbench(a));
+            if (pin != 0) {
+                return pin;
+            }
+            return Integer.compare(sortOf(a), sortOf(b));
+        });
         return tree;
+    }
+
+    private static boolean isWorkbench(MenuVO menu) {
+        if (menu == null) {
+            return false;
+        }
+        String path = menu.getPath() == null ? "" : menu.getPath().replace("/", "");
+        return "工作台".equals(menu.getMenuName()) || "workbench".equalsIgnoreCase(path);
+    }
+
+    private static int sortOf(MenuVO menu) {
+        return menu.getSortOrder() == null ? 0 : menu.getSortOrder();
     }
 }

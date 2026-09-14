@@ -2,6 +2,7 @@ package com.base.admin.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -22,4 +23,7 @@ public class SysLoginLog implements Serializable {
     private Integer status;
     private String msg;
     private LocalDateTime loginTime;
+
+    @TableLogic(value = "1", delval = "0")
+    private Integer isActive;
 }
