@@ -26,7 +26,7 @@ export default function Login() {
   const completeLogin = async (username: string, password: string, force = false) => {
     await dispatch(login({ username, password, force })).unwrap();
     await dispatch(getInfo()).unwrap();
-    message.success('登录成功');
+    message.success('登录成功!');
     navigate('/', { replace: true });
   };
 
