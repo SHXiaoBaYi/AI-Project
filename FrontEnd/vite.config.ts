@@ -28,8 +28,14 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         '/api': {
-          target: env.VITE_API_URL,
+          target: env.VITE_API_URL || 'http://127.0.0.1:8080',
           changeOrigin: true,
+          // 避免 localhost 解析到 IPv6 ::1 导致连不上后端
+          configure: (proxy) => {
+            proxy.on('error', (err) => {
+              console.error('[vite proxy /api]', err.message);
+            });
+          },
         },
       },
     },
