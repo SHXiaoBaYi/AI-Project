@@ -3,11 +3,12 @@ import { message } from '@/store/slices/staticFunctionSlice';
 import { getToken, removeToken } from '@/utils/auth';
 import type { ApiResult } from '@/types/api';
 
-const HTTP_UNAUTHORIZED = 401; // 未认证
-const HTTP_FORBIDDEN = 403; // 已认证，未授权
-const HTTP_SUCCESS = 200; // 业务成功
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_FORBIDDEN = 403;
+const HTTP_SUCCESS = 200;
+const CODE_LOGIN_CONFLICT = 40901;
+const CODE_SESSION_KICKED = 4011;
 
-/** HTTP 状态码对应的错误提示 */
 const HTTP_STATUS_MESSAGES: Record<number, string> = {
   400: '请求参数错误',
   404: '请求的资源不存在',
@@ -18,10 +19,19 @@ const HTTP_STATUS_MESSAGES: Record<number, string> = {
   504: '网关超时',
 };
 
+let kicking = false;
+
 /** 处理认证/授权失败，返回 true 表示已拦截 */
-function handleAuthError(code: number): boolean {
-  if (code === HTTP_UNAUTHORIZED) {
-    sessionStorage.setItem('authError', '登录已失效，请重新登录');
+function handleAuthError(code: number, tip?: string): boolean {
+  if (code === CODE_SESSION_KICKED || code === HTTP_UNAUTHORIZED) {
+    if (kicking) {
+      return true;
+    }
+    kicking = true;
+    sessionStorage.setItem(
+      'authError',
+      tip || (code === CODE_SESSION_KICKED ? '该账号已在其他设备登录，您已被强制下线' : '登录已失效，请重新登录'),
+    );
     removeToken();
     window.location.href = '/login';
     return true;
@@ -52,7 +62,14 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   (response) => {
     const res = response.data as ApiResult<unknown>;
-    if (handleAuthError(res.code)) {
+
+    if (res.code === CODE_LOGIN_CONFLICT) {
+      const err = new Error(res.msg || '账号已在其他设备登录') as Error & { code: number };
+      err.code = CODE_LOGIN_CONFLICT;
+      return Promise.reject(err);
+    }
+
+    if (handleAuthError(res.code, res.msg)) {
       return Promise.reject(new Error(res.msg));
     }
     if (res.code !== HTTP_SUCCESS) {
@@ -63,6 +80,16 @@ service.interceptors.response.use(
   },
   (error) => {
     const httpStatus = error.response?.status;
+    const body = error.response?.data as ApiResult<unknown> | undefined;
+    if (body?.code === CODE_SESSION_KICKED || body?.code === CODE_LOGIN_CONFLICT) {
+      if (body.code === CODE_LOGIN_CONFLICT) {
+        const err = new Error(body.msg || '账号已在其他设备登录') as Error & { code: number };
+        err.code = CODE_LOGIN_CONFLICT;
+        return Promise.reject(err);
+      }
+      handleAuthError(CODE_SESSION_KICKED, body.msg);
+      return Promise.reject(error);
+    }
     if (!handleAuthError(httpStatus)) {
       const msg = HTTP_STATUS_MESSAGES[httpStatus] || error.message || '网络错误，请联系管理员';
       message.error(msg);
@@ -72,3 +99,4 @@ service.interceptors.response.use(
 );
 
 export default service;
+export { CODE_LOGIN_CONFLICT, CODE_SESSION_KICKED };

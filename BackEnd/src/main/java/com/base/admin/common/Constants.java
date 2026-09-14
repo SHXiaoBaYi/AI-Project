@@ -14,5 +14,10 @@ public class Constants {
     public static final int STATUS_ACTIVE = 0;
     public static final int STATUS_DISABLED = 1;
 
+    /** 账号已在其他设备登录，需确认是否强制下线 */
+    public static final int CODE_LOGIN_CONFLICT = 40901;
+    /** 当前会话已被其他设备强制下线 */
+    public static final int CODE_SESSION_KICKED = 4011;
+
     private Constants() {}
 }

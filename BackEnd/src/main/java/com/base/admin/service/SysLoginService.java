@@ -6,7 +6,9 @@ import com.base.admin.domain.vo.UserInfoVO;
 
 public interface SysLoginService {
 
-    LoginVO login(LoginDTO dto);
+    LoginVO login(LoginDTO dto, String ip, String userAgent);
+
+    void logout(Long userId);
 
     UserInfoVO getUserInfo(Long userId);
 }

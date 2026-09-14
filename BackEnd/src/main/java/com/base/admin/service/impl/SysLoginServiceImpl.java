@@ -16,6 +16,7 @@ import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.mapper.SysUserRoleMapper;
 import com.base.admin.security.JwtUtils;
 import com.base.admin.security.LoginUser;
+import com.base.admin.service.OnlineSessionService;
 import com.base.admin.service.SysLoginService;
 import com.base.admin.util.TreeUtil;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Service;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,10 +41,10 @@ public class SysLoginServiceImpl implements SysLoginService {
     private final SysRoleMapper roleMapper;
     private final SysUserRoleMapper userRoleMapper;
     private final SysMenuMapper menuMapper;
+    private final OnlineSessionService onlineSessionService;
 
     @Override
-    public LoginVO login(LoginDTO dto) {
-        // 前置检查用户状态，防止被 Spring Security 吞掉具体异常
+    public LoginVO login(LoginDTO dto, String ip, String userAgent) {
         SysUser user = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, dto.getUsername()));
         if (user == null) {
@@ -56,8 +58,21 @@ public class SysLoginServiceImpl implements SysLoginService {
                 new UsernamePasswordAuthenticationToken(dto.getUsername(), dto.getPassword()));
 
         LoginUser loginUser = (LoginUser) authentication.getPrincipal();
-        String token = jwtUtils.generateToken(loginUser.getUserId(), loginUser.getUsername());
+        boolean force = Boolean.TRUE.equals(dto.getForce());
+
+        if (!force && onlineSessionService.hasActiveSession(loginUser.getUserId())) {
+            throw new BusinessException(Constants.CODE_LOGIN_CONFLICT, "该账号已在其他设备登录，是否强制对方下线？");
+        }
+
+        String tokenId = UUID.randomUUID().toString().replace("-", "");
+        String token = jwtUtils.generateToken(loginUser.getUserId(), loginUser.getUsername(), tokenId);
+        onlineSessionService.saveSession(loginUser.getUserId(), loginUser.getUsername(), tokenId, ip, userAgent);
         return LoginVO.builder().token(token).build();
+    }
+
+    @Override
+    public void logout(Long userId) {
+        onlineSessionService.removeSession(userId);
     }
 
     @Override
@@ -79,7 +94,6 @@ public class SysLoginServiceImpl implements SysLoginService {
         Set<String> permissions;
         List<MenuVO> menus;
         if (isAdmin) {
-            // 管理员直接返回所有激活状态的菜单
             permissions = new HashSet<>();
             permissions.add(Constants.ADMIN_PERM);
             menus = TreeUtil.buildMenuTree(menuMapper.selectAllMenus());

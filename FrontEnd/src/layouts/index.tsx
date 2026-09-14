@@ -5,7 +5,7 @@ import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-desig
 import { getIconComponent } from '@/utils/iconMap';
 import { Dropdown, theme } from 'antd';
 import { useSelector, useDispatch } from 'react-redux';
-import { logout } from '@/store/slices/userSlice';
+import { logout, logoutRemote } from '@/store/slices/userSlice';
 import { resetMenus } from '@/store/slices/menuSlice';
 import type { RootState, AppDispatch } from '@/store';
 import type { MenuTree } from '@/types/menu';
@@ -50,7 +50,8 @@ export default function BasicLayout() {
     routes: convertMenusToRoute(menus),
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await dispatch(logoutRemote());
     dispatch(logout());
     dispatch(resetMenus());
     navigate('/login', { replace: true });

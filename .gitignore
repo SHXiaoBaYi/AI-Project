@@ -25,5 +25,6 @@
 .env.rds.local
 **/application-local.yml
 **/application-local.yaml
+deploy/application-prod.yml
 node_modules/
 .DS_Store

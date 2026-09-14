@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { loginApi, getUserInfoApi } from '@/api/auth';
+import { loginApi, getUserInfoApi, logoutApi } from '@/api/auth';
 import { getToken, setToken, removeToken } from '@/utils/auth';
 import type { UserInfo } from '@/types/user';
 import type { MenuTree } from '@/types/menu';
@@ -11,6 +11,11 @@ interface UserState {
   menus: MenuTree[];
 }
 
+export interface LoginRejectPayload {
+  code?: number;
+  message?: string;
+}
+
 const initialState: UserState = {
   token: getToken(),
   userInfo: null,
@@ -20,16 +25,38 @@ const initialState: UserState = {
 
 export const login = createAsyncThunk(
   'user/login',
-  async ({ username, password }: { username: string; password: string }) => {
-    const res = await loginApi(username, password);
-    setToken(res.token);
-    return res.token;
+  async (
+    { username, password, force = false }: { username: string; password: string; force?: boolean },
+    { rejectWithValue },
+  ) => {
+    try {
+      const res = await loginApi(username, password, force);
+      setToken(res.token);
+      return res.token;
+    } catch (err) {
+      const e = err as Error & { code?: number };
+      // RTK 默认序列化只会保留 string 类型 code，数字业务码必须走 rejectWithValue
+      return rejectWithValue({
+        code: e.code,
+        message: e.message || '登录失败',
+      } satisfies LoginRejectPayload);
+    }
   },
 );
 
 export const getInfo = createAsyncThunk('user/getInfo', async () => {
   const res = await getUserInfoApi();
   return res;
+});
+
+export const logoutRemote = createAsyncThunk('user/logoutRemote', async () => {
+  try {
+    await logoutApi();
+  } catch {
+    // ignore network errors on logout
+  } finally {
+    removeToken();
+  }
 });
 
 const userSlice = createSlice({
@@ -54,6 +81,12 @@ const userSlice = createSlice({
         state.userInfo = userInfo;
         state.permissions = userInfo.permissions ?? [];
         state.menus = menus ?? [];
+      })
+      .addCase(logoutRemote.fulfilled, (state) => {
+        state.token = '';
+        state.userInfo = null;
+        state.permissions = [];
+        state.menus = [];
       });
   },
 });

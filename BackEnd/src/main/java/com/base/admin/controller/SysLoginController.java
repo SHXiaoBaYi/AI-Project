@@ -6,9 +6,11 @@ import com.base.admin.domain.vo.LoginVO;
 import com.base.admin.domain.vo.UserInfoVO;
 import com.base.admin.security.LoginUser;
 import com.base.admin.service.SysLoginService;
+import com.base.admin.util.IpUtils;
 import com.base.admin.util.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -22,8 +24,8 @@ public class SysLoginController {
 
     @Operation(summary = "用户登录")
     @PostMapping("/auth/login")
-    public Result<LoginVO> login(@Valid @RequestBody LoginDTO dto) {
-        LoginVO vo = loginService.login(dto);
+    public Result<LoginVO> login(@Valid @RequestBody LoginDTO dto, HttpServletRequest request) {
+        LoginVO vo = loginService.login(dto, IpUtils.getClientIp(request), request.getHeader("User-Agent"));
         return Result.ok(vo);
     }
 
@@ -33,5 +35,19 @@ public class SysLoginController {
         LoginUser currentUser = SecurityUtils.getCurrentUser();
         UserInfoVO info = loginService.getUserInfo(currentUser.getUserId());
         return Result.ok(info);
+    }
+
+    @Operation(summary = "会话探活（用于被踢检测）")
+    @GetMapping("/auth/session")
+    public Result<Void> checkSession() {
+        return Result.ok();
+    }
+
+    @Operation(summary = "退出登录")
+    @PostMapping("/auth/logout")
+    public Result<Void> logout() {
+        LoginUser currentUser = SecurityUtils.getCurrentUser();
+        loginService.logout(currentUser.getUserId());
+        return Result.ok();
     }
 }

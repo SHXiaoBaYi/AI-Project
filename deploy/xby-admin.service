@@ -1,0 +1,16 @@
+[Unit]
+Description=XiaoBaYi Admin Backend
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/xby-admin
+Environment=SPRING_PROFILES_ACTIVE=prod
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/xby-admin/base-admin-1.0.0.jar --spring.config.additional-location=optional:file:/opt/xby-admin/config/
+SuccessExitStatus=143
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

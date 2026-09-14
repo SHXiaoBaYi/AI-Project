@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.util.Base64;
 import java.util.Date;
+import java.util.UUID;
 
 @Component
 public class JwtUtils {
@@ -25,7 +26,12 @@ public class JwtUtils {
     }
 
     public String generateToken(Long userId, String username) {
+        return generateToken(userId, username, UUID.randomUUID().toString().replace("-", ""));
+    }
+
+    public String generateToken(Long userId, String username, String tokenId) {
         return Jwts.builder()
+                .id(tokenId)
                 .subject(String.valueOf(userId))
                 .claim("username", username)
                 .issuedAt(new Date())
@@ -45,6 +51,11 @@ public class JwtUtils {
     public Long getUserIdFromToken(String token) {
         Claims claims = parseToken(token);
         return Long.parseLong(claims.getSubject());
+    }
+
+    public String getTokenId(String token) {
+        Claims claims = parseToken(token);
+        return claims.getId();
     }
 
     public boolean validateToken(String token) {

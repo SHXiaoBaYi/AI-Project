@@ -15,4 +15,7 @@ public class LoginDTO {
     @NotBlank(message = "Password cannot be empty")
     @Schema(description = "密码", requiredMode = Schema.RequiredMode.REQUIRED, example = "123456")
     private String password;
+
+    @Schema(description = "是否强制登录（踢掉其他设备）", example = "false")
+    private Boolean force;
 }

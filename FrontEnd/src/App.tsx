@@ -5,6 +5,7 @@ import { Spin, App as AntdApp, ConfigProvider } from 'antd';
 import { createAppRouter } from '@/router';
 import { getInfo } from '@/store/slices/userSlice';
 import { StaticFunctionCapture } from '@/store/slices/staticFunctionSlice';
+import { checkSessionApi } from '@/api/auth';
 import type { RootState, AppDispatch } from '@/store';
 
 export default function App() {
@@ -24,6 +25,19 @@ export default function App() {
       });
     }
   }, [token, routesLoaded, dispatch]);
+
+  // 定时探活：被其他设备强制下线后尽快跳回登录页
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      checkSessionApi().catch(() => {
+        // 4011 / 401 由 request 拦截器处理跳转
+      });
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [token]);
 
   const isLoggedIn = !!token && routesLoaded;
   const showLoading = token && !routesLoaded;

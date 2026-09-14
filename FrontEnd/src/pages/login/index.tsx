@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Form, Input, Button, Card } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { Form, Input, Button, Card, Modal } from 'antd';
+import { UserOutlined, LockOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { login, getInfo } from '@/store/slices/userSlice';
 import { message } from '@/store/slices/staticFunctionSlice';
+import { CODE_LOGIN_CONFLICT } from '@/api/request';
 import type { AppDispatch } from '@/store';
 import loginBg from '@/assets/login-bg.png';
 
 export default function Login() {
   const [loading, setLoading] = useState(false);
+  const [form] = Form.useForm();
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
 
@@ -21,15 +23,42 @@ export default function Login() {
     }
   }, []);
 
+  const completeLogin = async (username: string, password: string, force = false) => {
+    await dispatch(login({ username, password, force })).unwrap();
+    await dispatch(getInfo()).unwrap();
+    message.success('登录成功');
+    navigate('/', { replace: true });
+  };
+
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true);
     try {
-      await dispatch(login(values)).unwrap();
-      await dispatch(getInfo()).unwrap();
-      message.success('登录成功');
-      navigate('/', { replace: true });
-    } catch {
-      // Error
+      await completeLogin(values.username, values.password, false);
+    } catch (err) {
+      const code = Number((err as { code?: number | string })?.code);
+      if (code === CODE_LOGIN_CONFLICT) {
+        Modal.confirm({
+          title: '账号登录提示',
+          icon: <ExclamationCircleOutlined />,
+          content: '该账号已在其他设备登录，是否强制对方下线？',
+          okText: '强制下线',
+          cancelText: '取消',
+          centered: true,
+          onOk: async () => {
+            setLoading(true);
+            try {
+              await completeLogin(values.username, values.password, true);
+            } catch {
+              // error toast already handled
+            } finally {
+              setLoading(false);
+            }
+          },
+          onCancel: () => {
+            // 关闭弹窗，留在登录页
+          },
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -42,7 +71,6 @@ export default function Login() {
         background: `url(${loginBg}) center/cover no-repeat`,
       }}
     >
-      {/* 装饰圆形 */}
       <div
         className='absolute rounded-full'
         style={{
@@ -65,26 +93,13 @@ export default function Login() {
           left: -100,
         }}
       />
-      {/* <div
-        className='absolute rounded-full'
-        style={{
-          width: 280,
-          height: 280,
-          background: 'radial-gradient(circle, rgba(34,197,94,0.25) 0%, transparent 70%)',
-          filter: 'blur(50px)',
-          top: '35%',
-          left: '8%',
-        }}
-      /> */}
 
-      {/* 登录卡片 */}
       <Card
         className='relative w-100 rounded-2xl! shadow-xl backdrop-blur-sm md:mr-40! md:ml-auto!'
         variant='borderless'
         style={{ background: 'rgba(255, 255, 255, 0.75)' }}
         styles={{ body: { padding: '40px 36px 32px' } }}
       >
-        {/* Logo & 标题 */}
         <div className='mb-8 text-center'>
           <div
             className='mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl'
@@ -96,8 +111,8 @@ export default function Login() {
           <p className='mt-1.5 text-sm text-gray-400'>后台数据分析系统</p>
         </div>
 
-        {/* 登录表单 */}
         <Form
+          form={form}
           name='login'
           onFinish={onFinish}
           size='large'
