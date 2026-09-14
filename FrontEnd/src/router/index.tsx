@@ -13,7 +13,7 @@ function PagePlaceholder() {
   return (
     <Result
       status='warning'
-      title='页面开发中'
+      title='页面开发中...'
       subTitle='该菜单对应的页面组件尚未创建，请在 src/pages/ 下添加对应路径的 index.tsx 文件'
       extra={
         <Button
