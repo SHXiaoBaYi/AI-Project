@@ -58,7 +58,7 @@ export default function BasicLayout() {
 
   return (
     <ProLayout
-      title='Base Admin'
+      title='小巴依(上海)'
       layout='mix'
       collapsed={collapsed}
       onCollapse={setCollapsed}

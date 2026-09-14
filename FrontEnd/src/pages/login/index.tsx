@@ -90,16 +90,15 @@ export default function Login() {
             className='mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl'
             style={{ background: 'linear-gradient(135deg, var(--ant-color-primary), var(--ant-color-primary-hover))' }}
           >
-            <span className='text-2xl font-bold text-white'>B</span>
+            <span className='text-2xl font-bold text-white'>小</span>
           </div>
-          <h1 className='text-2xl font-bold tracking-tight text-gray-800'>Base Admin</h1>
-          <p className='mt-1.5 text-sm text-gray-400'>基础权限管理系统</p>
+          <h1 className='text-2xl font-bold tracking-tight text-gray-800'>小巴依(上海)</h1>
+          <p className='mt-1.5 text-sm text-gray-400'>后台数据分析系统</p>
         </div>
 
         {/* 登录表单 */}
         <Form
           name='login'
-          initialValues={{ username: 'admin', password: 'admin123' }}
           onFinish={onFinish}
           size='large'
         >
@@ -135,8 +134,6 @@ export default function Login() {
             </Button>
           </Form.Item>
         </Form>
-
-        <p className='mt-4 text-center text-xs text-gray-400'>默认账号: admin / admin123</p>
       </Card>
     </div>
   );
