@@ -520,9 +520,12 @@ function MetricGroup({
 }
 
 function PlatformShot({ platform, formRef }: { platform: string; formRef: RefObject<ProFormInstance | null> }) {
-  const [url, setUrl] = useState<string | undefined>(() =>
-    formRef.current?.getFieldValue(['items', platform, 'screenshotUrl']),
-  );
+  const [url, setUrl] = useState<string | undefined>();
+
+  useEffect(() => {
+    setUrl(formRef.current?.getFieldValue(['items', platform, 'screenshotUrl']));
+  }, [platform, formRef]);
+
   return (
     <div>
       <ProFormText

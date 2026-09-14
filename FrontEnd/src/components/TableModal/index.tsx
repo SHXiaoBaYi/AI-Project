@@ -1,8 +1,8 @@
+import { useMemo, useRef } from 'react';
 import { BetaSchemaForm } from '@ant-design/pro-components';
 import type { FormSchema } from '@ant-design/pro-components/es/form/components/SchemaForm';
 import defaultModalProps from '@/components/BaseModalForm/defaultModalProps';
 import styles from './index.module.css';
-import { useMemo } from 'react';
 
 type TableModalProps<T = Record<string, any>, ValueType = 'text'> = FormSchema<T, ValueType> & {
   /** 是否只读，默认 true（详情模式）。设为 false 则为新增/编辑模式 */
@@ -18,8 +18,17 @@ export default function TableModal<T = Record<string, any>, ValueType = 'text'>(
     columns: callerColumns,
     readonly = true,
     onFinish,
+    open,
     ...rest
   } = props as any;
+
+  // 每次打开弹窗重建表单，避免编辑时残留上一次 initialValues
+  const wasOpenRef = useRef(!!open);
+  const instanceKeyRef = useRef(0);
+  if (open && !wasOpenRef.current) {
+    instanceKeyRef.current += 1;
+  }
+  wasOpenRef.current = !!open;
 
   const adaptedColumns = useMemo(() => {
     if (!Array.isArray(callerColumns)) return callerColumns;
@@ -53,8 +62,14 @@ export default function TableModal<T = Record<string, any>, ValueType = 'text'>(
     className: isDetail ? [styles.detailForm, callerClassName].filter(Boolean).join(' ') : callerClassName || undefined,
     columns: adaptedColumns,
     onFinish,
+    open,
     ...rest,
   } as FormSchema<T, ValueType>;
 
-  return <BetaSchemaForm<T, ValueType> {...mergedProps} />;
+  return (
+    <BetaSchemaForm<T, ValueType>
+      key={instanceKeyRef.current}
+      {...mergedProps}
+    />
+  );
 }
