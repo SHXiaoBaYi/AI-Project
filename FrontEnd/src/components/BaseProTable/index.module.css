@@ -1,0 +1,7 @@
+.table {
+  contain: layout;
+}
+
+.table :global(.ant-pagination .ant-select) {
+  border-radius: 2px;
+}

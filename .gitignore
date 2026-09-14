@@ -1,24 +1,29 @@
-# Compiled class file
-*.class
+# 编译输出的 class 文件
+**/target/
+**/classes/
+**/*.class
 
-# Log file
+# 常见的构建产物
+**/build/
+**/out/
+**/bin/
+
+# IDE 配置（可选）
+.idea/
+*.iml
+.settings/
+.project
+.classpath
+
+# 日志文件
 *.log
 
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
-*.jar
-*.war
-*.nar
-*.ear
-*.zip
-*.tar.gz
-*.rar
-
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
+# 本地密钥与环境覆盖（勿提交）
+.env
+.env.*
+!.env.example
+.env.rds.local
+**/application-local.yml
+**/application-local.yaml
+node_modules/
+.DS_Store

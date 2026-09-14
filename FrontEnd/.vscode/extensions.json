@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "esbenp.prettier-vscode", // prettier自动格式化代码
+    "dbaeumer.vscode-eslint", // eslint规范代码风格
+    "bradlc.vscode-tailwindcss" // 使用tailwindcss原子化样式快速构建布局
+  ]
+}

@@ -1,0 +1,16 @@
+.modal {
+  .container {
+    padding: 0;
+  }
+  .header {
+    border-bottom: 1px solid var(--ant-color-split);
+    padding: 20px 24px;
+  }
+  .body {
+    padding: 0 24px;
+  }
+  .footer {
+    border-top: 1px solid var(--ant-color-split);
+    padding: 20px 24px;
+  }
+}

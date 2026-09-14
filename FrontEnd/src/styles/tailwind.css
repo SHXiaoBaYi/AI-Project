@@ -1,0 +1,7 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-primary: var(--ant-color-primary);
+  --color-primary-bg: var(--ant-color-primary-bg);
+  --color-primary-hover: var(--ant-color-primary-bg-hover);
+}
