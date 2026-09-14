@@ -4,8 +4,10 @@ server:
     context-path: /api
 
 spring:
+  # local/dev：本机开发（浏览器访问 localhost）→ RDS 外网
+  # prod：ECS 等同 VPC 部署 → RDS 内网
   profiles:
-    active: dev
+    active: local
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8
@@ -13,6 +15,16 @@ spring:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
+
+# RDS 地址统一管理：按 profile 选择外网/内网
+xby:
+  rds:
+    external-host: rm-bp18jx12jxs1884h9so.mysql.rds.aliyuncs.com
+    internal-host: rm-bp18jx12jxs1884h9.mysql.rds.aliyuncs.com
+    port: 3306
+    database: base_admin
+    username: ${RDS_USERNAME:xiaobayi0099}
+    password: ${RDS_PASSWORD:Xby@123456}
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml

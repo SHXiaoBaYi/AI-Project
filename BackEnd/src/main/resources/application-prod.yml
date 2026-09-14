@@ -1,8 +1,9 @@
+# ECS / 同 VPC 生产环境：使用 RDS 内网地址
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/base_admin?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-    username: root
-    password: your_password
+    url: jdbc:mysql://${xby.rds.internal-host}:${xby.rds.port}/${xby.rds.database}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${xby.rds.username}
+    password: ${xby.rds.password}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
 springdoc:

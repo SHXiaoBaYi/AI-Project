@@ -23,8 +23,8 @@
 .env.*
 !.env.example
 .env.rds.local
-**/application-local.yml
-**/application-local.yaml
+# application-local.yml 已纳入仓库（仅含外网主机引用，密码走环境变量/默认占位）
+**/application-secret.yml
 deploy/application-prod.yml
 node_modules/
 .DS_Store
