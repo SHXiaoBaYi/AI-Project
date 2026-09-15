@@ -80,14 +80,19 @@ export function GeoDailySummaryBoard({
   records,
   activeDate,
   onActiveDateChange,
+  dimension = 'topic',
 }: {
   groups?: GeoDailySummaryDate[];
-  /** 日监测原始记录（优先用于汇总明细展示） */
+  /** 日监测原始记录（优先用于话题维度汇总明细展示） */
   records?: GeoDailyVO[];
   activeDate?: string;
   onActiveDateChange?: (date: string) => void;
+  dimension?: 'topic' | 'owner';
 }) {
   const data = useMemo(() => {
+    if (dimension === 'owner') {
+      return groups || [];
+    }
     if (records && records.length > 0) {
       return buildDailySummaryFromRecords(records);
     }
@@ -95,7 +100,7 @@ export function GeoDailySummaryBoard({
       return groups || [];
     }
     return groups || [];
-  }, [groups, records]);
+  }, [groups, records, dimension]);
 
   const [innerKey, setInnerKey] = useState<string>();
   const [iframeUrl, setIframeUrl] = useState<string>();
@@ -122,8 +127,8 @@ export function GeoDailySummaryBoard({
     onActiveDateChange?.(key);
   };
 
-  const platformColumns: ColumnsType<GeoDailySummaryPlatform> = useMemo(
-    () => [
+  const platformColumns: ColumnsType<GeoDailySummaryPlatform> = useMemo(() => {
+    const base: ColumnsType<GeoDailySummaryPlatform> = [
       {
         title: '平台',
         dataIndex: 'platform',
@@ -131,6 +136,26 @@ export function GeoDailySummaryBoard({
         fixed: 'left',
         render: (v) => <span className='px-2 font-medium'>{v}</span>,
       },
+    ];
+    if (dimension === 'owner') {
+      base.push(
+        {
+          title: '话题',
+          dataIndex: 'topicName',
+          width: 120,
+          ellipsis: true,
+          render: (v) => v || '-',
+        },
+        {
+          title: '关键字',
+          dataIndex: 'keyword',
+          width: 160,
+          ellipsis: true,
+          render: (v) => v || '-',
+        },
+      );
+    }
+    base.push(
       {
         title: '提及',
         dataIndex: 'mentioned',
@@ -194,12 +219,39 @@ export function GeoDailySummaryBoard({
           />
         ),
       },
-    ],
-    [],
-  );
+    );
+    return base;
+  }, [dimension]);
 
-  const topicColumns: ColumnsType<GeoDailySummaryTopic> = useMemo(
-    () => [
+  const topicColumns: ColumnsType<GeoDailySummaryTopic> = useMemo(() => {
+    if (dimension === 'owner') {
+      return [
+        {
+          title: '负责人',
+          dataIndex: 'ownerName',
+          width: 140,
+          fixed: 'left',
+          render: (v, row) => <span className='px-2 font-medium'>{v || row.topicName || '未指定'}</span>,
+        },
+        {
+          title: '各平台监测',
+          dataIndex: 'platforms',
+          render: (_, row) => (
+            <Table<GeoDailySummaryPlatform>
+              size='small'
+              bordered
+              pagination={false}
+              rowKey={(r) => `${currentKey}-${row.ownerName}-${r.platform}-${r.id ?? ''}-${r.keyword ?? ''}`}
+              columns={platformColumns}
+              dataSource={row.platforms}
+              scroll={{ x: 1200 }}
+              className='bg-white'
+            />
+          ),
+        },
+      ];
+    }
+    return [
       {
         title: '话题',
         dataIndex: 'topicName',
@@ -238,13 +290,12 @@ export function GeoDailySummaryBoard({
           />
         ),
       },
-    ],
-    [currentKey, platformColumns],
-  );
+    ];
+  }, [currentKey, platformColumns, dimension]);
 
   if (!data.length) {
     return (
-      <Card title='日报汇总'>
+      <Card title={dimension === 'owner' ? '日报汇总（负责人维度）' : '日报汇总'}>
         <div className='py-8 text-center text-neutral-400'>
           当前筛选范围内暂无汇总数据，请调整日期范围或先在「日监测」录入数据
         </div>
@@ -255,7 +306,7 @@ export function GeoDailySummaryBoard({
   return (
     <>
       <Card
-        title='日报汇总（日期 Tab）'
+        title={dimension === 'owner' ? '日报汇总（负责人维度 · 日期 Tab）' : '日报汇总（话题维度 · 日期 Tab）'}
         extra={<span className='text-sm text-neutral-500'>当前：{currentKey || '-'}</span>}
       >
         <Tabs
@@ -269,14 +320,14 @@ export function GeoDailySummaryBoard({
         />
         <div className='mb-2 text-sm text-neutral-500'>
           已切换到 <b>{activeGroup?.inspectDate}</b>，共 {activeGroup?.topics?.length || 0}{' '}
-          个话题；下方图表/明细同步过滤该日
+          {dimension === 'owner' ? '位负责人' : '个话题'}；下方图表/明细同步过滤该日
         </div>
         <Table<GeoDailySummaryTopic>
-          key={`summary-table-${currentKey}`}
+          key={`summary-table-${dimension}-${currentKey}`}
           size='small'
           bordered
           pagination={false}
-          rowKey={(r) => `${currentKey}-${r.topicId}-${r.keyword}-${r.topicName}`}
+          rowKey={(r) => `${currentKey}-${r.topicId}-${r.keyword}-${r.topicName}-${r.ownerName}`}
           columns={topicColumns}
           dataSource={[...(activeGroup?.topics || [])]}
           scroll={{ x: 1200, y: 'calc(100vh - 360px)' }}

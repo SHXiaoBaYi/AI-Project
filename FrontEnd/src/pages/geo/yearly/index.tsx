@@ -12,6 +12,7 @@ import { Column, Line } from '@ant-design/charts';
 import dayjs from 'dayjs';
 import BaseModalForm from '@/components/BaseModalForm';
 import PermissionButton from '@/components/Buttons/PermissionButton';
+import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
 import { GeoCompareSummaryCards, buildCompareSummaryFromRows } from '@/components/geo/GeoTrendBoard';
 import {
   deleteGeoYearTargetApi,
@@ -21,11 +22,135 @@ import {
   getGeoYearTargetsApi,
   saveGeoYearTargetApi,
 } from '@/api/geo';
-import type { GeoTopic, GeoYearTarget, GeoYearlyBoard } from '@/types/geo';
+import type { GeoTopic, GeoYearTarget, GeoYearlyBoard, GeoYearlyRow } from '@/types/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
 
 const defaultYears = [dayjs().subtract(1, 'year'), dayjs()];
+
+function YearlyBoardSlice({
+  rows,
+  actualChart,
+  achieveChart,
+  compareSummary,
+  groupTitle,
+  persistedPeriodCount,
+  onConfigureTarget,
+}: {
+  rows: GeoYearlyRow[];
+  actualChart: GeoYearlyBoard['actualChart'];
+  achieveChart: GeoYearlyBoard['achieveChart'];
+  compareSummary?: GeoYearlyBoard['compareSummary'];
+  groupTitle: string;
+  persistedPeriodCount?: number;
+  onConfigureTarget?: () => void;
+}) {
+  return (
+    <>
+      <GeoCompareSummaryCards
+        title={`年报同比 / 环比看板（${groupTitle}）`}
+        alwaysShow
+        summary={
+          compareSummary ??
+          buildCompareSummaryFromRows(
+            (rows ?? []).map((r) => ({
+              axisLabel: r.periodLabel,
+              sampleCount: r.sampleCount,
+              mentionRate: r.actualRate,
+              firstMentionRate: r.achieveRate,
+              recommendCount: r.sampleCount,
+              mentionRateMom: r.actualRateMom,
+              mentionRateYoy: r.actualRateYoy,
+              firstMentionRateMom: r.achieveRateMom,
+              firstMentionRateYoy: r.achieveRateYoy,
+              topicName: r.ownerName || r.topicName,
+            })),
+            '环比/同比=上一年度同期',
+          )
+        }
+      />
+      <Card title='实际达成%（折线，系列=平台）'>
+        <Line
+          data={actualChart}
+          xField='axis'
+          yField='value'
+          colorField='series'
+          height={280}
+        />
+      </Card>
+      <Card title='目标达成率%（柱状，系列=平台）'>
+        <Column
+          data={achieveChart}
+          xField='axis'
+          yField='value'
+          colorField='series'
+          height={260}
+        />
+      </Card>
+      <Card
+        title={`达成明细（${groupTitle}，已落库周期 ${persistedPeriodCount ?? 0}）`}
+        extra={
+          onConfigureTarget ? (
+            <PermissionButton
+              perm='geo:yearly:target'
+              onClick={onConfigureTarget}
+            >
+              配置目标
+            </PermissionButton>
+          ) : null
+        }
+      >
+        <div className='mb-3 text-sm text-neutral-600'>
+          年报数据由定时任务自动落库，页面仅支持查看；目标配置仍可维护。
+        </div>
+        <Table
+          rowKey={(r) => `${r.periodLabel}-${r.ownerName || r.topicName}-${r.platform}`}
+          dataSource={rows}
+          pagination={false}
+          scroll={{ x: 'max-content' }}
+          columns={[
+            { title: '时间', dataIndex: 'periodLabel' },
+            {
+              title: groupTitle,
+              render: (_, r) => (groupTitle === '负责人' ? r.ownerName || r.topicName || '-' : r.topicName),
+            },
+            { title: '平台', dataIndex: 'platform' },
+            { title: '目标%', dataIndex: 'targetRate' },
+            { title: '实际达成%', dataIndex: 'actualRate' },
+            {
+              title: '实际环比',
+              dataIndex: 'actualRateMom',
+              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
+            },
+            {
+              title: '实际同比',
+              dataIndex: 'actualRateYoy',
+              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
+            },
+            { title: '达成率%', dataIndex: 'achieveRate' },
+            {
+              title: '达成环比',
+              dataIndex: 'achieveRateMom',
+              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
+            },
+            {
+              title: '达成同比',
+              dataIndex: 'achieveRateYoy',
+              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
+            },
+            { title: '样本', dataIndex: 'sampleCount' },
+            {
+              title: '来源',
+              dataIndex: 'fromSnapshot',
+              width: 90,
+              render: (v: boolean | undefined) => (v ? <Tag color='success'>已落库</Tag> : <Tag>实时</Tag>),
+            },
+          ]}
+        />
+      </Card>
+    </>
+  );
+}
 
 const YearlyPage = memo(function YearlyPage() {
   const { message } = App.useApp();
@@ -51,6 +176,10 @@ const YearlyPage = memo(function YearlyPage() {
       rows: data?.rows ?? [],
       persistedPeriodCount: data?.persistedPeriodCount ?? 0,
       compareSummary: data?.compareSummary,
+      ownerActualChart: data?.ownerActualChart ?? [],
+      ownerAchieveChart: data?.ownerAchieveChart ?? [],
+      ownerRows: data?.ownerRows ?? [],
+      ownerCompareSummary: data?.ownerCompareSummary,
     });
   };
 
@@ -103,101 +232,32 @@ const YearlyPage = memo(function YearlyPage() {
           />
         </QueryFilter>
       </Card>
-      <GeoCompareSummaryCards
-        title='年报同比 / 环比看板'
-        alwaysShow
-        summary={
-          board.compareSummary ??
-          buildCompareSummaryFromRows(
-            (board.rows ?? []).map((r) => ({
-              axisLabel: r.periodLabel,
-              sampleCount: r.sampleCount,
-              mentionRate: r.actualRate,
-              firstMentionRate: r.achieveRate,
-              recommendCount: r.sampleCount,
-              mentionRateMom: r.actualRateMom,
-              mentionRateYoy: r.actualRateYoy,
-              firstMentionRateMom: r.achieveRateMom,
-              firstMentionRateYoy: r.achieveRateYoy,
-            })),
-            '环比/同比=上一年度同期',
-          )
+      <GeoBoardDimensionTabs
+        topic={
+          <YearlyBoardSlice
+            groupTitle='话题'
+            rows={board.rows ?? []}
+            actualChart={board.actualChart}
+            achieveChart={board.achieveChart}
+            compareSummary={board.compareSummary}
+            persistedPeriodCount={board.persistedPeriodCount}
+            onConfigureTarget={() => setTargetOpen(true)}
+          />
+        }
+        owner={
+          <YearlyBoardSlice
+            groupTitle='负责人'
+            rows={(board.ownerRows ?? []).map((r) => ({
+              ...r,
+              ownerName: r.ownerName || r.topicName,
+            }))}
+            actualChart={board.ownerActualChart ?? []}
+            achieveChart={board.ownerAchieveChart ?? []}
+            compareSummary={board.ownerCompareSummary}
+            persistedPeriodCount={board.persistedPeriodCount}
+          />
         }
       />
-      <Card title='实际达成%（折线，系列=平台）'>
-        <Line
-          data={board.actualChart}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={280}
-        />
-      </Card>
-      <Card title='目标达成率%（柱状，系列=平台）'>
-        <Column
-          data={board.achieveChart}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={260}
-        />
-      </Card>
-      <Card
-        title={`达成明细（只读，已落库周期 ${board.persistedPeriodCount ?? 0}）`}
-        extra={
-          <PermissionButton
-            perm='geo:yearly:target'
-            onClick={() => setTargetOpen(true)}
-          >
-            配置目标
-          </PermissionButton>
-        }
-      >
-        <div className='mb-3 text-sm text-neutral-600'>
-          年报数据由定时任务自动落库，页面仅支持查看；目标配置仍可维护。
-        </div>
-        <Table
-          rowKey={(r) => `${r.periodLabel}-${r.topicName}-${r.platform}`}
-          dataSource={board.rows}
-          pagination={false}
-          scroll={{ x: 'max-content' }}
-          columns={[
-            { title: '时间', dataIndex: 'periodLabel' },
-            { title: '话题', dataIndex: 'topicName' },
-            { title: '平台', dataIndex: 'platform' },
-            { title: '目标%', dataIndex: 'targetRate' },
-            { title: '实际达成%', dataIndex: 'actualRate' },
-            {
-              title: '实际环比',
-              dataIndex: 'actualRateMom',
-              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
-            },
-            {
-              title: '实际同比',
-              dataIndex: 'actualRateYoy',
-              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
-            },
-            { title: '达成率%', dataIndex: 'achieveRate' },
-            {
-              title: '达成环比',
-              dataIndex: 'achieveRateMom',
-              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
-            },
-            {
-              title: '达成同比',
-              dataIndex: 'achieveRateYoy',
-              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
-            },
-            { title: '样本', dataIndex: 'sampleCount' },
-            {
-              title: '来源',
-              dataIndex: 'fromSnapshot',
-              width: 90,
-              render: (v: boolean | undefined) => (v ? <Tag color='success'>已落库</Tag> : <Tag>实时</Tag>),
-            },
-          ]}
-        />
-      </Card>
       <Card title='目标配置'>
         <Table
           rowKey='id'

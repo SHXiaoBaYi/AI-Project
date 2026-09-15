@@ -10,6 +10,7 @@ import {
   getGeoTopicOptionsApi,
 } from '@/api/geo';
 import type { GeoDailyBoard, GeoDailyVO, GeoTopic } from '@/types/geo';
+import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
 import { GeoDailySummaryBoard } from '@/components/geo/GeoDailySummaryBoard';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
@@ -21,6 +22,11 @@ const emptyBoard: GeoDailyBoard = {
   recommendChart: [],
   rows: [],
   summaryGroups: [],
+  ownerMentionChart: [],
+  ownerFirstMentionChart: [],
+  ownerRecommendChart: [],
+  ownerRows: [],
+  ownerSummaryGroups: [],
 };
 
 function rangeAround(anchor: Dayjs): [Dayjs, Dayjs] {
@@ -57,12 +63,17 @@ const DayBoardPage = memo(function DayBoardPage() {
       }),
     ]);
 
-    const nextBoard = {
+    const nextBoard: GeoDailyBoard = {
       mentionChart: data?.mentionChart ?? [],
       firstMentionChart: data?.firstMentionChart ?? [],
       recommendChart: data?.recommendChart ?? [],
       rows: data?.rows ?? [],
       summaryGroups: data?.summaryGroups ?? [],
+      ownerMentionChart: data?.ownerMentionChart ?? [],
+      ownerFirstMentionChart: data?.ownerFirstMentionChart ?? [],
+      ownerRecommendChart: data?.ownerRecommendChart ?? [],
+      ownerRows: data?.ownerRows ?? [],
+      ownerSummaryGroups: data?.ownerSummaryGroups ?? [],
     };
     const nextRecords = list?.rows ?? [];
     setBoard(nextBoard);
@@ -74,7 +85,9 @@ const DayBoardPage = memo(function DayBoardPage() {
           .map((r) => r.inspectDate)
           .filter(Boolean)
           .concat(nextBoard.summaryGroups?.map((g) => g.inspectDate) || [])
-          .concat(nextBoard.rows?.map((r) => r.dateLabel) || []),
+          .concat(nextBoard.ownerSummaryGroups?.map((g) => g.inspectDate) || [])
+          .concat(nextBoard.rows?.map((r) => r.dateLabel) || [])
+          .concat(nextBoard.ownerRows?.map((r) => r.dateLabel) || []),
       ),
     ].sort((a, b) => b.localeCompare(a));
     if (dates[0]) setActiveDate(dates[0]);
@@ -102,12 +115,17 @@ const DayBoardPage = memo(function DayBoardPage() {
     };
   }, []);
 
-  const filteredRows = useMemo(() => {
+  const topicRows = useMemo(() => {
     if (!activeDate) return board.rows ?? [];
     return (board.rows ?? []).filter((r) => r.dateLabel === activeDate);
   }, [board.rows, activeDate]);
 
-  const filteredCharts = useMemo(() => {
+  const ownerRows = useMemo(() => {
+    if (!activeDate) return board.ownerRows ?? [];
+    return (board.ownerRows ?? []).filter((r) => r.dateLabel === activeDate);
+  }, [board.ownerRows, activeDate]);
+
+  const topicCharts = useMemo(() => {
     if (!activeDate) {
       return {
         mentionChart: board.mentionChart,
@@ -119,6 +137,21 @@ const DayBoardPage = memo(function DayBoardPage() {
       mentionChart: (board.mentionChart ?? []).filter((p) => p.axis === activeDate),
       firstMentionChart: (board.firstMentionChart ?? []).filter((p) => p.axis === activeDate),
       recommendChart: (board.recommendChart ?? []).filter((p) => p.axis === activeDate),
+    };
+  }, [board, activeDate]);
+
+  const ownerCharts = useMemo(() => {
+    if (!activeDate) {
+      return {
+        mentionChart: board.ownerMentionChart,
+        firstMentionChart: board.ownerFirstMentionChart,
+        recommendChart: board.ownerRecommendChart,
+      };
+    }
+    return {
+      mentionChart: (board.ownerMentionChart ?? []).filter((p) => p.axis === activeDate),
+      firstMentionChart: (board.ownerFirstMentionChart ?? []).filter((p) => p.axis === activeDate),
+      recommendChart: (board.ownerRecommendChart ?? []).filter((p) => p.axis === activeDate),
     };
   }, [board, activeDate]);
 
@@ -168,21 +201,52 @@ const DayBoardPage = memo(function DayBoardPage() {
         </QueryFilter>
       </Card>
 
-      <GeoDailySummaryBoard
-        groups={board.summaryGroups}
-        records={records}
-        activeDate={activeDate}
-        onActiveDateChange={setActiveDate}
-      />
-
-      <GeoTrendBoard
-        key={`trend-${activeDate || 'all'}`}
-        mentionChart={filteredCharts.mentionChart}
-        firstMentionChart={filteredCharts.firstMentionChart}
-        recommendChart={filteredCharts.recommendChart}
-        rows={filteredRows.map((r) => ({ ...r, axisLabel: r.dateLabel }))}
-        axisTitle='日期'
-        tableTitle={`日报明细（当前日期：${activeDate || '全部'}）`}
+      <GeoBoardDimensionTabs
+        topic={
+          <>
+            <GeoDailySummaryBoard
+              dimension='topic'
+              groups={board.summaryGroups}
+              records={records}
+              activeDate={activeDate}
+              onActiveDateChange={setActiveDate}
+            />
+            <GeoTrendBoard
+              key={`topic-trend-${activeDate || 'all'}`}
+              mentionChart={topicCharts.mentionChart}
+              firstMentionChart={topicCharts.firstMentionChart}
+              recommendChart={topicCharts.recommendChart}
+              rows={topicRows.map((r) => ({ ...r, axisLabel: r.dateLabel }))}
+              axisTitle='日期'
+              groupTitle='话题'
+              tableTitle={`日报明细（话题维度，当前日期：${activeDate || '全部'}）`}
+            />
+          </>
+        }
+        owner={
+          <>
+            <GeoDailySummaryBoard
+              dimension='owner'
+              groups={board.ownerSummaryGroups}
+              activeDate={activeDate}
+              onActiveDateChange={setActiveDate}
+            />
+            <GeoTrendBoard
+              key={`owner-trend-${activeDate || 'all'}`}
+              mentionChart={ownerCharts.mentionChart}
+              firstMentionChart={ownerCharts.firstMentionChart}
+              recommendChart={ownerCharts.recommendChart}
+              rows={ownerRows.map((r) => ({
+                ...r,
+                axisLabel: r.dateLabel,
+                topicName: r.ownerName || r.topicName,
+              }))}
+              axisTitle='日期'
+              groupTitle='负责人'
+              tableTitle={`日报明细（负责人维度，当前日期：${activeDate || '全部'}）`}
+            />
+          </>
+        }
       />
     </div>
   );

@@ -25,19 +25,34 @@ public class GeoDailyBoardVO {
     @Schema(description = "汇总展示（按日期 Tab：话题/关键字/负责人 + 平台明细，对齐日监测新增）")
     private List<GeoDailySummaryDateVO> summaryGroups = new ArrayList<>();
 
+    @Schema(description = "负责人维度-提及率折线")
+    private List<GeoChartPointVO> ownerMentionChart = new ArrayList<>();
+
+    @Schema(description = "负责人维度-首位提及率折线")
+    private List<GeoChartPointVO> ownerFirstMentionChart = new ArrayList<>();
+
+    @Schema(description = "负责人维度-推荐次数柱状")
+    private List<GeoChartPointVO> ownerRecommendChart = new ArrayList<>();
+
+    @Schema(description = "负责人维度-明细")
+    private List<GeoDailyRowVO> ownerRows = new ArrayList<>();
+
+    @Schema(description = "负责人维度汇总（按日期 Tab：负责人 + 平台明细）")
+    private List<GeoDailySummaryDateVO> ownerSummaryGroups = new ArrayList<>();
+
     @Data
     @Schema(description = "日报一行")
     public static class GeoDailyRowVO {
         @Schema(description = "日期", example = "2026-09-01")
         private String dateLabel;
 
-        @Schema(description = "话题")
+        @Schema(description = "话题（话题维度）")
         private String topicName;
 
         @Schema(description = "关键字")
         private String keyword;
 
-        @Schema(description = "负责人")
+        @Schema(description = "负责人（负责人维度）")
         private String ownerName;
 
         @Schema(description = "平台")
@@ -99,6 +114,12 @@ public class GeoDailyBoardVO {
 
         @Schema(description = "平台")
         private String platform;
+
+        @Schema(description = "话题名称（负责人维度明细用）")
+        private String topicName;
+
+        @Schema(description = "关键字（负责人维度明细用）")
+        private String keyword;
 
         @Schema(description = "是否提及（1=是 0=否）", example = "1")
         private Integer mentioned;

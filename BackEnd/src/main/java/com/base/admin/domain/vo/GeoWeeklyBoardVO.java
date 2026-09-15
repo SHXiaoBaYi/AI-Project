@@ -25,8 +25,23 @@ public class GeoWeeklyBoardVO {
     @Schema(description = "查询范围内已落库的周期数", example = "2")
     private int persistedPeriodCount;
 
-    @Schema(description = "同比/环比汇总（按查询范围内最新周期）")
+    @Schema(description = "同比/环比汇总（按查询范围内最新周期，话题维度）")
     private GeoBoardCompareSummaryVO compareSummary;
+
+    @Schema(description = "负责人维度-提及率折线")
+    private List<GeoChartPointVO> ownerMentionChart = new ArrayList<>();
+
+    @Schema(description = "负责人维度-首位提及率折线")
+    private List<GeoChartPointVO> ownerFirstMentionChart = new ArrayList<>();
+
+    @Schema(description = "负责人维度-推荐次数柱状")
+    private List<GeoChartPointVO> ownerRecommendChart = new ArrayList<>();
+
+    @Schema(description = "负责人维度-明细")
+    private List<GeoWeeklyRowVO> ownerRows = new ArrayList<>();
+
+    @Schema(description = "负责人维度-同比/环比汇总")
+    private GeoBoardCompareSummaryVO ownerCompareSummary;
 
     @Data
     @Schema(description = "周报一行")
@@ -34,8 +49,11 @@ public class GeoWeeklyBoardVO {
         @Schema(description = "周标签", example = "2026年第36周")
         private String weekLabel;
 
-        @Schema(description = "话题")
+        @Schema(description = "话题（话题维度）")
         private String topicName;
+
+        @Schema(description = "负责人（负责人维度）")
+        private String ownerName;
 
         @Schema(description = "平台")
         private String platform;

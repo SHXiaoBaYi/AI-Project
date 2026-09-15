@@ -4,6 +4,7 @@ import { Card } from 'antd';
 import dayjs from 'dayjs';
 import { getGeoPlatformsApi, getGeoTopicOptionsApi, getGeoWeeklyBoardApi } from '@/api/geo';
 import type { GeoTopic, GeoWeeklyBoard } from '@/types/geo';
+import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { endOfIsoWeek, startOfIsoWeek, toDayjs } from '@/utils/geoBoardQuery';
@@ -33,6 +34,11 @@ const WeeklyPage = memo(function WeeklyPage() {
       rows: data?.rows ?? [],
       persistedPeriodCount: data?.persistedPeriodCount ?? 0,
       compareSummary: data?.compareSummary,
+      ownerMentionChart: data?.ownerMentionChart ?? [],
+      ownerFirstMentionChart: data?.ownerFirstMentionChart ?? [],
+      ownerRecommendChart: data?.ownerRecommendChart ?? [],
+      ownerRows: data?.ownerRows ?? [],
+      ownerCompareSummary: data?.ownerCompareSummary,
     });
   };
 
@@ -91,16 +97,39 @@ const WeeklyPage = memo(function WeeklyPage() {
           周报只读查看；已结束周由定时任务自动落库（已落库周期 {board.persistedPeriodCount ?? 0}）
         </span>
       </Card>
-      <GeoTrendBoard
-        showCompare
-        compareHint='环比=上一周；同比=去年同周'
-        compareSummary={board.compareSummary}
-        mentionChart={board.mentionChart}
-        firstMentionChart={board.firstMentionChart}
-        recommendChart={board.recommendChart}
-        rows={board.rows.map((r) => ({ ...r, axisLabel: r.weekLabel }))}
-        axisTitle='周次'
-        tableTitle='周报明细（只读，已落库优先）'
+      <GeoBoardDimensionTabs
+        topic={
+          <GeoTrendBoard
+            showCompare
+            compareHint='环比=上一周；同比=去年同周'
+            compareSummary={board.compareSummary}
+            mentionChart={board.mentionChart}
+            firstMentionChart={board.firstMentionChart}
+            recommendChart={board.recommendChart}
+            rows={(board.rows ?? []).map((r) => ({ ...r, axisLabel: r.weekLabel }))}
+            axisTitle='周次'
+            groupTitle='话题'
+            tableTitle='周报明细（话题维度）'
+          />
+        }
+        owner={
+          <GeoTrendBoard
+            showCompare
+            compareHint='环比=上一周；同比=去年同周'
+            compareSummary={board.ownerCompareSummary}
+            mentionChart={board.ownerMentionChart}
+            firstMentionChart={board.ownerFirstMentionChart}
+            recommendChart={board.ownerRecommendChart}
+            rows={(board.ownerRows ?? []).map((r) => ({
+              ...r,
+              axisLabel: r.weekLabel,
+              topicName: r.ownerName || r.topicName,
+            }))}
+            axisTitle='周次'
+            groupTitle='负责人'
+            tableTitle='周报明细（负责人维度）'
+          />
+        }
       />
     </div>
   );

@@ -124,6 +124,7 @@ export interface GeoChartPoint {
 export interface GeoWeeklyRow {
   weekLabel: string;
   topicName: string;
+  ownerName?: string;
   platform: string;
   sampleCount: number;
   mentionRate: number;
@@ -161,11 +162,17 @@ export interface GeoWeeklyBoard {
   rows: GeoWeeklyRow[];
   persistedPeriodCount?: number;
   compareSummary?: GeoBoardCompareSummary;
+  ownerMentionChart?: GeoChartPoint[];
+  ownerFirstMentionChart?: GeoChartPoint[];
+  ownerRecommendChart?: GeoChartPoint[];
+  ownerRows?: GeoWeeklyRow[];
+  ownerCompareSummary?: GeoBoardCompareSummary;
 }
 
 export interface GeoMonthlyRow {
   monthLabel: string;
   topicName: string;
+  ownerName?: string;
   platform: string;
   sampleCount: number;
   mentionRate: number;
@@ -189,6 +196,11 @@ export interface GeoMonthlyBoard {
   rows: GeoMonthlyRow[];
   persistedPeriodCount?: number;
   compareSummary?: GeoBoardCompareSummary;
+  ownerMentionChart?: GeoChartPoint[];
+  ownerFirstMentionChart?: GeoChartPoint[];
+  ownerRecommendChart?: GeoChartPoint[];
+  ownerRows?: GeoMonthlyRow[];
+  ownerCompareSummary?: GeoBoardCompareSummary;
 }
 
 export interface GeoDailyRow {
@@ -208,6 +220,8 @@ export interface GeoDailyRow {
 export interface GeoDailySummaryPlatform {
   id?: number;
   platform: string;
+  topicName?: string;
+  keyword?: string;
   mentioned?: number;
   rankNo?: number;
   recommendStatus?: string;
@@ -242,11 +256,17 @@ export interface GeoDailyBoard {
   recommendChart: GeoChartPoint[];
   rows: GeoDailyRow[];
   summaryGroups?: GeoDailySummaryDate[];
+  ownerMentionChart?: GeoChartPoint[];
+  ownerFirstMentionChart?: GeoChartPoint[];
+  ownerRecommendChart?: GeoChartPoint[];
+  ownerRows?: GeoDailyRow[];
+  ownerSummaryGroups?: GeoDailySummaryDate[];
 }
 
 export interface GeoYearlyRow {
   periodLabel: string;
   topicName: string;
+  ownerName?: string;
   platform: string;
   targetRate?: number;
   actualRate: number;
@@ -265,6 +285,10 @@ export interface GeoYearlyBoard {
   rows: GeoYearlyRow[];
   persistedPeriodCount?: number;
   compareSummary?: GeoBoardCompareSummary;
+  ownerActualChart?: GeoChartPoint[];
+  ownerAchieveChart?: GeoChartPoint[];
+  ownerRows?: GeoYearlyRow[];
+  ownerCompareSummary?: GeoBoardCompareSummary;
 }
 
 export interface GeoPersistResult {

@@ -240,6 +240,7 @@ export function GeoTrendBoard({
   rows = [],
   axisTitle,
   tableTitle,
+  groupTitle = '话题',
   compareSummary,
   showCompare = false,
   compareHint = '环比=上一周期；同比=去年同期',
@@ -250,6 +251,7 @@ export function GeoTrendBoard({
   rows?: GeoTrendRow[];
   axisTitle: string;
   tableTitle: string;
+  groupTitle?: string;
   compareSummary?: GeoBoardCompareSummary | null;
   showCompare?: boolean;
   compareHint?: string;
@@ -264,7 +266,7 @@ export function GeoTrendBoard({
 
   const columns: ColumnsType<GeoTrendRow> = [
     { title: axisTitle, dataIndex: 'axisLabel' },
-    { title: '话题', dataIndex: 'topicName' },
+    { title: groupTitle, dataIndex: 'topicName' },
     { title: '平台', dataIndex: 'platform' },
     { title: '样本', dataIndex: 'sampleCount' },
     { title: '提及率%', dataIndex: 'mentionRate' },

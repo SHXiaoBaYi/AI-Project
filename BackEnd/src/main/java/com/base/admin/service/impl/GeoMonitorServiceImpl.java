@@ -56,6 +56,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.IsoFields;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -468,45 +469,74 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     public GeoWeeklyBoardVO weeklyBoard(GeoBoardQueryDTO query) {
         LocalDate[] range = weekRange(query);
         LocalDate compareStart = range[0].minusYears(1).minusWeeks(1);
-        List<TrendAgg> live = liveTrend(compareStart, range[1], query, GeoMonitorServiceImpl::weekKey,
-                GeoMonitorServiceImpl::weekLabel, GeoMonitorServiceImpl::weekBounds);
-        return buildWeeklyBoard(range, new LocalDate[]{compareStart, range[1]}, query, live);
+        List<TrendAgg> liveTopic = liveTrend(compareStart, range[1], query, BoardDim.TOPIC,
+                GeoMonitorServiceImpl::weekKey, GeoMonitorServiceImpl::weekLabel, GeoMonitorServiceImpl::weekBounds);
+        List<TrendAgg> liveOwner = liveTrend(compareStart, range[1], query, BoardDim.OWNER,
+                GeoMonitorServiceImpl::weekKey, GeoMonitorServiceImpl::weekLabel, GeoMonitorServiceImpl::weekBounds);
+        GeoWeeklyBoardVO board = buildWeeklyBoard(range, new LocalDate[]{compareStart, range[1]}, query, liveTopic);
+        fillOwnerWeeklySlice(board, range, liveOwner);
+        return board;
     }
 
     @Override
     public GeoMonthlyBoardVO monthlyBoard(GeoBoardQueryDTO query) {
         LocalDate[] range = monthRange(query);
         LocalDate compareStart = range[0].minusYears(1).minusMonths(1);
-        List<TrendAgg> live = liveTrend(compareStart, range[1], query, GeoMonitorServiceImpl::monthKey,
-                GeoMonitorServiceImpl::monthLabel, GeoMonitorServiceImpl::monthBounds);
-        return buildMonthlyBoard(range, new LocalDate[]{compareStart, range[1]}, query, live);
+        List<TrendAgg> liveTopic = liveTrend(compareStart, range[1], query, BoardDim.TOPIC,
+                GeoMonitorServiceImpl::monthKey, GeoMonitorServiceImpl::monthLabel, GeoMonitorServiceImpl::monthBounds);
+        List<TrendAgg> liveOwner = liveTrend(compareStart, range[1], query, BoardDim.OWNER,
+                GeoMonitorServiceImpl::monthKey, GeoMonitorServiceImpl::monthLabel, GeoMonitorServiceImpl::monthBounds);
+        GeoMonthlyBoardVO board = buildMonthlyBoard(range, new LocalDate[]{compareStart, range[1]}, query, liveTopic);
+        fillOwnerMonthlySlice(board, range, liveOwner);
+        return board;
     }
 
     @Override
     public GeoDailyBoardVO dailyBoard(GeoBoardQueryDTO query) {
         LocalDate[] range = dayRange(query);
-        List<GeoMonitorDaily> records = dailyMapper.selectList(
-                buildDailyWrapper(range[0], range[1], query.getTopicId(), query.getKeyword(), query.getPlatforms()));
+        List<GeoMonitorDaily> records = loadActiveDaily(
+                range[0], range[1], query.getTopicId(), query.getKeyword(), query.getPlatforms());
         Map<Long, String> topicNames = topicNameMap();
         GeoDailyBoardVO board = new GeoDailyBoardVO();
-        List<TrendAgg> trendRows = aggregateTrend(records, r -> r.getInspectDate().toString(),
-                r -> r.getInspectDate().toString(), r -> new LocalDate[]{r.getInspectDate(), r.getInspectDate()}, topicNames);
-        for (TrendAgg row : trendRows) {
+        List<TrendAgg> topicRows = aggregateTrend(records, r -> r.getInspectDate().toString(),
+                r -> r.getInspectDate().toString(), r -> new LocalDate[]{r.getInspectDate(), r.getInspectDate()},
+                BoardDim.TOPIC, topicNames);
+        for (TrendAgg row : topicRows) {
             GeoDailyBoardVO.GeoDailyRowVO vo = new GeoDailyBoardVO.GeoDailyRowVO();
-            vo.setDateLabel(row.axis);
-            vo.setTopicName(row.topicName);
-            vo.setPlatform(row.platform);
-            vo.setSampleCount(row.sampleCount);
-            vo.setMentionRate(row.mentionRate);
-            vo.setFirstMentionRate(row.firstMentionRate);
-            vo.setRecommendCount(row.recommendCount);
-            vo.setCompetitorTop(row.competitorTop);
-            vo.setCitePlatformTop(row.citePlatformTop);
+            vo.setDateLabel(row.axis());
+            vo.setTopicName(row.groupName());
+            vo.setPlatform(row.platform());
+            vo.setSampleCount(row.sampleCount());
+            vo.setMentionRate(row.mentionRate());
+            vo.setFirstMentionRate(row.firstMentionRate());
+            vo.setRecommendCount(row.recommendCount());
+            vo.setCompetitorTop(row.competitorTop());
+            vo.setCitePlatformTop(row.citePlatformTop());
             board.getRows().add(vo);
         }
-        fillMetricCharts(records, r -> r.getInspectDate().toString(),
-                board.getMentionChart(), board.getFirstMentionChart(), board.getRecommendChart());
+        fillChartsFromTrend(topicRows, board.getMentionChart(), board.getFirstMentionChart(), board.getRecommendChart());
         board.setSummaryGroups(buildDailySummaryGroups(records, topicNames));
+
+        List<TrendAgg> ownerTrendRows = aggregateTrend(records, r -> r.getInspectDate().toString(),
+                r -> r.getInspectDate().toString(), r -> new LocalDate[]{r.getInspectDate(), r.getInspectDate()},
+                BoardDim.OWNER, topicNames);
+        for (TrendAgg row : ownerTrendRows) {
+            GeoDailyBoardVO.GeoDailyRowVO vo = new GeoDailyBoardVO.GeoDailyRowVO();
+            vo.setDateLabel(row.axis());
+            vo.setOwnerName(row.groupName());
+            vo.setTopicName(row.groupName());
+            vo.setPlatform(row.platform());
+            vo.setSampleCount(row.sampleCount());
+            vo.setMentionRate(row.mentionRate());
+            vo.setFirstMentionRate(row.firstMentionRate());
+            vo.setRecommendCount(row.recommendCount());
+            vo.setCompetitorTop(row.competitorTop());
+            vo.setCitePlatformTop(row.citePlatformTop());
+            board.getOwnerRows().add(vo);
+        }
+        fillChartsFromTrend(ownerTrendRows, board.getOwnerMentionChart(), board.getOwnerFirstMentionChart(),
+                board.getOwnerRecommendChart());
+        board.setOwnerSummaryGroups(buildDailyOwnerSummaryGroups(records, topicNames));
         return board;
     }
 
@@ -514,15 +544,18 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     public GeoYearlyBoardVO yearlyBoard(GeoBoardQueryDTO query) {
         LocalDate[] range = yearRange(query);
         LocalDate compareStart = LocalDate.of(range[0].getYear() - 2, 1, 1);
-        List<YearAgg> live = liveYearly(compareStart, range[1], query);
-        return buildYearlyBoard(range, new LocalDate[]{compareStart, range[1]}, query, live);
+        List<YearAgg> liveTopic = liveYearly(compareStart, range[1], query, BoardDim.TOPIC);
+        List<YearAgg> liveOwner = liveYearly(compareStart, range[1], query, BoardDim.OWNER);
+        GeoYearlyBoardVO board = buildYearlyBoard(range, new LocalDate[]{compareStart, range[1]}, query, liveTopic);
+        fillOwnerYearlySlice(board, range, liveOwner);
+        return board;
     }
 
     @Override
     @Transactional
     public GeoPersistResultVO persistWeeklyBoard(GeoBoardQueryDTO query) {
         LocalDate[] range = weekRange(query);
-        List<TrendAgg> live = liveTrend(range[0], range[1], query, GeoMonitorServiceImpl::weekKey,
+        List<TrendAgg> live = liveTrend(range[0], range[1], query, BoardDim.TOPIC, GeoMonitorServiceImpl::weekKey,
                 GeoMonitorServiceImpl::weekLabel, GeoMonitorServiceImpl::weekBounds);
         return persistTrend(GeoPeriodType.WEEK, live, true);
     }
@@ -531,7 +564,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     @Transactional
     public GeoPersistResultVO persistMonthlyBoard(GeoBoardQueryDTO query) {
         LocalDate[] range = monthRange(query);
-        List<TrendAgg> live = liveTrend(range[0], range[1], query, GeoMonitorServiceImpl::monthKey,
+        List<TrendAgg> live = liveTrend(range[0], range[1], query, BoardDim.TOPIC, GeoMonitorServiceImpl::monthKey,
                 GeoMonitorServiceImpl::monthLabel, GeoMonitorServiceImpl::monthBounds);
         return persistTrend(GeoPeriodType.MONTH, live, true);
     }
@@ -540,7 +573,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     @Transactional
     public GeoPersistResultVO persistYearlyBoard(GeoBoardQueryDTO query) {
         LocalDate[] range = yearRange(query);
-        List<YearAgg> live = liveYearly(range[0], range[1], query);
+        List<YearAgg> live = liveYearly(range[0], range[1], query, BoardDim.TOPIC);
         return persistYearly(live, true);
     }
 
@@ -551,9 +584,9 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         LocalDate end = today.minusDays(1).with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY));
         int weeks = Math.max(lookbackWeeks, 1);
         LocalDate start = end.minusWeeks(weeks - 1L).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-        List<TrendAgg> live = liveTrend(start, end, new GeoBoardQueryDTO(), GeoMonitorServiceImpl::weekKey,
+        List<TrendAgg> live = liveTrend(start, end, new GeoBoardQueryDTO(), BoardDim.TOPIC, GeoMonitorServiceImpl::weekKey,
                 GeoMonitorServiceImpl::weekLabel, GeoMonitorServiceImpl::weekBounds).stream()
-                .filter(r -> r.periodEnd.isBefore(today))
+                .filter(r -> r.periodEnd().isBefore(today))
                 .toList();
         return persistTrend(GeoPeriodType.WEEK, live, false);
     }
@@ -565,9 +598,9 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         LocalDate end = today.with(TemporalAdjusters.firstDayOfMonth()).minusDays(1);
         int months = Math.max(lookbackMonths, 1);
         LocalDate start = end.minusMonths(months - 1L).with(TemporalAdjusters.firstDayOfMonth());
-        List<TrendAgg> live = liveTrend(start, end, new GeoBoardQueryDTO(), GeoMonitorServiceImpl::monthKey,
+        List<TrendAgg> live = liveTrend(start, end, new GeoBoardQueryDTO(), BoardDim.TOPIC, GeoMonitorServiceImpl::monthKey,
                 GeoMonitorServiceImpl::monthLabel, GeoMonitorServiceImpl::monthBounds).stream()
-                .filter(r -> r.periodEnd.isBefore(today))
+                .filter(r -> r.periodEnd().isBefore(today))
                 .toList();
         return persistTrend(GeoPeriodType.MONTH, live, false);
     }
@@ -579,8 +612,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         int years = Math.max(lookbackYears, 1);
         LocalDate end = LocalDate.of(today.getYear(), 12, 31);
         LocalDate start = LocalDate.of(today.getYear() - years + 1, 1, 1);
-        List<YearAgg> live = liveYearly(start, end, new GeoBoardQueryDTO()).stream()
-                .filter(r -> r.periodEnd.isBefore(today))
+        List<YearAgg> live = liveYearly(start, end, new GeoBoardQueryDTO(), BoardDim.TOPIC).stream()
+                .filter(r -> r.periodEnd().isBefore(today))
                 .toList();
         return persistYearly(live, false);
     }
@@ -624,13 +657,13 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         entity.setRemark(dto.getRemark());
     }
 
-    private List<TrendAgg> liveTrend(LocalDate start, LocalDate end, GeoBoardQueryDTO query,
+    private List<TrendAgg> liveTrend(LocalDate start, LocalDate end, GeoBoardQueryDTO query, BoardDim dim,
                                      Function<GeoMonitorDaily, String> keyFn,
                                      Function<GeoMonitorDaily, String> labelFn,
                                      Function<GeoMonitorDaily, LocalDate[]> boundsFn) {
-        List<GeoMonitorDaily> records = dailyMapper.selectList(
-                buildDailyWrapper(start, end, query.getTopicId(), query.getKeyword(), query.getPlatforms()));
-        return aggregateTrend(records, keyFn, labelFn, boundsFn, topicNameMap());
+        List<GeoMonitorDaily> records = loadActiveDaily(
+                start, end, query.getTopicId(), query.getKeyword(), query.getPlatforms());
+        return aggregateTrend(records, keyFn, labelFn, boundsFn, dim, topicNameMap());
     }
 
     private GeoWeeklyBoardVO buildWeeklyBoard(LocalDate[] displayRange, LocalDate[] compareRange,
@@ -640,25 +673,25 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         Set<String> persistedKeys = new HashSet<>();
         List<TrendAgg> displayRows = new ArrayList<>();
         for (TrendAgg row : merged.values()) {
-            if (row.periodEnd.isBefore(displayRange[0]) || row.periodStart.isAfter(displayRange[1])) {
+            if (row.periodEnd().isBefore(displayRange[0]) || row.periodStart().isAfter(displayRange[1])) {
                 continue;
             }
             displayRows.add(row);
             GeoWeeklyBoardVO.GeoWeeklyRowVO vo = new GeoWeeklyBoardVO.GeoWeeklyRowVO();
-            vo.setWeekLabel(row.axis);
-            vo.setTopicName(row.topicName);
-            vo.setPlatform(row.platform);
-            vo.setSampleCount(row.sampleCount);
-            vo.setMentionRate(row.mentionRate);
-            vo.setFirstMentionRate(row.firstMentionRate);
-            vo.setRecommendCount(row.recommendCount);
-            vo.setCompetitorTop(row.competitorTop);
-            vo.setCitePlatformTop(row.citePlatformTop);
-            vo.setFromSnapshot(row.fromSnapshot);
+            vo.setWeekLabel(row.axis());
+            vo.setTopicName(row.groupName());
+            vo.setPlatform(row.platform());
+            vo.setSampleCount(row.sampleCount());
+            vo.setMentionRate(row.mentionRate());
+            vo.setFirstMentionRate(row.firstMentionRate());
+            vo.setRecommendCount(row.recommendCount());
+            vo.setCompetitorTop(row.competitorTop());
+            vo.setCitePlatformTop(row.citePlatformTop());
+            vo.setFromSnapshot(row.fromSnapshot());
             fillTrendCompare(vo, row, merged, true);
             board.getRows().add(vo);
-            if (row.fromSnapshot) {
-                persistedKeys.add(row.periodKey);
+            if (row.fromSnapshot()) {
+                persistedKeys.add(row.periodKey());
             }
         }
         board.getRows().sort(Comparator.comparing(GeoWeeklyBoardVO.GeoWeeklyRowVO::getWeekLabel)
@@ -666,12 +699,39 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .thenComparing(GeoWeeklyBoardVO.GeoWeeklyRowVO::getPlatform));
         Map<String, TrendAgg> displayMap = new LinkedHashMap<>();
         for (TrendAgg row : displayRows) {
-            displayMap.put(rowKey(row.periodKey, row.topicId, row.platform), row);
+            displayMap.put(rowKey(row), row);
         }
         fillChartsFromTrend(displayMap.values(), board.getMentionChart(), board.getFirstMentionChart(), board.getRecommendChart());
         board.setPersistedPeriodCount(persistedKeys.size());
         board.setCompareSummary(buildTrendCompareSummary(displayRows, merged, true, "环比=上一周；同比=去年同周"));
         return board;
+    }
+
+    private void fillOwnerWeeklySlice(GeoWeeklyBoardVO board, LocalDate[] displayRange, List<TrendAgg> liveOwner) {
+        Map<String, TrendAgg> merged = toTrendMap(liveOwner);
+        List<TrendAgg> displayRows = filterTrendDisplay(merged.values(), displayRange);
+        for (TrendAgg row : displayRows) {
+            GeoWeeklyBoardVO.GeoWeeklyRowVO vo = new GeoWeeklyBoardVO.GeoWeeklyRowVO();
+            vo.setWeekLabel(row.axis());
+            vo.setOwnerName(row.groupName());
+            vo.setTopicName(row.groupName());
+            vo.setPlatform(row.platform());
+            vo.setSampleCount(row.sampleCount());
+            vo.setMentionRate(row.mentionRate());
+            vo.setFirstMentionRate(row.firstMentionRate());
+            vo.setRecommendCount(row.recommendCount());
+            vo.setCompetitorTop(row.competitorTop());
+            vo.setCitePlatformTop(row.citePlatformTop());
+            vo.setFromSnapshot(false);
+            fillTrendCompare(vo, row, merged, true);
+            board.getOwnerRows().add(vo);
+        }
+        board.getOwnerRows().sort(Comparator.comparing(GeoWeeklyBoardVO.GeoWeeklyRowVO::getWeekLabel)
+                .thenComparing(r -> r.getOwnerName() == null ? "" : r.getOwnerName())
+                .thenComparing(GeoWeeklyBoardVO.GeoWeeklyRowVO::getPlatform));
+        fillChartsFromTrend(displayRows, board.getOwnerMentionChart(), board.getOwnerFirstMentionChart(),
+                board.getOwnerRecommendChart());
+        board.setOwnerCompareSummary(buildTrendCompareSummary(displayRows, merged, true, "环比=上一周；同比=去年同周"));
     }
 
     private GeoMonthlyBoardVO buildMonthlyBoard(LocalDate[] displayRange, LocalDate[] compareRange,
@@ -681,25 +741,25 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         Set<String> persistedKeys = new HashSet<>();
         List<TrendAgg> displayRows = new ArrayList<>();
         for (TrendAgg row : merged.values()) {
-            if (row.periodEnd.isBefore(displayRange[0]) || row.periodStart.isAfter(displayRange[1])) {
+            if (row.periodEnd().isBefore(displayRange[0]) || row.periodStart().isAfter(displayRange[1])) {
                 continue;
             }
             displayRows.add(row);
             GeoMonthlyBoardVO.GeoMonthlyRowVO vo = new GeoMonthlyBoardVO.GeoMonthlyRowVO();
-            vo.setMonthLabel(row.axis);
-            vo.setTopicName(row.topicName);
-            vo.setPlatform(row.platform);
-            vo.setSampleCount(row.sampleCount);
-            vo.setMentionRate(row.mentionRate);
-            vo.setFirstMentionRate(row.firstMentionRate);
-            vo.setRecommendCount(row.recommendCount);
-            vo.setCompetitorTop(row.competitorTop);
-            vo.setCitePlatformTop(row.citePlatformTop);
-            vo.setFromSnapshot(row.fromSnapshot);
+            vo.setMonthLabel(row.axis());
+            vo.setTopicName(row.groupName());
+            vo.setPlatform(row.platform());
+            vo.setSampleCount(row.sampleCount());
+            vo.setMentionRate(row.mentionRate());
+            vo.setFirstMentionRate(row.firstMentionRate());
+            vo.setRecommendCount(row.recommendCount());
+            vo.setCompetitorTop(row.competitorTop());
+            vo.setCitePlatformTop(row.citePlatformTop());
+            vo.setFromSnapshot(row.fromSnapshot());
             fillTrendCompare(vo, row, merged, false);
             board.getRows().add(vo);
-            if (row.fromSnapshot) {
-                persistedKeys.add(row.periodKey);
+            if (row.fromSnapshot()) {
+                persistedKeys.add(row.periodKey());
             }
         }
         board.getRows().sort(Comparator.comparing(GeoMonthlyBoardVO.GeoMonthlyRowVO::getMonthLabel)
@@ -707,12 +767,39 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .thenComparing(GeoMonthlyBoardVO.GeoMonthlyRowVO::getPlatform));
         Map<String, TrendAgg> displayMap = new LinkedHashMap<>();
         for (TrendAgg row : displayRows) {
-            displayMap.put(rowKey(row.periodKey, row.topicId, row.platform), row);
+            displayMap.put(rowKey(row), row);
         }
         fillChartsFromTrend(displayMap.values(), board.getMentionChart(), board.getFirstMentionChart(), board.getRecommendChart());
         board.setPersistedPeriodCount(persistedKeys.size());
         board.setCompareSummary(buildTrendCompareSummary(displayRows, merged, false, "环比=上一月；同比=去年同月"));
         return board;
+    }
+
+    private void fillOwnerMonthlySlice(GeoMonthlyBoardVO board, LocalDate[] displayRange, List<TrendAgg> liveOwner) {
+        Map<String, TrendAgg> merged = toTrendMap(liveOwner);
+        List<TrendAgg> displayRows = filterTrendDisplay(merged.values(), displayRange);
+        for (TrendAgg row : displayRows) {
+            GeoMonthlyBoardVO.GeoMonthlyRowVO vo = new GeoMonthlyBoardVO.GeoMonthlyRowVO();
+            vo.setMonthLabel(row.axis());
+            vo.setOwnerName(row.groupName());
+            vo.setTopicName(row.groupName());
+            vo.setPlatform(row.platform());
+            vo.setSampleCount(row.sampleCount());
+            vo.setMentionRate(row.mentionRate());
+            vo.setFirstMentionRate(row.firstMentionRate());
+            vo.setRecommendCount(row.recommendCount());
+            vo.setCompetitorTop(row.competitorTop());
+            vo.setCitePlatformTop(row.citePlatformTop());
+            vo.setFromSnapshot(false);
+            fillTrendCompare(vo, row, merged, false);
+            board.getOwnerRows().add(vo);
+        }
+        board.getOwnerRows().sort(Comparator.comparing(GeoMonthlyBoardVO.GeoMonthlyRowVO::getMonthLabel)
+                .thenComparing(r -> r.getOwnerName() == null ? "" : r.getOwnerName())
+                .thenComparing(GeoMonthlyBoardVO.GeoMonthlyRowVO::getPlatform));
+        fillChartsFromTrend(displayRows, board.getOwnerMentionChart(), board.getOwnerFirstMentionChart(),
+                board.getOwnerRecommendChart());
+        board.setOwnerCompareSummary(buildTrendCompareSummary(displayRows, merged, false, "环比=上一月；同比=去年同月"));
     }
 
     private GeoYearlyBoardVO buildYearlyBoard(LocalDate[] displayRange, LocalDate[] compareRange,
@@ -722,25 +809,25 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         Set<String> persistedKeys = new HashSet<>();
         List<YearAgg> displayRows = new ArrayList<>();
         for (YearAgg row : merged.values()) {
-            if (row.periodEnd.isBefore(displayRange[0]) || row.periodStart.isAfter(displayRange[1])) {
+            if (row.periodEnd().isBefore(displayRange[0]) || row.periodStart().isAfter(displayRange[1])) {
                 continue;
             }
             displayRows.add(row);
             GeoYearlyBoardVO.GeoYearlyRowVO vo = new GeoYearlyBoardVO.GeoYearlyRowVO();
-            vo.setPeriodLabel(row.periodLabel);
-            vo.setTopicName(row.topicName);
-            vo.setPlatform(row.platform);
-            vo.setTargetRate(row.targetRate);
-            vo.setActualRate(row.actualRate);
-            vo.setAchieveRate(row.achieveRate);
-            vo.setSampleCount(row.sampleCount);
-            vo.setFromSnapshot(row.fromSnapshot);
+            vo.setPeriodLabel(row.periodLabel());
+            vo.setTopicName(row.groupName());
+            vo.setPlatform(row.platform());
+            vo.setTargetRate(row.targetRate());
+            vo.setActualRate(row.actualRate());
+            vo.setAchieveRate(row.achieveRate());
+            vo.setSampleCount(row.sampleCount());
+            vo.setFromSnapshot(row.fromSnapshot());
             fillYearCompare(vo, row, merged);
             board.getRows().add(vo);
-            addChart(board.getActualChart(), row.periodLabel + " / " + row.topicName, row.platform, row.actualRate);
-            addChart(board.getAchieveChart(), row.periodLabel + " / " + row.topicName, row.platform, row.achieveRate);
-            if (row.fromSnapshot) {
-                persistedKeys.add(row.periodKey);
+            addChart(board.getActualChart(), row.periodLabel() + " / " + row.groupName(), row.platform(), row.actualRate());
+            addChart(board.getAchieveChart(), row.periodLabel() + " / " + row.groupName(), row.platform(), row.achieveRate());
+            if (row.fromSnapshot()) {
+                persistedKeys.add(row.periodKey());
             }
         }
         board.getRows().sort(Comparator.comparing(GeoYearlyBoardVO.GeoYearlyRowVO::getPeriodLabel)
@@ -753,11 +840,69 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         return board;
     }
 
+    private void fillOwnerYearlySlice(GeoYearlyBoardVO board, LocalDate[] displayRange, List<YearAgg> liveOwner) {
+        Map<String, YearAgg> merged = toYearMap(liveOwner);
+        List<YearAgg> displayRows = new ArrayList<>();
+        for (YearAgg row : merged.values()) {
+            if (row.periodEnd().isBefore(displayRange[0]) || row.periodStart().isAfter(displayRange[1])) {
+                continue;
+            }
+            displayRows.add(row);
+            GeoYearlyBoardVO.GeoYearlyRowVO vo = new GeoYearlyBoardVO.GeoYearlyRowVO();
+            vo.setPeriodLabel(row.periodLabel());
+            vo.setOwnerName(row.groupName());
+            vo.setTopicName(row.groupName());
+            vo.setPlatform(row.platform());
+            vo.setTargetRate(row.targetRate());
+            vo.setActualRate(row.actualRate());
+            vo.setAchieveRate(row.achieveRate());
+            vo.setSampleCount(row.sampleCount());
+            vo.setFromSnapshot(false);
+            fillYearCompare(vo, row, merged);
+            board.getOwnerRows().add(vo);
+            addChart(board.getOwnerActualChart(), row.periodLabel() + " / " + row.groupName(), row.platform(), row.actualRate());
+            addChart(board.getOwnerAchieveChart(), row.periodLabel() + " / " + row.groupName(), row.platform(), row.achieveRate());
+        }
+        board.getOwnerRows().sort(Comparator.comparing(GeoYearlyBoardVO.GeoYearlyRowVO::getPeriodLabel)
+                .thenComparing(r -> r.getOwnerName() == null ? "" : r.getOwnerName())
+                .thenComparing(GeoYearlyBoardVO.GeoYearlyRowVO::getPlatform));
+        sortChart(board.getOwnerActualChart());
+        sortChart(board.getOwnerAchieveChart());
+        board.setOwnerCompareSummary(buildYearCompareSummary(displayRows, merged));
+    }
+
+    private static Map<String, TrendAgg> toTrendMap(List<TrendAgg> rows) {
+        Map<String, TrendAgg> merged = new LinkedHashMap<>();
+        for (TrendAgg row : rows) {
+            merged.put(rowKey(row), row);
+        }
+        return merged;
+    }
+
+    private static Map<String, YearAgg> toYearMap(List<YearAgg> rows) {
+        Map<String, YearAgg> merged = new LinkedHashMap<>();
+        for (YearAgg row : rows) {
+            merged.put(rowKey(row), row);
+        }
+        return merged;
+    }
+
+    private static List<TrendAgg> filterTrendDisplay(Collection<TrendAgg> rows, LocalDate[] displayRange) {
+        List<TrendAgg> displayRows = new ArrayList<>();
+        for (TrendAgg row : rows) {
+            if (row.periodEnd().isBefore(displayRange[0]) || row.periodStart().isAfter(displayRange[1])) {
+                continue;
+            }
+            displayRows.add(row);
+        }
+        return displayRows;
+    }
+
     private List<GeoDailyBoardVO.GeoDailySummaryDateVO> buildDailySummaryGroups(
             List<GeoMonitorDaily> records, Map<Long, String> topicNames) {
         Map<String, Map<String, GeoDailyBoardVO.GeoDailySummaryTopicVO>> byDate = new LinkedHashMap<>();
         for (GeoMonitorDaily record : records) {
-            if (record == null || record.getInspectDate() == null) {
+            if (!isActiveDaily(record) || record.getInspectDate() == null) {
                 continue;
             }
             String date = record.getInspectDate().toString();
@@ -799,14 +944,58 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         return groups;
     }
 
+    private List<GeoDailyBoardVO.GeoDailySummaryDateVO> buildDailyOwnerSummaryGroups(
+            List<GeoMonitorDaily> records, Map<Long, String> topicNames) {
+        Map<String, Map<String, GeoDailyBoardVO.GeoDailySummaryTopicVO>> byDate = new LinkedHashMap<>();
+        for (GeoMonitorDaily record : records) {
+            if (!isActiveDaily(record) || record.getInspectDate() == null) {
+                continue;
+            }
+            String date = record.getInspectDate().toString();
+            String ownerKey = ownerDimKey(record);
+            String ownerName = ownerDimName(ownerKey);
+            Map<String, GeoDailyBoardVO.GeoDailySummaryTopicVO> owners =
+                    byDate.computeIfAbsent(date, k -> new LinkedHashMap<>());
+            GeoDailyBoardVO.GeoDailySummaryTopicVO owner = owners.computeIfAbsent(ownerKey, id -> {
+                GeoDailyBoardVO.GeoDailySummaryTopicVO t = new GeoDailyBoardVO.GeoDailySummaryTopicVO();
+                t.setTopicId(0L);
+                t.setTopicName(ownerName);
+                t.setOwnerName(ownerName);
+                t.setKeyword("");
+                return t;
+            });
+            GeoDailyBoardVO.GeoDailySummaryPlatformVO platform = new GeoDailyBoardVO.GeoDailySummaryPlatformVO();
+            platform.setId(record.getId());
+            platform.setPlatform(record.getPlatform());
+            platform.setTopicName(topicNames.getOrDefault(record.getTopicId(), ""));
+            platform.setKeyword(record.getKeyword());
+            platform.setMentioned(record.getMentioned() == null ? 0 : record.getMentioned());
+            platform.setRankNo(record.getRankNo());
+            platform.setRecommendStatus(record.getRecommendStatus());
+            platform.setThirdPartyUrl(record.getThirdPartyUrl());
+            platform.setCompetitors(record.getCompetitors());
+            platform.setNegativeContent(record.getNegativeContent());
+            platform.setScreenshotUrl(record.getScreenshotUrl());
+            owner.getPlatforms().add(platform);
+        }
+        List<GeoDailyBoardVO.GeoDailySummaryDateVO> groups = new ArrayList<>();
+        for (Map.Entry<String, Map<String, GeoDailyBoardVO.GeoDailySummaryTopicVO>> e : byDate.entrySet()) {
+            GeoDailyBoardVO.GeoDailySummaryDateVO dateVo = new GeoDailyBoardVO.GeoDailySummaryDateVO();
+            dateVo.setInspectDate(e.getKey());
+            dateVo.getTopics().addAll(e.getValue().values());
+            groups.add(dateVo);
+        }
+        groups.sort(Comparator.comparing(GeoDailyBoardVO.GeoDailySummaryDateVO::getInspectDate).reversed());
+        return groups;
+    }
+
     private void fillTrendCompare(Object vo, TrendAgg row, Map<String, TrendAgg> merged, boolean weekMode) {
-        TrendAgg mom = merged.get(rowKey(shiftPeriodKey(row.periodKey, weekMode, -1), row.topicId, row.platform));
-        TrendAgg yoy = merged.get(rowKey(shiftPeriodKey(row.periodKey, weekMode, weekMode ? -52 : -12), row.topicId, row.platform));
+        TrendAgg mom = merged.get(rowKey(shiftPeriodKey(row.periodKey, weekMode, -1), row.groupKey, row.platform));
+        TrendAgg yoy = merged.get(rowKey(shiftPeriodKey(row.periodKey, weekMode, weekMode ? -52 : -12), row.groupKey, row.platform));
         if (yoy == null) {
-            // 按日期回退：去年同期
             LocalDate yoyDate = weekMode ? row.periodStart.minusWeeks(52) : row.periodStart.minusYears(1);
             String yoyKey = weekMode ? weekKey(yoyDate) : monthKey(yoyDate);
-            yoy = merged.get(rowKey(yoyKey, row.topicId, row.platform));
+            yoy = merged.get(rowKey(yoyKey, row.groupKey, row.platform));
         }
         if (vo instanceof GeoWeeklyBoardVO.GeoWeeklyRowVO w) {
             w.setMentionRateMom(deltaRate(row.mentionRate, mom == null ? null : mom.mentionRate));
@@ -837,7 +1026,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private YearAgg findYearNeighbor(Map<String, YearAgg> merged, YearAgg row, int yearOffset) {
         LocalDate target = row.periodStart.plusYears(yearOffset);
         for (YearAgg item : merged.values()) {
-            if (!Objects.equals(item.topicId, row.topicId) || !Objects.equals(item.platform, row.platform)) {
+            if (!Objects.equals(item.groupKey, row.groupKey) || !Objects.equals(item.platform, row.platform)) {
                 continue;
             }
             if (item.periodStart.getYear() == target.getYear()) {
@@ -862,13 +1051,13 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         List<TrendAgg> momRows = new ArrayList<>();
         List<TrendAgg> yoyRows = new ArrayList<>();
         for (TrendAgg row : latest) {
-            TrendAgg mom = merged.get(rowKey(shiftPeriodKey(row.periodKey, weekMode, -1), row.topicId, row.platform));
+            TrendAgg mom = merged.get(rowKey(shiftPeriodKey(row.periodKey, weekMode, -1), row.groupKey, row.platform));
             if (mom != null) {
                 momRows.add(mom);
             }
             LocalDate yoyDate = weekMode ? row.periodStart.minusWeeks(52) : row.periodStart.minusYears(1);
             String yoyKey = weekMode ? weekKey(yoyDate) : monthKey(yoyDate);
-            TrendAgg yoy = merged.get(rowKey(yoyKey, row.topicId, row.platform));
+            TrendAgg yoy = merged.get(rowKey(yoyKey, row.groupKey, row.platform));
             if (yoy != null) {
                 yoyRows.add(yoy);
             }
@@ -1008,34 +1197,53 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         private int sampleCount;
     }
 
+    /**
+     * 看板指标一律以有效日监测（is_active=1）实时聚合为准；
+     * 快照仅用于标记「已落库」，不再覆盖指标，避免已删除数据仍出现在汇总中。
+     */
     private Map<String, TrendAgg> mergeTrendWithSnapshots(GeoPeriodType type, LocalDate[] range,
                                                           GeoBoardQueryDTO query, List<TrendAgg> live) {
+        Set<String> snapshotPeriodKeys = loadSnapshotPeriodKeys(type, range[0], range[1], query);
         Map<String, TrendAgg> merged = new LinkedHashMap<>();
         for (TrendAgg row : live) {
-            merged.put(rowKey(row.periodKey, row.topicId, row.platform), row);
-        }
-        // 快照按 topic+platform 粒度落库，关键字筛选时仅展示实时聚合，避免口径不一致
-        if (!StringUtils.hasText(query.getKeyword())) {
-            for (GeoBoardPeriodStat snap : listSnapshots(type, range[0], range[1], query)) {
-                TrendAgg row = TrendAgg.fromSnapshot(snap);
-                merged.put(rowKey(row.periodKey, row.topicId, row.platform), row);
-            }
+            boolean persisted = snapshotPeriodKeys.contains(row.periodKey());
+            TrendAgg out = persisted && !row.fromSnapshot()
+                    ? new TrendAgg(row.periodKey(), row.axis(), row.groupKey(), row.groupName(), row.topicId(),
+                    row.platform(), row.periodStart(), row.periodEnd(), row.sampleCount(), row.mentionRate(),
+                    row.firstMentionRate(), row.recommendCount(), row.competitorTop(), row.citePlatformTop(), true)
+                    : row;
+            merged.put(rowKey(out), out);
         }
         return merged;
     }
 
     private Map<String, YearAgg> mergeYearlyWithSnapshots(LocalDate[] range, GeoBoardQueryDTO query, List<YearAgg> live) {
+        Set<String> snapshotPeriodKeys = loadSnapshotPeriodKeys(GeoPeriodType.YEAR, range[0], range[1], query);
         Map<String, YearAgg> merged = new LinkedHashMap<>();
         for (YearAgg row : live) {
-            merged.put(rowKey(row.periodKey, row.topicId, row.platform), row);
-        }
-        if (!StringUtils.hasText(query.getKeyword())) {
-            for (GeoBoardPeriodStat snap : listSnapshots(GeoPeriodType.YEAR, range[0], range[1], query)) {
-                YearAgg row = YearAgg.fromSnapshot(snap);
-                merged.put(rowKey(row.periodKey, row.topicId, row.platform), row);
-            }
+            boolean persisted = snapshotPeriodKeys.contains(row.periodKey());
+            YearAgg out = persisted && !row.fromSnapshot()
+                    ? new YearAgg(row.periodKey(), row.periodLabel(), row.groupKey(), row.groupName(), row.topicId(),
+                    row.platform(), row.periodStart(), row.periodEnd(), row.targetRate(), row.actualRate(),
+                    row.achieveRate(), row.sampleCount(), true)
+                    : row;
+            merged.put(rowKey(out), out);
         }
         return merged;
+    }
+
+    private Set<String> loadSnapshotPeriodKeys(GeoPeriodType type, LocalDate start, LocalDate end, GeoBoardQueryDTO query) {
+        // 关键字筛选时快照口径不一致，不参与已落库标记
+        if (StringUtils.hasText(query.getKeyword())) {
+            return Set.of();
+        }
+        Set<String> keys = new HashSet<>();
+        for (GeoBoardPeriodStat snap : listSnapshots(type, start, end, query)) {
+            if (snap != null && StringUtils.hasText(snap.getPeriodKey())) {
+                keys.add(snap.getPeriodKey());
+            }
+        }
+        return keys;
     }
 
     private List<GeoBoardPeriodStat> listSnapshots(GeoPeriodType type, LocalDate start, LocalDate end, GeoBoardQueryDTO query) {
@@ -1129,7 +1337,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         entity.setPeriodStart(row.periodStart);
         entity.setPeriodEnd(row.periodEnd);
         entity.setTopicId(row.topicId);
-        entity.setTopicName(row.topicName);
+        entity.setTopicName(row.groupName);
         entity.setPlatform(row.platform);
         entity.setSampleCount(row.sampleCount);
         entity.setMentionRate(BigDecimal.valueOf(row.mentionRate));
@@ -1162,7 +1370,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         entity.setPeriodStart(row.periodStart);
         entity.setPeriodEnd(row.periodEnd);
         entity.setTopicId(row.topicId);
-        entity.setTopicName(row.topicName);
+        entity.setTopicName(row.groupName);
         entity.setPlatform(row.platform);
         entity.setSampleCount(row.sampleCount);
         entity.setMentionRate(BigDecimal.valueOf(row.actualRate));
@@ -1181,14 +1389,31 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         }
     }
 
-    private List<YearAgg> liveYearly(LocalDate start, LocalDate end, GeoBoardQueryDTO query) {
-        List<GeoMonitorDaily> records = dailyMapper.selectList(
-                buildDailyWrapper(start, end, query.getTopicId(), query.getKeyword(), query.getPlatforms()));
+    private List<YearAgg> liveYearly(LocalDate start, LocalDate end, GeoBoardQueryDTO query, BoardDim dim) {
+        List<GeoMonitorDaily> records = loadActiveDaily(
+                start, end, query.getTopicId(), query.getKeyword(), query.getPlatforms());
         Map<Long, String> topicNames = topicNameMap();
+        List<YearAgg> rows = new ArrayList<>();
+        if (dim == BoardDim.OWNER) {
+            Map<String, List<GeoMonitorDaily>> grouped = records.stream()
+                    .collect(Collectors.groupingBy(r -> r.getInspectDate().getYear() + "\0" + ownerGroupKey(r) + "\0" + r.getPlatform(),
+                            LinkedHashMap::new, Collectors.toList()));
+            grouped.forEach((key, list) -> {
+                GeoMonitorDaily first = list.getFirst();
+                int year = first.getInspectDate().getYear();
+                LocalDate ts = LocalDate.of(year, 1, 1);
+                LocalDate te = LocalDate.of(year, 12, 31);
+                String label = String.valueOf(year);
+                String ownerKey = ownerDimKey(first);
+                rows.add(YearAgg.live(yearPeriodKey(label, ts, te), label, ownerGroupKey(first), ownerDimName(ownerKey),
+                        null, first.getPlatform(), ts, te, new BigDecimal("80.00"), list));
+            });
+            return rows;
+        }
+
         List<GeoYearTarget> targets = targetMapper.selectList(new LambdaQueryWrapper<GeoYearTarget>()
                 .eq(query.getTopicId() != null, GeoYearTarget::getTopicId, query.getTopicId())
                 .orderByAsc(GeoYearTarget::getSortOrder));
-        List<YearAgg> rows = new ArrayList<>();
         if (!targets.isEmpty()) {
             for (GeoYearTarget target : targets) {
                 if (!overlaps(target, start, end)) {
@@ -1204,12 +1429,13 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 Map<String, List<GeoMonitorDaily>> byPlatform = scoped.stream()
                         .collect(Collectors.groupingBy(GeoMonitorDaily::getPlatform));
                 String topicName = topicNames.getOrDefault(target.getTopicId(), "");
+                String groupKey = topicGroupKey(target.getTopicId());
                 if (byPlatform.isEmpty()) {
-                    rows.add(YearAgg.live(periodKey, target.getPeriodLabel(), target.getTopicId(), topicName,
+                    rows.add(YearAgg.live(periodKey, target.getPeriodLabel(), groupKey, topicName, target.getTopicId(),
                             "-", ts, te, target.getTargetRate(), List.of()));
                 } else {
                     byPlatform.forEach((platform, list) -> rows.add(YearAgg.live(
-                            periodKey, target.getPeriodLabel(), target.getTopicId(), topicName,
+                            periodKey, target.getPeriodLabel(), groupKey, topicName, target.getTopicId(),
                             platform, ts, te, target.getTargetRate(), list)));
                 }
             }
@@ -1222,8 +1448,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 LocalDate ts = LocalDate.of(year, 1, 1);
                 LocalDate te = LocalDate.of(year, 12, 31);
                 String label = String.valueOf(year);
-                rows.add(YearAgg.live(yearPeriodKey(label, ts, te), label, first.getTopicId(),
-                        topicNames.getOrDefault(first.getTopicId(), ""), first.getPlatform(),
+                rows.add(YearAgg.live(yearPeriodKey(label, ts, te), label, topicGroupKey(first.getTopicId()),
+                        topicNames.getOrDefault(first.getTopicId(), ""), first.getTopicId(), first.getPlatform(),
                         ts, te, new BigDecimal("80.00"), list));
             });
         }
@@ -1317,6 +1543,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         List<String> platformFilter = query.getPlatforms() == null ? List.of()
                 : query.getPlatforms().stream().filter(StringUtils::hasText).toList();
         LambdaQueryWrapper<GeoMonitorDaily> wrapper = new LambdaQueryWrapper<GeoMonitorDaily>()
+                .eq(GeoMonitorDaily::getIsActive, 1)
                 .ge(query.getStartDate() != null, GeoMonitorDaily::getInspectDate, query.getStartDate())
                 .le(query.getEndDate() != null, GeoMonitorDaily::getInspectDate, query.getEndDate())
                 .eq(query.getTopicId() != null, GeoMonitorDaily::getTopicId, query.getTopicId())
@@ -1354,12 +1581,25 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             LocalDate start, LocalDate end, Long topicId, String keyword, List<String> platforms) {
         List<String> platformFilter = platforms == null ? List.of()
                 : platforms.stream().filter(StringUtils::hasText).toList();
+        // 统计/看板统一只取有效数据；逻辑删除字段再显式约束，防止自定义路径漏过滤
         return new LambdaQueryWrapper<GeoMonitorDaily>()
+                .eq(GeoMonitorDaily::getIsActive, 1)
                 .ge(start != null, GeoMonitorDaily::getInspectDate, start)
                 .le(end != null, GeoMonitorDaily::getInspectDate, end)
                 .eq(topicId != null, GeoMonitorDaily::getTopicId, topicId)
                 .like(StringUtils.hasText(keyword), GeoMonitorDaily::getKeyword, keyword)
                 .in(!platformFilter.isEmpty(), GeoMonitorDaily::getPlatform, platformFilter);
+    }
+
+    private List<GeoMonitorDaily> loadActiveDaily(LocalDate start, LocalDate end, Long topicId,
+                                                  String keyword, List<String> platforms) {
+        return dailyMapper.selectList(buildDailyWrapper(start, end, topicId, keyword, platforms)).stream()
+                .filter(GeoMonitorServiceImpl::isActiveDaily)
+                .toList();
+    }
+
+    private static boolean isActiveDaily(GeoMonitorDaily record) {
+        return record != null && !Integer.valueOf(0).equals(record.getIsActive());
     }
 
     private Map<Long, String> topicNameMap() {
@@ -1480,10 +1720,14 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                                           Function<GeoMonitorDaily, String> keyFn,
                                           Function<GeoMonitorDaily, String> labelFn,
                                           Function<GeoMonitorDaily, LocalDate[]> boundsFn,
+                                          BoardDim dim,
                                           Map<Long, String> topicNames) {
         Map<String, List<GeoMonitorDaily>> grouped = records.stream()
-                .collect(Collectors.groupingBy(r -> keyFn.apply(r) + "\0" + r.getTopicId() + "\0" + r.getPlatform(),
-                        LinkedHashMap::new, Collectors.toList()));
+                .filter(GeoMonitorServiceImpl::isActiveDaily)
+                .collect(Collectors.groupingBy(r -> {
+                    String groupKey = dim == BoardDim.OWNER ? ownerGroupKey(r) : topicGroupKey(r.getTopicId());
+                    return keyFn.apply(r) + "\0" + groupKey + "\0" + r.getPlatform();
+                }, LinkedHashMap::new, Collectors.toList()));
         List<TrendAgg> rows = new ArrayList<>();
         for (List<GeoMonitorDaily> list : grouped.values()) {
             GeoMonitorDaily first = list.getFirst();
@@ -1492,11 +1736,25 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             int firstRank = (int) list.stream().filter(x -> Objects.equals(x.getRankNo(), 1)).count();
             int recommend = (int) list.stream().filter(x -> "出现且推荐".equals(x.getRecommendStatus())).count();
             LocalDate[] bounds = boundsFn.apply(first);
+            String groupKey;
+            String groupName;
+            Long topicId;
+            if (dim == BoardDim.OWNER) {
+                String ownerKey = ownerDimKey(first);
+                groupKey = ownerGroupKey(first);
+                groupName = ownerDimName(ownerKey);
+                topicId = null;
+            } else {
+                topicId = first.getTopicId();
+                groupKey = topicGroupKey(topicId);
+                groupName = topicNames.getOrDefault(topicId, "");
+            }
             rows.add(new TrendAgg(
                     keyFn.apply(first),
                     labelFn.apply(first),
-                    first.getTopicId(),
-                    topicNames.getOrDefault(first.getTopicId(), ""),
+                    groupKey,
+                    groupName,
+                    topicId,
                     first.getPlatform(),
                     bounds[0],
                     bounds[1],
@@ -1508,7 +1766,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                     topN(list.stream().map(x -> hostOf(x.getThirdPartyUrl())).toList(), 5),
                     false));
         }
-        rows.sort(Comparator.comparing(TrendAgg::axis).thenComparing(TrendAgg::topicName).thenComparing(TrendAgg::platform));
+        rows.sort(Comparator.comparing(TrendAgg::axis).thenComparing(TrendAgg::groupName).thenComparing(TrendAgg::platform));
         return rows;
     }
 
@@ -1548,6 +1806,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                                   List<GeoChartPointVO> mentionChart, List<GeoChartPointVO> firstMentionChart,
                                   List<GeoChartPointVO> recommendChart) {
         Map<String, List<GeoMonitorDaily>> chartGroup = records.stream()
+                .filter(GeoMonitorServiceImpl::isActiveDaily)
                 .collect(Collectors.groupingBy(r -> axisFn.apply(r) + "\0" + r.getPlatform(),
                         LinkedHashMap::new, Collectors.toList()));
         chartGroup.forEach((key, list) -> {
@@ -1608,8 +1867,39 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         return label + "@" + start + "~" + end;
     }
 
-    private static String rowKey(String periodKey, Long topicId, String platform) {
-        return periodKey + "\0" + topicId + "\0" + platform;
+    private enum BoardDim {
+        TOPIC, OWNER
+    }
+
+    private static String topicGroupKey(Long topicId) {
+        return "t:" + (topicId == null ? "0" : topicId);
+    }
+
+    private static String ownerGroupKey(GeoMonitorDaily record) {
+        return "o:" + ownerDimKey(record);
+    }
+
+    private static String ownerDimKey(GeoMonitorDaily record) {
+        if (record == null || !StringUtils.hasText(record.getOwnerName())) {
+            return "";
+        }
+        return record.getOwnerName().trim();
+    }
+
+    private static String ownerDimName(String ownerKey) {
+        return StringUtils.hasText(ownerKey) ? ownerKey : "未指定";
+    }
+
+    private static String rowKey(String periodKey, String groupKey, String platform) {
+        return periodKey + "\0" + groupKey + "\0" + platform;
+    }
+
+    private static String rowKey(TrendAgg row) {
+        return rowKey(row.periodKey(), row.groupKey(), row.platform());
+    }
+
+    private static String rowKey(YearAgg row) {
+        return rowKey(row.periodKey(), row.groupKey(), row.platform());
     }
 
     private static double pct(int num, int den) {
@@ -1673,16 +1963,18 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         private final List<String> platforms = new ArrayList<>();
     }
 
-    private record TrendAgg(String periodKey, String axis, Long topicId, String topicName, String platform,
-                            LocalDate periodStart, LocalDate periodEnd, int sampleCount, double mentionRate,
-                            double firstMentionRate, int recommendCount, String competitorTop, String citePlatformTop,
-                            boolean fromSnapshot) {
+    private record TrendAgg(String periodKey, String axis, String groupKey, String groupName, Long topicId,
+                            String platform, LocalDate periodStart, LocalDate periodEnd, int sampleCount,
+                            double mentionRate, double firstMentionRate, int recommendCount, String competitorTop,
+                            String citePlatformTop, boolean fromSnapshot) {
         static TrendAgg fromSnapshot(GeoBoardPeriodStat snap) {
+            Long topicId = snap.getTopicId();
             return new TrendAgg(
                     snap.getPeriodKey(),
                     snap.getPeriodLabel(),
-                    snap.getTopicId(),
+                    topicGroupKey(topicId),
                     snap.getTopicName(),
+                    topicId,
                     snap.getPlatform(),
                     snap.getPeriodStart(),
                     snap.getPeriodEnd(),
@@ -1696,26 +1988,31 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         }
     }
 
-    private record YearAgg(String periodKey, String periodLabel, Long topicId, String topicName, String platform,
-                           LocalDate periodStart, LocalDate periodEnd, BigDecimal targetRate, double actualRate,
-                           double achieveRate, int sampleCount, boolean fromSnapshot) {
-        static YearAgg live(String periodKey, String periodLabel, Long topicId, String topicName, String platform,
-                            LocalDate periodStart, LocalDate periodEnd, BigDecimal targetRate,
+    private record YearAgg(String periodKey, String periodLabel, String groupKey, String groupName, Long topicId,
+                           String platform, LocalDate periodStart, LocalDate periodEnd, BigDecimal targetRate,
+                           double actualRate, double achieveRate, int sampleCount, boolean fromSnapshot) {
+        static YearAgg live(String periodKey, String periodLabel, String groupKey, String groupName, Long topicId,
+                            String platform, LocalDate periodStart, LocalDate periodEnd, BigDecimal targetRate,
                             List<GeoMonitorDaily> list) {
-            int total = list.size();
-            int mentioned = (int) list.stream().filter(x -> Objects.equals(x.getMentioned(), 1)).count();
+            List<GeoMonitorDaily> active = list == null ? List.of() : list.stream()
+                    .filter(GeoMonitorServiceImpl::isActiveDaily)
+                    .toList();
+            int total = active.size();
+            int mentioned = (int) active.stream().filter(x -> Objects.equals(x.getMentioned(), 1)).count();
             double actual = pct(mentioned, total);
             double achieve = targetRate == null || targetRate.doubleValue() == 0 ? 0 : actual / targetRate.doubleValue() * 100;
-            return new YearAgg(periodKey, periodLabel, topicId, topicName, platform, periodStart, periodEnd,
+            return new YearAgg(periodKey, periodLabel, groupKey, groupName, topicId, platform, periodStart, periodEnd,
                     targetRate, round(actual), round(achieve), total, false);
         }
 
         static YearAgg fromSnapshot(GeoBoardPeriodStat snap) {
+            Long topicId = snap.getTopicId();
             return new YearAgg(
                     snap.getPeriodKey(),
                     snap.getPeriodLabel(),
-                    snap.getTopicId(),
+                    topicGroupKey(topicId),
                     snap.getTopicName(),
+                    topicId,
                     snap.getPlatform(),
                     snap.getPeriodStart(),
                     snap.getPeriodEnd(),
