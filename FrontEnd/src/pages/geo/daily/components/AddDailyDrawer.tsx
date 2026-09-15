@@ -10,9 +10,17 @@ import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import { GEO_TERM_TYPES, GEO_TERM_TYPE_DEFAULT } from '@/constants/geo';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
+/** 提及=-1 表示忽略该平台，不写入数据库 */
+const MENTION_IGNORE = -1;
+const MENTION_OPTIONS = [
+  { label: '是', value: 1 },
+  { label: '否', value: 0 },
+  { label: '忽略', value: MENTION_IGNORE },
+];
 
 type PlatformRow = {
   platform: string;
+  /** 1=是 0=否 -1=忽略（不入库） */
   mentioned: number;
   rankNo?: number;
   recommendStatus?: string;
@@ -44,7 +52,7 @@ function uid(prefix: string) {
 function createPlatformRows(platforms: string[]): PlatformRow[] {
   return platforms.map((platform) => ({
     platform,
-    mentioned: 0,
+    mentioned: MENTION_IGNORE,
     recommendStatus: '未出现',
   }));
 }
@@ -215,13 +223,19 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           setActiveKey(tab.key);
           return null;
         }
+        const items = row.platforms.filter((p) => Number(p.mentioned) !== MENTION_IGNORE);
+        if (!items.length) {
+          message.error(`${tab.inspectDate} 第 ${index + 1} 个话题：全部平台均为「忽略」，请至少保留一个平台`);
+          setActiveKey(tab.key);
+          return null;
+        }
         groups.push({
           inspectDate: tab.inspectDate,
           topicId: Number(row.topicId),
           keyword: String(row.keyword).trim(),
           termType: row.termType || GEO_TERM_TYPE_DEFAULT,
           ownerUserId: row.ownerUserId,
-          items: row.platforms,
+          items,
           tabKey: tab.key,
         });
       }
@@ -277,7 +291,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           ownerUserId: g.ownerUserId,
           items: g.items.map((item) => ({
             platform: item.platform,
-            mentioned: Number(item.mentioned) ? 1 : 0,
+            mentioned: Number(item.mentioned) === 1 ? 1 : 0,
             rankNo: item.rankNo == null ? undefined : Number(item.rankNo),
             recommendStatus: item.recommendStatus,
             thirdPartyUrl: item.thirdPartyUrl,
@@ -326,16 +340,13 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
     {
       title: '提及',
       dataIndex: 'mentioned',
-      width: 88,
+      width: 100,
       render: (v, row) => (
         <Select
           className='w-full'
           variant='borderless'
-          value={Number(v) ? 1 : 0}
-          options={[
-            { label: '是', value: 1 },
-            { label: '否', value: 0 },
-          ]}
+          value={Number(v) === 1 ? 1 : Number(v) === MENTION_IGNORE ? MENTION_IGNORE : 0}
+          options={MENTION_OPTIONS}
           onChange={(val) => updatePlatform(tabKey, topicKey, row.platform, { mentioned: val })}
         />
       ),
@@ -476,7 +487,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
     {
       title: '关键字',
       dataIndex: 'keyword',
-      width: 200,
+      width: 300,
       render: (v, row) => (
         <Input
           variant='borderless'
