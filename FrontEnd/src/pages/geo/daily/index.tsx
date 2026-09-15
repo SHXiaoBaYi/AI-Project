@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Drawer, Tag, Upload } from 'antd';
+import { App, Button, Drawer, Tag, Typography, Upload } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
@@ -137,7 +137,7 @@ const DailyPage = memo(function DailyPage() {
     {
       title: '第三方链接',
       dataIndex: 'thirdPartyUrl',
-      width: 120,
+      width: 220,
       ellipsis: true,
       valueType: 'select',
       valueEnum: {
@@ -149,13 +149,14 @@ const DailyPage = memo(function DailyPage() {
       },
       render: (_, r) =>
         r.thirdPartyUrl ? (
-          <Button
-            type='link'
-            size='small'
+          <Typography.Link
+            ellipsis
+            title={r.thirdPartyUrl}
+            className='max-w-full'
             onClick={() => setIframeUrl(r.thirdPartyUrl)}
           >
-            站内打开
-          </Button>
+            {r.thirdPartyUrl}
+          </Typography.Link>
         ) : (
           '-'
         ),

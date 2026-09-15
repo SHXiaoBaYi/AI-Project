@@ -24,3 +24,53 @@
 .ant-table-wrapper .ant-table *::-webkit-scrollbar-thumb:hover {
   background: #a0a0a0;
 }
+
+/* 嵌套「各平台监测」表：禁用 sticky/scroll 伪列，避免左侧约 40px 空白 */
+.geo-nested-platform-scroll {
+  margin: -8px;
+  overflow-y: hidden;
+}
+.geo-nested-platform-table.ant-table-wrapper {
+  margin: 0;
+  margin-left: 0 !important;
+  overflow-y: hidden;
+}
+.geo-nested-platform-table .ant-table,
+.geo-nested-platform-table .ant-table-container,
+.geo-nested-platform-table .ant-table-content,
+.geo-nested-platform-table .ant-table-body {
+  margin: 0;
+  margin-left: 0 !important;
+  overflow-y: hidden !important;
+}
+.geo-nested-platform-table .ant-table *::-webkit-scrollbar:vertical {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.geo-nested-platform-table .ant-table-container::before,
+.geo-nested-platform-table .ant-table-container::after {
+  display: none !important;
+  width: 0 !important;
+  box-shadow: none !important;
+  content: none !important;
+}
+.geo-nested-platform-table .ant-table-sticky-holder,
+.geo-nested-platform-table .ant-table-sticky-scroll {
+  display: none !important;
+}
+.geo-nested-platform-table .ant-table-cell-fix-left,
+.geo-nested-platform-table .ant-table-cell-fix-right,
+.geo-nested-platform-table .ant-table-cell-fix-start,
+.geo-nested-platform-table .ant-table-cell-fix-end {
+  position: static !important;
+  left: auto !important;
+  right: auto !important;
+  inset-inline-start: auto !important;
+  inset-inline-end: auto !important;
+}
+.geo-nested-platform-table table {
+  width: max-content;
+  min-width: 100%;
+  margin-inline-start: 0 !important;
+}

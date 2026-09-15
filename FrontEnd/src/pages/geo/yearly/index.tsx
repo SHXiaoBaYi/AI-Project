@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, lazy, Suspense } from 'react';
 import {
   ProFormDatePicker,
   ProFormDateRangePicker,
@@ -8,7 +8,6 @@ import {
   QueryFilter,
 } from '@ant-design/pro-components';
 import { App, Button, Card, Popconfirm, Table, Tag } from 'antd';
-import { Column, Line } from '@ant-design/charts';
 import dayjs from 'dayjs';
 import BaseModalForm from '@/components/BaseModalForm';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -25,6 +24,9 @@ import {
 import type { GeoTopic, GeoYearTarget, GeoYearlyBoard, GeoYearlyRow } from '@/types/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
+
+const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
+const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
 
 const defaultYears = [dayjs().subtract(1, 'year'), dayjs()];
 
@@ -70,22 +72,26 @@ function YearlyBoardSlice({
         }
       />
       <Card title='实际达成%（折线，系列=平台）'>
-        <Line
-          data={actualChart}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={280}
-        />
+        <Suspense fallback={<div className='h-[280px]' />}>
+          <Line
+            data={actualChart}
+            xField='axis'
+            yField='value'
+            colorField='series'
+            height={280}
+          />
+        </Suspense>
       </Card>
       <Card title='目标达成率%（柱状，系列=平台）'>
-        <Column
-          data={achieveChart}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={260}
-        />
+        <Suspense fallback={<div className='h-[260px]' />}>
+          <Column
+            data={achieveChart}
+            xField='axis'
+            yField='value'
+            colorField='series'
+            height={260}
+          />
+        </Suspense>
       </Card>
       <Card
         title={`达成明细（${groupTitle}，已落库周期 ${persistedPeriodCount ?? 0}）`}

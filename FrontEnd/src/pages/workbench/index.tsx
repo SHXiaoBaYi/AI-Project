@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { Card, Badge, Button, Checkbox, Tag, Divider, Statistic, theme } from 'antd';
 import {
   ArrowUpOutlined,
@@ -16,7 +16,9 @@ import {
   SyncOutlined,
   MoneyCollectOutlined,
 } from '@ant-design/icons';
-import { Line, Column } from '@ant-design/charts';
+
+const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
+const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
 
 const trendData = [
   { date: '06-10', value: 38500, type: '销售额' },
@@ -310,7 +312,9 @@ export default function Workbench() {
           }
         >
           <div className='h-64 sm:h-80'>
-            <Line {...lineConfig} />
+            <Suspense fallback={<div className='h-full' />}>
+              <Line {...lineConfig} />
+            </Suspense>
           </div>
         </Card>
 
@@ -403,7 +407,9 @@ export default function Workbench() {
           }
         >
           <div className='h-64 sm:h-80'>
-            <Column {...columnConfig} />
+            <Suspense fallback={<div className='h-full' />}>
+              <Column {...columnConfig} />
+            </Suspense>
           </div>
         </Card>
       </div>

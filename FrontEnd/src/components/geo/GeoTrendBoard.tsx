@@ -1,9 +1,22 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { Card, Col, Row, Statistic, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons';
-import { Column, Line } from '@ant-design/charts';
 import type { GeoBoardCompareSummary, GeoChartPoint } from '@/types/geo';
+
+const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
+const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
+
+function ChartFallback({ height = 280 }: { height?: number }) {
+  return (
+    <div
+      className='flex items-center justify-center text-sm text-neutral-400'
+      style={{ height }}
+    >
+      图表加载中…
+    </div>
+  );
+}
 
 export interface GeoTrendRow {
   axisLabel: string;
@@ -201,13 +214,15 @@ export function GeoCompareSummaryCards({
             size='small'
             title='环比变化看板'
           >
-            <Column
-              data={momChart}
-              xField='axis'
-              yField='value'
-              colorField='series'
-              height={220}
-            />
+            <Suspense fallback={<ChartFallback height={220} />}>
+              <Column
+                data={momChart}
+                xField='axis'
+                yField='value'
+                colorField='series'
+                height={220}
+              />
+            </Suspense>
           </Card>
         </Col>
         <Col
@@ -218,13 +233,15 @@ export function GeoCompareSummaryCards({
             size='small'
             title='同比变化看板'
           >
-            <Column
-              data={yoyChart}
-              xField='axis'
-              yField='value'
-              colorField='series'
-              height={220}
-            />
+            <Suspense fallback={<ChartFallback height={220} />}>
+              <Column
+                data={yoyChart}
+                xField='axis'
+                yField='value'
+                colorField='series'
+                height={220}
+              />
+            </Suspense>
           </Card>
         </Col>
       </Row>
@@ -326,31 +343,37 @@ export function GeoTrendBoard({
         />
       ) : null}
       <Card title={`提及率%（折线，横轴=${axisTitle}，系列=平台）`}>
-        <Line
-          data={mentionChart}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={280}
-        />
+        <Suspense fallback={<ChartFallback height={280} />}>
+          <Line
+            data={mentionChart}
+            xField='axis'
+            yField='value'
+            colorField='series'
+            height={280}
+          />
+        </Suspense>
       </Card>
       <Card title={`首位提及率%（折线，横轴=${axisTitle}，系列=平台）`}>
-        <Line
-          data={firstMentionChart}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={280}
-        />
+        <Suspense fallback={<ChartFallback height={280} />}>
+          <Line
+            data={firstMentionChart}
+            xField='axis'
+            yField='value'
+            colorField='series'
+            height={280}
+          />
+        </Suspense>
       </Card>
       <Card title={`推荐次数（柱状，横轴=${axisTitle}，系列=平台）`}>
-        <Column
-          data={recommendChart}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={260}
-        />
+        <Suspense fallback={<ChartFallback height={260} />}>
+          <Column
+            data={recommendChart}
+            xField='axis'
+            yField='value'
+            colorField='series'
+            height={260}
+          />
+        </Suspense>
       </Card>
       <Card title={tableTitle}>
         <Table

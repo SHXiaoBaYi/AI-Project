@@ -306,7 +306,6 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       title: '平台',
       dataIndex: 'platform',
       width: 100,
-      fixed: 'left',
       render: (v: string) => <span className='px-2 font-medium'>{v}</span>,
     },
     {
@@ -399,7 +398,6 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
     {
       title: '负面内容',
       dataIndex: 'negativeContent',
-      width: 160,
       render: (v, row) => (
         <Input
           variant='borderless'
@@ -413,7 +411,6 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       title: '截图',
       dataIndex: 'screenshotUrl',
       width: 120,
-      fixed: 'right',
       render: (v, row) => (
         <Space size={4}>
           <Upload
@@ -448,7 +445,6 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       title: '话题',
       dataIndex: 'topicId',
       width: 160,
-      fixed: 'left',
       render: (v, row) => (
         <Select
           className='w-full'
@@ -466,7 +462,6 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       title: '关键字',
       dataIndex: 'keyword',
       width: 200,
-      fixed: 'left',
       render: (v, row) => (
         <Input
           variant='borderless'
@@ -480,7 +475,6 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       title: '负责人',
       dataIndex: 'ownerName',
       width: 120,
-      fixed: 'left',
       render: (v, row) => (
         <Input
           variant='borderless'
@@ -494,22 +488,32 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       title: '各平台监测',
       dataIndex: 'platforms',
       render: (_, row) => (
-        <Table<PlatformRow>
-          size='small'
-          bordered
-          pagination={false}
-          rowKey='platform'
-          columns={buildPlatformColumns(tabKey, row.rowKey)}
-          dataSource={row.platforms}
-          scroll={{ x: 1100 }}
-          className='bg-white'
-        />
+        <div className='geo-nested-platform-scroll max-w-full overflow-x-auto overflow-y-hidden'>
+          <Table<PlatformRow>
+            size='small'
+            bordered
+            pagination={false}
+            tableLayout='auto'
+            rowKey='platform'
+            columns={buildPlatformColumns(tabKey, row.rowKey)}
+            dataSource={row.platforms}
+            className='geo-nested-platform-table bg-white'
+            style={{ marginLeft: 0 }}
+            components={{
+              table: (props) => (
+                <table
+                  {...props}
+                  style={{ ...props.style, marginLeft: 0 }}
+                />
+              ),
+            }}
+          />
+        </div>
       ),
     },
     {
       title: '操作',
       width: 72,
-      fixed: 'right',
       render: (_, row) => (
         <Button
           type='link'
@@ -577,15 +581,17 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
                     添加话题行
                   </Button>
                 </div>
-                <Table<TopicRow>
-                  size='small'
-                  bordered
-                  pagination={false}
-                  rowKey='rowKey'
-                  columns={buildTopicColumns(tab.key)}
-                  dataSource={tab.topics}
-                  scroll={{ x: 1600, y: 'calc(100vh - 260px)' }}
-                />
+                <div className='max-h-[calc(100vh-260px)] overflow-auto'>
+                  <Table<TopicRow>
+                    size='small'
+                    bordered
+                    pagination={false}
+                    tableLayout='auto'
+                    rowKey='rowKey'
+                    columns={buildTopicColumns(tab.key)}
+                    dataSource={tab.topics}
+                  />
+                </div>
               </div>
             ),
           }))}

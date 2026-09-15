@@ -43,5 +43,42 @@ export default defineConfig(({ mode }) => {
     css: {
       devSourcemap: true,
     },
+    build: {
+      cssCodeSplit: true,
+      rollupOptions: {
+        output: {
+          // Vite 8 / Rolldown：vendor 与页面分包，未改动的 hash 文件可被浏览器长期缓存
+          codeSplitting: {
+            groups: [
+              {
+                name: 'react-vendor',
+                test: /node_modules[\\/](react|react-dom|scheduler|react-router|react-redux|@reduxjs)[\\/]/,
+                priority: 40,
+              },
+              {
+                name: 'charts-vendor',
+                test: /node_modules[\\/](@ant-design[\\/]charts|@antv)[\\/]/,
+                priority: 35,
+              },
+              {
+                name: 'antd-vendor',
+                test: /node_modules[\\/](antd|@ant-design[\\/](cssinjs|colors|icons|fast-color)|@rc-component|rc-)[\\/]/,
+                priority: 30,
+              },
+              {
+                name: 'pro-vendor',
+                test: /node_modules[\\/]@ant-design[\\/]pro-components[\\/]/,
+                priority: 25,
+              },
+              {
+                name: 'vendor',
+                test: /node_modules[\\/]/,
+                priority: 10,
+              },
+            ],
+          },
+        },
+      },
+    },
   };
 });
