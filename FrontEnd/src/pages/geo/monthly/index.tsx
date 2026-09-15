@@ -6,6 +6,7 @@ import { getGeoMonthlyBoardApi, getGeoPlatformsApi, getGeoTopicOptionsApi } from
 import type { GeoMonthlyBoard, GeoTopic } from '@/types/geo';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
+import { toDayjs } from '@/utils/geoBoardQuery';
 
 const emptyBoard: GeoMonthlyBoard = { mentionChart: [], firstMentionChart: [], recommendChart: [], rows: [] };
 const defaultMonths = [dayjs().subtract(5, 'month').startOf('month'), dayjs().endOf('month')];
@@ -16,13 +17,14 @@ const MonthlyPage = memo(function MonthlyPage() {
   const [board, setBoard] = useState<GeoMonthlyBoard>(emptyBoard);
 
   const load = async (values?: Record<string, any>) => {
-    const range = (values?.monthRange as dayjs.Dayjs[] | undefined) ?? defaultMonths;
+    const start = toDayjs(values?.monthRange?.[0]) ?? defaultMonths[0];
+    const end = toDayjs(values?.monthRange?.[1]) ?? defaultMonths[1];
     const data = await getGeoMonthlyBoardApi({
-      startDate: (range[0] ?? dayjs()).startOf('month').format('YYYY-MM-DD'),
-      endDate: (range[1] ?? dayjs()).endOf('month').format('YYYY-MM-DD'),
+      startDate: start.startOf('month').format('YYYY-MM-DD'),
+      endDate: end.endOf('month').format('YYYY-MM-DD'),
       topicId: values?.topicId,
-      keyword: values?.keyword,
-      platforms: values?.platforms,
+      keyword: values?.keyword?.trim() || undefined,
+      platforms: values?.platforms?.length ? values.platforms : undefined,
     });
     setBoard({
       mentionChart: data?.mentionChart ?? [],
@@ -30,13 +32,14 @@ const MonthlyPage = memo(function MonthlyPage() {
       recommendChart: data?.recommendChart ?? [],
       rows: data?.rows ?? [],
       persistedPeriodCount: data?.persistedPeriodCount ?? 0,
+      compareSummary: data?.compareSummary,
     });
   };
 
   useEffect(() => {
     getGeoTopicOptionsApi().then(setTopics);
     getGeoPlatformsApi().then(setPlatforms);
-    load();
+    void load({ monthRange: defaultMonths });
   }, []);
 
   return (
@@ -48,6 +51,9 @@ const MonthlyPage = memo(function MonthlyPage() {
           onFinish={async (v) => {
             await load(v);
             return true;
+          }}
+          onReset={() => {
+            void load({ monthRange: defaultMonths });
           }}
         >
           <ProFormDateRangePicker
@@ -63,6 +69,8 @@ const MonthlyPage = memo(function MonthlyPage() {
             name='topicId'
             label='话题'
             allowClear
+            showSearch
+            optionFilterProp='label'
             options={topics.map((t) => ({ label: t.topicName, value: t.id }))}
           />
           <ProFormText
@@ -84,6 +92,9 @@ const MonthlyPage = memo(function MonthlyPage() {
         </span>
       </Card>
       <GeoTrendBoard
+        showCompare
+        compareHint='环比=上一月；同比=去年同月'
+        compareSummary={board.compareSummary}
         mentionChart={board.mentionChart}
         firstMentionChart={board.firstMentionChart}
         recommendChart={board.recommendChart}

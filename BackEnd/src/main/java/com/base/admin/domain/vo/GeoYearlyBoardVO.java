@@ -23,6 +23,9 @@ public class GeoYearlyBoardVO {
     @Schema(description = "查询范围内已落库的周期数", example = "2")
     private int persistedPeriodCount;
 
+    @Schema(description = "同比/环比汇总（按查询范围内最新周期）")
+    private GeoBoardCompareSummaryVO compareSummary;
+
     @Data
     @Schema(description = "全年达成一行")
     public static class GeoYearlyRowVO {
@@ -41,8 +44,20 @@ public class GeoYearlyBoardVO {
         @Schema(description = "实际达成%", example = "86.00")
         private double actualRate;
 
+        @Schema(description = "实际达成环比（百分点）", nullable = true)
+        private Double actualRateMom;
+
+        @Schema(description = "实际达成同比（百分点）", nullable = true)
+        private Double actualRateYoy;
+
         @Schema(description = "达成率%（实际/目标）", example = "107.50")
         private double achieveRate;
+
+        @Schema(description = "达成率环比（百分点）", nullable = true)
+        private Double achieveRateMom;
+
+        @Schema(description = "达成率同比（百分点）", nullable = true)
+        private Double achieveRateYoy;
 
         @Schema(description = "样本数", example = "40")
         private int sampleCount;

@@ -17,6 +17,7 @@ export interface GeoDailyVO {
   inspectDate: string;
   platform: string;
   keyword: string;
+  ownerName?: string;
   topicId: number;
   topicName: string;
   mentioned: number;
@@ -36,6 +37,7 @@ export interface GeoDailyDTO {
   inspectDate: string;
   platform: string;
   keyword: string;
+  ownerName?: string;
   topicId: number;
   mentioned?: number;
   rankNo?: number;
@@ -62,6 +64,7 @@ export interface GeoDailyBatchDTO {
   inspectDate: string;
   topicId: number;
   keyword: string;
+  ownerName?: string;
   items: GeoDailyPlatformItem[];
 }
 
@@ -69,6 +72,7 @@ export interface GeoDailyBulkGroupDTO {
   inspectDate: string;
   topicId: number;
   keyword: string;
+  ownerName?: string;
   items: GeoDailyPlatformItem[];
 }
 
@@ -123,11 +127,31 @@ export interface GeoWeeklyRow {
   platform: string;
   sampleCount: number;
   mentionRate: number;
+  mentionRateMom?: number | null;
+  mentionRateYoy?: number | null;
   firstMentionRate: number;
+  firstMentionRateMom?: number | null;
+  firstMentionRateYoy?: number | null;
   recommendCount: number;
+  recommendCountMom?: number | null;
+  recommendCountYoy?: number | null;
   competitorTop?: string;
   citePlatformTop?: string;
   fromSnapshot?: boolean;
+}
+
+export interface GeoBoardCompareSummary {
+  mentionRate?: number;
+  mentionRateMom?: number | null;
+  mentionRateYoy?: number | null;
+  firstMentionRate?: number;
+  firstMentionRateMom?: number | null;
+  firstMentionRateYoy?: number | null;
+  recommendCount?: number;
+  recommendCountMom?: number | null;
+  recommendCountYoy?: number | null;
+  sampleCount?: number;
+  compareHint?: string;
 }
 
 export interface GeoWeeklyBoard {
@@ -136,6 +160,7 @@ export interface GeoWeeklyBoard {
   recommendChart: GeoChartPoint[];
   rows: GeoWeeklyRow[];
   persistedPeriodCount?: number;
+  compareSummary?: GeoBoardCompareSummary;
 }
 
 export interface GeoMonthlyRow {
@@ -144,8 +169,14 @@ export interface GeoMonthlyRow {
   platform: string;
   sampleCount: number;
   mentionRate: number;
+  mentionRateMom?: number | null;
+  mentionRateYoy?: number | null;
   firstMentionRate: number;
+  firstMentionRateMom?: number | null;
+  firstMentionRateYoy?: number | null;
   recommendCount: number;
+  recommendCountMom?: number | null;
+  recommendCountYoy?: number | null;
   competitorTop?: string;
   citePlatformTop?: string;
   fromSnapshot?: boolean;
@@ -157,11 +188,14 @@ export interface GeoMonthlyBoard {
   recommendChart: GeoChartPoint[];
   rows: GeoMonthlyRow[];
   persistedPeriodCount?: number;
+  compareSummary?: GeoBoardCompareSummary;
 }
 
 export interface GeoDailyRow {
   dateLabel: string;
   topicName: string;
+  keyword?: string;
+  ownerName?: string;
   platform: string;
   sampleCount: number;
   mentionRate: number;
@@ -171,11 +205,43 @@ export interface GeoDailyRow {
   citePlatformTop?: string;
 }
 
+export interface GeoDailySummaryPlatform {
+  id?: number;
+  platform: string;
+  mentioned?: number;
+  rankNo?: number;
+  recommendStatus?: string;
+  thirdPartyUrl?: string;
+  competitors?: string;
+  negativeContent?: string;
+  screenshotUrl?: string;
+  sampleCount?: number;
+  mentionRate?: number;
+  firstMentionRate?: number;
+  recommendCount?: number;
+  competitorTop?: string;
+  citePlatformTop?: string;
+}
+
+export interface GeoDailySummaryTopic {
+  topicId: number;
+  topicName: string;
+  keyword?: string;
+  ownerName?: string;
+  platforms: GeoDailySummaryPlatform[];
+}
+
+export interface GeoDailySummaryDate {
+  inspectDate: string;
+  topics: GeoDailySummaryTopic[];
+}
+
 export interface GeoDailyBoard {
   mentionChart: GeoChartPoint[];
   firstMentionChart: GeoChartPoint[];
   recommendChart: GeoChartPoint[];
   rows: GeoDailyRow[];
+  summaryGroups?: GeoDailySummaryDate[];
 }
 
 export interface GeoYearlyRow {
@@ -184,7 +250,11 @@ export interface GeoYearlyRow {
   platform: string;
   targetRate?: number;
   actualRate: number;
+  actualRateMom?: number | null;
+  actualRateYoy?: number | null;
   achieveRate: number;
+  achieveRateMom?: number | null;
+  achieveRateYoy?: number | null;
   sampleCount: number;
   fromSnapshot?: boolean;
 }
@@ -194,6 +264,7 @@ export interface GeoYearlyBoard {
   achieveChart: GeoChartPoint[];
   rows: GeoYearlyRow[];
   persistedPeriodCount?: number;
+  compareSummary?: GeoBoardCompareSummary;
 }
 
 export interface GeoPersistResult {

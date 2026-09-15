@@ -1,0 +1,316 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Button, Card, Drawer, Table, Tabs, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import type { GeoDailySummaryDate, GeoDailySummaryPlatform, GeoDailySummaryTopic, GeoDailyVO } from '@/types/geo';
+import GeoScreenshot from '@/components/geo/GeoScreenshot';
+
+/** 用日监测原始记录组装汇总（含排名/链接等明细字段） */
+export function buildDailySummaryFromRecords(records: GeoDailyVO[] = []): GeoDailySummaryDate[] {
+  const byDate = new Map<string, Map<string, GeoDailySummaryTopic>>();
+
+  for (const row of records) {
+    const date = row.inspectDate;
+    if (!date) continue;
+    let topics = byDate.get(date);
+    if (!topics) {
+      topics = new Map();
+      byDate.set(date, topics);
+    }
+    const topicKey = `${row.topicId || 0}||${row.keyword || ''}`;
+    let topic = topics.get(topicKey);
+    if (!topic) {
+      topic = {
+        topicId: row.topicId,
+        topicName: row.topicName || '未命名话题',
+        keyword: row.keyword,
+        ownerName: row.ownerName,
+        platforms: [],
+      };
+      topics.set(topicKey, topic);
+    } else if (!topic.ownerName && row.ownerName) {
+      topic.ownerName = row.ownerName;
+    }
+    topic.platforms.push({
+      id: row.id,
+      platform: row.platform,
+      mentioned: row.mentioned,
+      rankNo: row.rankNo,
+      recommendStatus: row.recommendStatus,
+      thirdPartyUrl: row.thirdPartyUrl,
+      competitors: row.competitors,
+      negativeContent: row.negativeContent,
+      screenshotUrl: row.screenshotUrl,
+    });
+  }
+
+  return [...byDate.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([inspectDate, topics]) => ({
+      inspectDate,
+      topics: [...topics.values()],
+    }));
+}
+
+function hasDetailFields(groups?: GeoDailySummaryDate[]) {
+  return !!groups?.some((g) =>
+    g.topics?.some((t) =>
+      t.platforms?.some(
+        (p) =>
+          p.mentioned != null ||
+          p.rankNo != null ||
+          !!p.recommendStatus ||
+          !!p.thirdPartyUrl ||
+          !!p.competitors ||
+          !!p.negativeContent ||
+          !!p.screenshotUrl,
+      ),
+    ),
+  );
+}
+
+function resolveUrl(url?: string) {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith('/')) return url;
+  return `https://${url}`;
+}
+
+export function GeoDailySummaryBoard({
+  groups,
+  records,
+  activeDate,
+  onActiveDateChange,
+}: {
+  groups?: GeoDailySummaryDate[];
+  /** 日监测原始记录（优先用于汇总明细展示） */
+  records?: GeoDailyVO[];
+  activeDate?: string;
+  onActiveDateChange?: (date: string) => void;
+}) {
+  const data = useMemo(() => {
+    if (records && records.length > 0) {
+      return buildDailySummaryFromRecords(records);
+    }
+    if (hasDetailFields(groups)) {
+      return groups || [];
+    }
+    return groups || [];
+  }, [groups, records]);
+
+  const [innerKey, setInnerKey] = useState<string>();
+  const [iframeUrl, setIframeUrl] = useState<string>();
+
+  useEffect(() => {
+    if (!data.length) {
+      setInnerKey(undefined);
+      return;
+    }
+    const next =
+      (activeDate && data.some((g) => g.inspectDate === activeDate) && activeDate) ||
+      (innerKey && data.some((g) => g.inspectDate === innerKey) && innerKey) ||
+      data[0].inspectDate;
+    if (next !== innerKey) setInnerKey(next);
+    if (next && next !== activeDate) onActiveDateChange?.(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const currentKey = innerKey && data.some((g) => g.inspectDate === innerKey) ? innerKey : data[0]?.inspectDate;
+  const activeGroup = useMemo(() => data.find((g) => g.inspectDate === currentKey), [data, currentKey]);
+
+  const handleTabChange = (key: string) => {
+    setInnerKey(key);
+    onActiveDateChange?.(key);
+  };
+
+  const platformColumns: ColumnsType<GeoDailySummaryPlatform> = useMemo(
+    () => [
+      {
+        title: '平台',
+        dataIndex: 'platform',
+        width: 100,
+        fixed: 'left',
+        render: (v) => <span className='px-2 font-medium'>{v}</span>,
+      },
+      {
+        title: '提及',
+        dataIndex: 'mentioned',
+        width: 72,
+        render: (v) => (Number(v) ? <Tag color='success'>是</Tag> : <Tag>否</Tag>),
+      },
+      {
+        title: '排名',
+        dataIndex: 'rankNo',
+        width: 72,
+        render: (v) => (v == null || v === '' ? '-' : v),
+      },
+      {
+        title: '推荐状态',
+        dataIndex: 'recommendStatus',
+        width: 120,
+        render: (v) => v || '-',
+      },
+      {
+        title: '第三方链接',
+        dataIndex: 'thirdPartyUrl',
+        width: 140,
+        ellipsis: true,
+        render: (v?: string) =>
+          v ? (
+            <Button
+              type='link'
+              size='small'
+              className='px-0'
+              onClick={() => setIframeUrl(resolveUrl(v))}
+            >
+              查看详情
+            </Button>
+          ) : (
+            '-'
+          ),
+      },
+      {
+        title: '竞品',
+        dataIndex: 'competitors',
+        width: 140,
+        ellipsis: true,
+        render: (v) => v || '-',
+      },
+      {
+        title: '负面内容',
+        dataIndex: 'negativeContent',
+        width: 140,
+        ellipsis: true,
+        render: (v) => v || '-',
+      },
+      {
+        title: '截图',
+        dataIndex: 'screenshotUrl',
+        width: 90,
+        fixed: 'right',
+        render: (v?: string) => (
+          <GeoScreenshot
+            src={v}
+            width={40}
+          />
+        ),
+      },
+    ],
+    [],
+  );
+
+  const topicColumns: ColumnsType<GeoDailySummaryTopic> = useMemo(
+    () => [
+      {
+        title: '话题',
+        dataIndex: 'topicName',
+        width: 140,
+        fixed: 'left',
+        render: (v) => <span className='px-2 font-medium'>{v}</span>,
+      },
+      {
+        title: '关键字',
+        dataIndex: 'keyword',
+        width: 200,
+        fixed: 'left',
+        ellipsis: true,
+        render: (v) => v || '-',
+      },
+      {
+        title: '负责人',
+        dataIndex: 'ownerName',
+        width: 110,
+        fixed: 'left',
+        render: (v) => v || '-',
+      },
+      {
+        title: '各平台监测',
+        dataIndex: 'platforms',
+        render: (_, row) => (
+          <Table<GeoDailySummaryPlatform>
+            size='small'
+            bordered
+            pagination={false}
+            rowKey={(r) => `${currentKey}-${row.topicId}-${row.keyword}-${r.platform}-${r.id ?? ''}`}
+            columns={platformColumns}
+            dataSource={row.platforms}
+            scroll={{ x: 1000 }}
+            className='bg-white'
+          />
+        ),
+      },
+    ],
+    [currentKey, platformColumns],
+  );
+
+  if (!data.length) {
+    return (
+      <Card title='日报汇总'>
+        <div className='py-8 text-center text-neutral-400'>
+          当前筛选范围内暂无汇总数据，请调整日期范围或先在「日监测」录入数据
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <Card
+        title='日报汇总（日期 Tab）'
+        extra={<span className='text-sm text-neutral-500'>当前：{currentKey || '-'}</span>}
+      >
+        <Tabs
+          type='card'
+          activeKey={currentKey}
+          onChange={handleTabChange}
+          items={data.map((group) => ({
+            key: group.inspectDate,
+            label: `${group.inspectDate}（${group.topics?.length || 0}）`,
+          }))}
+        />
+        <div className='mb-2 text-sm text-neutral-500'>
+          已切换到 <b>{activeGroup?.inspectDate}</b>，共 {activeGroup?.topics?.length || 0}{' '}
+          个话题；下方图表/明细同步过滤该日
+        </div>
+        <Table<GeoDailySummaryTopic>
+          key={`summary-table-${currentKey}`}
+          size='small'
+          bordered
+          pagination={false}
+          rowKey={(r) => `${currentKey}-${r.topicId}-${r.keyword}-${r.topicName}`}
+          columns={topicColumns}
+          dataSource={[...(activeGroup?.topics || [])]}
+          scroll={{ x: 1200, y: 'calc(100vh - 360px)' }}
+        />
+      </Card>
+
+      <Drawer
+        title='第三方页面'
+        width='70%'
+        open={!!iframeUrl}
+        onClose={() => setIframeUrl(undefined)}
+        destroyOnHidden
+        extra={
+          iframeUrl ? (
+            <Button
+              type='link'
+              href={iframeUrl}
+              target='_blank'
+              rel='noreferrer'
+            >
+              新窗口打开
+            </Button>
+          ) : null
+        }
+      >
+        {iframeUrl ? (
+          <iframe
+            title='geo-link-preview'
+            src={iframeUrl}
+            className='h-[75vh] w-full border-0'
+            sandbox='allow-scripts allow-same-origin allow-popups allow-forms'
+          />
+        ) : null}
+      </Drawer>
+    </>
+  );
+}

@@ -31,6 +31,10 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v4_geo_daily_board.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v5_geo_board_snapshot.sql"));
             ensureBoardLockedColumn(connection);
+            ensureOwnerNameColumn(connection);
+        } catch (Exception e) {
+            log.error("GEO schema migrate failed", e);
+            throw e;
         }
         log.info("GEO 平台主数据、看板落库与菜单已同步");
     }
@@ -50,14 +54,44 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         log.info("已为 geo_monitor_daily 增加 board_locked 字段");
     }
 
+    private void ensureOwnerNameColumn(Connection connection) throws Exception {
+        if (columnExists(connection, "geo_monitor_daily", "owner_name")) {
+            log.info("geo_monitor_daily.owner_name 已存在，跳过");
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    ALTER TABLE geo_monitor_daily
+                      ADD COLUMN owner_name VARCHAR(64) NULL
+                      COMMENT '负责人（与关键字绑定）'
+                      AFTER keyword
+                    """);
+        }
+        log.info("已为 geo_monitor_daily 增加 owner_name 字段");
+    }
+
     private boolean columnExists(Connection connection, String table, String column) throws Exception {
+        // 优先用 INFORMATION_SCHEMA，避免 RDS/驱动 catalog 不一致导致误判
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("""
+                     SELECT COUNT(1) AS cnt
+                     FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = '%s'
+                       AND COLUMN_NAME = '%s'
+                     """.formatted(table, column))) {
+            if (rs.next() && rs.getInt("cnt") > 0) {
+                return true;
+            }
+        }
         DatabaseMetaData metaData = connection.getMetaData();
-        try (ResultSet rs = metaData.getColumns(connection.getCatalog(), null, table, column)) {
+        String catalog = connection.getCatalog();
+        try (ResultSet rs = metaData.getColumns(catalog, null, table, column)) {
             if (rs.next()) {
                 return true;
             }
         }
-        try (ResultSet rs = metaData.getColumns(connection.getCatalog(), null, table.toUpperCase(), column.toUpperCase())) {
+        try (ResultSet rs = metaData.getColumns(catalog, null, table.toUpperCase(), column.toUpperCase())) {
             return rs.next();
         }
     }

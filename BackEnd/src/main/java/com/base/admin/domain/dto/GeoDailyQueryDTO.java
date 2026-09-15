@@ -27,6 +27,9 @@ public class GeoDailyQueryDTO extends PageQuery {
     @Schema(description = "关键字")
     private String keyword;
 
+    @Schema(description = "负责人")
+    private String ownerName;
+
     @Schema(description = "平台（多选）")
     private List<String> platforms;
 

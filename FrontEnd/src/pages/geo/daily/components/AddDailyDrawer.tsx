@@ -1,23 +1,10 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import {
-  App,
-  Button,
-  DatePicker,
-  Drawer,
-  Image,
-  Input,
-  InputNumber,
-  Modal,
-  Select,
-  Space,
-  Table,
-  Tabs,
-  Upload,
-} from 'antd';
+import { App, Button, DatePicker, Drawer, Input, InputNumber, Modal, Select, Space, Table, Tabs, Upload } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import { saveGeoDailyBulkApi, uploadGeoScreenshotApi } from '@/api/geo';
 import type { GeoDailyBulkSaveResult, GeoTopic } from '@/types/geo';
+import GeoScreenshot from '@/components/geo/GeoScreenshot';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
 
@@ -36,6 +23,7 @@ type TopicRow = {
   rowKey: string;
   topicId?: number;
   keyword?: string;
+  ownerName?: string;
   platforms: PlatformRow[];
 };
 
@@ -195,6 +183,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       inspectDate: string;
       topicId: number;
       keyword: string;
+      ownerName?: string;
       items: PlatformRow[];
       tabKey: string;
     }[] = [];
@@ -217,6 +206,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           inspectDate: tab.inspectDate,
           topicId: Number(row.topicId),
           keyword: String(row.keyword).trim(),
+          ownerName: String(row.ownerName || '').trim() || undefined,
           items: row.platforms,
           tabKey: tab.key,
         });
@@ -269,6 +259,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           inspectDate: g.inspectDate,
           topicId: g.topicId,
           keyword: g.keyword,
+          ownerName: g.ownerName,
           items: g.items.map((item) => ({
             platform: item.platform,
             mentioned: Number(item.mentioned) ? 1 : 0,
@@ -442,9 +433,9 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
             <Button size='small'>上传</Button>
           </Upload>
           {v ? (
-            <Image
+            <GeoScreenshot
+              src={v}
               width={36}
-              src={`/api${v}`}
             />
           ) : null}
         </Space>
@@ -457,6 +448,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       title: '话题',
       dataIndex: 'topicId',
       width: 160,
+      fixed: 'left',
       render: (v, row) => (
         <Select
           className='w-full'
@@ -473,13 +465,28 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
     {
       title: '关键字',
       dataIndex: 'keyword',
-      width: 220,
+      width: 200,
+      fixed: 'left',
       render: (v, row) => (
         <Input
           variant='borderless'
           placeholder='关键字 / 提问'
           value={v}
           onChange={(e) => updateTopic(tabKey, row.rowKey, { keyword: e.target.value })}
+        />
+      ),
+    },
+    {
+      title: '负责人',
+      dataIndex: 'ownerName',
+      width: 120,
+      fixed: 'left',
+      render: (v, row) => (
+        <Input
+          variant='borderless'
+          placeholder='与关键字绑定'
+          value={v}
+          onChange={(e) => updateTopic(tabKey, row.rowKey, { ownerName: e.target.value })}
         />
       ),
     },
@@ -577,7 +584,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
                   rowKey='rowKey'
                   columns={buildTopicColumns(tab.key)}
                   dataSource={tab.topics}
-                  scroll={{ x: 1400, y: 'calc(100vh - 260px)' }}
+                  scroll={{ x: 1600, y: 'calc(100vh - 260px)' }}
                 />
               </div>
             ),

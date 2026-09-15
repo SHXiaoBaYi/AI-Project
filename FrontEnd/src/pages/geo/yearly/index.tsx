@@ -12,6 +12,7 @@ import { Column, Line } from '@ant-design/charts';
 import dayjs from 'dayjs';
 import BaseModalForm from '@/components/BaseModalForm';
 import PermissionButton from '@/components/Buttons/PermissionButton';
+import { GeoCompareSummaryCards, buildCompareSummaryFromRows } from '@/components/geo/GeoTrendBoard';
 import {
   deleteGeoYearTargetApi,
   getGeoPlatformsApi,
@@ -22,6 +23,7 @@ import {
 } from '@/api/geo';
 import type { GeoTopic, GeoYearTarget, GeoYearlyBoard } from '@/types/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
+import { toDayjs } from '@/utils/geoBoardQuery';
 
 const defaultYears = [dayjs().subtract(1, 'year'), dayjs()];
 
@@ -34,15 +36,22 @@ const YearlyPage = memo(function YearlyPage() {
   const [targetOpen, setTargetOpen] = useState(false);
 
   const loadBoard = async (values?: Record<string, any>) => {
-    const range = (values?.yearRange as dayjs.Dayjs[] | undefined) ?? defaultYears;
+    const start = toDayjs(values?.yearRange?.[0]) ?? defaultYears[0];
+    const end = toDayjs(values?.yearRange?.[1]) ?? defaultYears[1];
     const data = await getGeoYearlyBoardApi({
-      startDate: range[0]?.startOf('year').format('YYYY-MM-DD'),
-      endDate: range[1]?.endOf('year').format('YYYY-MM-DD'),
+      startDate: start.startOf('year').format('YYYY-MM-DD'),
+      endDate: end.endOf('year').format('YYYY-MM-DD'),
       topicId: values?.topicId,
-      keyword: values?.keyword,
-      platforms: values?.platforms,
+      keyword: values?.keyword?.trim() || undefined,
+      platforms: values?.platforms?.length ? values.platforms : undefined,
     });
-    setBoard(data);
+    setBoard({
+      actualChart: data?.actualChart ?? [],
+      achieveChart: data?.achieveChart ?? [],
+      rows: data?.rows ?? [],
+      persistedPeriodCount: data?.persistedPeriodCount ?? 0,
+      compareSummary: data?.compareSummary,
+    });
   };
 
   const loadTargets = () => getGeoYearTargetsApi().then(setTargets);
@@ -50,7 +59,7 @@ const YearlyPage = memo(function YearlyPage() {
   useEffect(() => {
     getGeoTopicOptionsApi().then(setTopics);
     getGeoPlatformsApi().then(setPlatforms);
-    loadBoard();
+    void loadBoard({ yearRange: defaultYears });
     loadTargets();
   }, []);
 
@@ -64,6 +73,9 @@ const YearlyPage = memo(function YearlyPage() {
             await loadBoard(v);
             return true;
           }}
+          onReset={() => {
+            void loadBoard({ yearRange: defaultYears });
+          }}
         >
           <ProFormDateRangePicker
             name='yearRange'
@@ -74,6 +86,8 @@ const YearlyPage = memo(function YearlyPage() {
             name='topicId'
             label='话题'
             allowClear
+            showSearch
+            optionFilterProp='label'
             options={topics.map((t) => ({ label: t.topicName, value: t.id }))}
           />
           <ProFormText
@@ -89,6 +103,27 @@ const YearlyPage = memo(function YearlyPage() {
           />
         </QueryFilter>
       </Card>
+      <GeoCompareSummaryCards
+        title='年报同比 / 环比看板'
+        alwaysShow
+        summary={
+          board.compareSummary ??
+          buildCompareSummaryFromRows(
+            (board.rows ?? []).map((r) => ({
+              axisLabel: r.periodLabel,
+              sampleCount: r.sampleCount,
+              mentionRate: r.actualRate,
+              firstMentionRate: r.achieveRate,
+              recommendCount: r.sampleCount,
+              mentionRateMom: r.actualRateMom,
+              mentionRateYoy: r.actualRateYoy,
+              firstMentionRateMom: r.achieveRateMom,
+              firstMentionRateYoy: r.achieveRateYoy,
+            })),
+            '环比/同比=上一年度同期',
+          )
+        }
+      />
       <Card title='实际达成%（折线，系列=平台）'>
         <Line
           data={board.actualChart}
@@ -125,13 +160,34 @@ const YearlyPage = memo(function YearlyPage() {
           rowKey={(r) => `${r.periodLabel}-${r.topicName}-${r.platform}`}
           dataSource={board.rows}
           pagination={false}
+          scroll={{ x: 'max-content' }}
           columns={[
             { title: '时间', dataIndex: 'periodLabel' },
             { title: '话题', dataIndex: 'topicName' },
             { title: '平台', dataIndex: 'platform' },
             { title: '目标%', dataIndex: 'targetRate' },
             { title: '实际达成%', dataIndex: 'actualRate' },
+            {
+              title: '实际环比',
+              dataIndex: 'actualRateMom',
+              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
+            },
+            {
+              title: '实际同比',
+              dataIndex: 'actualRateYoy',
+              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
+            },
             { title: '达成率%', dataIndex: 'achieveRate' },
+            {
+              title: '达成环比',
+              dataIndex: 'achieveRateMom',
+              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
+            },
+            {
+              title: '达成同比',
+              dataIndex: 'achieveRateYoy',
+              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
+            },
             { title: '样本', dataIndex: 'sampleCount' },
             {
               title: '来源',
@@ -162,7 +218,7 @@ const YearlyPage = memo(function YearlyPage() {
                     await deleteGeoYearTargetApi(r.id);
                     message.success('已删除');
                     loadTargets();
-                    loadBoard();
+                    void loadBoard({ yearRange: defaultYears });
                   }}
                 >
                   <Button
@@ -190,7 +246,7 @@ const YearlyPage = memo(function YearlyPage() {
           });
           message.success('已保存');
           loadTargets();
-          loadBoard();
+          void loadBoard({ yearRange: defaultYears });
           return true;
         }}
       >

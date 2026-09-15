@@ -6,9 +6,10 @@ import {
   ProFormText,
   ProFormTextArea,
 } from '@ant-design/pro-components';
-import { App, Button, Image, Upload } from 'antd';
+import { App, Button, Upload } from 'antd';
 import dayjs from 'dayjs';
 import BaseModalForm from '@/components/BaseModalForm';
+import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import { updateGeoDailyApi, uploadGeoScreenshotApi } from '@/api/geo';
 import type { GeoDailyVO, GeoTopic } from '@/types/geo';
 
@@ -62,6 +63,7 @@ const EditDailyModal = memo(function EditDailyModal({
           inspectDate: values.inspectDate ? dayjs(values.inspectDate).format('YYYY-MM-DD') : record.inspectDate,
           platform: values.platform,
           keyword: values.keyword,
+          ownerName: values.ownerName,
           topicId: values.topicId,
           mentioned: values.mentioned,
           rankNo: values.rankNo,
@@ -98,6 +100,11 @@ const EditDailyModal = memo(function EditDailyModal({
           name='keyword'
           label='关键字'
           rules={[{ required: true, message: '请输入关键字' }]}
+        />
+        <ProFormText
+          name='ownerName'
+          label='负责人'
+          placeholder='与关键字绑定'
         />
         <ProFormSelect
           name='mentioned'
@@ -161,9 +168,9 @@ const EditDailyModal = memo(function EditDailyModal({
         </Upload>
         {screenshotUrl ? (
           <div className='mt-2'>
-            <Image
-              width={120}
-              src={`/api${screenshotUrl}`}
+            <GeoScreenshot
+              src={screenshotUrl}
+              width={160}
             />
           </div>
         ) : null}

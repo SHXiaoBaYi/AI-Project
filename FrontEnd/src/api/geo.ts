@@ -65,6 +65,7 @@ export function getGeoDailyListApi(
     endDate?: string;
     topicId?: number;
     keyword?: string;
+    ownerName?: string;
     platforms?: string[];
     mentioned?: number;
     rankNoMin?: number;

@@ -29,6 +29,9 @@ public class GeoMonitorDaily extends BaseEntity {
     @Schema(description = "关键字/提问问题", example = "新疆适合寄内地的礼品")
     private String keyword;
 
+    @Schema(description = "负责人（与关键字绑定）", example = "张三")
+    private String ownerName;
+
     @Schema(description = "话题ID", example = "1")
     private Long topicId;
 

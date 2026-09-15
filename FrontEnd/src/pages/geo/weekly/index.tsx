@@ -6,17 +6,9 @@ import { getGeoPlatformsApi, getGeoTopicOptionsApi, getGeoWeeklyBoardApi } from 
 import type { GeoTopic, GeoWeeklyBoard } from '@/types/geo';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
+import { endOfIsoWeek, startOfIsoWeek, toDayjs } from '@/utils/geoBoardQuery';
 
 const emptyBoard: GeoWeeklyBoard = { mentionChart: [], firstMentionChart: [], recommendChart: [], rows: [] };
-
-function startOfIsoWeek(value: dayjs.Dayjs) {
-  return value.subtract((value.day() + 6) % 7, 'day').startOf('day');
-}
-
-function endOfIsoWeek(value: dayjs.Dayjs) {
-  return startOfIsoWeek(value).add(6, 'day').endOf('day');
-}
-
 const defaultWeeks = [startOfIsoWeek(dayjs().subtract(4, 'week')), endOfIsoWeek(dayjs())];
 
 const WeeklyPage = memo(function WeeklyPage() {
@@ -25,13 +17,14 @@ const WeeklyPage = memo(function WeeklyPage() {
   const [board, setBoard] = useState<GeoWeeklyBoard>(emptyBoard);
 
   const load = async (values?: Record<string, any>) => {
-    const range = (values?.weekRange as dayjs.Dayjs[] | undefined) ?? defaultWeeks;
+    const start = toDayjs(values?.weekRange?.[0]) ?? defaultWeeks[0];
+    const end = toDayjs(values?.weekRange?.[1]) ?? defaultWeeks[1];
     const data = await getGeoWeeklyBoardApi({
-      startDate: startOfIsoWeek(range[0] ?? dayjs()).format('YYYY-MM-DD'),
-      endDate: endOfIsoWeek(range[1] ?? dayjs()).format('YYYY-MM-DD'),
+      startDate: startOfIsoWeek(start).format('YYYY-MM-DD'),
+      endDate: endOfIsoWeek(end).format('YYYY-MM-DD'),
       topicId: values?.topicId,
-      keyword: values?.keyword,
-      platforms: values?.platforms,
+      keyword: values?.keyword?.trim() || undefined,
+      platforms: values?.platforms?.length ? values.platforms : undefined,
     });
     setBoard({
       mentionChart: data?.mentionChart ?? [],
@@ -39,13 +32,14 @@ const WeeklyPage = memo(function WeeklyPage() {
       recommendChart: data?.recommendChart ?? [],
       rows: data?.rows ?? [],
       persistedPeriodCount: data?.persistedPeriodCount ?? 0,
+      compareSummary: data?.compareSummary,
     });
   };
 
   useEffect(() => {
     getGeoTopicOptionsApi().then(setTopics);
     getGeoPlatformsApi().then(setPlatforms);
-    load();
+    void load({ weekRange: defaultWeeks });
   }, []);
 
   return (
@@ -57,6 +51,9 @@ const WeeklyPage = memo(function WeeklyPage() {
           onFinish={async (v) => {
             await load(v);
             return true;
+          }}
+          onReset={() => {
+            void load({ weekRange: defaultWeeks });
           }}
         >
           <ProFormDateRangePicker
@@ -72,6 +69,8 @@ const WeeklyPage = memo(function WeeklyPage() {
             name='topicId'
             label='话题'
             allowClear
+            showSearch
+            optionFilterProp='label'
             options={topics.map((t) => ({ label: t.topicName, value: t.id }))}
           />
           <ProFormText
@@ -93,6 +92,9 @@ const WeeklyPage = memo(function WeeklyPage() {
         </span>
       </Card>
       <GeoTrendBoard
+        showCompare
+        compareHint='环比=上一周；同比=去年同周'
+        compareSummary={board.compareSummary}
         mentionChart={board.mentionChart}
         firstMentionChart={board.firstMentionChart}
         recommendChart={board.recommendChart}

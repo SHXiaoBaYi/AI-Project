@@ -1,47 +1,144 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { ProFormDateRangePicker, ProFormSelect, ProFormText, QueryFilter } from '@ant-design/pro-components';
 import { Card } from 'antd';
-import dayjs from 'dayjs';
-import { getGeoDailyBoardApi, getGeoPlatformsApi, getGeoTopicOptionsApi } from '@/api/geo';
-import type { GeoDailyBoard, GeoTopic } from '@/types/geo';
+import dayjs, { type Dayjs } from 'dayjs';
+import {
+  getGeoDailyBoardApi,
+  getGeoDailyListApi,
+  getGeoLatestInspectDateApi,
+  getGeoPlatformsApi,
+  getGeoTopicOptionsApi,
+} from '@/api/geo';
+import type { GeoDailyBoard, GeoDailyVO, GeoTopic } from '@/types/geo';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
+import { GeoDailySummaryBoard } from '@/components/geo/GeoDailySummaryBoard';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
+import { toDayjs } from '@/utils/geoBoardQuery';
 
-const emptyBoard: GeoDailyBoard = { mentionChart: [], firstMentionChart: [], recommendChart: [], rows: [] };
-const defaultDays = [dayjs().subtract(13, 'day'), dayjs()];
+const emptyBoard: GeoDailyBoard = {
+  mentionChart: [],
+  firstMentionChart: [],
+  recommendChart: [],
+  rows: [],
+  summaryGroups: [],
+};
+
+function rangeAround(anchor: Dayjs): [Dayjs, Dayjs] {
+  return [anchor.subtract(13, 'day'), anchor];
+}
 
 const DayBoardPage = memo(function DayBoardPage() {
   const [topics, setTopics] = useState<GeoTopic[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [board, setBoard] = useState<GeoDailyBoard>(emptyBoard);
+  const [records, setRecords] = useState<GeoDailyVO[]>([]);
+  const [defaultDays, setDefaultDays] = useState<[Dayjs, Dayjs]>(rangeAround(dayjs()));
+  const [ready, setReady] = useState(false);
+  const [activeDate, setActiveDate] = useState<string>();
 
-  const load = async (values?: Record<string, any>) => {
-    const range = (values?.dateRange as dayjs.Dayjs[] | undefined) ?? defaultDays;
-    const data = await getGeoDailyBoardApi({
-      startDate: range[0]?.format('YYYY-MM-DD'),
-      endDate: range[1]?.format('YYYY-MM-DD'),
-      topicId: values?.topicId,
-      keyword: values?.keyword,
-      platforms: values?.platforms,
-    });
-    setBoard(data);
+  const load = async (values?: Record<string, any>, fallbackRange?: [Dayjs, Dayjs]) => {
+    const base = fallbackRange ?? defaultDays;
+    const start = toDayjs(values?.dateRange?.[0]) ?? base[0];
+    const end = toDayjs(values?.dateRange?.[1]) ?? base[1];
+    const query = {
+      startDate: start.format('YYYY-MM-DD'),
+      endDate: end.format('YYYY-MM-DD'),
+      topicId: values?.topicId as number | undefined,
+      keyword: values?.keyword?.trim() || undefined,
+      platforms: values?.platforms?.length ? (values.platforms as string[]) : undefined,
+    };
+
+    const [data, list] = await Promise.all([
+      getGeoDailyBoardApi(query),
+      getGeoDailyListApi({
+        ...query,
+        pageNum: 1,
+        pageSize: 5000,
+      }),
+    ]);
+
+    const nextBoard = {
+      mentionChart: data?.mentionChart ?? [],
+      firstMentionChart: data?.firstMentionChart ?? [],
+      recommendChart: data?.recommendChart ?? [],
+      rows: data?.rows ?? [],
+      summaryGroups: data?.summaryGroups ?? [],
+    };
+    const nextRecords = list?.rows ?? [];
+    setBoard(nextBoard);
+    setRecords(nextRecords);
+
+    const dates = [
+      ...new Set(
+        nextRecords
+          .map((r) => r.inspectDate)
+          .filter(Boolean)
+          .concat(nextBoard.summaryGroups?.map((g) => g.inspectDate) || [])
+          .concat(nextBoard.rows?.map((r) => r.dateLabel) || []),
+      ),
+    ].sort((a, b) => b.localeCompare(a));
+    if (dates[0]) setActiveDate(dates[0]);
   };
 
   useEffect(() => {
-    getGeoTopicOptionsApi().then(setTopics);
-    getGeoPlatformsApi().then(setPlatforms);
-    load();
+    let cancelled = false;
+    (async () => {
+      const [topicList, platformList, latest] = await Promise.all([
+        getGeoTopicOptionsApi(),
+        getGeoPlatformsApi(),
+        getGeoLatestInspectDateApi().catch(() => ({ inspectDate: undefined as string | undefined })),
+      ]);
+      if (cancelled) return;
+      setTopics(topicList);
+      setPlatforms(platformList);
+      const anchor = latest?.inspectDate ? dayjs(latest.inspectDate) : dayjs();
+      const nextRange = rangeAround(anchor.isValid() ? anchor : dayjs());
+      setDefaultDays(nextRange);
+      setReady(true);
+      await load({ dateRange: nextRange }, nextRange);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const filteredRows = useMemo(() => {
+    if (!activeDate) return board.rows ?? [];
+    return (board.rows ?? []).filter((r) => r.dateLabel === activeDate);
+  }, [board.rows, activeDate]);
+
+  const filteredCharts = useMemo(() => {
+    if (!activeDate) {
+      return {
+        mentionChart: board.mentionChart,
+        firstMentionChart: board.firstMentionChart,
+        recommendChart: board.recommendChart,
+      };
+    }
+    return {
+      mentionChart: (board.mentionChart ?? []).filter((p) => p.axis === activeDate),
+      firstMentionChart: (board.firstMentionChart ?? []).filter((p) => p.axis === activeDate),
+      recommendChart: (board.recommendChart ?? []).filter((p) => p.axis === activeDate),
+    };
+  }, [board, activeDate]);
+
+  if (!ready) {
+    return <Card loading />;
+  }
 
   return (
     <div className='flex flex-col gap-4'>
       <Card>
         <QueryFilter
           {...BUTTERFLY_SEARCH}
+          key={defaultDays[0].format('YYYY-MM-DD') + defaultDays[1].format('YYYY-MM-DD')}
           initialValues={{ dateRange: defaultDays }}
           onFinish={async (v) => {
             await load(v);
             return true;
+          }}
+          onReset={() => {
+            void load({ dateRange: defaultDays }, defaultDays);
           }}
         >
           <ProFormDateRangePicker
@@ -53,6 +150,8 @@ const DayBoardPage = memo(function DayBoardPage() {
             name='topicId'
             label='话题'
             allowClear
+            showSearch
+            optionFilterProp='label'
             options={topics.map((t) => ({ label: t.topicName, value: t.id }))}
           />
           <ProFormText
@@ -68,13 +167,22 @@ const DayBoardPage = memo(function DayBoardPage() {
           />
         </QueryFilter>
       </Card>
+
+      <GeoDailySummaryBoard
+        groups={board.summaryGroups}
+        records={records}
+        activeDate={activeDate}
+        onActiveDateChange={setActiveDate}
+      />
+
       <GeoTrendBoard
-        mentionChart={board.mentionChart}
-        firstMentionChart={board.firstMentionChart}
-        recommendChart={board.recommendChart}
-        rows={(board.rows ?? []).map((r) => ({ ...r, axisLabel: r.dateLabel }))}
+        key={`trend-${activeDate || 'all'}`}
+        mentionChart={filteredCharts.mentionChart}
+        firstMentionChart={filteredCharts.firstMentionChart}
+        recommendChart={filteredCharts.recommendChart}
+        rows={filteredRows.map((r) => ({ ...r, axisLabel: r.dateLabel }))}
         axisTitle='日期'
-        tableTitle='日报明细（实时聚合，默认近 14 天）'
+        tableTitle={`日报明细（当前日期：${activeDate || '全部'}）`}
       />
     </div>
   );

@@ -1,11 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Drawer, Image, Tag, Upload } from 'antd';
+import { App, Button, Drawer, Tag, Upload } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
+import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import {
   deleteGeoDailyApi,
   getGeoDailyListApi,
@@ -85,6 +86,7 @@ const DailyPage = memo(function DailyPage() {
       render: (_, r) => r.topicName,
     },
     { title: '关键字', dataIndex: 'keyword', ellipsis: true, width: 220 },
+    { title: '负责人', dataIndex: 'ownerName', width: 100, ellipsis: true },
     {
       title: '提及',
       dataIndex: 'mentioned',
@@ -125,15 +127,12 @@ const DailyPage = memo(function DailyPage() {
       search: {
         transform: (value) => ({ hasScreenshot: value }),
       },
-      render: (_, r) =>
-        r.screenshotUrl ? (
-          <Image
-            width={40}
-            src={`/api${r.screenshotUrl}`}
-          />
-        ) : (
-          '-'
-        ),
+      render: (_, r) => (
+        <GeoScreenshot
+          src={r.screenshotUrl}
+          width={40}
+        />
+      ),
     },
     {
       title: '第三方链接',
@@ -244,6 +243,7 @@ const DailyPage = memo(function DailyPage() {
             endDate: range?.[1],
             topicId: params.topicId,
             keyword: params.keyword,
+            ownerName: params.ownerName,
             platforms: params.platforms,
             mentioned: params.mentioned,
             rankNoMin: params.rankNoMin,

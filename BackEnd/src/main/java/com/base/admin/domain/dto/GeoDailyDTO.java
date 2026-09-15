@@ -26,6 +26,9 @@ public class GeoDailyDTO {
     @Schema(description = "关键字/提问问题", requiredMode = Schema.RequiredMode.REQUIRED, example = "新疆适合寄内地的礼品")
     private String keyword;
 
+    @Schema(description = "负责人（与关键字绑定）", example = "张三")
+    private String ownerName;
+
     @NotNull(message = "话题不能为空")
     @Schema(description = "话题ID", requiredMode = Schema.RequiredMode.REQUIRED, example = "1")
     private Long topicId;

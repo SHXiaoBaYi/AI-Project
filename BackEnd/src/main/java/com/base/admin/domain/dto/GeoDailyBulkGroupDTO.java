@@ -26,6 +26,9 @@ public class GeoDailyBulkGroupDTO {
     @Schema(description = "关键字/提问问题", requiredMode = Schema.RequiredMode.REQUIRED, example = "新疆适合寄内地的礼品")
     private String keyword;
 
+    @Schema(description = "负责人（与关键字绑定）", example = "张三")
+    private String ownerName;
+
     @Valid
     @NotEmpty(message = "请至少填写一个平台")
     @Schema(description = "各平台监测指标")
