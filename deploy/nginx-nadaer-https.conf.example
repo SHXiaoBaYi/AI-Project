@@ -1,32 +1,36 @@
-# IP 直连 + 域名子路径共用
-# 正式访问：https://www.nadaer.net/shxby/
-# IP 临时：http://ECS_IP/shxby/
+# HTTPS 示例（证书就绪后启用，或由 certbot 自动改写）
+# 证书路径按实际申请结果调整
 
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name www.nadaer.net nadaer.net _;
+    listen 80;
+    server_name www.nadaer.net nadaer.net;
+    return 301 https://www.nadaer.net$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name www.nadaer.net nadaer.net;
+
+    ssl_certificate     /etc/letsencrypt/live/www.nadaer.net/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/www.nadaer.net/privkey.pem;
 
     client_max_body_size 20m;
     root /opt/xby-admin/html;
 
-    # 根路径跳到子应用
     location = / {
         return 302 /shxby/;
     }
 
-    # API：/shxby/api/* -> 后端 /api/*
     location /shxby/api/ {
         proxy_pass http://127.0.0.1:8080/api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_connect_timeout 60s;
         proxy_read_timeout 120s;
     }
 
-    # 前端静态资源 + SPA
     location /shxby/ {
         try_files $uri $uri/ /shxby/index.html;
     }
