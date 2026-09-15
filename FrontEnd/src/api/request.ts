@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { message } from '@/store/slices/staticFunctionSlice';
 import { getToken, removeToken } from '@/utils/auth';
+import { withBase } from '@/utils/basePath';
 import type { ApiResult } from '@/types/api';
 
 const HTTP_UNAUTHORIZED = 401;
@@ -33,7 +34,7 @@ function handleAuthError(code: number, tip?: string): boolean {
       tip || (code === CODE_SESSION_KICKED ? '该账号已在其他设备登录，您已被强制下线' : '登录已失效，请重新登录'),
     );
     removeToken();
-    window.location.href = '/login';
+    window.location.href = withBase('/login');
     return true;
   }
   if (code === HTTP_FORBIDDEN) {
@@ -44,7 +45,7 @@ function handleAuthError(code: number, tip?: string): boolean {
 }
 
 const service = axios.create({
-  baseURL: '/api',
+  baseURL: withBase('/api'),
   timeout: 30000,
 });
 

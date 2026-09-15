@@ -7,6 +7,7 @@ import componentMap from './componentMap';
 import type { MenuTree } from '@/types/menu';
 import { PageLoading } from '@ant-design/pro-components';
 import { RouteErrorPage } from '@/components/PageErrorBoundary';
+import { getRouterBasename } from '@/utils/basePath';
 
 // eslint-disable-next-line react-refresh/only-export-components
 function PagePlaceholder() {
@@ -71,58 +72,67 @@ function buildDynamicRoutes(menus: MenuTree[], parentPath = ''): any[] {
 }
 
 export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
+  const basename = getRouterBasename();
+  const routerOpts = basename ? { basename } : undefined;
+
   if (!isLoggedIn) {
-    return createBrowserRouter([
-      {
-        path: '/login',
-        element: <Login />,
-      },
-      {
-        path: '*',
-        element: (
-          <Navigate
-            to='/login'
-            replace
-          />
-        ),
-      },
-    ]);
-  }
-
-  const dynamicRoutes = buildDynamicRoutes(menus);
-
-  return createBrowserRouter([
-    {
-      path: '/login',
-      element: (
-        <Navigate
-          to='/'
-          replace
-        />
-      ),
-    },
-    {
-      path: '/',
-      element: <BasicLayout />,
-      children: [
+    return createBrowserRouter(
+      [
         {
-          index: true,
+          path: '/login',
+          element: <Login />,
+        },
+        {
+          path: '*',
           element: (
             <Navigate
-              to='/workbench'
+              to='/login'
               replace
             />
           ),
         },
-        // 测试页面需要放到动态路由前
-        {
-          path: '/demo',
-          element: withSuspense(Demo),
-          errorElement: <RouteErrorPage />,
-        },
-        ...dynamicRoutes,
-        { path: '*', element: <NotFound />, errorElement: <RouteErrorPage /> },
       ],
-    },
-  ]);
+      routerOpts,
+    );
+  }
+
+  const dynamicRoutes = buildDynamicRoutes(menus);
+
+  return createBrowserRouter(
+    [
+      {
+        path: '/login',
+        element: (
+          <Navigate
+            to='/'
+            replace
+          />
+        ),
+      },
+      {
+        path: '/',
+        element: <BasicLayout />,
+        children: [
+          {
+            index: true,
+            element: (
+              <Navigate
+                to='/workbench'
+                replace
+              />
+            ),
+          },
+          // 测试页面需要放到动态路由前
+          {
+            path: '/demo',
+            element: withSuspense(Demo),
+            errorElement: <RouteErrorPage />,
+          },
+          ...dynamicRoutes,
+          { path: '*', element: <NotFound />, errorElement: <RouteErrorPage /> },
+        ],
+      },
+    ],
+    routerOpts,
+  );
 }
