@@ -336,3 +336,93 @@ export interface GeoBoardQuery {
   keyword?: string;
   platforms?: string[];
 }
+
+export interface GeoContentPlacementListItem {
+  id: number;
+  publisherUserId?: number;
+  publisherName?: string;
+  ownerUserId?: number;
+  ownerName?: string;
+  topicId?: number;
+  topicName?: string;
+  targetQuestion?: string;
+  title?: string;
+  source?: string;
+  sourcePlacementId?: number;
+  sourceTargetQuestion?: string;
+  aggregateStatus?: string;
+  publishProgress?: number | null;
+  platformCount?: number;
+  successCount?: number;
+  citeCount?: number;
+  remark?: string;
+}
+
+export interface GeoContentPlacementItem {
+  id: number;
+  placementId: number;
+  title?: string;
+  platformName?: string;
+  publishStatus?: string;
+  publishUrl?: string;
+  publishTime?: string;
+  citeCount?: number;
+  remark?: string;
+}
+
+export interface GeoContentPlacementCite {
+  id: number;
+  placementId: number;
+  itemId?: number;
+  askQuestion?: string;
+  aiPlatform?: string;
+  citeUrl?: string;
+  remark?: string;
+}
+
+export interface GeoContentPlacementDetail {
+  id: number;
+  publisherName?: string;
+  ownerName?: string;
+  topicName?: string;
+  targetQuestion?: string;
+  title?: string;
+  aggregateStatus?: string;
+  publishProgress?: number | null;
+  remark?: string;
+  items: GeoContentPlacementItem[];
+  cites: GeoContentPlacementCite[];
+}
+
+export interface GeoContentPlacementDTO {
+  id?: number;
+  publisherUserId?: number | null;
+  ownerUserId?: number | null;
+  topicId?: number;
+  topicName?: string;
+  targetQuestion: string;
+  remark?: string;
+}
+
+export interface GeoContentPlacementItemDTO {
+  id?: number;
+  placementId: number;
+  title: string;
+  platformName: string;
+  publishStatus: string;
+  publishUrl?: string;
+  publishTime?: string;
+  sortOrder?: number;
+  remark?: string;
+}
+
+export interface GeoContentPlacementCiteDTO {
+  id?: number;
+  placementId: number;
+  itemId?: number;
+  askQuestion: string;
+  aiPlatform: string;
+  citeUrl?: string;
+  sortOrder?: number;
+  remark?: string;
+}

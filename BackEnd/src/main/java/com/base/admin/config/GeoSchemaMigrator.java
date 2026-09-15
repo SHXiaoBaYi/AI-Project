@@ -30,11 +30,16 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v3_geo_platform.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v4_geo_daily_board.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v5_geo_board_snapshot.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v9_geo_content_placement.sql"));
             ensureBoardLockedColumn(connection);
             ensureOwnerNameColumn(connection);
             ensureTermTypeColumn(connection);
             ensureOwnerUserIdColumn(connection);
             ensurePlatformType(connection);
+            ensureContentPlacementItemTitle(connection);
+            ensureContentPlacementSource(connection);
+            ensureContentPlacementRelations(connection);
+            ensureContentPlacementProgress(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -175,6 +180,236 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             }
         }
         log.info("内容发布平台默认数据已同步");
+    }
+
+    private void ensureContentPlacementItemTitle(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement_item")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_content_placement_item", "title")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement_item
+                          ADD COLUMN title VARCHAR(500) NOT NULL DEFAULT ''
+                          COMMENT '标题（归属发布详情）'
+                          AFTER placement_id
+                        """);
+            }
+            log.info("已为 geo_content_placement_item 增加 title 字段");
+        }
+        try (Statement statement = connection.createStatement()) {
+            int updated = statement.executeUpdate("""
+                    UPDATE geo_content_placement_item i
+                    INNER JOIN geo_content_placement p ON p.id = i.placement_id AND p.is_active = 1
+                    SET i.title = p.title
+                    WHERE (i.title IS NULL OR i.title = '')
+                      AND p.title IS NOT NULL AND p.title <> ''
+                    """);
+            if (updated > 0) {
+                log.info("已回填 {} 条发布详情标题", updated);
+            }
+        }
+        // 补齐新增/编辑权限菜单
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (125, '内容投放新增', 122, 3, '', '', 'F', 'geo:content:add', '#', 0, 0, '', 1),
+                    (126, '内容投放修改', 122, 4, '', '', 'F', 'geo:content:edit', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), perms = VALUES(perms), is_active = 1
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (125, 126)
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+        }
+    }
+
+    private void ensureContentPlacementSource(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement")) {
+            return;
+        }
+        boolean addedSource = false;
+        if (!columnExists(connection, "geo_content_placement", "source")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT '导入'
+                          COMMENT '来源：导入/手动新增/AI生成'
+                          AFTER title
+                        """);
+            }
+            addedSource = true;
+            log.info("已为 geo_content_placement 增加 source 字段");
+        }
+        if (!columnExists(connection, "geo_content_placement", "source_placement_id")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN source_placement_id BIGINT NULL
+                          COMMENT 'AI生成参照的内容投放ID'
+                          AFTER source
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 source_placement_id 字段");
+        }
+        if (addedSource) {
+            try (Statement statement = connection.createStatement()) {
+                // 无发布详情的历史空壳视为手动新增，其余历史数据视为导入
+                statement.executeUpdate("""
+                        UPDATE geo_content_placement p
+                        SET p.source = '手动新增'
+                        WHERE NOT EXISTS (
+                          SELECT 1 FROM geo_content_placement_item i
+                          WHERE i.placement_id = p.id AND i.is_active = 1
+                        )
+                        """);
+            }
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (127, '生成相似问题', 122, 5, '', '', 'F', 'geo:content:generate', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), perms = VALUES(perms), is_active = 1
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id = 127
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+        }
+    }
+
+    private void ensureContentPlacementRelations(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_content_placement", "publisher_user_id")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN publisher_user_id BIGINT NULL
+                          COMMENT '发布人用户ID'
+                          AFTER publisher_name
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 publisher_user_id");
+        }
+        if (!columnExists(connection, "geo_content_placement", "owner_user_id")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN owner_user_id BIGINT NULL
+                          COMMENT '归属人用户ID'
+                          AFTER owner_name
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 owner_user_id");
+        }
+        if (!columnExists(connection, "geo_content_placement", "topic_id")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN topic_id BIGINT NULL
+                          COMMENT '话题ID'
+                          AFTER owner_user_id
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 topic_id");
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    UPDATE geo_content_placement p
+                    INNER JOIN sys_user u ON u.is_active = 1
+                      AND (u.nickname = p.publisher_name OR u.username = p.publisher_name)
+                    SET p.publisher_user_id = u.user_id
+                    WHERE p.publisher_user_id IS NULL
+                      AND p.publisher_name IS NOT NULL AND p.publisher_name <> ''
+                      AND p.publisher_name <> '待分配'
+                    """);
+            statement.executeUpdate("""
+                    UPDATE geo_content_placement p
+                    INNER JOIN sys_user u ON u.is_active = 1
+                      AND (u.nickname = p.owner_name OR u.username = p.owner_name)
+                    SET p.owner_user_id = u.user_id
+                    WHERE p.owner_user_id IS NULL
+                      AND p.owner_name IS NOT NULL AND p.owner_name <> ''
+                      AND p.owner_name <> '待分配'
+                    """);
+            statement.executeUpdate("""
+                    UPDATE geo_content_placement p
+                    INNER JOIN geo_topic t ON t.is_active = 1 AND t.topic_name = p.topic_name
+                    SET p.topic_id = t.id
+                    WHERE p.topic_id IS NULL
+                      AND p.topic_name IS NOT NULL AND p.topic_name <> ''
+                    """);
+        }
+    }
+
+    private void ensureContentPlacementProgress(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_content_placement", "placement_progress")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN placement_progress VARCHAR(32) NOT NULL DEFAULT '未投放'
+                          COMMENT '投放进度：投放完成/部分投放/未投放'
+                          AFTER source_placement_id
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 placement_progress");
+        }
+        if (!indexExists(connection, "geo_content_placement", "idx_placement_progress")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD INDEX idx_placement_progress (placement_progress)
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 idx_placement_progress");
+        }
+        try (Statement statement = connection.createStatement()) {
+            // 按子表投放成功占比回填主表进度
+            int updated = statement.executeUpdate("""
+                    UPDATE geo_content_placement p
+                    SET p.placement_progress = CASE
+                      WHEN NOT EXISTS (
+                        SELECT 1 FROM geo_content_placement_item i
+                        WHERE i.placement_id = p.id AND i.is_active = 1
+                      ) THEN '未投放'
+                      WHEN NOT EXISTS (
+                        SELECT 1 FROM geo_content_placement_item i
+                        WHERE i.placement_id = p.id AND i.is_active = 1
+                          AND i.publish_status <> '投放成功'
+                      ) THEN '投放完成'
+                      WHEN EXISTS (
+                        SELECT 1 FROM geo_content_placement_item i
+                        WHERE i.placement_id = p.id AND i.is_active = 1
+                          AND i.publish_status = '投放成功'
+                      ) THEN '部分投放'
+                      ELSE '未投放'
+                    END
+                    """);
+            if (updated > 0) {
+                log.info("已回填 geo_content_placement.placement_progress {} 条", updated);
+            }
+        }
+    }
+
+    private boolean tableExists(Connection connection, String table) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("""
+                     SELECT COUNT(1) AS cnt
+                     FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = '%s'
+                     """.formatted(table))) {
+            return rs.next() && rs.getInt("cnt") > 0;
+        }
     }
 
     private boolean indexExists(Connection connection, String table, String indexName) throws Exception {

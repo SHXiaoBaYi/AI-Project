@@ -27,6 +27,20 @@ public final class ExcelCellUtils {
         return value.replace("\n", " ").replace("\r", "");
     }
 
+    /** 读取原始单元格（不展开合并区域），用于识别续行 */
+    public static String rawStr(Sheet sheet, int rowIdx, int colIdx) {
+        Row row = sheet.getRow(rowIdx);
+        if (row == null) {
+            return "";
+        }
+        Cell cell = row.getCell(colIdx);
+        if (cell == null) {
+            return "";
+        }
+        String value = FORMATTER.formatCellValue(cell).trim();
+        return value.replace("\n", " ").replace("\r", "");
+    }
+
     public static LocalDate date(Sheet sheet, int rowIdx, int colIdx) {
         Cell cell = resolvedCell(sheet, rowIdx, colIdx);
         if (cell == null) {

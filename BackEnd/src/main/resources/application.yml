@@ -28,6 +28,13 @@ xby:
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
   upload-dir: ${UPLOAD_DIR:./uploads}
+  # 通用 AI 大模型（OpenAI 兼容）。未启用或未配 key 时，相似问题走本地启发式生成
+  ai:
+    enabled: ${XBY_AI_ENABLED:false}
+    base-url: ${XBY_AI_BASE_URL:https://api.deepseek.com/v1}
+    api-key: ${XBY_AI_API_KEY:}
+    model: ${XBY_AI_MODEL:deepseek-chat}
+    timeout-seconds: 60
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml

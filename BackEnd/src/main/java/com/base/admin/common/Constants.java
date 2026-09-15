@@ -29,5 +29,34 @@ public class Constants {
     /** 平台类型：内容发布平台 */
     public static final String PLATFORM_TYPE_CONTENT = "内容发布平台";
 
+    /** 内容投放状态：投放成功 */
+    public static final String CONTENT_PUBLISH_SUCCESS = "投放成功";
+    /** 内容投放状态：审核未通过 */
+    public static final String CONTENT_PUBLISH_REJECTED = "审核未通过";
+    /** 内容投放状态：未投放 */
+    public static final String CONTENT_PUBLISH_NONE = "未投放";
+
+    /** 内容投放聚合进度：投放完成 */
+    public static final String CONTENT_AGG_DONE = "投放完成";
+    /** 内容投放聚合进度：部分投放 */
+    public static final String CONTENT_AGG_PARTIAL = "部分投放";
+    /** 内容投放聚合进度：未投放 */
+    public static final String CONTENT_AGG_NONE = "未投放";
+
+    /** @deprecated 兼容旧文案 */
+    public static final String CONTENT_AGG_ALL_SUCCESS = CONTENT_AGG_DONE;
+    /** @deprecated 兼容旧文案 */
+    public static final String CONTENT_AGG_ALL_NONE = CONTENT_AGG_NONE;
+
+    /** 内容投放来源：导入 */
+    public static final String CONTENT_SOURCE_IMPORT = "导入";
+    /** 内容投放来源：手动新增 */
+    public static final String CONTENT_SOURCE_MANUAL = "手动新增";
+    /** 内容投放来源：AI生成 */
+    public static final String CONTENT_SOURCE_AI = "AI生成";
+
+    /** 内容投放待分配占位 */
+    public static final String CONTENT_UNASSIGNED = "待分配";
+
     private Constants() {}
 }

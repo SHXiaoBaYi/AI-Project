@@ -18,6 +18,13 @@ import type {
   GeoWeeklyBoard,
   GeoYearTarget,
   GeoYearlyBoard,
+  GeoContentPlacementCite,
+  GeoContentPlacementCiteDTO,
+  GeoContentPlacementDetail,
+  GeoContentPlacementDTO,
+  GeoContentPlacementItem,
+  GeoContentPlacementItemDTO,
+  GeoContentPlacementListItem,
 } from '@/types/geo';
 
 export function getGeoTopicListApi(data: PageQuery & { topicName?: string }) {
@@ -180,4 +187,80 @@ export function saveGeoYearTargetApi(data: Partial<GeoYearTarget>) {
 
 export function deleteGeoYearTargetApi(id: number) {
   return request.delete(`/geo/yearly/targets/${id}`);
+}
+
+export function getGeoContentPlacementListApi(
+  data: PageQuery & {
+    publisherUserId?: number;
+    ownerUserId?: number;
+    topicId?: number;
+    targetQuestion?: string;
+    title?: string;
+    source?: string;
+    aggregateStatus?: string;
+  },
+) {
+  return request.post<unknown, PageResult<GeoContentPlacementListItem>>('/geo/content-placement/list', data);
+}
+
+export function getGeoContentPlacementDetailApi(id: number) {
+  return request.get<unknown, GeoContentPlacementDetail>(`/geo/content-placement/${id}`);
+}
+
+export function getGeoContentPlacementItemsApi(id: number) {
+  return request.get<unknown, GeoContentPlacementItem[]>(`/geo/content-placement/${id}/items`);
+}
+
+export function getGeoContentPlacementCitesApi(id: number, itemId?: number) {
+  return request.get<unknown, GeoContentPlacementCite[]>(`/geo/content-placement/${id}/cites`, {
+    params: itemId != null ? { itemId } : undefined,
+  });
+}
+
+export function deleteGeoContentPlacementApi(id: number) {
+  return request.delete(`/geo/content-placement/${id}`);
+}
+
+export function createGeoContentPlacementApi(data: GeoContentPlacementDTO) {
+  return request.post<unknown, number>('/geo/content-placement', data);
+}
+
+export function updateGeoContentPlacementApi(data: GeoContentPlacementDTO) {
+  return request.put('/geo/content-placement', data);
+}
+
+export function createGeoContentPlacementItemApi(data: GeoContentPlacementItemDTO) {
+  return request.post<unknown, number>('/geo/content-placement/items', data);
+}
+
+export function updateGeoContentPlacementItemApi(data: GeoContentPlacementItemDTO) {
+  return request.put('/geo/content-placement/items', data);
+}
+
+export function deleteGeoContentPlacementItemApi(itemId: number) {
+  return request.delete(`/geo/content-placement/items/${itemId}`);
+}
+
+export function createGeoContentPlacementCiteApi(data: GeoContentPlacementCiteDTO) {
+  return request.post<unknown, number>('/geo/content-placement/cites', data);
+}
+
+export function updateGeoContentPlacementCiteApi(data: GeoContentPlacementCiteDTO) {
+  return request.put('/geo/content-placement/cites', data);
+}
+
+export function deleteGeoContentPlacementCiteApi(citeId: number) {
+  return request.delete(`/geo/content-placement/cites/${citeId}`);
+}
+
+export function generateSimilarGeoContentPlacementApi(id: number) {
+  return request.post<unknown, GeoContentPlacementListItem[]>(`/geo/content-placement/${id}/generate-similar`);
+}
+
+export function importGeoContentPlacementApi(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post<unknown, GeoImportResult>('/geo/content-placement/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
 }
