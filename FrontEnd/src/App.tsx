@@ -2,11 +2,16 @@ import { useEffect, useRef } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { Spin, App as AntdApp, ConfigProvider } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
+import dayjs from 'dayjs';
+import 'dayjs/locale/zh-cn';
 import { createAppRouter } from '@/router';
 import { getInfo } from '@/store/slices/userSlice';
 import { StaticFunctionCapture } from '@/store/slices/staticFunctionSlice';
 import { checkSessionApi } from '@/api/auth';
 import type { RootState, AppDispatch } from '@/store';
+
+dayjs.locale('zh-cn');
 
 export default function App() {
   const dispatch = useDispatch<AppDispatch>();
@@ -44,7 +49,10 @@ export default function App() {
   const router = createAppRouter(menus, isLoggedIn);
 
   return (
-    <ConfigProvider theme={themeConfig}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={themeConfig}
+    >
       <AntdApp message={{ maxCount: 1 }}>
         <StaticFunctionCapture />
         {showLoading ? (

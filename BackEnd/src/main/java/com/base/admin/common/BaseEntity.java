@@ -3,6 +3,7 @@ package com.base.admin.common;
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -22,7 +23,8 @@ public abstract class BaseEntity implements Serializable {
     private String createBy;
 
     @TableField(fill = FieldFill.INSERT)
-    @Schema(description = "创建时间")
+    @Schema(description = "创建时间", example = "2026-09-15 10:00:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
 
     @TableField(fill = FieldFill.INSERT_UPDATE)
@@ -30,7 +32,8 @@ public abstract class BaseEntity implements Serializable {
     private String updateBy;
 
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    @Schema(description = "更新时间")
+    @Schema(description = "更新时间", example = "2026-09-15 10:00:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime updateTime;
 
     @TableLogic(value = "1", delval = "0")

@@ -26,6 +26,7 @@ export interface GeoDailyVO {
   thirdPartyUrl?: string;
   negativeContent?: string;
   competitors?: string;
+  boardLocked?: number;
   createTime?: string;
   updateTime?: string;
 }
@@ -64,6 +65,36 @@ export interface GeoDailyBatchDTO {
   items: GeoDailyPlatformItem[];
 }
 
+export interface GeoDailyBulkGroupDTO {
+  inspectDate: string;
+  topicId: number;
+  keyword: string;
+  items: GeoDailyPlatformItem[];
+}
+
+export interface GeoDailyBulkSaveDTO {
+  ignoreLocked?: boolean;
+  groups: GeoDailyBulkGroupDTO[];
+}
+
+export interface GeoDailyBulkConflict {
+  id?: number;
+  inspectDate: string;
+  platform: string;
+  keyword: string;
+  topicId?: number;
+  topicName?: string;
+  reason: string;
+}
+
+export interface GeoDailyBulkSaveResult {
+  needConfirm: boolean;
+  insertCount: number;
+  updateCount: number;
+  skippedLockedCount: number;
+  lockedConflicts: GeoDailyBulkConflict[];
+}
+
 export interface GeoDailyGroup {
   inspectDate: string;
   topicId?: number;
@@ -96,6 +127,7 @@ export interface GeoWeeklyRow {
   recommendCount: number;
   competitorTop?: string;
   citePlatformTop?: string;
+  fromSnapshot?: boolean;
 }
 
 export interface GeoWeeklyBoard {
@@ -103,6 +135,28 @@ export interface GeoWeeklyBoard {
   firstMentionChart: GeoChartPoint[];
   recommendChart: GeoChartPoint[];
   rows: GeoWeeklyRow[];
+  persistedPeriodCount?: number;
+}
+
+export interface GeoMonthlyRow {
+  monthLabel: string;
+  topicName: string;
+  platform: string;
+  sampleCount: number;
+  mentionRate: number;
+  firstMentionRate: number;
+  recommendCount: number;
+  competitorTop?: string;
+  citePlatformTop?: string;
+  fromSnapshot?: boolean;
+}
+
+export interface GeoMonthlyBoard {
+  mentionChart: GeoChartPoint[];
+  firstMentionChart: GeoChartPoint[];
+  recommendChart: GeoChartPoint[];
+  rows: GeoMonthlyRow[];
+  persistedPeriodCount?: number;
 }
 
 export interface GeoDailyRow {
@@ -132,12 +186,20 @@ export interface GeoYearlyRow {
   actualRate: number;
   achieveRate: number;
   sampleCount: number;
+  fromSnapshot?: boolean;
 }
 
 export interface GeoYearlyBoard {
   actualChart: GeoChartPoint[];
   achieveChart: GeoChartPoint[];
   rows: GeoYearlyRow[];
+  persistedPeriodCount?: number;
+}
+
+export interface GeoPersistResult {
+  snapshotCount: number;
+  lockedDailyCount: number;
+  periodCount: number;
 }
 
 export interface GeoYearTarget {

@@ -7,29 +7,29 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Data
-@Schema(description = "GEO周报看板（落库优先，未落库则实时聚合）")
-public class GeoWeeklyBoardVO {
+@Schema(description = "GEO月报看板")
+public class GeoMonthlyBoardVO {
 
-    @Schema(description = "提及率折线（横轴=周，系列=平台）")
+    @Schema(description = "提及率折线（横轴=月，系列=平台）")
     private List<GeoChartPointVO> mentionChart = new ArrayList<>();
 
-    @Schema(description = "首位提及率折线（横轴=周，系列=平台）")
+    @Schema(description = "首位提及率折线（横轴=月，系列=平台）")
     private List<GeoChartPointVO> firstMentionChart = new ArrayList<>();
 
-    @Schema(description = "推荐次数柱状（横轴=周，系列=平台）")
+    @Schema(description = "推荐次数柱状（横轴=月，系列=平台）")
     private List<GeoChartPointVO> recommendChart = new ArrayList<>();
 
-    @Schema(description = "周报明细")
-    private List<GeoWeeklyRowVO> rows = new ArrayList<>();
+    @Schema(description = "月报明细")
+    private List<GeoMonthlyRowVO> rows = new ArrayList<>();
 
     @Schema(description = "查询范围内已落库的周期数", example = "2")
     private int persistedPeriodCount;
 
     @Data
-    @Schema(description = "周报一行")
-    public static class GeoWeeklyRowVO {
-        @Schema(description = "周标签", example = "2026年第36周")
-        private String weekLabel;
+    @Schema(description = "月报一行")
+    public static class GeoMonthlyRowVO {
+        @Schema(description = "月标签", example = "2026年09月")
+        private String monthLabel;
 
         @Schema(description = "话题")
         private String topicName;

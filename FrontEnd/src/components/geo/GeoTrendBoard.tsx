@@ -1,4 +1,4 @@
-import { Card, Table } from 'antd';
+import { Card, Table, Tag } from 'antd';
 import { Column, Line } from '@ant-design/charts';
 import type { GeoChartPoint } from '@/types/geo';
 
@@ -12,6 +12,7 @@ export interface GeoTrendRow {
   recommendCount: number;
   competitorTop?: string;
   citePlatformTop?: string;
+  fromSnapshot?: boolean;
 }
 
 export function GeoTrendBoard({
@@ -74,6 +75,12 @@ export function GeoTrendBoard({
             { title: '推荐次数', dataIndex: 'recommendCount' },
             { title: '竞品TOP', dataIndex: 'competitorTop', ellipsis: true },
             { title: '引用平台TOP', dataIndex: 'citePlatformTop', ellipsis: true },
+            {
+              title: '来源',
+              dataIndex: 'fromSnapshot',
+              width: 90,
+              render: (v: boolean | undefined) => (v ? <Tag color='success'>已落库</Tag> : <Tag>实时</Tag>),
+            },
           ]}
         />
       </Card>

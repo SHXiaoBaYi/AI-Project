@@ -1,10 +1,11 @@
 import { memo, useEffect, useState } from 'react';
-import { ProForm, ProFormDateRangePicker, ProFormSelect, ProFormText } from '@ant-design/pro-components';
+import { ProFormDateRangePicker, ProFormSelect, ProFormText, QueryFilter } from '@ant-design/pro-components';
 import { Card } from 'antd';
 import dayjs from 'dayjs';
 import { getGeoPlatformsApi, getGeoTopicOptionsApi, getGeoWeeklyBoardApi } from '@/api/geo';
 import type { GeoTopic, GeoWeeklyBoard } from '@/types/geo';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
+import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 
 const emptyBoard: GeoWeeklyBoard = { mentionChart: [], firstMentionChart: [], recommendChart: [], rows: [] };
 
@@ -37,6 +38,7 @@ const WeeklyPage = memo(function WeeklyPage() {
       firstMentionChart: data?.firstMentionChart ?? [],
       recommendChart: data?.recommendChart ?? [],
       rows: data?.rows ?? [],
+      persistedPeriodCount: data?.persistedPeriodCount ?? 0,
     });
   };
 
@@ -49,9 +51,9 @@ const WeeklyPage = memo(function WeeklyPage() {
   return (
     <div className='flex flex-col gap-4'>
       <Card>
-        <ProForm
-          layout='inline'
-          submitter={{ searchConfig: { submitText: '查询' } }}
+        <QueryFilter
+          {...BUTTERFLY_SEARCH}
+          initialValues={{ weekRange: defaultWeeks }}
           onFinish={async (v) => {
             await load(v);
             return true;
@@ -60,7 +62,6 @@ const WeeklyPage = memo(function WeeklyPage() {
           <ProFormDateRangePicker
             name='weekRange'
             label='周范围'
-            initialValue={defaultWeeks}
             fieldProps={{
               picker: 'week',
               format: 'YYYY-[第]ww[周]',
@@ -84,7 +85,12 @@ const WeeklyPage = memo(function WeeklyPage() {
             options={platforms.map((p) => ({ label: p, value: p }))}
             fieldProps={{ mode: 'multiple', maxTagCount: 'responsive' }}
           />
-        </ProForm>
+        </QueryFilter>
+      </Card>
+      <Card size='small'>
+        <span className='text-sm text-neutral-600'>
+          周报只读查看；已结束周由定时任务自动落库（已落库周期 {board.persistedPeriodCount ?? 0}）
+        </span>
       </Card>
       <GeoTrendBoard
         mentionChart={board.mentionChart}
@@ -92,7 +98,7 @@ const WeeklyPage = memo(function WeeklyPage() {
         recommendChart={board.recommendChart}
         rows={board.rows.map((r) => ({ ...r, axisLabel: r.weekLabel }))}
         axisTitle='周次'
-        tableTitle='周报明细（实时聚合，默认近 5 周）'
+        tableTitle='周报明细（只读，已落库优先）'
       />
     </div>
   );

@@ -1,13 +1,13 @@
 import { memo, useEffect, useState } from 'react';
 import {
-  ProForm,
   ProFormDatePicker,
   ProFormDateRangePicker,
   ProFormDigit,
   ProFormSelect,
   ProFormText,
+  QueryFilter,
 } from '@ant-design/pro-components';
-import { App, Button, Card, Popconfirm, Table } from 'antd';
+import { App, Button, Card, Popconfirm, Table, Tag } from 'antd';
 import { Column, Line } from '@ant-design/charts';
 import dayjs from 'dayjs';
 import BaseModalForm from '@/components/BaseModalForm';
@@ -21,6 +21,9 @@ import {
   saveGeoYearTargetApi,
 } from '@/api/geo';
 import type { GeoTopic, GeoYearTarget, GeoYearlyBoard } from '@/types/geo';
+import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
+
+const defaultYears = [dayjs().subtract(1, 'year'), dayjs()];
 
 const YearlyPage = memo(function YearlyPage() {
   const { message } = App.useApp();
@@ -31,7 +34,7 @@ const YearlyPage = memo(function YearlyPage() {
   const [targetOpen, setTargetOpen] = useState(false);
 
   const loadBoard = async (values?: Record<string, any>) => {
-    const range = (values?.yearRange as dayjs.Dayjs[] | undefined) ?? [dayjs().subtract(1, 'year'), dayjs()];
+    const range = (values?.yearRange as dayjs.Dayjs[] | undefined) ?? defaultYears;
     const data = await getGeoYearlyBoardApi({
       startDate: range[0]?.startOf('year').format('YYYY-MM-DD'),
       endDate: range[1]?.endOf('year').format('YYYY-MM-DD'),
@@ -54,9 +57,9 @@ const YearlyPage = memo(function YearlyPage() {
   return (
     <div className='flex flex-col gap-4'>
       <Card>
-        <ProForm
-          layout='inline'
-          submitter={{ searchConfig: { submitText: '查询' } }}
+        <QueryFilter
+          {...BUTTERFLY_SEARCH}
+          initialValues={{ yearRange: defaultYears }}
           onFinish={async (v) => {
             await loadBoard(v);
             return true;
@@ -65,7 +68,6 @@ const YearlyPage = memo(function YearlyPage() {
           <ProFormDateRangePicker
             name='yearRange'
             label='年份范围'
-            initialValue={[dayjs().subtract(1, 'year'), dayjs()]}
             fieldProps={{ picker: 'year', format: 'YYYY', placeholder: ['开始年', '结束年'] }}
           />
           <ProFormSelect
@@ -85,7 +87,7 @@ const YearlyPage = memo(function YearlyPage() {
             options={platforms.map((p) => ({ label: p, value: p }))}
             fieldProps={{ mode: 'multiple', maxTagCount: 'responsive' }}
           />
-        </ProForm>
+        </QueryFilter>
       </Card>
       <Card title='实际达成%（折线，系列=平台）'>
         <Line
@@ -106,17 +108,19 @@ const YearlyPage = memo(function YearlyPage() {
         />
       </Card>
       <Card
-        title='达成明细（实时聚合，默认近两年）'
+        title={`达成明细（只读，已落库周期 ${board.persistedPeriodCount ?? 0}）`}
         extra={
           <PermissionButton
             perm='geo:yearly:target'
-            type='primary'
             onClick={() => setTargetOpen(true)}
           >
             配置目标
           </PermissionButton>
         }
       >
+        <div className='mb-3 text-sm text-neutral-600'>
+          年报数据由定时任务自动落库，页面仅支持查看；目标配置仍可维护。
+        </div>
         <Table
           rowKey={(r) => `${r.periodLabel}-${r.topicName}-${r.platform}`}
           dataSource={board.rows}
@@ -129,6 +133,12 @@ const YearlyPage = memo(function YearlyPage() {
             { title: '实际达成%', dataIndex: 'actualRate' },
             { title: '达成率%', dataIndex: 'achieveRate' },
             { title: '样本', dataIndex: 'sampleCount' },
+            {
+              title: '来源',
+              dataIndex: 'fromSnapshot',
+              width: 90,
+              render: (v: boolean | undefined) => (v ? <Tag color='success'>已落库</Tag> : <Tag>实时</Tag>),
+            },
           ]}
         />
       </Card>

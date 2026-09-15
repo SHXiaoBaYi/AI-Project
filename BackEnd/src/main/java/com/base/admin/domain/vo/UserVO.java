@@ -1,5 +1,6 @@
 package com.base.admin.domain.vo;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -35,6 +36,7 @@ public class UserVO {
     private String remark;
 
     @Schema(description = "创建时间", example = "2024-01-01 00:00:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
 
     @Schema(description = "关联角色列表")

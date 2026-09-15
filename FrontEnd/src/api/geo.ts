@@ -4,10 +4,14 @@ import type {
   GeoBoardQuery,
   GeoDailyBatchDTO,
   GeoDailyBoard,
+  GeoDailyBulkSaveDTO,
+  GeoDailyBulkSaveResult,
   GeoDailyDTO,
   GeoDailyGroup,
   GeoDailyVO,
   GeoImportResult,
+  GeoMonthlyBoard,
+  GeoPersistResult,
   GeoPlatform,
   GeoTopic,
   GeoWeeklyBoard,
@@ -62,6 +66,16 @@ export function getGeoDailyListApi(
     topicId?: number;
     keyword?: string;
     platforms?: string[];
+    mentioned?: number;
+    rankNoMin?: number;
+    rankNoMax?: number;
+    recommendStatus?: string;
+    hasScreenshot?: number;
+    hasThirdPartyUrl?: number;
+    competitors?: string;
+    boardLocked?: number;
+    updateTimeStart?: string;
+    updateTimeEnd?: string;
   },
 ) {
   return request.post<unknown, PageResult<GeoDailyVO>>('/geo/daily/list', data);
@@ -77,6 +91,10 @@ export function updateGeoDailyApi(data: GeoDailyDTO) {
 
 export function saveGeoDailyBatchApi(data: GeoDailyBatchDTO, isEdit: boolean) {
   return isEdit ? request.put('/geo/daily/batch', data) : request.post('/geo/daily/batch', data);
+}
+
+export function saveGeoDailyBulkApi(data: GeoDailyBulkSaveDTO) {
+  return request.post<unknown, GeoDailyBulkSaveResult>('/geo/daily/bulk', data);
 }
 
 export function getGeoDailyGroupApi(inspectDate: string, keyword: string) {
@@ -117,12 +135,28 @@ export function getGeoWeeklyBoardApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoWeeklyBoard>('/geo/weekly/board', data);
 }
 
+export function persistGeoWeeklyBoardApi(data: GeoBoardQuery) {
+  return request.post<unknown, GeoPersistResult>('/geo/weekly/persist', data);
+}
+
+export function getGeoMonthlyBoardApi(data: GeoBoardQuery) {
+  return request.post<unknown, GeoMonthlyBoard>('/geo/monthly/board', data);
+}
+
+export function persistGeoMonthlyBoardApi(data: GeoBoardQuery) {
+  return request.post<unknown, GeoPersistResult>('/geo/monthly/persist', data);
+}
+
 export function getGeoDailyBoardApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoDailyBoard>('/geo/day/board', data);
 }
 
 export function getGeoYearlyBoardApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoYearlyBoard>('/geo/yearly/board', data);
+}
+
+export function persistGeoYearlyBoardApi(data: GeoBoardQuery) {
+  return request.post<unknown, GeoPersistResult>('/geo/yearly/persist', data);
 }
 
 export function getGeoYearTargetsApi() {

@@ -10,7 +10,9 @@ spring:
     active: local
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
-    time-zone: GMT+8
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
   servlet:
     multipart:
       max-file-size: 10MB
@@ -54,3 +56,16 @@ jwt:
 
 geo:
   seed: false
+  board-persist:
+    enabled: true
+    # 本地启动时立即跑一轮，便于马上看到「已统计」效果
+    on-startup: true
+    lookback-weeks: 26
+    lookback-months: 12
+    lookback-years: 2
+    # 每周一 02:00 固化已结束的周
+    weekly-cron: "0 0 2 ? * MON"
+    # 每月 1 日 02:10 固化已结束的月
+    monthly-cron: "0 10 2 1 * ?"
+    # 每年 1 月 1 日 02:20 固化已结束的年/目标区间
+    yearly-cron: "0 20 2 1 1 ?"

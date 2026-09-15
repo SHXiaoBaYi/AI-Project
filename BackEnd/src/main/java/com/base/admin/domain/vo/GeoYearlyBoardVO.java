@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Data
-@Schema(description = "GEO全年目标看板（由日监测实时聚合）")
+@Schema(description = "GEO全年目标看板（落库优先，未落库则实时聚合）")
 public class GeoYearlyBoardVO {
 
     @Schema(description = "实际达成折线（横轴=时段/话题，系列=平台）")
@@ -19,6 +19,9 @@ public class GeoYearlyBoardVO {
 
     @Schema(description = "达成明细")
     private List<GeoYearlyRowVO> rows = new ArrayList<>();
+
+    @Schema(description = "查询范围内已落库的周期数", example = "2")
+    private int persistedPeriodCount;
 
     @Data
     @Schema(description = "全年达成一行")
@@ -43,5 +46,8 @@ public class GeoYearlyBoardVO {
 
         @Schema(description = "样本数", example = "40")
         private int sampleCount;
+
+        @Schema(description = "是否已落库", example = "true")
+        private boolean fromSnapshot;
     }
 }

@@ -1,115 +1,57 @@
-import { memo, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
-import type { ActionType, ProColumnType, ProFormInstance } from '@ant-design/pro-components';
-import {
-  ProFormDatePicker,
-  ProFormDigit,
-  ProFormSelect,
-  ProFormText,
-  ProFormTextArea,
-} from '@ant-design/pro-components';
-import { App, Button, Drawer, Image, Upload } from 'antd';
+import { memo, useEffect, useRef, useState } from 'react';
+import type { ActionType, ProColumnType } from '@ant-design/pro-components';
+import { App, Button, Drawer, Image, Tag, Upload } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import {
   deleteGeoDailyApi,
-  getGeoDailyGroupApi,
   getGeoDailyListApi,
-  getGeoLatestInspectDateApi,
   getGeoPlatformsApi,
   getGeoTopicOptionsApi,
   importGeoDailyApi,
-  saveGeoDailyBatchApi,
-  uploadGeoScreenshotApi,
 } from '@/api/geo';
-import type { GeoDailyGroup, GeoDailyVO, GeoTopic } from '@/types/geo';
+import type { GeoDailyVO, GeoTopic } from '@/types/geo';
+import { formatDateTime, toDateTimeParam } from '@/utils/datetime';
+import EditDailyModal from './components/EditDailyModal';
+import AddDailyDrawer from './components/AddDailyDrawer';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
-
-function emptyPlatformItems(platformNames: string[]) {
-  return Object.fromEntries(platformNames.map((p) => [p, { mentioned: 0, recommendStatus: '未出现' }])) as Record<
-    string,
-    Record<string, any>
-  >;
-}
-
-function groupToItems(platformNames: string[], group?: GeoDailyGroup) {
-  const items = emptyPlatformItems(platformNames);
-  group?.items?.forEach((row) => {
-    items[row.platform] = {
-      id: row.id,
-      mentioned: row.mentioned ?? 0,
-      rankNo: row.rankNo,
-      recommendStatus: row.recommendStatus,
-      screenshotUrl: row.screenshotUrl,
-      thirdPartyUrl: row.thirdPartyUrl,
-      negativeContent: row.negativeContent,
-      competitors: row.competitors,
-    };
-  });
-  return items;
-}
 
 const DailyPage = memo(function DailyPage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
-  const formRef = useRef<ProFormInstance>(null);
   const [topics, setTopics] = useState<GeoTopic[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
-  const [formOpen, setFormOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<GeoDailyVO | null>(null);
-  const [formKey, setFormKey] = useState(0);
-  const [initialValues, setInitialValues] = useState<Record<string, any>>({});
+  const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [iframeUrl, setIframeUrl] = useState<string>();
 
-  useEffect(() => {
+  const refreshMeta = () => {
     getGeoTopicOptionsApi().then(setTopics);
     getGeoPlatformsApi().then(setPlatforms);
-  }, []);
-
-  const openForm = async (record?: GeoDailyVO) => {
-    const names = platforms.length
-      ? platforms
-      : await getGeoPlatformsApi().then((list) => {
-          setPlatforms(list);
-          return list;
-        });
-    if (record) {
-      const group = await getGeoDailyGroupApi(record.inspectDate, record.keyword);
-      setEditing(record);
-      setInitialValues({
-        inspectDate: dayjs(group.inspectDate || record.inspectDate),
-        topicId: group.topicId || record.topicId,
-        keyword: group.keyword || record.keyword,
-        items: groupToItems(names, group),
-      });
-    } else {
-      const latest = await getGeoLatestInspectDateApi();
-      setEditing(null);
-      setInitialValues({
-        inspectDate: latest.inspectDate ? dayjs(latest.inspectDate) : dayjs(),
-        items: emptyPlatformItems(names),
-      });
-    }
-    setFormKey((k) => k + 1);
-    setFormOpen(true);
   };
 
-  const fillGroupFromKey = async () => {
-    const dateVal = formRef.current?.getFieldValue('inspectDate');
-    const keyword = String(formRef.current?.getFieldValue('keyword') || '').trim();
-    if (!dateVal || !keyword) return;
-    const group = await getGeoDailyGroupApi(dayjs(dateVal).format('YYYY-MM-DD'), keyword);
-    if (!group.items?.length) return;
-    formRef.current?.setFieldsValue({
-      topicId: group.topicId,
-      items: groupToItems(platforms, group),
-    });
+  useEffect(() => {
+    refreshMeta();
+  }, []);
+
+  const openEdit = (record: GeoDailyVO) => {
+    setEditing(record);
+    setEditOpen(true);
+  };
+
+  const openAdd = async () => {
+    if (!platforms.length) {
+      const list = await getGeoPlatformsApi();
+      setPlatforms(list);
+    }
+    setAddOpen(true);
   };
 
   const columns: ProColumnType<GeoDailyVO>[] = [
@@ -124,17 +66,14 @@ const DailyPage = memo(function DailyPage() {
       title: '平台',
       dataIndex: 'platform',
       width: 90,
-      search: false,
-    },
-    {
-      title: '平台',
-      dataIndex: 'platforms',
-      hideInTable: true,
       valueType: 'select',
       fieldProps: {
         mode: 'multiple',
         maxTagCount: 'responsive',
         options: platforms.map((p) => ({ label: p, value: p })),
+      },
+      search: {
+        transform: (value) => ({ platforms: value }),
       },
     },
     {
@@ -150,16 +89,42 @@ const DailyPage = memo(function DailyPage() {
       title: '提及',
       dataIndex: 'mentioned',
       width: 80,
-      search: false,
+      valueType: 'select',
       valueEnum: { 1: { text: '是', status: 'Success' }, 0: { text: '否', status: 'Default' } },
     },
-    { title: '排名', dataIndex: 'rankNo', width: 80, search: false },
-    { title: '推荐状态', dataIndex: 'recommendStatus', width: 120, search: false },
+    {
+      title: '排名',
+      dataIndex: 'rankNo',
+      width: 80,
+      valueType: 'digitRange',
+      fieldProps: { precision: 0, min: 1 },
+      search: {
+        transform: (value) => ({
+          rankNoMin: value?.[0],
+          rankNoMax: value?.[1],
+        }),
+      },
+      render: (_, r) => r.rankNo ?? '-',
+    },
+    {
+      title: '推荐状态',
+      dataIndex: 'recommendStatus',
+      width: 120,
+      valueType: 'select',
+      fieldProps: { options: RECOMMEND_OPTIONS },
+    },
     {
       title: '截图',
       dataIndex: 'screenshotUrl',
       width: 80,
-      search: false,
+      valueType: 'select',
+      valueEnum: {
+        1: { text: '有截图' },
+        0: { text: '无截图' },
+      },
+      search: {
+        transform: (value) => ({ hasScreenshot: value }),
+      },
       render: (_, r) =>
         r.screenshotUrl ? (
           <Image
@@ -174,8 +139,15 @@ const DailyPage = memo(function DailyPage() {
       title: '第三方链接',
       dataIndex: 'thirdPartyUrl',
       width: 120,
-      search: false,
       ellipsis: true,
+      valueType: 'select',
+      valueEnum: {
+        1: { text: '有链接' },
+        0: { text: '无链接' },
+      },
+      search: {
+        transform: (value) => ({ hasThirdPartyUrl: value }),
+      },
       render: (_, r) =>
         r.thirdPartyUrl ? (
           <Button
@@ -189,35 +161,70 @@ const DailyPage = memo(function DailyPage() {
           '-'
         ),
     },
-    { title: '竞品', dataIndex: 'competitors', search: false, ellipsis: true, width: 140 },
-    { title: '更新时间', dataIndex: 'updateTime', search: false, width: 170 },
+    {
+      title: '竞品',
+      dataIndex: 'competitors',
+      ellipsis: true,
+      width: 140,
+      fieldProps: { placeholder: '竞品关键字' },
+    },
+    {
+      title: '统计标记',
+      dataIndex: 'boardLocked',
+      width: 100,
+      valueType: 'select',
+      valueEnum: {
+        1: { text: '已统计', status: 'Warning' },
+        0: { text: '未统计', status: 'Default' },
+      },
+      render: (_, r) => (r.boardLocked === 1 ? <Tag color='warning'>已统计</Tag> : <Tag>未统计</Tag>),
+    },
+    {
+      title: '更新时间',
+      dataIndex: 'updateTime',
+      valueType: 'dateTimeRange',
+      width: 180,
+      render: (_, r) => formatDateTime(r.updateTime),
+      search: {
+        transform: (value) => ({
+          updateTimeStart: toDateTimeParam(value?.[0]),
+          updateTimeEnd: toDateTimeParam(value?.[1]),
+        }),
+      },
+    },
     {
       title: '操作',
       valueType: 'option',
       width: 140,
-      render: (_, record) => (
-        <ActionButtons
-          items={[
-            {
-              key: 'edit',
-              label: '编辑',
-              perm: 'geo:daily:edit',
-              onClick: () => openForm(record),
-            },
-            {
-              key: 'delete',
-              label: '删除',
-              perm: 'geo:daily:delete',
-              confirmTitle: '确定删除？删除后不再计入看板统计。',
-              onClick: async () => {
-                await deleteGeoDailyApi(record.id);
-                message.success('已删除');
-                actionRef.current?.reload();
+      search: false,
+      render: (_, record) => {
+        const locked = record.boardLocked === 1;
+        return (
+          <ActionButtons
+            items={[
+              {
+                key: 'edit',
+                label: locked ? '已统计' : '编辑',
+                perm: 'geo:daily:edit',
+                disabled: locked,
+                onClick: () => openEdit(record),
               },
-            },
-          ]}
-        />
-      ),
+              {
+                key: 'delete',
+                label: '删除',
+                perm: 'geo:daily:delete',
+                disabled: locked,
+                confirmTitle: '确定删除？删除后不再计入看板统计。',
+                onClick: async () => {
+                  await deleteGeoDailyApi(record.id);
+                  message.success('已删除');
+                  actionRef.current?.reload();
+                },
+              },
+            ]}
+          />
+        );
+      },
     },
   ];
 
@@ -238,6 +245,16 @@ const DailyPage = memo(function DailyPage() {
             topicId: params.topicId,
             keyword: params.keyword,
             platforms: params.platforms,
+            mentioned: params.mentioned,
+            rankNoMin: params.rankNoMin,
+            rankNoMax: params.rankNoMax,
+            recommendStatus: params.recommendStatus,
+            hasScreenshot: params.hasScreenshot,
+            hasThirdPartyUrl: params.hasThirdPartyUrl,
+            competitors: params.competitors,
+            boardLocked: params.boardLocked,
+            updateTimeStart: params.updateTimeStart,
+            updateTimeEnd: params.updateTimeEnd,
           });
           return { data: res.rows, success: true, total: res.total };
         }}
@@ -253,163 +270,38 @@ const DailyPage = memo(function DailyPage() {
             key='add'
             type='primary'
             perm='geo:daily:add'
-            onClick={() => openForm()}
+            onClick={() => void openAdd()}
           >
             新增
           </PermissionButton>,
         ]}
       />
 
-      <BaseModalForm
-        key={formKey}
-        formRef={formRef}
-        width={1000}
-        title={editing ? '编辑日监测（多平台）' : '新增日监测（多平台）'}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        initialValues={initialValues}
-        onFinish={async (values) => {
-          const items = platforms
-            .map((platform) => ({ platform, ...(values.items?.[platform] || {}) }))
-            .filter((item) => item.platform);
-          await saveGeoDailyBatchApi(
-            {
-              inspectDate: values.inspectDate ? dayjs(values.inspectDate).format('YYYY-MM-DD') : values.inspectDate,
-              topicId: values.topicId,
-              keyword: values.keyword,
-              items,
-            },
-            !!editing,
-          );
-          message.success(editing ? '已更新' : '已保存');
-          getGeoPlatformsApi().then(setPlatforms);
-          getGeoTopicOptionsApi().then(setTopics);
-          actionRef.current?.reload();
-          return true;
+      <EditDailyModal
+        open={editOpen}
+        record={editing}
+        topics={topics}
+        platforms={platforms}
+        onOpenChange={(v) => {
+          setEditOpen(v);
+          if (!v) setEditing(null);
         }}
-      >
-        <div className='mb-3 text-sm font-medium'>基础信息</div>
-        <div className='grid grid-cols-3 gap-x-4'>
-          <ProFormDatePicker
-            name='inspectDate'
-            label='巡查日期'
-            rules={[{ required: true, message: '请选择巡查日期' }]}
-            fieldProps={{
-              onChange: () => {
-                void fillGroupFromKey();
-              },
-            }}
-          />
-          <ProFormSelect
-            name='topicId'
-            label='话题'
-            rules={[{ required: true, message: '请选择话题' }]}
-            options={topics.map((t) => ({ label: t.topicName, value: t.id }))}
-          />
-          <ProFormText
-            name='keyword'
-            label='关键字'
-            rules={[{ required: true, message: '请输入关键字' }]}
-            fieldProps={{
-              onBlur: () => {
-                void fillGroupFromKey();
-              },
-            }}
-          />
-        </div>
+        onSuccess={() => {
+          refreshMeta();
+          actionRef.current?.reload();
+        }}
+      />
 
-        <MetricGroup
-          title='提及情况'
-          platforms={platforms}
-        >
-          {(p) => (
-            <>
-              <ProFormDigit
-                name={['items', p, 'id']}
-                hidden
-              />
-              <ProFormSelect
-                name={['items', p, 'mentioned']}
-                label={false}
-                options={[
-                  { label: '是', value: 1 },
-                  { label: '否', value: 0 },
-                ]}
-              />
-            </>
-          )}
-        </MetricGroup>
-        <MetricGroup
-          title='排名'
-          platforms={platforms}
-        >
-          {(p) => (
-            <ProFormDigit
-              name={['items', p, 'rankNo']}
-              label={false}
-              min={1}
-              fieldProps={{ precision: 0 }}
-            />
-          )}
-        </MetricGroup>
-        <MetricGroup
-          title='推荐状态'
-          platforms={platforms}
-        >
-          {(p) => (
-            <ProFormSelect
-              name={['items', p, 'recommendStatus']}
-              label={false}
-              options={RECOMMEND_OPTIONS}
-            />
-          )}
-        </MetricGroup>
-        <MetricGroup
-          title='第三方链接'
-          platforms={platforms}
-        >
-          {(p) => (
-            <ProFormText
-              name={['items', p, 'thirdPartyUrl']}
-              label={false}
-            />
-          )}
-        </MetricGroup>
-        <MetricGroup
-          title='出现的竞品'
-          platforms={platforms}
-        >
-          {(p) => (
-            <ProFormText
-              name={['items', p, 'competitors']}
-              label={false}
-            />
-          )}
-        </MetricGroup>
-        <MetricGroup
-          title='负面/错误内容'
-          platforms={platforms}
-        >
-          {(p) => (
-            <ProFormTextArea
-              name={['items', p, 'negativeContent']}
-              label={false}
-              fieldProps={{ rows: 2 }}
-            />
-          )}
-        </MetricGroup>
-        <MetricGroup
-          title='监测截图'
-          platforms={platforms}
-        >
-          {(p) => (
-            <PlatformShot
-              platform={p}
-              formRef={formRef}
-            />
-          )}
-        </MetricGroup>
-      </BaseModalForm>
+      <AddDailyDrawer
+        open={addOpen}
+        topics={topics}
+        platforms={platforms}
+        onOpenChange={setAddOpen}
+        onSuccess={() => {
+          refreshMeta();
+          actionRef.current?.reload();
+        }}
+      />
 
       <BaseModalForm
         title='导入日监测 Excel'
@@ -445,8 +337,7 @@ const DailyPage = memo(function DailyPage() {
               message.success(`导入完成：新增 ${res.insertCount}，更新 ${res.updateCount}，失败 ${res.failureCount}`);
               setImportOpen(false);
               setFile(null);
-              getGeoTopicOptionsApi().then(setTopics);
-              getGeoPlatformsApi().then(setPlatforms);
+              refreshMeta();
               actionRef.current?.reload();
             }}
           >
@@ -484,81 +375,5 @@ const DailyPage = memo(function DailyPage() {
     </>
   );
 });
-
-function MetricGroup({
-  title,
-  platforms,
-  children,
-}: {
-  title: string;
-  platforms: string[];
-  children: (platform: string) => ReactNode;
-}) {
-  return (
-    <div className='mb-4'>
-      <div className='mb-2 border-b border-neutral-200 pb-1 text-sm font-medium'>{title}</div>
-      {platforms.length ? (
-        <div
-          className='grid gap-3'
-          style={{ gridTemplateColumns: `repeat(${platforms.length}, minmax(0, 1fr))` }}
-        >
-          {platforms.map((p) => (
-            <div
-              key={p}
-              className='min-w-0'
-            >
-              <div className='mb-1 text-xs text-neutral-500'>{p}</div>
-              {children(p)}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className='text-xs text-neutral-400'>请先在平台管理中维护平台</div>
-      )}
-    </div>
-  );
-}
-
-function PlatformShot({ platform, formRef }: { platform: string; formRef: RefObject<ProFormInstance | null> }) {
-  const [url, setUrl] = useState<string | undefined>();
-
-  useEffect(() => {
-    setUrl(formRef.current?.getFieldValue(['items', platform, 'screenshotUrl']));
-  }, [platform, formRef]);
-
-  return (
-    <div>
-      <ProFormText
-        name={['items', platform, 'screenshotUrl']}
-        hidden
-      />
-      <Upload
-        maxCount={1}
-        accept='image/*'
-        showUploadList={false}
-        customRequest={async (opt) => {
-          try {
-            const res = await uploadGeoScreenshotApi(opt.file as File);
-            formRef.current?.setFieldValue(['items', platform, 'screenshotUrl'], res.url);
-            setUrl(res.url);
-            opt.onSuccess?.(res);
-          } catch (e) {
-            opt.onError?.(e as Error);
-          }
-        }}
-      >
-        <Button size='small'>上传截图</Button>
-      </Upload>
-      {url ? (
-        <div className='mt-2'>
-          <Image
-            width={96}
-            src={`/api${url}`}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 export default DailyPage;

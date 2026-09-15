@@ -237,7 +237,6 @@ const UserManage = memo(function UserManage() {
         actionRef={actionRef}
         rowKey='userId'
         scroll={{ x: 600 }}
-        search={{ labelWidth: 'auto' }}
         request={async (params) => {
           const { rows: data, total } = await getUserListApi(tools.handleSearchParams(params));
           currentPageKeysRef.current = new Set(data.map((u) => u.userId));

@@ -11,6 +11,7 @@ export interface ActionItem {
   icon?: ReactNode;
   onClick?: () => void;
   confirmTitle?: string;
+  disabled?: boolean;
 }
 
 interface ActionButtonsProps {
@@ -43,6 +44,7 @@ export default function ActionButtons({ items, maxVisible = 3 }: ActionButtonsPr
       icon={item.icon}
       block={block}
       size='small'
+      disabled={item.disabled}
       style={{
         padding: block ? '4px 10px' : '0px',
         height: block ? '30px' : undefined,
@@ -58,6 +60,9 @@ export default function ActionButtons({ items, maxVisible = 3 }: ActionButtonsPr
 
   const renderPrimaryItem = (item: ActionItem) => {
     const btn = renderButton(item, false);
+    if (item.disabled) {
+      return btn;
+    }
     if (item.confirmTitle) {
       return (
         <Popconfirm
@@ -75,6 +80,9 @@ export default function ActionButtons({ items, maxVisible = 3 }: ActionButtonsPr
 
   const renderOverflowItem = (item: ActionItem) => {
     const btn = renderButton(item, true);
+    if (item.disabled) {
+      return <div className='w-full'>{btn}</div>;
+    }
 
     if (item.confirmTitle) {
       return (

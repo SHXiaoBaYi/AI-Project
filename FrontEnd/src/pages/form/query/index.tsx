@@ -1,5 +1,6 @@
 import React from 'react';
 import { ProCard, ProFormDatePicker, ProFormText, QueryFilter } from '@ant-design/pro-components';
+import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 
 const App: React.FC = () => {
   return (
@@ -16,7 +17,7 @@ const App: React.FC = () => {
       </ProCard>
       <ProCard styles={{ body: { paddingTop: '40px' } }}>
         <QueryFilter
-          defaultCollapsed
+          {...BUTTERFLY_SEARCH}
           split
         >
           <ProFormText

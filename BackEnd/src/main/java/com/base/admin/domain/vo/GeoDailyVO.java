@@ -1,5 +1,6 @@
 package com.base.admin.domain.vo;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -49,9 +50,14 @@ public class GeoDailyVO {
     @Schema(description = "出现的竞品")
     private String competitors;
 
+    @Schema(description = "是否已被周/月/年统计（1=已统计不可改 0=未统计可编辑）", example = "0")
+    private Integer boardLocked;
+
     @Schema(description = "创建时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
 
     @Schema(description = "更新时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime updateTime;
 }
