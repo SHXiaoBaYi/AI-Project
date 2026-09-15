@@ -12,4 +12,7 @@ public class GeoPlatformQueryDTO extends PageQuery {
 
     @Schema(description = "平台名称")
     private String platformName;
+
+    @Schema(description = "平台类型（AI平台/内容发布平台）", example = "AI平台")
+    private String platformType;
 }

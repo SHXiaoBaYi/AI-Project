@@ -1,6 +1,7 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App, Button, DatePicker, Drawer, Input, InputNumber, Modal, Select, Space, Table, Tabs, Upload } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { InputProps } from 'antd';
 import { useSelector } from 'react-redux';
 import dayjs, { type Dayjs } from 'dayjs';
 import { saveGeoDailyBulkApi, uploadGeoScreenshotApi } from '@/api/geo';
@@ -29,6 +30,229 @@ type PlatformRow = {
   negativeContent?: string;
   screenshotUrl?: string;
 };
+
+type ImeSafeInputProps = Omit<InputProps, 'value' | 'onChange'> & {
+  value?: string;
+  onChange: (value: string) => void;
+};
+
+/**
+ * Controlled Input that buffers updates during CJK IME composition.
+ * Parent Table re-renders (unstable columns / row remount risk) must not
+ * interrupt composition — otherwise hanzi cannot be committed.
+ */
+const ImeSafeInput = memo(function ImeSafeInput({ value, onChange, ...rest }: ImeSafeInputProps) {
+  const [inner, setInner] = useState(value ?? '');
+  const composingRef = useRef(false);
+
+  useEffect(() => {
+    if (!composingRef.current) {
+      setInner(value ?? '');
+    }
+  }, [value]);
+
+  return (
+    <Input
+      {...rest}
+      value={inner}
+      onCompositionStart={() => {
+        composingRef.current = true;
+      }}
+      onCompositionEnd={(e) => {
+        composingRef.current = false;
+        const next = e.currentTarget.value;
+        setInner(next);
+        onChange(next);
+      }}
+      onChange={(e) => {
+        const next = e.target.value;
+        setInner(next);
+        const native = e.nativeEvent as InputEvent;
+        if (!composingRef.current && !native.isComposing) {
+          onChange(next);
+        }
+      }}
+    />
+  );
+});
+
+type PlatformNestedTableProps = {
+  tabKey: string;
+  topicKey: string;
+  platforms: PlatformRow[];
+  onUpdate: (tabKey: string, topicKey: string, platform: string, patch: Partial<PlatformRow>) => void;
+};
+
+/** Nested platform table with memoized columns to avoid remounting Inputs on each keystroke. */
+const PlatformNestedTable = memo(function PlatformNestedTable({
+  tabKey,
+  topicKey,
+  platforms,
+  onUpdate,
+}: PlatformNestedTableProps) {
+  const columns = useMemo((): ColumnsType<PlatformRow> => {
+    const patch = (platform: string, next: Partial<PlatformRow>) => onUpdate(tabKey, topicKey, platform, next);
+    return [
+      {
+        title: '平台',
+        dataIndex: 'platform',
+        width: 100,
+        render: (v: string) => <span className='px-2 font-medium'>{v}</span>,
+      },
+      {
+        title: '提及',
+        dataIndex: 'mentioned',
+        width: 100,
+        render: (v, row) => (
+          <Select
+            className='w-full'
+            variant='borderless'
+            value={Number(v) === 1 ? 1 : Number(v) === MENTION_IGNORE ? MENTION_IGNORE : 0}
+            options={MENTION_OPTIONS}
+            onChange={(val) => patch(row.platform, { mentioned: val })}
+          />
+        ),
+      },
+      {
+        title: '排名',
+        dataIndex: 'rankNo',
+        width: 96,
+        render: (v, row) => (
+          <InputNumber
+            className='w-full'
+            variant='borderless'
+            min={0}
+            step={1}
+            precision={0}
+            value={v}
+            controls={false}
+            parser={(text) => {
+              const digits = String(text ?? '').replace(/[^\d]/g, '');
+              return digits === '' ? ('' as unknown as number) : Number(digits);
+            }}
+            onChange={(val) => {
+              if (val == null || val === ('' as unknown as number)) {
+                patch(row.platform, { rankNo: undefined });
+                return;
+              }
+              const n = Math.max(0, Math.floor(Number(val)));
+              patch(row.platform, {
+                rankNo: Number.isFinite(n) ? n : undefined,
+              });
+            }}
+          />
+        ),
+      },
+      {
+        title: '推荐状态',
+        dataIndex: 'recommendStatus',
+        width: 140,
+        render: (v, row) => (
+          <Select
+            className='w-full'
+            variant='borderless'
+            value={v}
+            options={RECOMMEND_OPTIONS}
+            onChange={(val) => patch(row.platform, { recommendStatus: val })}
+          />
+        ),
+      },
+      {
+        title: '第三方链接',
+        dataIndex: 'thirdPartyUrl',
+        width: 180,
+        render: (v, row) => (
+          <ImeSafeInput
+            variant='borderless'
+            value={v}
+            placeholder='链接'
+            onChange={(val) => patch(row.platform, { thirdPartyUrl: val })}
+          />
+        ),
+      },
+      {
+        title: '竞品',
+        dataIndex: 'competitors',
+        width: 140,
+        render: (v, row) => (
+          <ImeSafeInput
+            variant='borderless'
+            value={v}
+            placeholder='竞品'
+            onChange={(val) => patch(row.platform, { competitors: val })}
+          />
+        ),
+      },
+      {
+        title: '负面内容',
+        dataIndex: 'negativeContent',
+        render: (v, row) => (
+          <ImeSafeInput
+            variant='borderless'
+            value={v}
+            placeholder='负面内容'
+            onChange={(val) => patch(row.platform, { negativeContent: val })}
+          />
+        ),
+      },
+      {
+        title: '截图',
+        dataIndex: 'screenshotUrl',
+        width: 120,
+        render: (v, row) => (
+          <Space size={4}>
+            <Upload
+              maxCount={1}
+              accept='image/*'
+              showUploadList={false}
+              customRequest={async (opt) => {
+                try {
+                  const res = await uploadGeoScreenshotApi(opt.file as File);
+                  patch(row.platform, { screenshotUrl: res.url });
+                  opt.onSuccess?.(res);
+                } catch (e) {
+                  opt.onError?.(e as Error);
+                }
+              }}
+            >
+              <Button size='small'>上传</Button>
+            </Upload>
+            {v ? (
+              <GeoScreenshot
+                src={v}
+                width={36}
+              />
+            ) : null}
+          </Space>
+        ),
+      },
+    ];
+  }, [tabKey, topicKey, onUpdate]);
+
+  return (
+    <div className='geo-nested-platform-scroll max-w-full overflow-x-auto overflow-y-hidden'>
+      <Table<PlatformRow>
+        size='small'
+        bordered
+        pagination={false}
+        tableLayout='auto'
+        rowKey='platform'
+        columns={columns}
+        dataSource={platforms}
+        className='geo-nested-platform-table bg-white'
+        style={{ marginLeft: 0 }}
+        components={{
+          table: (props) => (
+            <table
+              {...props}
+              style={{ ...props.style, marginLeft: 0 }}
+            />
+          ),
+        }}
+      />
+    </div>
+  );
+});
 
 type TopicRow = {
   rowKey: string;
@@ -114,7 +338,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   const topicOptions = useMemo(() => topics.map((t) => ({ label: t.topicName, value: t.id })), [topics]);
   const ownerOptions = useMemo(() => owners.map((u) => ({ label: u.displayName, value: u.userId })), [owners]);
 
-  const updateTopic = (tabKey: string, rowKey: string, patch: Partial<TopicRow>) => {
+  const updateTopic = useCallback((tabKey: string, rowKey: string, patch: Partial<TopicRow>) => {
     setTabs((prev) =>
       prev.map((tab) =>
         tab.key !== tabKey
@@ -125,27 +349,30 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
             },
       ),
     );
-  };
+  }, []);
 
-  const updatePlatform = (tabKey: string, topicKey: string, platform: string, patch: Partial<PlatformRow>) => {
-    setTabs((prev) =>
-      prev.map((tab) =>
-        tab.key !== tabKey
-          ? tab
-          : {
-              ...tab,
-              topics: tab.topics.map((row) =>
-                row.rowKey !== topicKey
-                  ? row
-                  : {
-                      ...row,
-                      platforms: row.platforms.map((p) => (p.platform === platform ? { ...p, ...patch } : p)),
-                    },
-              ),
-            },
-      ),
-    );
-  };
+  const updatePlatform = useCallback(
+    (tabKey: string, topicKey: string, platform: string, patch: Partial<PlatformRow>) => {
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.key !== tabKey
+            ? tab
+            : {
+                ...tab,
+                topics: tab.topics.map((row) =>
+                  row.rowKey !== topicKey
+                    ? row
+                    : {
+                        ...row,
+                        platforms: row.platforms.map((p) => (p.platform === platform ? { ...p, ...patch } : p)),
+                      },
+                ),
+              },
+        ),
+      );
+    },
+    [],
+  );
 
   const addTopic = (tabKey: string) => {
     setTabs((prev) =>
@@ -330,142 +557,6 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
     void submitBulk(false);
   };
 
-  const buildPlatformColumns = (tabKey: string, topicKey: string): ColumnsType<PlatformRow> => [
-    {
-      title: '平台',
-      dataIndex: 'platform',
-      width: 100,
-      render: (v: string) => <span className='px-2 font-medium'>{v}</span>,
-    },
-    {
-      title: '提及',
-      dataIndex: 'mentioned',
-      width: 100,
-      render: (v, row) => (
-        <Select
-          className='w-full'
-          variant='borderless'
-          value={Number(v) === 1 ? 1 : Number(v) === MENTION_IGNORE ? MENTION_IGNORE : 0}
-          options={MENTION_OPTIONS}
-          onChange={(val) => updatePlatform(tabKey, topicKey, row.platform, { mentioned: val })}
-        />
-      ),
-    },
-    {
-      title: '排名',
-      dataIndex: 'rankNo',
-      width: 96,
-      render: (v, row) => (
-        <InputNumber
-          className='w-full'
-          variant='borderless'
-          min={0}
-          step={1}
-          precision={0}
-          value={v}
-          controls={false}
-          parser={(text) => {
-            const digits = String(text ?? '').replace(/[^\d]/g, '');
-            return digits === '' ? ('' as unknown as number) : Number(digits);
-          }}
-          onChange={(val) => {
-            if (val == null || val === ('' as unknown as number)) {
-              updatePlatform(tabKey, topicKey, row.platform, { rankNo: undefined });
-              return;
-            }
-            const n = Math.max(0, Math.floor(Number(val)));
-            updatePlatform(tabKey, topicKey, row.platform, {
-              rankNo: Number.isFinite(n) ? n : undefined,
-            });
-          }}
-        />
-      ),
-    },
-    {
-      title: '推荐状态',
-      dataIndex: 'recommendStatus',
-      width: 140,
-      render: (v, row) => (
-        <Select
-          className='w-full'
-          variant='borderless'
-          value={v}
-          options={RECOMMEND_OPTIONS}
-          onChange={(val) => updatePlatform(tabKey, topicKey, row.platform, { recommendStatus: val })}
-        />
-      ),
-    },
-    {
-      title: '第三方链接',
-      dataIndex: 'thirdPartyUrl',
-      width: 180,
-      render: (v, row) => (
-        <Input
-          variant='borderless'
-          value={v}
-          placeholder='链接'
-          onChange={(e) => updatePlatform(tabKey, topicKey, row.platform, { thirdPartyUrl: e.target.value })}
-        />
-      ),
-    },
-    {
-      title: '竞品',
-      dataIndex: 'competitors',
-      width: 140,
-      render: (v, row) => (
-        <Input
-          variant='borderless'
-          value={v}
-          placeholder='竞品'
-          onChange={(e) => updatePlatform(tabKey, topicKey, row.platform, { competitors: e.target.value })}
-        />
-      ),
-    },
-    {
-      title: '负面内容',
-      dataIndex: 'negativeContent',
-      render: (v, row) => (
-        <Input
-          variant='borderless'
-          value={v}
-          placeholder='负面内容'
-          onChange={(e) => updatePlatform(tabKey, topicKey, row.platform, { negativeContent: e.target.value })}
-        />
-      ),
-    },
-    {
-      title: '截图',
-      dataIndex: 'screenshotUrl',
-      width: 120,
-      render: (v, row) => (
-        <Space size={4}>
-          <Upload
-            maxCount={1}
-            accept='image/*'
-            showUploadList={false}
-            customRequest={async (opt) => {
-              try {
-                const res = await uploadGeoScreenshotApi(opt.file as File);
-                updatePlatform(tabKey, topicKey, row.platform, { screenshotUrl: res.url });
-                opt.onSuccess?.(res);
-              } catch (e) {
-                opt.onError?.(e as Error);
-              }
-            }}
-          >
-            <Button size='small'>上传</Button>
-          </Upload>
-          {v ? (
-            <GeoScreenshot
-              src={v}
-              width={36}
-            />
-          ) : null}
-        </Space>
-      ),
-    },
-  ];
-
   const buildTopicColumns = (tabKey: string): ColumnsType<TopicRow> => [
     {
       title: '话题',
@@ -489,11 +580,11 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       dataIndex: 'keyword',
       width: 300,
       render: (v, row) => (
-        <Input
+        <ImeSafeInput
           variant='borderless'
           placeholder='关键字 / 提问'
           value={v}
-          onChange={(e) => updateTopic(tabKey, row.rowKey, { keyword: e.target.value })}
+          onChange={(val) => updateTopic(tabKey, row.rowKey, { keyword: val })}
         />
       ),
     },
@@ -533,27 +624,12 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       title: '各平台监测',
       dataIndex: 'platforms',
       render: (_, row) => (
-        <div className='geo-nested-platform-scroll max-w-full overflow-x-auto overflow-y-hidden'>
-          <Table<PlatformRow>
-            size='small'
-            bordered
-            pagination={false}
-            tableLayout='auto'
-            rowKey='platform'
-            columns={buildPlatformColumns(tabKey, row.rowKey)}
-            dataSource={row.platforms}
-            className='geo-nested-platform-table bg-white'
-            style={{ marginLeft: 0 }}
-            components={{
-              table: (props) => (
-                <table
-                  {...props}
-                  style={{ ...props.style, marginLeft: 0 }}
-                />
-              ),
-            }}
-          />
-        </div>
+        <PlatformNestedTable
+          tabKey={tabKey}
+          topicKey={row.rowKey}
+          platforms={row.platforms}
+          onUpdate={updatePlatform}
+        />
       ),
     },
     {

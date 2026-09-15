@@ -8,6 +8,7 @@ export interface GeoTopic {
 export interface GeoPlatform {
   id: number;
   platformName: string;
+  platformType?: string;
   sortOrder?: number;
   remark?: string;
 }

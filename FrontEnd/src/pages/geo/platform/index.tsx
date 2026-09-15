@@ -7,6 +7,7 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { createGeoPlatformApi, deleteGeoPlatformApi, getGeoPlatformListApi, updateGeoPlatformApi } from '@/api/geo';
 import type { GeoPlatform } from '@/types/geo';
+import { GEO_PLATFORM_TYPE_DEFAULT, GEO_PLATFORM_TYPES } from '@/constants/geo';
 
 const PlatformPage = memo(function PlatformPage() {
   const { message } = App.useApp();
@@ -19,6 +20,19 @@ const PlatformPage = memo(function PlatformPage() {
       title: '平台名称',
       dataIndex: 'platformName',
       formItemProps: { rules: [{ required: true, message: '请输入平台名称' }] },
+    },
+    {
+      title: '平台类型',
+      dataIndex: 'platformType',
+      width: 140,
+      valueType: 'select',
+      valueEnum: {
+        AI平台: { text: 'AI平台' },
+        内容发布平台: { text: '内容发布平台' },
+      },
+      fieldProps: { options: [...GEO_PLATFORM_TYPES] },
+      formItemProps: { rules: [{ required: true, message: '请选择平台类型' }] },
+      render: (_, r) => r.platformType || GEO_PLATFORM_TYPE_DEFAULT,
     },
     { title: '排序', dataIndex: 'sortOrder', search: false, valueType: 'digit' },
     { title: '备注', dataIndex: 'remark', search: false, ellipsis: true },
@@ -67,6 +81,7 @@ const PlatformPage = memo(function PlatformPage() {
             pageNum: params.current,
             pageSize: params.pageSize,
             platformName: params.platformName,
+            platformType: params.platformType,
           });
           return { data: res.rows, success: true, total: res.total };
         }}
@@ -90,13 +105,17 @@ const PlatformPage = memo(function PlatformPage() {
         columns={columns as any}
         open={open}
         onOpenChange={setOpen}
-        initialValues={editing ?? { sortOrder: 0 }}
+        initialValues={editing ?? { sortOrder: 0, platformType: GEO_PLATFORM_TYPE_DEFAULT }}
         onFinish={async (values) => {
+          const payload = {
+            ...values,
+            platformType: values.platformType || GEO_PLATFORM_TYPE_DEFAULT,
+          };
           if (editing) {
-            await updateGeoPlatformApi({ ...values, id: editing.id });
+            await updateGeoPlatformApi({ ...payload, id: editing.id });
             message.success('已更新');
           } else {
-            await createGeoPlatformApi(values);
+            await createGeoPlatformApi(payload);
             message.success('已创建');
           }
           actionRef.current?.reload();

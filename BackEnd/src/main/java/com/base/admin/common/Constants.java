@@ -24,5 +24,10 @@ public class Constants {
     /** 日监测长短词：周巡查 */
     public static final String TERM_TYPE_WEEKLY = "周巡查";
 
+    /** 平台类型：AI平台（日监测可选） */
+    public static final String PLATFORM_TYPE_AI = "AI平台";
+    /** 平台类型：内容发布平台 */
+    public static final String PLATFORM_TYPE_CONTENT = "内容发布平台";
+
     private Constants() {}
 }

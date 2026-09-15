@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -38,9 +39,12 @@ public class GeoPlatformController {
         return Result.ok(platformService.list(query));
     }
 
-    @Operation(summary = "全部平台（下拉）")
+    @Operation(summary = "全部平台（下拉，可按类型过滤）")
     @GetMapping("/options")
-    public Result<List<GeoPlatform>> options() {
+    public Result<List<GeoPlatform>> options(@RequestParam(required = false) String platformType) {
+        if (platformType != null && !platformType.isBlank()) {
+            return Result.ok(platformService.listByType(platformType));
+        }
         return Result.ok(platformService.listAll());
     }
 

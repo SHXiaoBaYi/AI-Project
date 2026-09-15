@@ -15,6 +15,10 @@ public class GeoPlatformDTO {
     @Schema(description = "平台名称", requiredMode = Schema.RequiredMode.REQUIRED, example = "豆包")
     private String platformName;
 
+    @NotBlank(message = "平台类型不能为空")
+    @Schema(description = "平台类型（AI平台/内容发布平台）", requiredMode = Schema.RequiredMode.REQUIRED, example = "AI平台")
+    private String platformType;
+
     @Schema(description = "排序", example = "1")
     private Integer sortOrder;
 

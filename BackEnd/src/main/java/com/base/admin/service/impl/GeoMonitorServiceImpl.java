@@ -14,6 +14,7 @@ import com.base.admin.domain.dto.GeoDailyQueryDTO;
 import com.base.admin.domain.dto.GeoYearTargetDTO;
 import com.base.admin.domain.entity.GeoBoardPeriodStat;
 import com.base.admin.domain.entity.GeoMonitorDaily;
+import com.base.admin.domain.entity.GeoPlatform;
 import com.base.admin.domain.entity.GeoTopic;
 import com.base.admin.domain.entity.GeoYearTarget;
 import com.base.admin.domain.entity.SysUser;
@@ -481,7 +482,9 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
 
     @Override
     public List<String> listPlatforms() {
-        return platformService.listAll().stream().map(p -> p.getPlatformName()).toList();
+        return platformService.listByType(Constants.PLATFORM_TYPE_AI).stream()
+                .map(GeoPlatform::getPlatformName)
+                .toList();
     }
 
     @Override

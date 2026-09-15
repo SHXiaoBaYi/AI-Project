@@ -40,12 +40,14 @@ export function deleteGeoTopicApi(id: number) {
   return request.delete(`/geo/topic/${id}`);
 }
 
-export function getGeoPlatformListApi(data: PageQuery & { platformName?: string }) {
+export function getGeoPlatformListApi(data: PageQuery & { platformName?: string; platformType?: string }) {
   return request.post<unknown, PageResult<GeoPlatform>>('/geo/platform/list', data);
 }
 
-export function getGeoPlatformOptionsApi() {
-  return request.get<unknown, GeoPlatform[]>('/geo/platform/options');
+export function getGeoPlatformOptionsApi(platformType?: string) {
+  return request.get<unknown, GeoPlatform[]>('/geo/platform/options', {
+    params: platformType ? { platformType } : undefined,
+  });
 }
 
 export function createGeoPlatformApi(data: Partial<GeoPlatform>) {
@@ -131,7 +133,8 @@ export function uploadGeoScreenshotApi(file: File) {
 }
 
 export async function getGeoPlatformsApi() {
-  const list = await getGeoPlatformOptionsApi();
+  // 日监测及相关筛选项仅展示 AI平台
+  const list = await getGeoPlatformOptionsApi('AI平台');
   return list.map((p) => p.platformName);
 }
 

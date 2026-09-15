@@ -2,6 +2,7 @@ package com.base.admin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.base.admin.common.Constants;
 import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.GeoPlatformDTO;
 import com.base.admin.domain.dto.GeoPlatformQueryDTO;
@@ -28,6 +29,7 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
     public PageResult<GeoPlatform> list(GeoPlatformQueryDTO query) {
         LambdaQueryWrapper<GeoPlatform> wrapper = new LambdaQueryWrapper<GeoPlatform>()
                 .like(StringUtils.hasText(query.getPlatformName()), GeoPlatform::getPlatformName, query.getPlatformName())
+                .eq(StringUtils.hasText(query.getPlatformType()), GeoPlatform::getPlatformType, normalizeType(query.getPlatformType()))
                 .orderByAsc(GeoPlatform::getSortOrder)
                 .orderByAsc(GeoPlatform::getId);
         Page<GeoPlatform> page = platformMapper.selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
@@ -37,6 +39,15 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
     @Override
     public List<GeoPlatform> listAll() {
         return platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
+                .orderByAsc(GeoPlatform::getSortOrder)
+                .orderByAsc(GeoPlatform::getId));
+    }
+
+    @Override
+    public List<GeoPlatform> listByType(String platformType) {
+        String type = normalizeType(platformType);
+        return platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
+                .eq(GeoPlatform::getPlatformType, type)
                 .orderByAsc(GeoPlatform::getSortOrder)
                 .orderByAsc(GeoPlatform::getId));
     }
@@ -52,13 +63,12 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
 
     @Override
     public void create(GeoPlatformDTO dto) {
-        long count = platformMapper.selectCount(
-                new LambdaQueryWrapper<GeoPlatform>().eq(GeoPlatform::getPlatformName, dto.getPlatformName().trim()));
-        if (count > 0) {
-            throw new BusinessException("平台名称已存在");
-        }
+        String name = dto.getPlatformName().trim();
+        String type = normalizeType(dto.getPlatformType());
+        assertNameTypeUnique(name, type, null);
         GeoPlatform platform = new GeoPlatform();
-        platform.setPlatformName(dto.getPlatformName().trim());
+        platform.setPlatformName(name);
+        platform.setPlatformType(type);
         platform.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : 0);
         platform.setRemark(dto.getRemark());
         platformMapper.insert(platform);
@@ -68,14 +78,11 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
     public void update(GeoPlatformDTO dto) {
         GeoPlatform platform = getById(dto.getId());
         String name = dto.getPlatformName().trim();
-        long count = platformMapper.selectCount(new LambdaQueryWrapper<GeoPlatform>()
-                .eq(GeoPlatform::getPlatformName, name)
-                .ne(GeoPlatform::getId, dto.getId()));
-        if (count > 0) {
-            throw new BusinessException("平台名称已存在");
-        }
+        String type = normalizeType(dto.getPlatformType());
+        assertNameTypeUnique(name, type, dto.getId());
         String oldName = platform.getPlatformName();
         platform.setPlatformName(name);
+        platform.setPlatformType(type);
         platform.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : 0);
         platform.setRemark(dto.getRemark());
         platformMapper.updateById(platform);
@@ -99,28 +106,58 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
 
     @Override
     public GeoPlatform getOrCreate(String platformName) {
+        return getOrCreate(platformName, Constants.PLATFORM_TYPE_AI);
+    }
+
+    @Override
+    public GeoPlatform getOrCreate(String platformName, String platformType) {
         String name = platformName == null ? "" : platformName.trim();
         if (!StringUtils.hasText(name)) {
             throw new BusinessException("平台不能为空");
         }
-        GeoPlatform existing = platformMapper.selectOne(
-                new LambdaQueryWrapper<GeoPlatform>().eq(GeoPlatform::getPlatformName, name));
+        String type = normalizeType(platformType);
+        GeoPlatform existing = platformMapper.selectOne(new LambdaQueryWrapper<GeoPlatform>()
+                .eq(GeoPlatform::getPlatformName, name)
+                .eq(GeoPlatform::getPlatformType, type)
+                .last("LIMIT 1"));
         if (existing != null) {
             return existing;
         }
         GeoPlatform platform = new GeoPlatform();
         platform.setPlatformName(name);
+        platform.setPlatformType(type);
         platform.setSortOrder(0);
         try {
             platformMapper.insert(platform);
             return platform;
         } catch (Exception e) {
-            GeoPlatform again = platformMapper.selectOne(
-                    new LambdaQueryWrapper<GeoPlatform>().eq(GeoPlatform::getPlatformName, name));
+            GeoPlatform again = platformMapper.selectOne(new LambdaQueryWrapper<GeoPlatform>()
+                    .eq(GeoPlatform::getPlatformName, name)
+                    .eq(GeoPlatform::getPlatformType, type)
+                    .last("LIMIT 1"));
             if (again != null) {
                 return again;
             }
             throw e;
         }
+    }
+
+    private void assertNameTypeUnique(String name, String type, Long excludeId) {
+        LambdaQueryWrapper<GeoPlatform> wrapper = new LambdaQueryWrapper<GeoPlatform>()
+                .eq(GeoPlatform::getPlatformName, name)
+                .eq(GeoPlatform::getPlatformType, type);
+        if (excludeId != null) {
+            wrapper.ne(GeoPlatform::getId, excludeId);
+        }
+        if (platformMapper.selectCount(wrapper) > 0) {
+            throw new BusinessException("同类型下平台名称已存在");
+        }
+    }
+
+    private static String normalizeType(String raw) {
+        if (Constants.PLATFORM_TYPE_CONTENT.equals(raw)) {
+            return Constants.PLATFORM_TYPE_CONTENT;
+        }
+        return Constants.PLATFORM_TYPE_AI;
     }
 }

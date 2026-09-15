@@ -34,6 +34,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureOwnerNameColumn(connection);
             ensureTermTypeColumn(connection);
             ensureOwnerUserIdColumn(connection);
+            ensurePlatformType(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -113,6 +114,80 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
         }
         log.info("已为 geo_monitor_daily 增加 owner_user_id 字段");
+    }
+
+    private void ensurePlatformType(Connection connection) throws Exception {
+        if (!columnExists(connection, "geo_platform", "platform_type")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_platform
+                          ADD COLUMN platform_type VARCHAR(32) NOT NULL DEFAULT 'AI平台'
+                          COMMENT '平台类型：AI平台/内容发布平台'
+                          AFTER platform_name
+                        """);
+            }
+            log.info("已为 geo_platform 增加 platform_type 字段");
+        } else {
+            log.info("geo_platform.platform_type 已存在，跳过建列");
+        }
+
+        try (Statement statement = connection.createStatement()) {
+            int updated = statement.executeUpdate("""
+                    UPDATE geo_platform
+                    SET platform_type = 'AI平台'
+                    WHERE platform_type IS NULL OR platform_type = ''
+                    """);
+            if (updated > 0) {
+                log.info("已将 {} 条平台补全为 AI平台", updated);
+            }
+        }
+
+        if (indexExists(connection, "geo_platform", "uk_platform_name")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("ALTER TABLE geo_platform DROP INDEX uk_platform_name");
+            }
+            log.info("已删除 geo_platform.uk_platform_name");
+        }
+        if (!indexExists(connection, "geo_platform", "uk_platform_name_type")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_platform
+                          ADD UNIQUE KEY uk_platform_name_type (platform_name, platform_type)
+                        """);
+            }
+            log.info("已创建 geo_platform.uk_platform_name_type");
+        }
+
+        String[] contentPlatforms = {
+                "搜狐", "网易", "今日头条", "淘江湖", "腾讯新闻", "携程",
+                "bilibili", "知乎", "trip", "官网", "公众号", "小红书"
+        };
+        int sort = 101;
+        try (Statement statement = connection.createStatement()) {
+            for (String name : contentPlatforms) {
+                String safe = name.replace("'", "''");
+                statement.execute("""
+                        INSERT INTO geo_platform (platform_name, platform_type, sort_order, is_active)
+                        VALUES ('%s', '内容发布平台', %d, 1)
+                        ON DUPLICATE KEY UPDATE is_active = 1, sort_order = VALUES(sort_order)
+                        """.formatted(safe, sort));
+                sort++;
+            }
+        }
+        log.info("内容发布平台默认数据已同步");
+    }
+
+    private boolean indexExists(Connection connection, String table, String indexName) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("""
+                     SELECT COUNT(1) AS cnt
+                     FROM INFORMATION_SCHEMA.STATISTICS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = '%s'
+                       AND INDEX_NAME = '%s'
+                     """.formatted(table, indexName))) {
+            return rs.next() && rs.getInt("cnt") > 0;
+        }
     }
 
     private boolean columnExists(Connection connection, String table, String column) throws Exception {
