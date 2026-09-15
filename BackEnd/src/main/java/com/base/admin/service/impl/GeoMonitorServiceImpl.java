@@ -2,6 +2,7 @@ package com.base.admin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.base.admin.common.Constants;
 import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.GeoBoardQueryDTO;
 import com.base.admin.domain.dto.GeoDailyBatchDTO;
@@ -15,6 +16,7 @@ import com.base.admin.domain.entity.GeoBoardPeriodStat;
 import com.base.admin.domain.entity.GeoMonitorDaily;
 import com.base.admin.domain.entity.GeoTopic;
 import com.base.admin.domain.entity.GeoYearTarget;
+import com.base.admin.domain.entity.SysUser;
 import com.base.admin.domain.enums.GeoPeriodType;
 import com.base.admin.domain.vo.GeoChartPointVO;
 import com.base.admin.domain.vo.GeoDailyBoardVO;
@@ -26,6 +28,7 @@ import com.base.admin.domain.vo.GeoBoardCompareSummaryVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoLatestDateVO;
 import com.base.admin.domain.vo.GeoMonthlyBoardVO;
+import com.base.admin.domain.vo.GeoOwnerOptionVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
 import com.base.admin.domain.vo.GeoWeeklyBoardVO;
 import com.base.admin.domain.vo.GeoYearlyBoardVO;
@@ -34,6 +37,7 @@ import com.base.admin.mapper.GeoBoardPeriodStatMapper;
 import com.base.admin.mapper.GeoMonitorDailyMapper;
 import com.base.admin.mapper.GeoTopicMapper;
 import com.base.admin.mapper.GeoYearTargetMapper;
+import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.GeoMonitorService;
 import com.base.admin.service.GeoPlatformService;
 import com.base.admin.service.GeoTopicService;
@@ -83,6 +87,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private final GeoBoardPeriodStatMapper periodStatMapper;
     private final GeoTopicService topicService;
     private final GeoPlatformService platformService;
+    private final SysUserMapper userMapper;
 
     @Override
     public PageResult<GeoDailyVO> listDaily(GeoDailyQueryDTO query) {
@@ -92,13 +97,15 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .orderByAsc(GeoMonitorDaily::getId);
         Page<GeoMonitorDaily> page = dailyMapper.selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         Map<Long, String> topicNames = topicNameMap();
-        List<GeoDailyVO> rows = page.getRecords().stream().map(e -> toVo(e, topicNames)).toList();
+        Map<Long, String> ownerNames = ownerDisplayMap(page.getRecords());
+        List<GeoDailyVO> rows = page.getRecords().stream().map(e -> toVo(e, topicNames, ownerNames)).toList();
         return new PageResult<>(page.getTotal(), rows);
     }
 
     @Override
     public GeoDailyVO getDaily(Long id) {
-        return toVo(requireDaily(id), topicNameMap());
+        GeoMonitorDaily entity = requireDaily(id);
+        return toVo(entity, topicNameMap(), ownerDisplayMap(List.of(entity)));
     }
 
     @Override
@@ -135,8 +142,10 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             GeoDailyDTO one = new GeoDailyDTO();
             one.setId(item.getId());
             one.setInspectDate(dto.getInspectDate());
+            one.setTermType(dto.getTermType());
             one.setTopicId(dto.getTopicId());
             one.setKeyword(dto.getKeyword());
+            one.setOwnerUserId(dto.getOwnerUserId());
             one.setOwnerName(dto.getOwnerName());
             one.setPlatform(item.getPlatform());
             one.setMentioned(item.getMentioned());
@@ -182,6 +191,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             }
             topicService.getById(group.getTopicId());
             String keyword = group.getKeyword().trim();
+            String termType = normalizeTermType(group.getTermType());
             String ownerName = StringUtils.hasText(group.getOwnerName()) ? group.getOwnerName().trim() : null;
             String topicName = topicNames.getOrDefault(group.getTopicId(), "");
             boolean datePeriodLocked = isInspectDatePeriodLocked(group.getInspectDate());
@@ -196,7 +206,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 }
                 platformCount++;
                 String platform = item.getPlatform().trim();
-                String uk = group.getInspectDate() + "|" + platform + "|" + keyword;
+                String uk = group.getInspectDate() + "|" + platform + "|" + keyword + "|" + termType;
                 if (!seenKeys.add(uk)) {
                     throw new BusinessException("提交数据存在重复：" + group.getInspectDate()
                             + " / " + platform + " / 「" + keyword + "」");
@@ -205,8 +215,10 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 GeoDailyDTO one = new GeoDailyDTO();
                 one.setId(item.getId());
                 one.setInspectDate(group.getInspectDate());
+                one.setTermType(termType);
                 one.setTopicId(group.getTopicId());
                 one.setKeyword(keyword);
+                one.setOwnerUserId(group.getOwnerUserId());
                 one.setOwnerName(ownerName);
                 one.setPlatform(platform);
                 one.setMentioned(item.getMentioned());
@@ -218,7 +230,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 one.setCompetitors(item.getCompetitors());
 
                 GeoMonitorDaily existing = dailyMapper.selectUkIncludeDeleted(
-                        group.getInspectDate(), platform, keyword);
+                        group.getInspectDate(), platform, keyword, termType);
                 if (existing != null && Integer.valueOf(1).equals(existing.getBoardLocked())) {
                     conflicts.add(buildConflict(existing, topicName,
                             "该记录已被周/月/年统计，不可覆盖"));
@@ -315,7 +327,9 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         platformService.getOrCreate(dto.getPlatform());
         String platform = dto.getPlatform().trim();
         String keyword = dto.getKeyword().trim();
-        GeoMonitorDaily existing = dailyMapper.selectUkIncludeDeleted(dto.getInspectDate(), platform, keyword);
+        String termType = normalizeTermType(dto.getTermType());
+        dto.setTermType(termType);
+        GeoMonitorDaily existing = dailyMapper.selectUkIncludeDeleted(dto.getInspectDate(), platform, keyword, termType);
         if (existing == null && dto.getId() != null) {
             existing = dailyMapper.selectById(dto.getId());
         }
@@ -350,6 +364,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .eq(GeoMonitorDaily::getKeyword, keyword.trim())
                 .orderByAsc(GeoMonitorDaily::getId));
         Map<Long, String> topicNames = topicNameMap();
+        Map<Long, String> ownerNames = ownerDisplayMap(records);
         GeoDailyGroupVO group = new GeoDailyGroupVO();
         group.setInspectDate(inspectDate);
         group.setKeyword(keyword.trim());
@@ -357,8 +372,11 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             GeoMonitorDaily first = records.getFirst();
             group.setTopicId(first.getTopicId());
             group.setTopicName(topicNames.getOrDefault(first.getTopicId(), ""));
+            group.setTermType(normalizeTermType(first.getTermType()));
+            group.setOwnerUserId(first.getOwnerUserId());
+            group.setOwnerName(resolveOwnerName(first, ownerNames));
         }
-        group.setItems(records.stream().map(e -> toVo(e, topicNames)).toList());
+        group.setItems(records.stream().map(e -> toVo(e, topicNames, ownerNames)).toList());
         return group;
     }
 
@@ -428,6 +446,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                             dto.setPlatform(group.platforms.get(p));
                             platformService.getOrCreate(dto.getPlatform());
                             dto.setKeyword(keyword.trim());
+                            dto.setTermType(Constants.TERM_TYPE_DAILY);
                             dto.setTopicId(topic.getId());
                             dto.setMentioned(parseMentioned(ExcelCellUtils.str(sheet, r, group.startCol + p)));
                             dto.setRankNo(parseRank(ExcelCellUtils.str(sheet, r, group.startCol + 2 + p)));
@@ -463,6 +482,23 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     @Override
     public List<String> listPlatforms() {
         return platformService.listAll().stream().map(p -> p.getPlatformName()).toList();
+    }
+
+    @Override
+    public List<GeoOwnerOptionVO> listOwnerOptions() {
+        List<SysUser> users = userMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getStatus, Constants.STATUS_ACTIVE)
+                .orderByAsc(SysUser::getUserId));
+        List<GeoOwnerOptionVO> options = new ArrayList<>();
+        for (SysUser user : users) {
+            GeoOwnerOptionVO option = new GeoOwnerOptionVO();
+            option.setUserId(user.getUserId());
+            option.setUsername(user.getUsername());
+            option.setNickname(user.getNickname());
+            option.setDisplayName(userDisplayName(user));
+            options.add(option);
+        }
+        return options;
     }
 
     @Override
@@ -900,6 +936,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
 
     private List<GeoDailyBoardVO.GeoDailySummaryDateVO> buildDailySummaryGroups(
             List<GeoMonitorDaily> records, Map<Long, String> topicNames) {
+        Map<Long, String> ownerNames = ownerDisplayMap(records);
         Map<String, Map<String, GeoDailyBoardVO.GeoDailySummaryTopicVO>> byDate = new LinkedHashMap<>();
         for (GeoMonitorDaily record : records) {
             if (!isActiveDaily(record) || record.getInspectDate() == null) {
@@ -907,7 +944,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             }
             String date = record.getInspectDate().toString();
             String keyword = record.getKeyword() == null ? "" : record.getKeyword();
-            String topicKey = (record.getTopicId() == null ? "0" : record.getTopicId()) + "\0" + keyword;
+            String termType = normalizeTermType(record.getTermType());
+            String topicKey = (record.getTopicId() == null ? "0" : record.getTopicId()) + "\0" + keyword + "\0" + termType;
             Map<String, GeoDailyBoardVO.GeoDailySummaryTopicVO> topics =
                     byDate.computeIfAbsent(date, k -> new LinkedHashMap<>());
             GeoDailyBoardVO.GeoDailySummaryTopicVO topic = topics.computeIfAbsent(topicKey, id -> {
@@ -915,11 +953,17 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 t.setTopicId(record.getTopicId());
                 t.setTopicName(topicNames.getOrDefault(record.getTopicId(), ""));
                 t.setKeyword(keyword);
-                t.setOwnerName(record.getOwnerName());
+                t.setTermType(termType);
+                t.setOwnerUserId(record.getOwnerUserId());
+                t.setOwnerName(resolveOwnerName(record, ownerNames));
                 return t;
             });
-            if (!StringUtils.hasText(topic.getOwnerName()) && StringUtils.hasText(record.getOwnerName())) {
-                topic.setOwnerName(record.getOwnerName());
+            if (!StringUtils.hasText(topic.getOwnerName())) {
+                String ownerName = resolveOwnerName(record, ownerNames);
+                if (StringUtils.hasText(ownerName)) {
+                    topic.setOwnerName(ownerName);
+                    topic.setOwnerUserId(record.getOwnerUserId());
+                }
             }
             GeoDailyBoardVO.GeoDailySummaryPlatformVO platform = new GeoDailyBoardVO.GeoDailySummaryPlatformVO();
             platform.setId(record.getId());
@@ -947,13 +991,14 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private List<GeoDailyBoardVO.GeoDailySummaryDateVO> buildDailyOwnerSummaryGroups(
             List<GeoMonitorDaily> records, Map<Long, String> topicNames) {
         Map<String, Map<String, GeoDailyBoardVO.GeoDailySummaryTopicVO>> byDate = new LinkedHashMap<>();
+        Map<Long, String> ownerNames = ownerDisplayMap(records);
         for (GeoMonitorDaily record : records) {
             if (!isActiveDaily(record) || record.getInspectDate() == null) {
                 continue;
             }
             String date = record.getInspectDate().toString();
             String ownerKey = ownerDimKey(record);
-            String ownerName = ownerDimName(ownerKey);
+            String ownerName = ownerDimName(resolveOwnerName(record, ownerNames));
             Map<String, GeoDailyBoardVO.GeoDailySummaryTopicVO> owners =
                     byDate.computeIfAbsent(date, k -> new LinkedHashMap<>());
             GeoDailyBoardVO.GeoDailySummaryTopicVO owner = owners.computeIfAbsent(ownerKey, id -> {
@@ -961,6 +1006,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 t.setTopicId(0L);
                 t.setTopicName(ownerName);
                 t.setOwnerName(ownerName);
+                t.setOwnerUserId(record.getOwnerUserId());
                 t.setKeyword("");
                 return t;
             });
@@ -1395,6 +1441,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         Map<Long, String> topicNames = topicNameMap();
         List<YearAgg> rows = new ArrayList<>();
         if (dim == BoardDim.OWNER) {
+            Map<Long, String> ownerNames = ownerDisplayMap(records);
             Map<String, List<GeoMonitorDaily>> grouped = records.stream()
                     .collect(Collectors.groupingBy(r -> r.getInspectDate().getYear() + "\0" + ownerGroupKey(r) + "\0" + r.getPlatform(),
                             LinkedHashMap::new, Collectors.toList()));
@@ -1404,8 +1451,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 LocalDate ts = LocalDate.of(year, 1, 1);
                 LocalDate te = LocalDate.of(year, 12, 31);
                 String label = String.valueOf(year);
-                String ownerKey = ownerDimKey(first);
-                rows.add(YearAgg.live(yearPeriodKey(label, ts, te), label, ownerGroupKey(first), ownerDimName(ownerKey),
+                rows.add(YearAgg.live(yearPeriodKey(label, ts, te), label, ownerGroupKey(first),
+                        ownerDimName(resolveOwnerName(first, ownerNames)),
                         null, first.getPlatform(), ts, te, new BigDecimal("80.00"), list));
             });
             return rows;
@@ -1461,8 +1508,10 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         platformService.getOrCreate(dto.getPlatform());
         String platform = dto.getPlatform().trim();
         String keyword = dto.getKeyword().trim();
+        String termType = normalizeTermType(dto.getTermType());
+        dto.setTermType(termType);
         assertDailyMutable(dto.getInspectDate(), null);
-        GeoMonitorDaily existing = dailyMapper.selectUkIncludeDeleted(dto.getInspectDate(), platform, keyword);
+        GeoMonitorDaily existing = dailyMapper.selectUkIncludeDeleted(dto.getInspectDate(), platform, keyword, termType);
         if (existing == null && dto.getId() != null) {
             existing = dailyMapper.selectById(dto.getId());
             if (existing == null) {
@@ -1477,7 +1526,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         }
         if (existing != null && dto.getId() != null && !existing.getId().equals(dto.getId())
                 && Integer.valueOf(1).equals(existing.getIsActive())) {
-            throw new BusinessException("同一天、同一平台、同一关键字已存在记录");
+            throw new BusinessException("同一天、同一平台、同一关键字、同一长短词已存在记录");
         }
         if (existing == null) {
             if (!allowInsert) {
@@ -1516,9 +1565,10 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
 
     private void fillDaily(GeoMonitorDaily entity, GeoDailyDTO dto) {
         entity.setInspectDate(dto.getInspectDate());
+        entity.setTermType(normalizeTermType(dto.getTermType()));
         entity.setPlatform(dto.getPlatform().trim());
         entity.setKeyword(dto.getKeyword().trim());
-        entity.setOwnerName(StringUtils.hasText(dto.getOwnerName()) ? dto.getOwnerName().trim() : null);
+        applyOwner(entity, dto);
         entity.setTopicId(dto.getTopicId());
         entity.setMentioned(dto.getMentioned() != null ? dto.getMentioned() : 0);
         entity.setRankNo(dto.getRankNo());
@@ -1548,6 +1598,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .le(query.getEndDate() != null, GeoMonitorDaily::getInspectDate, query.getEndDate())
                 .eq(query.getTopicId() != null, GeoMonitorDaily::getTopicId, query.getTopicId())
                 .like(StringUtils.hasText(query.getKeyword()), GeoMonitorDaily::getKeyword, query.getKeyword())
+                .eq(StringUtils.hasText(query.getTermType()), GeoMonitorDaily::getTermType, normalizeTermType(query.getTermType()))
+                .eq(query.getOwnerUserId() != null, GeoMonitorDaily::getOwnerUserId, query.getOwnerUserId())
                 .like(StringUtils.hasText(query.getOwnerName()), GeoMonitorDaily::getOwnerName, query.getOwnerName())
                 .in(!platformFilter.isEmpty(), GeoMonitorDaily::getPlatform, platformFilter)
                 .eq(query.getMentioned() != null, GeoMonitorDaily::getMentioned, query.getMentioned())
@@ -1607,13 +1659,15 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .collect(Collectors.toMap(GeoTopic::getId, GeoTopic::getTopicName, (a, b) -> a));
     }
 
-    private GeoDailyVO toVo(GeoMonitorDaily e, Map<Long, String> topicNames) {
+    private GeoDailyVO toVo(GeoMonitorDaily e, Map<Long, String> topicNames, Map<Long, String> ownerNames) {
         GeoDailyVO vo = new GeoDailyVO();
         vo.setId(e.getId());
         vo.setInspectDate(e.getInspectDate());
+        vo.setTermType(normalizeTermType(e.getTermType()));
         vo.setPlatform(e.getPlatform());
         vo.setKeyword(e.getKeyword());
-        vo.setOwnerName(e.getOwnerName());
+        vo.setOwnerUserId(e.getOwnerUserId());
+        vo.setOwnerName(resolveOwnerName(e, ownerNames));
         vo.setTopicId(e.getTopicId());
         vo.setTopicName(topicNames.getOrDefault(e.getTopicId(), ""));
         vo.setMentioned(e.getMentioned());
@@ -1627,6 +1681,60 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         vo.setCreateTime(e.getCreateTime());
         vo.setUpdateTime(e.getUpdateTime());
         return vo;
+    }
+
+    private void applyOwner(GeoMonitorDaily entity, GeoDailyDTO dto) {
+        if (dto.getOwnerUserId() != null) {
+            SysUser user = userMapper.selectById(dto.getOwnerUserId());
+            if (user == null) {
+                throw new BusinessException("负责人用户不存在");
+            }
+            entity.setOwnerUserId(user.getUserId());
+            entity.setOwnerName(userDisplayName(user));
+            return;
+        }
+        entity.setOwnerUserId(null);
+        entity.setOwnerName(StringUtils.hasText(dto.getOwnerName()) ? dto.getOwnerName().trim() : null);
+    }
+
+    private Map<Long, String> ownerDisplayMap(List<GeoMonitorDaily> records) {
+        List<Long> ids = records.stream()
+                .map(GeoMonitorDaily::getOwnerUserId)
+                .filter(id -> id != null)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return userMapper.selectList(new LambdaQueryWrapper<SysUser>().in(SysUser::getUserId, ids)).stream()
+                .collect(Collectors.toMap(SysUser::getUserId, GeoMonitorServiceImpl::userDisplayName, (a, b) -> a));
+    }
+
+    private static String resolveOwnerName(GeoMonitorDaily record, Map<Long, String> ownerNames) {
+        if (record == null) {
+            return null;
+        }
+        if (record.getOwnerUserId() != null && ownerNames != null && ownerNames.containsKey(record.getOwnerUserId())) {
+            return ownerNames.get(record.getOwnerUserId());
+        }
+        return StringUtils.hasText(record.getOwnerName()) ? record.getOwnerName().trim() : null;
+    }
+
+    private static String userDisplayName(SysUser user) {
+        if (user == null) {
+            return "";
+        }
+        if (StringUtils.hasText(user.getNickname())) {
+            return user.getNickname().trim();
+        }
+        return StringUtils.hasText(user.getUsername()) ? user.getUsername().trim() : "";
+    }
+
+    private static String normalizeTermType(String raw) {
+        if (Constants.TERM_TYPE_WEEKLY.equals(raw)) {
+            return Constants.TERM_TYPE_WEEKLY;
+        }
+        return Constants.TERM_TYPE_DAILY;
     }
 
     private List<DateGroup> parseDateGroups(Sheet sheet, int lastCol) {
@@ -1729,6 +1837,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                     return keyFn.apply(r) + "\0" + groupKey + "\0" + r.getPlatform();
                 }, LinkedHashMap::new, Collectors.toList()));
         List<TrendAgg> rows = new ArrayList<>();
+        Map<Long, String> ownerNames = ownerDisplayMap(records);
         for (List<GeoMonitorDaily> list : grouped.values()) {
             GeoMonitorDaily first = list.getFirst();
             int total = list.size();
@@ -1740,9 +1849,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             String groupName;
             Long topicId;
             if (dim == BoardDim.OWNER) {
-                String ownerKey = ownerDimKey(first);
                 groupKey = ownerGroupKey(first);
-                groupName = ownerDimName(ownerKey);
+                groupName = ownerDimName(resolveOwnerName(first, ownerNames));
                 topicId = null;
             } else {
                 topicId = first.getTopicId();
@@ -1880,14 +1988,20 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     }
 
     private static String ownerDimKey(GeoMonitorDaily record) {
-        if (record == null || !StringUtils.hasText(record.getOwnerName())) {
+        if (record == null) {
             return "";
         }
-        return record.getOwnerName().trim();
+        if (record.getOwnerUserId() != null) {
+            return "u:" + record.getOwnerUserId();
+        }
+        if (StringUtils.hasText(record.getOwnerName())) {
+            return "n:" + record.getOwnerName().trim();
+        }
+        return "";
     }
 
-    private static String ownerDimName(String ownerKey) {
-        return StringUtils.hasText(ownerKey) ? ownerKey : "未指定";
+    private static String ownerDimName(String ownerName) {
+        return StringUtils.hasText(ownerName) ? ownerName : "未指定";
     }
 
     private static String rowKey(String periodKey, String groupKey, String platform) {

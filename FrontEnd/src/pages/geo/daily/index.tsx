@@ -10,14 +10,16 @@ import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import {
   deleteGeoDailyApi,
   getGeoDailyListApi,
+  getGeoOwnerOptionsApi,
   getGeoPlatformsApi,
   getGeoTopicOptionsApi,
   importGeoDailyApi,
 } from '@/api/geo';
-import type { GeoDailyVO, GeoTopic } from '@/types/geo';
+import type { GeoDailyVO, GeoOwnerOption, GeoTopic } from '@/types/geo';
 import { formatDateTime, toDateTimeParam } from '@/utils/datetime';
 import EditDailyModal from './components/EditDailyModal';
 import AddDailyDrawer from './components/AddDailyDrawer';
+import { GEO_TERM_TYPES } from '@/constants/geo';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
 
@@ -26,6 +28,7 @@ const DailyPage = memo(function DailyPage() {
   const actionRef = useRef<ActionType>(null);
   const [topics, setTopics] = useState<GeoTopic[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
+  const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<GeoDailyVO | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -36,6 +39,7 @@ const DailyPage = memo(function DailyPage() {
   const refreshMeta = () => {
     getGeoTopicOptionsApi().then(setTopics);
     getGeoPlatformsApi().then(setPlatforms);
+    getGeoOwnerOptionsApi().then(setOwners);
   };
 
   useEffect(() => {
@@ -86,7 +90,31 @@ const DailyPage = memo(function DailyPage() {
       render: (_, r) => r.topicName,
     },
     { title: '关键字', dataIndex: 'keyword', ellipsis: true, width: 220 },
-    { title: '负责人', dataIndex: 'ownerName', width: 100, ellipsis: true },
+    {
+      title: '长短词',
+      dataIndex: 'termType',
+      width: 100,
+      valueType: 'select',
+      valueEnum: {
+        日巡查: { text: '日巡查' },
+        周巡查: { text: '周巡查' },
+      },
+      fieldProps: { options: [...GEO_TERM_TYPES] },
+      render: (_, r) => r.termType || '日巡查',
+    },
+    {
+      title: '负责人',
+      dataIndex: 'ownerUserId',
+      width: 120,
+      ellipsis: true,
+      valueType: 'select',
+      fieldProps: {
+        showSearch: true,
+        optionFilterProp: 'label',
+        options: owners.map((u) => ({ label: u.displayName, value: u.userId })),
+      },
+      render: (_, r) => r.ownerName || '-',
+    },
     {
       title: '提及',
       dataIndex: 'mentioned',
@@ -244,7 +272,8 @@ const DailyPage = memo(function DailyPage() {
             endDate: range?.[1],
             topicId: params.topicId,
             keyword: params.keyword,
-            ownerName: params.ownerName,
+            termType: params.termType,
+            ownerUserId: params.ownerUserId,
             platforms: params.platforms,
             mentioned: params.mentioned,
             rankNoMin: params.rankNoMin,
@@ -283,6 +312,7 @@ const DailyPage = memo(function DailyPage() {
         record={editing}
         topics={topics}
         platforms={platforms}
+        owners={owners}
         onOpenChange={(v) => {
           setEditOpen(v);
           if (!v) setEditing(null);
@@ -297,6 +327,7 @@ const DailyPage = memo(function DailyPage() {
         open={addOpen}
         topics={topics}
         platforms={platforms}
+        owners={owners}
         onOpenChange={setAddOpen}
         onSuccess={() => {
           refreshMeta();

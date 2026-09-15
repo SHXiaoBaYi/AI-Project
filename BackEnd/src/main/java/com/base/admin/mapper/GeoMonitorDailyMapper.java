@@ -13,16 +13,19 @@ import java.time.LocalDate;
 public interface GeoMonitorDailyMapper extends BaseMapper<GeoMonitorDaily> {
 
     @Select("""
-            SELECT id, inspect_date, platform, keyword, topic_id, mentioned, rank_no, recommend_status,
+            SELECT id, inspect_date, term_type, platform, keyword, owner_user_id, owner_name, topic_id,
+                   mentioned, rank_no, recommend_status,
                    screenshot_url, third_party_url, negative_content, competitors, board_locked,
                    create_by, create_time, update_by, update_time, is_active
             FROM geo_monitor_daily
             WHERE inspect_date = #{inspectDate} AND platform = #{platform} AND keyword = #{keyword}
+              AND term_type = #{termType}
             LIMIT 1
             """)
     GeoMonitorDaily selectUkIncludeDeleted(@Param("inspectDate") LocalDate inspectDate,
                                            @Param("platform") String platform,
-                                           @Param("keyword") String keyword);
+                                           @Param("keyword") String keyword,
+                                           @Param("termType") String termType);
 
     @Update("UPDATE geo_monitor_daily SET is_active = 1 WHERE id = #{id}")
     int restoreActive(@Param("id") Long id);

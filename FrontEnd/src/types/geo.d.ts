@@ -12,11 +12,20 @@ export interface GeoPlatform {
   remark?: string;
 }
 
+export interface GeoOwnerOption {
+  userId: number;
+  displayName: string;
+  username?: string;
+  nickname?: string;
+}
+
 export interface GeoDailyVO {
   id: number;
   inspectDate: string;
+  termType?: string;
   platform: string;
   keyword: string;
+  ownerUserId?: number;
   ownerName?: string;
   topicId: number;
   topicName: string;
@@ -35,8 +44,10 @@ export interface GeoDailyVO {
 export interface GeoDailyDTO {
   id?: number;
   inspectDate: string;
+  termType?: string;
   platform: string;
   keyword: string;
+  ownerUserId?: number;
   ownerName?: string;
   topicId: number;
   mentioned?: number;
@@ -62,16 +73,20 @@ export interface GeoDailyPlatformItem {
 
 export interface GeoDailyBatchDTO {
   inspectDate: string;
+  termType?: string;
   topicId: number;
   keyword: string;
+  ownerUserId?: number;
   ownerName?: string;
   items: GeoDailyPlatformItem[];
 }
 
 export interface GeoDailyBulkGroupDTO {
   inspectDate: string;
+  termType?: string;
   topicId: number;
   keyword: string;
+  ownerUserId?: number;
   ownerName?: string;
   items: GeoDailyPlatformItem[];
 }
@@ -101,9 +116,12 @@ export interface GeoDailyBulkSaveResult {
 
 export interface GeoDailyGroup {
   inspectDate: string;
+  termType?: string;
   topicId?: number;
   topicName?: string;
   keyword: string;
+  ownerUserId?: number;
+  ownerName?: string;
   items: GeoDailyVO[];
 }
 
@@ -241,6 +259,8 @@ export interface GeoDailySummaryTopic {
   topicId: number;
   topicName: string;
   keyword?: string;
+  termType?: string;
+  ownerUserId?: number;
   ownerName?: string;
   platforms: GeoDailySummaryPlatform[];
 }

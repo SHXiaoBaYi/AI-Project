@@ -18,6 +18,9 @@ public class GeoDailyBulkGroupDTO {
     @Schema(description = "巡查日期", requiredMode = Schema.RequiredMode.REQUIRED, example = "2026-09-15")
     private LocalDate inspectDate;
 
+    @Schema(description = "长短词（日巡查/周巡查，默认日巡查）", example = "日巡查")
+    private String termType;
+
     @NotNull(message = "话题不能为空")
     @Schema(description = "话题ID", requiredMode = Schema.RequiredMode.REQUIRED, example = "1")
     private Long topicId;
@@ -26,7 +29,10 @@ public class GeoDailyBulkGroupDTO {
     @Schema(description = "关键字/提问问题", requiredMode = Schema.RequiredMode.REQUIRED, example = "新疆适合寄内地的礼品")
     private String keyword;
 
-    @Schema(description = "负责人（与关键字绑定）", example = "张三")
+    @Schema(description = "负责人用户ID（关联 sys_user）", example = "1", nullable = true)
+    private Long ownerUserId;
+
+    @Schema(description = "负责人展示名（兼容旧数据）", example = "张三")
     private String ownerName;
 
     @Valid

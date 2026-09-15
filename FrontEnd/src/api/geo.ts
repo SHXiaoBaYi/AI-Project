@@ -11,6 +11,7 @@ import type {
   GeoDailyVO,
   GeoImportResult,
   GeoMonthlyBoard,
+  GeoOwnerOption,
   GeoPersistResult,
   GeoPlatform,
   GeoTopic,
@@ -65,6 +66,8 @@ export function getGeoDailyListApi(
     endDate?: string;
     topicId?: number;
     keyword?: string;
+    termType?: string;
+    ownerUserId?: number;
     ownerName?: string;
     platforms?: string[];
     mentioned?: number;
@@ -130,6 +133,10 @@ export function uploadGeoScreenshotApi(file: File) {
 export async function getGeoPlatformsApi() {
   const list = await getGeoPlatformOptionsApi();
   return list.map((p) => p.platformName);
+}
+
+export function getGeoOwnerOptionsApi() {
+  return request.get<unknown, GeoOwnerOption[]>('/geo/daily/owners');
 }
 
 export function getGeoWeeklyBoardApi(data: GeoBoardQuery) {

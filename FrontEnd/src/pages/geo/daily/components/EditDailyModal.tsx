@@ -11,7 +11,8 @@ import dayjs from 'dayjs';
 import BaseModalForm from '@/components/BaseModalForm';
 import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import { updateGeoDailyApi, uploadGeoScreenshotApi } from '@/api/geo';
-import type { GeoDailyVO, GeoTopic } from '@/types/geo';
+import type { GeoDailyVO, GeoOwnerOption, GeoTopic } from '@/types/geo';
+import { GEO_TERM_TYPES, GEO_TERM_TYPE_DEFAULT } from '@/constants/geo';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
 
@@ -20,6 +21,7 @@ interface EditDailyModalProps {
   record: GeoDailyVO | null;
   topics: GeoTopic[];
   platforms: string[];
+  owners: GeoOwnerOption[];
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }
@@ -29,6 +31,7 @@ const EditDailyModal = memo(function EditDailyModal({
   record,
   topics,
   platforms,
+  owners,
   onOpenChange,
   onSuccess,
 }: EditDailyModalProps) {
@@ -53,6 +56,7 @@ const EditDailyModal = memo(function EditDailyModal({
           ? {
               ...record,
               inspectDate: dayjs(record.inspectDate),
+              termType: record.termType || GEO_TERM_TYPE_DEFAULT,
             }
           : undefined
       }
@@ -63,7 +67,8 @@ const EditDailyModal = memo(function EditDailyModal({
           inspectDate: values.inspectDate ? dayjs(values.inspectDate).format('YYYY-MM-DD') : record.inspectDate,
           platform: values.platform,
           keyword: values.keyword,
-          ownerName: values.ownerName,
+          termType: values.termType || GEO_TERM_TYPE_DEFAULT,
+          ownerUserId: values.ownerUserId,
           topicId: values.topicId,
           mentioned: values.mentioned,
           rankNo: values.rankNo,
@@ -101,10 +106,27 @@ const EditDailyModal = memo(function EditDailyModal({
           label='关键字'
           rules={[{ required: true, message: '请输入关键字' }]}
         />
-        <ProFormText
-          name='ownerName'
+        <ProFormSelect
+          name='termType'
+          label='长短词'
+          rules={[{ required: true, message: '请选择长短词' }]}
+          options={[...GEO_TERM_TYPES]}
+          initialValue={GEO_TERM_TYPE_DEFAULT}
+        />
+        <ProFormSelect
+          name='ownerUserId'
           label='负责人'
-          placeholder='与关键字绑定'
+          placeholder='选择用户（展示昵称或用户名）'
+          showSearch
+          options={
+            record?.ownerUserId && !owners.some((u) => u.userId === record.ownerUserId)
+              ? [
+                  { label: record.ownerName || String(record.ownerUserId), value: record.ownerUserId },
+                  ...owners.map((u) => ({ label: u.displayName, value: u.userId })),
+                ]
+              : owners.map((u) => ({ label: u.displayName, value: u.userId }))
+          }
+          fieldProps={{ optionFilterProp: 'label', allowClear: true }}
         />
         <ProFormSelect
           name='mentioned'

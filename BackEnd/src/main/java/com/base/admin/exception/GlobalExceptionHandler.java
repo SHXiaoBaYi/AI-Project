@@ -61,8 +61,8 @@ public class GlobalExceptionHandler {
             root = root.getCause();
         }
         String detail = root.getMessage();
-        if (detail != null && detail.contains("owner_name")) {
-            return Result.fail("数据库缺少负责人字段 owner_name，请重启后端完成自动迁移后重试");
+        if (detail != null && (detail.contains("owner_name") || detail.contains("term_type") || detail.contains("owner_user_id"))) {
+            return Result.fail("数据库结构未同步，请重启后端完成自动迁移后重试");
         }
         if (detail != null && (detail.contains("Unknown column") || detail.contains("doesn't exist"))) {
             return Result.fail("数据库结构未同步：" + detail);

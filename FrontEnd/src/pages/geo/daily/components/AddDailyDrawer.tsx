@@ -1,10 +1,13 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { App, Button, DatePicker, Drawer, Input, InputNumber, Modal, Select, Space, Table, Tabs, Upload } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { useSelector } from 'react-redux';
 import dayjs, { type Dayjs } from 'dayjs';
 import { saveGeoDailyBulkApi, uploadGeoScreenshotApi } from '@/api/geo';
-import type { GeoDailyBulkSaveResult, GeoTopic } from '@/types/geo';
+import type { GeoDailyBulkSaveResult, GeoOwnerOption, GeoTopic } from '@/types/geo';
+import type { RootState } from '@/store';
 import GeoScreenshot from '@/components/geo/GeoScreenshot';
+import { GEO_TERM_TYPES, GEO_TERM_TYPE_DEFAULT } from '@/constants/geo';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
 
@@ -23,7 +26,8 @@ type TopicRow = {
   rowKey: string;
   topicId?: number;
   keyword?: string;
-  ownerName?: string;
+  termType?: string;
+  ownerUserId?: number;
   platforms: PlatformRow[];
 };
 
@@ -45,19 +49,21 @@ function createPlatformRows(platforms: string[]): PlatformRow[] {
   }));
 }
 
-function createTopicRow(platforms: string[]): TopicRow {
+function createTopicRow(platforms: string[], defaultOwnerUserId?: number): TopicRow {
   return {
     rowKey: uid('topic'),
     keyword: '',
+    termType: GEO_TERM_TYPE_DEFAULT,
+    ownerUserId: defaultOwnerUserId,
     platforms: createPlatformRows(platforms),
   };
 }
 
-function createDateTab(inspectDate: string, platforms: string[]): DateTab {
+function createDateTab(inspectDate: string, platforms: string[], defaultOwnerUserId?: number): DateTab {
   return {
     key: inspectDate,
     inspectDate,
-    topics: [createTopicRow(platforms)],
+    topics: [createTopicRow(platforms, defaultOwnerUserId)],
   };
 }
 
@@ -65,6 +71,7 @@ interface AddDailyDrawerProps {
   open: boolean;
   topics: GeoTopic[];
   platforms: string[];
+  owners: GeoOwnerOption[];
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }
@@ -73,10 +80,12 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   open,
   topics,
   platforms,
+  owners,
   onOpenChange,
   onSuccess,
 }: AddDailyDrawerProps) {
   const { message, modal } = App.useApp();
+  const currentUserId = useSelector((state: RootState) => state.user.userInfo?.userId);
   const [tabs, setTabs] = useState<DateTab[]>([]);
   const [activeKey, setActiveKey] = useState<string>();
   const [saving, setSaving] = useState(false);
@@ -86,7 +95,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   useEffect(() => {
     if (!open) return;
     const date = dayjs().format('YYYY-MM-DD');
-    const first = createDateTab(date, platforms);
+    const first = createDateTab(date, platforms, currentUserId);
     setTabs([first]);
     setActiveKey(first.key);
     setPendingDate(dayjs(date));
@@ -95,6 +104,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   }, [open]);
 
   const topicOptions = useMemo(() => topics.map((t) => ({ label: t.topicName, value: t.id })), [topics]);
+  const ownerOptions = useMemo(() => owners.map((u) => ({ label: u.displayName, value: u.userId })), [owners]);
 
   const updateTopic = (tabKey: string, rowKey: string, patch: Partial<TopicRow>) => {
     setTabs((prev) =>
@@ -131,7 +141,9 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
 
   const addTopic = (tabKey: string) => {
     setTabs((prev) =>
-      prev.map((tab) => (tab.key !== tabKey ? tab : { ...tab, topics: [...tab.topics, createTopicRow(platforms)] })),
+      prev.map((tab) =>
+        tab.key !== tabKey ? tab : { ...tab, topics: [...tab.topics, createTopicRow(platforms, currentUserId)] },
+      ),
     );
   };
 
@@ -158,7 +170,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       setAddDateOpen(false);
       return;
     }
-    const next = createDateTab(date, platforms);
+    const next = createDateTab(date, platforms, currentUserId);
     setTabs((prev) => [...prev, next]);
     setActiveKey(next.key);
     setAddDateOpen(false);
@@ -183,7 +195,8 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       inspectDate: string;
       topicId: number;
       keyword: string;
-      ownerName?: string;
+      termType?: string;
+      ownerUserId?: number;
       items: PlatformRow[];
       tabKey: string;
     }[] = [];
@@ -206,7 +219,8 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           inspectDate: tab.inspectDate,
           topicId: Number(row.topicId),
           keyword: String(row.keyword).trim(),
-          ownerName: String(row.ownerName || '').trim() || undefined,
+          termType: row.termType || GEO_TERM_TYPE_DEFAULT,
+          ownerUserId: row.ownerUserId,
           items: row.platforms,
           tabKey: tab.key,
         });
@@ -259,7 +273,8 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           inspectDate: g.inspectDate,
           topicId: g.topicId,
           keyword: g.keyword,
-          ownerName: g.ownerName,
+          termType: g.termType,
+          ownerUserId: g.ownerUserId,
           items: g.items.map((item) => ({
             platform: item.platform,
             mentioned: Number(item.mentioned) ? 1 : 0,
@@ -472,15 +487,34 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       ),
     },
     {
-      title: '负责人',
-      dataIndex: 'ownerName',
+      title: '长短词',
+      dataIndex: 'termType',
       width: 120,
       render: (v, row) => (
-        <Input
+        <Select
+          className='w-full'
           variant='borderless'
-          placeholder='与关键字绑定'
+          value={v || GEO_TERM_TYPE_DEFAULT}
+          options={[...GEO_TERM_TYPES]}
+          onChange={(val) => updateTopic(tabKey, row.rowKey, { termType: val })}
+        />
+      ),
+    },
+    {
+      title: '负责人',
+      dataIndex: 'ownerUserId',
+      width: 140,
+      render: (v, row) => (
+        <Select
+          className='w-full'
+          variant='borderless'
+          allowClear
+          showSearch
+          optionFilterProp='label'
+          placeholder='选择用户'
           value={v}
-          onChange={(e) => updateTopic(tabKey, row.rowKey, { ownerName: e.target.value })}
+          options={ownerOptions}
+          onChange={(val) => updateTopic(tabKey, row.rowKey, { ownerUserId: val })}
         />
       ),
     },

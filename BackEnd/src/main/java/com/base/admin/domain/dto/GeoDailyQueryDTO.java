@@ -27,6 +27,12 @@ public class GeoDailyQueryDTO extends PageQuery {
     @Schema(description = "关键字")
     private String keyword;
 
+    @Schema(description = "长短词（日巡查/周巡查）", example = "日巡查")
+    private String termType;
+
+    @Schema(description = "负责人用户ID", example = "1")
+    private Long ownerUserId;
+
     @Schema(description = "负责人")
     private String ownerName;
 

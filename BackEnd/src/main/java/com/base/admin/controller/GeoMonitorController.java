@@ -18,6 +18,7 @@ import com.base.admin.domain.vo.GeoDailyVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoLatestDateVO;
 import com.base.admin.domain.vo.GeoMonthlyBoardVO;
+import com.base.admin.domain.vo.GeoOwnerOptionVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
 import com.base.admin.domain.vo.GeoWeeklyBoardVO;
 import com.base.admin.domain.vo.GeoYearlyBoardVO;
@@ -153,6 +154,13 @@ public class GeoMonitorController {
     @RequiresPermission("geo:daily:list")
     public Result<List<String>> platforms() {
         return Result.ok(monitorService.listPlatforms());
+    }
+
+    @Operation(summary = "负责人下拉（系统用户，展示昵称或用户名）")
+    @GetMapping("/daily/owners")
+    @RequiresPermission("geo:daily:list")
+    public Result<List<GeoOwnerOptionVO>> owners() {
+        return Result.ok(monitorService.listOwnerOptions());
     }
 
     @Operation(summary = "周报看板（落库优先，未落库实时聚合）")

@@ -32,6 +32,8 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v5_geo_board_snapshot.sql"));
             ensureBoardLockedColumn(connection);
             ensureOwnerNameColumn(connection);
+            ensureTermTypeColumn(connection);
+            ensureOwnerUserIdColumn(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -68,6 +70,49 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
         }
         log.info("已为 geo_monitor_daily 增加 owner_name 字段");
+    }
+
+    private void ensureTermTypeColumn(Connection connection) throws Exception {
+        if (!columnExists(connection, "geo_monitor_daily", "term_type")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_monitor_daily
+                          ADD COLUMN term_type VARCHAR(16) NOT NULL DEFAULT '日巡查'
+                          COMMENT '长短词：日巡查/周巡查'
+                          AFTER inspect_date
+                        """);
+            }
+            log.info("已为 geo_monitor_daily 增加 term_type 字段");
+        } else {
+            log.info("geo_monitor_daily.term_type 已存在，跳过建列");
+        }
+        // 兜底：历史空值统一补成日巡查
+        try (Statement statement = connection.createStatement()) {
+            int updated = statement.executeUpdate("""
+                    UPDATE geo_monitor_daily
+                    SET term_type = '日巡查'
+                    WHERE term_type IS NULL OR term_type = ''
+                    """);
+            if (updated > 0) {
+                log.info("已将 {} 条空长短词补全为日巡查", updated);
+            }
+        }
+    }
+
+    private void ensureOwnerUserIdColumn(Connection connection) throws Exception {
+        if (columnExists(connection, "geo_monitor_daily", "owner_user_id")) {
+            log.info("geo_monitor_daily.owner_user_id 已存在，跳过");
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    ALTER TABLE geo_monitor_daily
+                      ADD COLUMN owner_user_id BIGINT NULL
+                      COMMENT '负责人用户ID（关联 sys_user）'
+                      AFTER keyword
+                    """);
+        }
+        log.info("已为 geo_monitor_daily 增加 owner_user_id 字段");
     }
 
     private boolean columnExists(Connection connection, String table, String column) throws Exception {

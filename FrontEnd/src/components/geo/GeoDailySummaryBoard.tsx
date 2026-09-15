@@ -16,13 +16,14 @@ export function buildDailySummaryFromRecords(records: GeoDailyVO[] = []): GeoDai
       topics = new Map();
       byDate.set(date, topics);
     }
-    const topicKey = `${row.topicId || 0}||${row.keyword || ''}`;
+    const topicKey = `${row.topicId || 0}||${row.keyword || ''}||${row.termType || '日巡查'}`;
     let topic = topics.get(topicKey);
     if (!topic) {
       topic = {
         topicId: row.topicId,
         topicName: row.topicName || '未命名话题',
         keyword: row.keyword,
+        termType: row.termType || '日巡查',
         ownerName: row.ownerName,
         platforms: [],
       };
@@ -271,6 +272,12 @@ export function GeoDailySummaryBoard({
         width: 200,
         ellipsis: true,
         render: (v) => v || '-',
+      },
+      {
+        title: '长短词',
+        dataIndex: 'termType',
+        width: 90,
+        render: (v) => v || '日巡查',
       },
       {
         title: '负责人',

@@ -15,6 +15,7 @@ import com.base.admin.domain.vo.GeoDailyVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoLatestDateVO;
 import com.base.admin.domain.vo.GeoMonthlyBoardVO;
+import com.base.admin.domain.vo.GeoOwnerOptionVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
 import com.base.admin.domain.vo.GeoWeeklyBoardVO;
 import com.base.admin.domain.vo.GeoYearlyBoardVO;
@@ -47,6 +48,8 @@ public interface GeoMonitorService {
     GeoImportResultVO importDaily(java.io.InputStream inputStream);
 
     List<String> listPlatforms();
+
+    List<GeoOwnerOptionVO> listOwnerOptions();
 
     GeoWeeklyBoardVO weeklyBoard(GeoBoardQueryDTO query);
 
