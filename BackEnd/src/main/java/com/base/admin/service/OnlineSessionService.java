@@ -1,6 +1,5 @@
 package com.base.admin.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.base.admin.domain.entity.SysUserOnline;
 import com.base.admin.mapper.SysUserOnlineMapper;
 import lombok.RequiredArgsConstructor;
@@ -48,40 +47,22 @@ public class OnlineSessionService {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expireTime = now.plusSeconds(Math.max(expirationMs / 1000, 60));
 
-        SysUserOnline online = findByUserId(userId);
-        if (online == null) {
-            online = new SysUserOnline();
-            online.setUserId(userId);
-            online.setUsername(username);
-            online.setTokenId(tokenId);
-            online.setIp(ip);
-            online.setUserAgent(trimUa(userAgent));
-            online.setLoginTime(now);
-            online.setExpireTime(expireTime);
-            online.setIsActive(1);
-            onlineMapper.insert(online);
-        } else {
-            online.setUsername(username);
-            online.setTokenId(tokenId);
-            online.setIp(ip);
-            online.setUserAgent(trimUa(userAgent));
-            online.setLoginTime(now);
-            online.setExpireTime(expireTime);
-            onlineMapper.updateById(online);
-        }
+        SysUserOnline online = new SysUserOnline();
+        online.setUserId(userId);
+        online.setUsername(username);
+        online.setTokenId(tokenId);
+        online.setIp(ip);
+        online.setUserAgent(trimUa(userAgent));
+        online.setLoginTime(now);
+        online.setExpireTime(expireTime);
+        // 并发登录用 upsert，避免 Duplicate entry
+        onlineMapper.upsert(online);
     }
 
     public void removeSession(Long userId) {
         if (userId != null) {
-            onlineMapper.deleteById(userId);
+            onlineMapper.physicalDeleteByUserId(userId);
         }
-    }
-
-    public void removeByTokenId(String tokenId) {
-        if (tokenId == null) {
-            return;
-        }
-        onlineMapper.delete(new LambdaQueryWrapper<SysUserOnline>().eq(SysUserOnline::getTokenId, tokenId));
     }
 
     private String trimUa(String ua) {
