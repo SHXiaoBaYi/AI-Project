@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { ProFormDateRangePicker, ProFormSelect, ProFormText, QueryFilter } from '@ant-design/pro-components';
 import { Card } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -115,45 +115,8 @@ const DayBoardPage = memo(function DayBoardPage() {
     };
   }, []);
 
-  const topicRows = useMemo(() => {
-    if (!activeDate) return board.rows ?? [];
-    return (board.rows ?? []).filter((r) => r.dateLabel === activeDate);
-  }, [board.rows, activeDate]);
-
-  const ownerRows = useMemo(() => {
-    if (!activeDate) return board.ownerRows ?? [];
-    return (board.ownerRows ?? []).filter((r) => r.dateLabel === activeDate);
-  }, [board.ownerRows, activeDate]);
-
-  const topicCharts = useMemo(() => {
-    if (!activeDate) {
-      return {
-        mentionChart: board.mentionChart,
-        firstMentionChart: board.firstMentionChart,
-        recommendChart: board.recommendChart,
-      };
-    }
-    return {
-      mentionChart: (board.mentionChart ?? []).filter((p) => p.axis === activeDate),
-      firstMentionChart: (board.firstMentionChart ?? []).filter((p) => p.axis === activeDate),
-      recommendChart: (board.recommendChart ?? []).filter((p) => p.axis === activeDate),
-    };
-  }, [board, activeDate]);
-
-  const ownerCharts = useMemo(() => {
-    if (!activeDate) {
-      return {
-        mentionChart: board.ownerMentionChart,
-        firstMentionChart: board.ownerFirstMentionChart,
-        recommendChart: board.ownerRecommendChart,
-      };
-    }
-    return {
-      mentionChart: (board.ownerMentionChart ?? []).filter((p) => p.axis === activeDate),
-      firstMentionChart: (board.ownerFirstMentionChart ?? []).filter((p) => p.axis === activeDate),
-      recommendChart: (board.ownerRecommendChart ?? []).filter((p) => p.axis === activeDate),
-    };
-  }, [board, activeDate]);
+  const topicRows = board.rows ?? [];
+  const ownerRows = board.ownerRows ?? [];
 
   if (!ready) {
     return <Card loading />;
@@ -212,14 +175,13 @@ const DayBoardPage = memo(function DayBoardPage() {
               onActiveDateChange={setActiveDate}
             />
             <GeoTrendBoard
-              key={`topic-trend-${activeDate || 'all'}`}
-              mentionChart={topicCharts.mentionChart}
-              firstMentionChart={topicCharts.firstMentionChart}
-              recommendChart={topicCharts.recommendChart}
+              mentionChart={board.mentionChart}
+              firstMentionChart={board.firstMentionChart}
+              recommendChart={board.recommendChart}
               rows={topicRows.map((r) => ({ ...r, axisLabel: r.dateLabel }))}
               axisTitle='日期'
               groupTitle='话题'
-              tableTitle={`日报明细（话题维度，当前日期：${activeDate || '全部'}）`}
+              tableTitle='日报明细（话题维度，完整日期范围）'
             />
           </>
         }
@@ -232,10 +194,9 @@ const DayBoardPage = memo(function DayBoardPage() {
               onActiveDateChange={setActiveDate}
             />
             <GeoTrendBoard
-              key={`owner-trend-${activeDate || 'all'}`}
-              mentionChart={ownerCharts.mentionChart}
-              firstMentionChart={ownerCharts.firstMentionChart}
-              recommendChart={ownerCharts.recommendChart}
+              mentionChart={board.ownerMentionChart}
+              firstMentionChart={board.ownerFirstMentionChart}
+              recommendChart={board.ownerRecommendChart}
               rows={ownerRows.map((r) => ({
                 ...r,
                 axisLabel: r.dateLabel,
@@ -243,7 +204,7 @@ const DayBoardPage = memo(function DayBoardPage() {
               }))}
               axisTitle='日期'
               groupTitle='负责人'
-              tableTitle={`日报明细（负责人维度，当前日期：${activeDate || '全部'}）`}
+              tableTitle='日报明细（负责人维度，完整日期范围）'
             />
           </>
         }

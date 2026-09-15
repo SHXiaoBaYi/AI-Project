@@ -20,7 +20,6 @@ export interface GeoTrendRow {
   recommendCountMom?: number | null;
   recommendCountYoy?: number | null;
   competitorTop?: string;
-  citePlatformTop?: string;
   fromSnapshot?: boolean;
 }
 
@@ -309,7 +308,6 @@ export function GeoTrendBoard({
         ] as ColumnsType<GeoTrendRow>)
       : []),
     { title: '竞品TOP', dataIndex: 'competitorTop', ellipsis: true },
-    { title: '引用平台TOP', dataIndex: 'citePlatformTop', ellipsis: true },
     {
       title: '来源',
       dataIndex: 'fromSnapshot',

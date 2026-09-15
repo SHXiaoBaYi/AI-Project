@@ -320,7 +320,7 @@ export function GeoDailySummaryBoard({
         />
         <div className='mb-2 text-sm text-neutral-500'>
           已切换到 <b>{activeGroup?.inspectDate}</b>，共 {activeGroup?.topics?.length || 0}{' '}
-          {dimension === 'owner' ? '位负责人' : '个话题'}；下方图表/明细同步过滤该日
+          {dimension === 'owner' ? '位负责人' : '个话题'}；下方提及率/首位提及率/推荐次数为完整日期范围
         </div>
         <Table<GeoDailySummaryTopic>
           key={`summary-table-${dimension}-${currentKey}`}
