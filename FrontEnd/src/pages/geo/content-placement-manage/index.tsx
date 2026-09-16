@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Modal, Progress, Select, Tabs, Tag, Upload } from 'antd';
+import { App, Button, Modal, Progress, Select, Tag, Upload } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
@@ -8,7 +8,6 @@ import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PlacementExecutionPanel from '@/components/geo/content-placement/PlacementExecutionPanel';
-import PublisherWeeklyBoard from '@/components/geo/content-placement/PublisherWeeklyBoard';
 import { AGG_COLOR, SOURCE_COLOR } from '@/components/geo/content-placement/constants';
 import {
   createGeoContentPlacementApi,
@@ -32,7 +31,7 @@ type AiProviderOption = {
   hint?: string;
 };
 
-/** 管理视角：目标问题生成/分配 + 发布人周看板 */
+/** 管理视角：目标问题生成/分配与投放进度 */
 const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
@@ -303,7 +302,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
     },
   ];
 
-  const questionPanel = (
+  return (
     <>
       <BaseProTable<GeoContentPlacementListItem>
         rowKey='id'
@@ -496,16 +495,6 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
         </div>
       </Modal>
     </>
-  );
-
-  return (
-    <Tabs
-      type='card'
-      items={[
-        { key: 'board', label: '发布人周看板', children: <PublisherWeeklyBoard /> },
-        { key: 'questions', label: '目标问题管理', children: questionPanel },
-      ]}
-    />
   );
 });
 

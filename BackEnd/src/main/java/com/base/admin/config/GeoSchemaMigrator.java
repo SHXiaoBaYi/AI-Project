@@ -597,12 +597,14 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     WHERE menu_id = 129 AND path <> 'geo/article-board' AND path LIKE '%article-board%'
                     """);
             statement.executeUpdate("""
-                    UPDATE sys_menu SET menu_name = '数据看板'
-                    WHERE menu_id = 129 AND menu_name IN ('我的文章看板', '')
+                    UPDATE sys_menu SET menu_name = '数据看板',
+                      remark = '发布收录聚合与发布人周看板'
+                    WHERE menu_id = 129
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 132, sort_order = 2, menu_name = '投放管理',
-                      path = 'geo/content-placement-manage', perms = 'geo:content:list', is_active = 1
+                      path = 'geo/content-placement-manage', perms = 'geo:content:list',
+                      remark = '目标问题生成、分配发布人与投放进度', is_active = 1
                     WHERE menu_id = 122
                     """);
             statement.executeUpdate("""

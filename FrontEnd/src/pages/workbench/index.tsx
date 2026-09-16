@@ -54,7 +54,7 @@ const SHORTCUTS: Shortcut[] = [
   {
     key: 'article',
     label: GEO_LABEL.articleBoard,
-    desc: '发布与收录聚合',
+    desc: '发布收录与发布人周看板',
     path: '/geo/article-board',
     perm: 'geo:article:list',
     icon: <FundOutlined />,
@@ -70,7 +70,7 @@ const SHORTCUTS: Shortcut[] = [
   {
     key: 'manage',
     label: GEO_LABEL.contentManage,
-    desc: '分配与进度管理',
+    desc: '目标问题生成与分配',
     path: '/geo/content-placement-manage',
     perm: 'geo:content:list',
     icon: <SendOutlined />,

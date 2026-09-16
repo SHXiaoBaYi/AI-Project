@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useEffect, useState } from 'react';
 import { ProFormDateRangePicker, ProFormSelect, QueryFilter } from '@ant-design/pro-components';
-import { Button, Card, Col, Modal, Row, Space, Table, Tag, Typography } from 'antd';
+import { Button, Card, Col, Modal, Row, Space, Table, Tabs, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -25,6 +25,7 @@ import { GEO_CONTENT_FORMS, GEO_PLATFORM_TYPE_AI, GEO_PLATFORM_TYPE_CONTENT } fr
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
 import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
+import PublisherWeeklyBoard from '@/components/geo/content-placement/PublisherWeeklyBoard';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
@@ -53,27 +54,47 @@ function ChartFallback({ height = 280 }: { height?: number }) {
 
 const ArticleBoardPage = memo(function ArticleBoardPage() {
   return (
-    <div className='flex flex-col gap-4'>
-      <Card size='small'>
-        <div className='flex flex-wrap items-center justify-between gap-2'>
-          <Typography.Text type='secondary'>
-            聚焦文章发布与 AI 收录；露出率请到「露出看板」，明细录入请到「日监测数据」或「投放管理」。
-          </Typography.Text>
-          <Space wrap>
-            <Link to='/geo/expose-board'>
-              <Button type='link'>露出看板</Button>
-            </Link>
-            <Link to='/geo/daily'>
-              <Button type='link'>日监测数据</Button>
-            </Link>
-            <Link to='/geo/content-placement-manage'>
-              <Button type='link'>投放管理</Button>
-            </Link>
-          </Space>
-        </div>
-      </Card>
-      <PublishPanel />
-    </div>
+    <Tabs
+      type='card'
+      items={[
+        {
+          key: 'publish',
+          label: '发布收录看板',
+          children: (
+            <div className='flex flex-col gap-4 pt-2'>
+              <Card size='small'>
+                <div className='flex flex-wrap items-center justify-between gap-2'>
+                  <Typography.Text type='secondary'>
+                    聚焦文章发布与 AI 收录；露出率请到「露出看板」，目标问题请到「投放管理」。
+                  </Typography.Text>
+                  <Space wrap>
+                    <Link to='/geo/expose-board'>
+                      <Button type='link'>露出看板</Button>
+                    </Link>
+                    <Link to='/geo/daily'>
+                      <Button type='link'>日监测数据</Button>
+                    </Link>
+                    <Link to='/geo/content-placement-manage'>
+                      <Button type='link'>投放管理</Button>
+                    </Link>
+                  </Space>
+                </div>
+              </Card>
+              <PublishPanel />
+            </div>
+          ),
+        },
+        {
+          key: 'publisher-week',
+          label: '发布人周看板',
+          children: (
+            <div className='pt-2'>
+              <PublisherWeeklyBoard />
+            </div>
+          ),
+        },
+      ]}
+    />
   );
 });
 const PublishPanel = memo(function PublishPanel() {
