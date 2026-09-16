@@ -10,6 +10,9 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.springframework.stereotype.Component;
 
+import java.util.Arrays;
+import java.util.Set;
+
 @Aspect
 @Component
 public class PermissionAspect {
@@ -20,9 +23,12 @@ public class PermissionAspect {
         if (currentUser == null) {
             throw new BusinessException(401, "未授权");
         }
-        String requiredPerm = requiresPermission.value();
-        if (!currentUser.getPermissions().contains(Constants.ADMIN_PERM)
-                && !currentUser.getPermissions().contains(requiredPerm)) {
+        Set<String> permissions = currentUser.getPermissions();
+        if (permissions.contains(Constants.ADMIN_PERM)) {
+            return;
+        }
+        boolean allowed = Arrays.stream(requiresPermission.value()).anyMatch(permissions::contains);
+        if (!allowed) {
             throw new BusinessException(403, "权限不足，无法访问");
         }
     }

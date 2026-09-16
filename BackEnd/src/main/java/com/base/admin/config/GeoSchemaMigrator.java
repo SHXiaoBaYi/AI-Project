@@ -40,6 +40,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureContentPlacementSource(connection);
             ensureContentPlacementRelations(connection);
             ensureContentPlacementProgress(connection);
+            ensureContentPlacementViewMenus(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -398,6 +399,43 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                 log.info("已回填 geo_content_placement.placement_progress {} 条", updated);
             }
         }
+    }
+
+    /** 内容投放拆分为管理视角 / 一线执行视角两套菜单 */
+    private void ensureContentPlacementViewMenus(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    UPDATE sys_menu
+                    SET menu_name = '投放管理',
+                        path = 'geo/content-placement-manage',
+                        perms = 'geo:content:list',
+                        icon = 'SendOutlined',
+                        remark = '管理视角：目标问题生成、分配发布人、投放进度',
+                        sort_order = 8,
+                        is_active = 1
+                    WHERE menu_id = 122
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (128, '投放执行', 100, 9, 'geo/content-placement-work', '', 'C', 'geo:content:work', 'FormOutlined', 0, 0,
+                     '一线视角：维护本人话题/目标问题的平台投放与引用详情', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      path = VALUES(path),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      sort_order = VALUES(sort_order),
+                      is_active = 1
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (122, 128)
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+        }
+        log.info("已同步内容投放管理/执行双视角菜单");
     }
 
     private boolean tableExists(Connection connection, String table) throws Exception {

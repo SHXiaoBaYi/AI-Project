@@ -73,16 +73,18 @@ CREATE TABLE IF NOT EXISTS geo_content_placement_cite (
 
 INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
 VALUES
-(122, '内容投放管理', 100, 8, 'geo/content-placement', '', 'C', 'geo:content:list', 'SendOutlined', 0, 0, '', 1),
+(122, '投放管理', 100, 8, 'geo/content-placement-manage', '', 'C', 'geo:content:list', 'SendOutlined', 0, 0, '管理视角：目标问题生成、分配发布人、投放进度', 1),
 (123, '内容投放删除', 122, 1, '', '', 'F', 'geo:content:delete', '#', 0, 0, '', 1),
 (124, '内容投放导入', 122, 2, '', '', 'F', 'geo:content:import', '#', 0, 0, '', 1),
 (125, '内容投放新增', 122, 3, '', '', 'F', 'geo:content:add', '#', 0, 0, '', 1),
 (126, '内容投放修改', 122, 4, '', '', 'F', 'geo:content:edit', '#', 0, 0, '', 1),
-(127, '生成相似问题', 122, 5, '', '', 'F', 'geo:content:generate', '#', 0, 0, '', 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), path = VALUES(path), perms = VALUES(perms), icon = VALUES(icon), is_active = 1;
+(127, '生成相似问题', 122, 5, '', '', 'F', 'geo:content:generate', '#', 0, 0, '', 1),
+(128, '投放执行', 100, 9, 'geo/content-placement-work', '', 'C', 'geo:content:work', 'FormOutlined', 0, 0, '一线视角：维护本人话题/目标问题的平台投放与引用详情', 1)
+ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), path = VALUES(path), perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark), is_active = 1;
 
 UPDATE sys_menu SET sort_order = 8 WHERE menu_id = 122;
+UPDATE sys_menu SET sort_order = 9 WHERE menu_id = 128;
 
 INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 122 AND 127
+SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 122 AND 128
 ON DUPLICATE KEY UPDATE is_active = 1;

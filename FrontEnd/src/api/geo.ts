@@ -193,6 +193,7 @@ export function getGeoContentPlacementListApi(
   data: PageQuery & {
     publisherUserId?: number;
     ownerUserId?: number;
+    relatedUserId?: number;
     topicId?: number;
     targetQuestion?: string;
     title?: string;

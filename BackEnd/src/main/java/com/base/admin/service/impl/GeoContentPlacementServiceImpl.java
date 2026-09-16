@@ -80,6 +80,10 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 .like(StringUtils.hasText(query.getTitle()), GeoContentPlacement::getTitle, query.getTitle())
                 .eq(StringUtils.hasText(query.getSource()), GeoContentPlacement::getSource, query.getSource())
                 .eq(StringUtils.hasText(filterAgg), GeoContentPlacement::getPlacementProgress, filterAgg)
+                .and(query.getRelatedUserId() != null, w -> w
+                        .eq(GeoContentPlacement::getPublisherUserId, query.getRelatedUserId())
+                        .or()
+                        .eq(GeoContentPlacement::getOwnerUserId, query.getRelatedUserId()))
                 .orderByDesc(GeoContentPlacement::getId);
 
         int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();

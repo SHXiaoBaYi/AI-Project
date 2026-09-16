@@ -21,9 +21,9 @@ public interface SysMenuMapper extends BaseMapper<SysMenu> {
                 WHERE m.status = 0 AND m.is_active = 1
             )
             SELECT DISTINCT m.perms FROM active_tree m
-            LEFT JOIN sys_role_menu rm ON m.menu_id = rm.menu_id
-            LEFT JOIN sys_user_role ur ON rm.role_id = ur.role_id
-            WHERE ur.user_id = #{userId} AND m.perms != ''
+            INNER JOIN sys_role_menu rm ON m.menu_id = rm.menu_id AND rm.is_active = 1
+            INNER JOIN sys_user_role ur ON rm.role_id = ur.role_id AND ur.is_active = 1
+            WHERE ur.user_id = #{userId} AND m.perms IS NOT NULL AND m.perms != ''
             """)
     Set<String> selectPermsByUserId(@Param("userId") Long userId);
 
@@ -38,8 +38,8 @@ public interface SysMenuMapper extends BaseMapper<SysMenu> {
             SELECT DISTINCT m.menu_id, m.menu_name, m.parent_id, m.sort_order, m.path, m.component,
                    m.menu_type, m.perms, m.icon, m.visible, m.status
             FROM active_tree m
-            LEFT JOIN sys_role_menu rm ON m.menu_id = rm.menu_id
-            LEFT JOIN sys_user_role ur ON rm.role_id = ur.role_id
+            INNER JOIN sys_role_menu rm ON m.menu_id = rm.menu_id AND rm.is_active = 1
+            INNER JOIN sys_user_role ur ON rm.role_id = ur.role_id AND ur.is_active = 1
             WHERE ur.user_id = #{userId} AND m.menu_type IN ('M', 'C')
             ORDER BY m.sort_order
             """)

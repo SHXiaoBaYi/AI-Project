@@ -8,5 +8,6 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface RequiresPermission {
-    String value();
+    /** 任一权限命中即可（OR） */
+    String[] value();
 }

@@ -41,28 +41,28 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "分页查询内容投放（按内容聚合）")
     @PostMapping("/list")
-    @RequiresPermission("geo:content:list")
+    @RequiresPermission({"geo:content:list", "geo:content:work"})
     public Result<PageResult<GeoContentPlacementListVO>> list(@RequestBody GeoContentPlacementQueryDTO query) {
         return Result.ok(contentPlacementService.list(query));
     }
 
     @Operation(summary = "内容投放详情")
     @GetMapping("/{id}")
-    @RequiresPermission("geo:content:list")
+    @RequiresPermission({"geo:content:list", "geo:content:work"})
     public Result<GeoContentPlacementDetailVO> detail(@PathVariable Long id) {
         return Result.ok(contentPlacementService.getDetail(id));
     }
 
     @Operation(summary = "平台发布明细（抽屉）")
     @GetMapping("/{id}/items")
-    @RequiresPermission("geo:content:list")
+    @RequiresPermission({"geo:content:list", "geo:content:work"})
     public Result<List<GeoContentPlacementItemVO>> items(@PathVariable Long id) {
         return Result.ok(contentPlacementService.listItems(id));
     }
 
     @Operation(summary = "AI引用明细（弹窗，可按平台明细过滤）")
     @GetMapping("/{id}/cites")
-    @RequiresPermission("geo:content:list")
+    @RequiresPermission({"geo:content:list", "geo:content:work"})
     public Result<List<GeoContentPlacementCiteVO>> cites(
             @PathVariable Long id,
             @RequestParam(required = false) Long itemId) {
@@ -105,7 +105,7 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "新增发布详情")
     @PostMapping("/items")
-    @RequiresPermission("geo:content:edit")
+    @RequiresPermission({"geo:content:edit", "geo:content:work"})
     @Log(title = "GEO内容投放-发布详情", businessType = 1)
     public Result<Long> createItem(@Valid @RequestBody GeoContentPlacementItemDTO dto) {
         return Result.ok(contentPlacementService.createItem(dto));
@@ -113,7 +113,7 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "修改发布详情")
     @PutMapping("/items")
-    @RequiresPermission("geo:content:edit")
+    @RequiresPermission({"geo:content:edit", "geo:content:work"})
     @Log(title = "GEO内容投放-发布详情", businessType = 2)
     public Result<Void> updateItem(@Valid @RequestBody GeoContentPlacementItemDTO dto) {
         contentPlacementService.updateItem(dto);
@@ -122,7 +122,7 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "删除发布详情")
     @DeleteMapping("/items/{itemId}")
-    @RequiresPermission("geo:content:edit")
+    @RequiresPermission({"geo:content:edit", "geo:content:work"})
     @Log(title = "GEO内容投放-发布详情", businessType = 3)
     public Result<Void> deleteItem(@PathVariable Long itemId) {
         contentPlacementService.deleteItem(itemId);
@@ -131,7 +131,7 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "新增AI引用")
     @PostMapping("/cites")
-    @RequiresPermission("geo:content:edit")
+    @RequiresPermission({"geo:content:edit", "geo:content:work"})
     @Log(title = "GEO内容投放-引用", businessType = 1)
     public Result<Long> createCite(@Valid @RequestBody GeoContentPlacementCiteDTO dto) {
         return Result.ok(contentPlacementService.createCite(dto));
@@ -139,7 +139,7 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "修改AI引用")
     @PutMapping("/cites")
-    @RequiresPermission("geo:content:edit")
+    @RequiresPermission({"geo:content:edit", "geo:content:work"})
     @Log(title = "GEO内容投放-引用", businessType = 2)
     public Result<Void> updateCite(@Valid @RequestBody GeoContentPlacementCiteDTO dto) {
         contentPlacementService.updateCite(dto);
@@ -148,7 +148,7 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "删除AI引用")
     @DeleteMapping("/cites/{citeId}")
-    @RequiresPermission("geo:content:edit")
+    @RequiresPermission({"geo:content:edit", "geo:content:work"})
     @Log(title = "GEO内容投放-引用", businessType = 3)
     public Result<Void> deleteCite(@PathVariable Long citeId) {
         contentPlacementService.deleteCite(citeId);
