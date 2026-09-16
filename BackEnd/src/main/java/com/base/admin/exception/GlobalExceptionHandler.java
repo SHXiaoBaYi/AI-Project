@@ -22,7 +22,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BadCredentialsException.class)
     public Result<Void> handleBadCredentials(BadCredentialsException e) {
-        return Result.fail("Invalid username or password");
+        return Result.fail("用户名或密码错误");
     }
 
     @ExceptionHandler(AccessDeniedException.class)

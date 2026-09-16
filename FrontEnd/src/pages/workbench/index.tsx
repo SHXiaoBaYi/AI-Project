@@ -1,442 +1,550 @@
-import { lazy, Suspense, useState, useEffect } from 'react';
-import { Card, Badge, Button, Checkbox, Tag, Divider, Statistic, theme } from 'antd';
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Button, Card, Col, Progress, Row, Space, Statistic, Table, Tag, Typography } from 'antd';
 import {
-  ArrowUpOutlined,
-  WarningOutlined,
-  DollarOutlined,
-  ShoppingCartOutlined,
-  ScanOutlined,
-  AuditOutlined,
-  EllipsisOutlined,
+  CalendarOutlined,
+  DashboardOutlined,
+  FormOutlined,
+  FundOutlined,
+  LineChartOutlined,
+  SendOutlined,
+  SettingOutlined,
+  TagsOutlined,
+  AppstoreOutlined,
+  UserOutlined,
   RightOutlined,
-  OrderedListOutlined,
-  AlertOutlined,
-  TrophyOutlined,
-  InboxOutlined,
-  SyncOutlined,
-  MoneyCollectOutlined,
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { useSelector } from 'react-redux';
+import dayjs from 'dayjs';
+import type { RootState } from '@/store';
+import { usePermission } from '@/hooks/usePermission';
+import { GEO_LABEL } from '@/constants/geoLabels';
+import { getGeoContentArticleBoardApi, getGeoContentPlacementListApi, getGeoDailyBoardApi } from '@/api/geo';
+import type { GeoContentPlacementListItem, GeoDailyBoard } from '@/types/geo';
+import { AGG_COLOR } from '@/components/geo/content-placement/constants';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
-const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
 
-const trendData = [
-  { date: '06-10', value: 38500, type: '销售额' },
-  { date: '06-10', value: 41200, type: '出库额' },
-  { date: '06-11', value: 42300, type: '销售额' },
-  { date: '06-11', value: 39800, type: '出库额' },
-  { date: '06-12', value: 35600, type: '销售额' },
-  { date: '06-12', value: 44500, type: '出库额' },
-  { date: '06-13', value: 51200, type: '销售额' },
-  { date: '06-13', value: 46800, type: '出库额' },
-  { date: '06-14', value: 47800, type: '销售额' },
-  { date: '06-14', value: 43200, type: '出库额' },
-  { date: '06-15', value: 40100, type: '销售额' },
-  { date: '06-15', value: 45100, type: '出库额' },
-  { date: '06-16', value: 32450, type: '销售额' },
-  { date: '06-16', value: 38900, type: '出库额' },
-];
+type Shortcut = {
+  key: string;
+  label: string;
+  desc: string;
+  path: string;
+  perm: string;
+  icon: ReactNode;
+};
 
-const inventoryWarnings = [
-  { key: 1, sku: 'EL-DR-001', name: '电子元器件A', current: 5, safe: 20, suggest: 25 },
-  { key: 2, sku: 'PK-BX-032', name: '包装箱B型', current: 12, safe: 50, suggest: 58 },
-  { key: 3, sku: 'CH-LB-118', name: '润滑剂C', current: 3, safe: 15, suggest: 22 },
-  { key: 4, sku: 'HD-SW-207', name: '开关总成D', current: 8, safe: 30, suggest: 32 },
-  { key: 5, sku: 'FT-GK-089', name: '密封垫E', current: 18, safe: 40, suggest: 32 },
-];
-
-const topProductsData = [
-  { name: '电子元器件A', sales: 1280 },
-  { name: '包装箱B型', sales: 960 },
-  { name: '润滑剂C', sales: 845 },
-  { name: '开关总成D', sales: 720 },
-  { name: '密封垫E', sales: 650 },
-];
-
-const initialTasks = [
-  { id: 1, text: '审核采购入库单 #PO-20240616-003', done: false },
-  { id: 2, text: '确认销售出库单 #SO-20240616-012', done: false },
-  { id: 3, text: '处理库存盘点差异 (仓库A-3区)', done: false },
-  { id: 4, text: '审批供应商付款申请 #PAY-20240615', done: true },
-  { id: 5, text: '更新商品安全库存阈值', done: true },
-];
-
-const shortcuts = [
-  { key: 'sale', label: '新建销售单', icon: <ShoppingCartOutlined /> },
-  { key: 'inbound', label: '扫码入库', icon: <ScanOutlined /> },
-  { key: 'check', label: '库存盘点', icon: <AuditOutlined /> },
-  { key: 'more', label: '更多', icon: <EllipsisOutlined /> },
-];
-
-const alertItems = [
+const SHORTCUTS: Shortcut[] = [
   {
-    key: 'pending-order',
-    label: '待审订单',
-    count: 3,
-    color: '#ff4d4f',
-    suffix: '',
+    key: 'daily',
+    label: GEO_LABEL.daily,
+    desc: '录入与查询日监测',
+    path: '/geo/daily',
+    perm: 'geo:daily:list',
+    icon: <CalendarOutlined />,
   },
   {
-    key: 'low-stock',
-    label: '库存下限',
-    count: 12,
-    color: '#fa8c16',
-    suffix: '',
+    key: 'expose',
+    label: GEO_LABEL.exposeBoard,
+    desc: '日/周/月/年露出看板',
+    path: '/geo/expose-board',
+    perm: 'geo:expose:list',
+    icon: <LineChartOutlined />,
   },
   {
-    key: 'overdue',
-    label: '超期应收',
-    count: 2,
-    color: '#ff4d4f',
-    suffix: '',
+    key: 'article',
+    label: GEO_LABEL.articleBoard,
+    desc: '发布与收录聚合',
+    path: '/geo/article-board',
+    perm: 'geo:article:list',
+    icon: <FundOutlined />,
+  },
+  {
+    key: 'work',
+    label: GEO_LABEL.contentWork,
+    desc: '维护本人投放与引用',
+    path: '/geo/content-placement-work',
+    perm: 'geo:content:work',
+    icon: <FormOutlined />,
+  },
+  {
+    key: 'manage',
+    label: GEO_LABEL.contentManage,
+    desc: '分配与进度管理',
+    path: '/geo/content-placement-manage',
+    perm: 'geo:content:list',
+    icon: <SendOutlined />,
+  },
+  {
+    key: 'topic',
+    label: GEO_LABEL.topic,
+    desc: '话题主数据',
+    path: '/geo/topic',
+    perm: 'geo:topic:list',
+    icon: <TagsOutlined />,
+  },
+  {
+    key: 'platform',
+    label: GEO_LABEL.platform,
+    desc: 'AI/内容平台配置',
+    path: '/geo/platform',
+    perm: 'geo:platform:list',
+    icon: <AppstoreOutlined />,
+  },
+  {
+    key: 'yearly',
+    label: GEO_LABEL.yearlyTarget,
+    desc: '目标与达成',
+    path: '/geo/yearly-target',
+    perm: 'geo:yearly:list',
+    icon: <DashboardOutlined />,
+  },
+  {
+    key: 'user',
+    label: '用户管理',
+    desc: '账号与角色',
+    path: '/system/user',
+    perm: 'system:user:list',
+    icon: <UserOutlined />,
+  },
+  {
+    key: 'role',
+    label: '角色管理',
+    desc: '权限分配',
+    path: '/system/role',
+    perm: 'system:role:list',
+    icon: <SettingOutlined />,
   },
 ];
 
-function useCountUp(end: number, duration = 1200) {
-  const [val, setVal] = useState(0);
+function resolvePersona(has: (p: string) => boolean, roles: string[]): { title: string; hint: string } {
+  if (roles.includes('admin') || has('*:*:*')) {
+    return { title: '系统总览工作台', hint: '你拥有全局权限，可进入全部 GEO 与系统模块。' };
+  }
+  const expose = has('geo:expose:list') || has('geo:daily:list');
+  const work = has('geo:content:work');
+  const manage = has('geo:content:list');
+  const article = has('geo:article:list');
+  const config = has('geo:topic:list') || has('geo:platform:list');
 
-  useEffect(() => {
-    let raf: number;
-    const start = performance.now();
+  if (work && !manage && !expose) {
+    return { title: '一线投放工作台', hint: '聚焦本人待投放任务与引用维护。' };
+  }
+  if (manage && !work && !expose) {
+    return { title: '投放管理工作台', hint: '查看分配进度并进入投放管理。' };
+  }
+  if (expose && !work && !manage) {
+    return { title: 'AI露出工作台', hint: '关注日监测录入与露出率走势。' };
+  }
+  if (article && !expose && !work) {
+    return { title: '数据看板工作台', hint: '查看发布与收录聚合表现。' };
+  }
+  if (config && !expose && !work && !manage) {
+    return { title: '基础配置工作台', hint: '维护话题与平台主数据。' };
+  }
+  return { title: '综合工作台', hint: '按你的权限展示相关看板与快捷入口。' };
+}
 
-    const tick = (now: number) => {
-      const p = Math.min((now - start) / duration, 1);
-      const eased = 1 - Math.pow(1 - p, 3);
-      setVal(Math.round(eased * end));
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
+function avgChart(points?: { value?: number }[]) {
+  if (!points?.length) return null;
+  const nums = points.map((p) => Number(p.value)).filter((n) => !Number.isNaN(n));
+  if (!nums.length) return null;
+  return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10;
+}
 
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [end, duration]);
-
-  return val;
+/** 按横轴聚合多平台均值为单折线 */
+function aggregateByAxis(points?: { axis?: string; value?: number }[]) {
+  if (!points?.length) return [];
+  const map = new Map<string, number[]>();
+  for (const p of points) {
+    const key = p.axis || '';
+    if (!key) continue;
+    const arr = map.get(key) || [];
+    arr.push(Number(p.value) || 0);
+    map.set(key, arr);
+  }
+  return [...map.entries()].map(([date, vals]) => ({
+    date,
+    value: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10,
+  }));
 }
 
 export default function Workbench() {
-  const [tasks, setTasks] = useState(initialTasks);
-  const { token } = theme.useToken();
+  const navigate = useNavigate();
+  const { has } = usePermission();
+  const userInfo = useSelector((state: RootState) => state.user.userInfo);
+  const roles = userInfo?.roles ?? [];
+  const userId = userInfo?.userId;
 
-  const salesValue = useCountUp(32450);
-  const stockValue = useCountUp(32767);
-  const collectValue = useCountUp(89324);
+  const persona = useMemo(() => resolvePersona(has, roles), [has, roles]);
+  const shortcuts = useMemo(() => SHORTCUTS.filter((s) => has(s.perm)), [has]);
 
-  const { colorPrimary, colorPrimaryBg, colorSuccess } = token;
+  const showExpose = has('geo:expose:list') || has('geo:daily:list') || has('geo:day:list');
+  const showMyWork = has('geo:content:work');
+  const showManage = has('geo:content:list');
+  const showArticle = has('geo:article:list');
 
-  const lineConfig = {
-    data: trendData,
-    xField: 'date',
-    yField: 'value',
-    colorField: 'type',
-    smooth: true,
-    scale: { color: { range: [colorPrimary, colorSuccess] } },
-    point: { size: 3, shape: 'circle' as const },
-    legend: { position: 'top' as const, offsetY: -4 },
-    yAxis: {
-      label: { formatter: (v: string) => `${(+v / 1000).toFixed(0)}K` },
-      grid: { line: { style: { stroke: '#f0f0f0', lineDash: [4, 4] } } },
-    },
-    xAxis: {
-      grid: { line: { style: { stroke: 'transparent' } } },
-    },
-    tooltip: {
-      formatter: (datum: Record<string, unknown>) => ({
-        name: datum.type,
-        value: `￥${Number(datum.value).toLocaleString()}`,
-      }),
-    },
-    area: {
-      style: { fillOpacity: 0.08 },
-    },
-  };
+  const [exposeLoading, setExposeLoading] = useState(false);
+  const [exposeBoard, setExposeBoard] = useState<GeoDailyBoard | null>(null);
+  const [myTasks, setMyTasks] = useState<GeoContentPlacementListItem[]>([]);
+  const [myTasksLoading, setMyTasksLoading] = useState(false);
+  const [manageStats, setManageStats] = useState({ done: 0, partial: 0, none: 0, total: 0 });
+  const [manageLoading, setManageLoading] = useState(false);
+  const [articleStats, setArticleStats] = useState({ publish: 0, citeRate: null as number | null });
+  const [articleLoading, setArticleLoading] = useState(false);
 
-  const columnConfig = {
-    data: topProductsData,
-    xField: 'name',
-    yField: 'sales',
-    style: { fill: colorPrimary },
-    scale: { x: { paddingInner: 0.5, paddingOuter: 0.25 } },
-    columnStyle: { radius: [6, 6, 0, 0] },
-    label: {
-      position: 'top' as const,
-      style: { fill: '#ffffff', fontSize: 12, fontWeight: 500 },
-    },
-    xAxis: {
-      label: { autoRotate: true, autoHide: false, style: { fontSize: 11 } },
-      grid: { line: { style: { stroke: 'transparent' } } },
-    },
-    yAxis: {
-      grid: { line: { style: { stroke: '#f0f0f0', lineDash: [4, 4] } } },
-    },
-    legend: false as const,
-  };
+  useEffect(() => {
+    if (!showExpose) return;
+    setExposeLoading(true);
+    const end = dayjs();
+    const start = end.subtract(6, 'day');
+    void getGeoDailyBoardApi({
+      startDate: start.format('YYYY-MM-DD'),
+      endDate: end.format('YYYY-MM-DD'),
+    })
+      .then(setExposeBoard)
+      .catch(() => setExposeBoard(null))
+      .finally(() => setExposeLoading(false));
+  }, [showExpose]);
 
-  const handleToggle = (id: number) => {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
-  };
+  useEffect(() => {
+    if (!showMyWork || !userId) return;
+    setMyTasksLoading(true);
+    void getGeoContentPlacementListApi({
+      pageNum: 1,
+      pageSize: 8,
+      relatedUserId: userId,
+    })
+      .then((res) => {
+        const rows = res.rows ?? [];
+        const pending = rows.filter((r) => r.aggregateStatus !== '投放完成');
+        setMyTasks(pending.length ? pending : rows.slice(0, 5));
+      })
+      .catch(() => setMyTasks([]))
+      .finally(() => setMyTasksLoading(false));
+  }, [showMyWork, userId]);
 
-  const undoneCount = tasks.filter((t) => !t.done).length;
+  useEffect(() => {
+    if (!showManage) return;
+    setManageLoading(true);
+    void getGeoContentPlacementListApi({ pageNum: 1, pageSize: 200 })
+      .then((res) => {
+        const rows = res.rows ?? [];
+        setManageStats({
+          total: res.total ?? rows.length,
+          done: rows.filter((r) => r.aggregateStatus === '投放完成').length,
+          partial: rows.filter((r) => r.aggregateStatus === '部分投放').length,
+          none: rows.filter((r) => !r.aggregateStatus || r.aggregateStatus === '未投放').length,
+        });
+      })
+      .catch(() => setManageStats({ done: 0, partial: 0, none: 0, total: 0 }))
+      .finally(() => setManageLoading(false));
+  }, [showManage]);
+
+  useEffect(() => {
+    if (!showArticle) return;
+    setArticleLoading(true);
+    const end = dayjs();
+    const start = end.subtract(13, 'day');
+    void getGeoContentArticleBoardApi({
+      startDate: start.format('YYYY-MM-DD'),
+      endDate: end.format('YYYY-MM-DD'),
+    })
+      .then((board) => {
+        const publish = (board.publishCountChart ?? []).reduce((s, p) => s + (Number(p.value) || 0), 0);
+        const citeAvg = avgChart(board.citeRateChart);
+        setArticleStats({ publish, citeRate: citeAvg });
+      })
+      .catch(() => setArticleStats({ publish: 0, citeRate: null }))
+      .finally(() => setArticleLoading(false));
+  }, [showArticle]);
+
+  const mentionAvg = exposeBoard?.compareSummary?.mentionRate ?? avgChart(exposeBoard?.mentionChart);
+  const firstAvg = exposeBoard?.compareSummary?.firstMentionRate ?? avgChart(exposeBoard?.firstMentionChart);
+  const negativeCount = exposeBoard?.negativeCount ?? 0;
+  const mentionLineData = aggregateByAxis(exposeBoard?.mentionChart);
+
+  const displayName = userInfo?.nickname || userInfo?.username || '同事';
 
   return (
     <div className='flex flex-col gap-4'>
-      {/* ── 顶部统计卡片 ── */}
-      <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'>
-        <Card>
-          <div className='flex items-start gap-4'>
-            <Statistic
-              title={
-                <div className='flex flex-wrap items-center gap-x-2'>
-                  <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50'>
-                    <DollarOutlined style={{ color: '#3b82f6', fontSize: '18px' }} />
-                  </div>
-                  <span className='font-medium text-gray-500'>今日销售额</span>
-                </div>
-              }
-              value={salesValue}
-              precision={0}
-              prefix={<span className='text-base'>￥</span>}
-              suffix={
-                <div className='flex'>
-                  <span className='ml-1 text-sm font-normal text-gray-400'>较昨日</span>
-                  <span className='ml-1 text-sm font-normal text-green-500'>
-                    <ArrowUpOutlined /> 8.2%
-                  </span>
-                </div>
-              }
-              styles={{ content: { fontSize: 26, fontWeight: 700 } }}
-            />
+      <Card size='small'>
+        <div className='flex flex-wrap items-end justify-between gap-3'>
+          <div>
+            <Typography.Title
+              level={4}
+              className='!mb-1'
+            >
+              你好，{displayName}
+            </Typography.Title>
+            <Typography.Text type='secondary'>
+              {persona.title} · {dayjs().format('YYYY-MM-DD dddd')} · {persona.hint}
+            </Typography.Text>
           </div>
-        </Card>
-
-        <Card>
-          <div className='flex items-start gap-4'>
-            <Statistic
-              title={
-                <div className='flex flex-wrap items-center gap-x-2'>
-                  <div
-                    className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl'
-                    style={{ backgroundColor: colorPrimaryBg }}
-                  >
-                    <InboxOutlined style={{ color: '#06b6d4', fontSize: '18px' }} />
-                  </div>
-                  <span className='font-medium text-gray-500'>库存金额</span>
-                </div>
-              }
-              value={stockValue}
-              precision={0}
-              prefix={<span className='text-base'>￥</span>}
-              styles={{ content: { fontSize: 26, fontWeight: 700 } }}
-            />
-          </div>
-        </Card>
-
-        <Card>
-          <div className='flex items-start gap-4'>
-            <Statistic
-              title={
-                <div className='flex flex-wrap items-center gap-x-2'>
-                  <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50'>
-                    <SyncOutlined style={{ color: '#f97316', fontSize: '18px' }} />
-                  </div>
-                  <span className='font-medium text-gray-500'>周转天数</span>
-                </div>
-              }
-              value={32}
-              suffix={<span className='text-sm font-normal text-gray-400'>天</span>}
-              styles={{ content: { fontSize: 26, fontWeight: 700 } }}
-            />
-          </div>
-        </Card>
-
-        <Card>
-          <div className='flex items-start gap-4'>
-            <Statistic
-              title={
-                <div className='flex flex-wrap items-center gap-x-2'>
-                  <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-purple-50'>
-                    <MoneyCollectOutlined style={{ color: '#a855f7', fontSize: '18px' }} />
-                  </div>
-                  <span className='font-medium text-gray-500'>待回款</span>
-                </div>
-              }
-              value={collectValue}
-              precision={0}
-              prefix={<span className='text-base'>￥</span>}
-              styles={{ content: { fontSize: 26, fontWeight: 700 } }}
-            />
-          </div>
-        </Card>
-      </div>
-
-      {/* ── 待处理预警 ── */}
-      <Card
-        size='small'
-        className='rounded-xl!'
-        styles={{ body: { padding: '12px 24px' } }}
-      >
-        <div className='flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-6'>
-          <div className='flex shrink-0 items-center gap-2 text-sm font-medium text-gray-600'>
-            <WarningOutlined style={{ color: 'var(--color-orange-400)' }} />
-            <span>待处理预警</span>
-          </div>
-          <div className='flex flex-wrap gap-x-6 gap-y-3'>
-            {alertItems.map((item) => (
-              <div
-                key={item.key}
-                className='flex items-center gap-2'
-              >
-                <Badge
-                  count={item.count}
-                  color={item.color}
-                  overflowCount={99}
-                />
-                <span className='text-sm text-gray-600'>
-                  {item.label}
-                  {item.suffix && <span className='ml-0.5 text-gray-400'>{item.suffix}</span>}
-                </span>
-              </div>
-            ))}
-          </div>
+          {roles.length ? (
+            <Space
+              size={4}
+              wrap
+            >
+              {roles.map((r) => (
+                <Tag
+                  key={r}
+                  color={r === 'admin' ? 'magenta' : 'blue'}
+                >
+                  {r === 'admin' ? '超级管理员' : r}
+                </Tag>
+              ))}
+            </Space>
+          ) : null}
         </div>
       </Card>
 
-      {/* ── 趋势图 + 库存预警 ── */}
-      <div className='grid grid-cols-1 gap-4 lg:grid-cols-12'>
-        <Card
-          className='rounded-xl! lg:col-span-7'
-          title={
-            <div className='flex items-center gap-2 text-sm font-medium'>
-              <DollarOutlined style={{ color: 'var(--color-blue-500)' }} />
-              近7天销售 vs 出库趋势
-            </div>
-          }
-        >
-          <div className='h-64 sm:h-80'>
-            <Suspense fallback={<div className='h-full' />}>
-              <Line {...lineConfig} />
-            </Suspense>
-          </div>
-        </Card>
-
-        <Card
-          className='rounded-xl! lg:col-span-5'
-          title={
-            <div className='flex items-center gap-2 text-sm font-medium'>
-              <AlertOutlined style={{ color: 'var(--color-red-400)' }} />
-              库存预警 TOP5
-            </div>
-          }
-        >
-          {/* header */}
-          <div className='mb-2 flex items-center border-b border-gray-100 pb-2 text-xs text-gray-400'>
-            <span className='min-w-0 flex-1'>SKU / 名称</span>
-            <span className='w-14 text-center sm:w-16'>当前</span>
-            <span className='w-14 text-center sm:w-16'>安全</span>
-            <span className='w-14 text-center sm:w-16'>建议采购</span>
-          </div>
-          {/* rows */}
-          {inventoryWarnings.map((item, idx) => (
-            <div
-              key={item.key}
-              className={`flex items-center py-2.5 text-sm ${
-                idx < inventoryWarnings.length - 1 ? 'border-b border-gray-50' : ''
-              }`}
-            >
-              <div className='min-w-0 flex-1'>
-                <div className='text-xs text-gray-400'>{item.sku}</div>
-                <div className='truncate text-gray-700'>{item.name}</div>
-              </div>
-              <span className='w-14 text-center font-semibold text-red-500 sm:w-16'>{item.current}</span>
-              <span className='w-14 text-center text-gray-500 sm:w-16'>{item.safe}</span>
-              <span className='w-14 text-center sm:w-16'>
-                <Tag color='blue'>{item.suggest}</Tag>
-              </span>
-            </div>
-          ))}
-        </Card>
-      </div>
-
-      {/* ── 待办任务 + 畅销商品 ── */}
-      <div className='grid grid-cols-1 gap-4 lg:grid-cols-12'>
-        <Card
-          className='rounded-xl! lg:col-span-7'
-          title={
-            <div className='flex items-center gap-2 text-sm font-medium'>
-              <OrderedListOutlined style={{ color: 'var(--color-blue-500)' }} />
-              待办任务
-              <Badge
-                count={undoneCount}
-                overflowCount={99}
-              />
-            </div>
-          }
-        >
-          <div>
-            {tasks.map((item) => (
-              <div
-                key={item.id}
-                className='flex items-center justify-between gap-2 py-2.5'
+      <Card
+        size='small'
+        title='快捷入口'
+      >
+        {shortcuts.length ? (
+          <Row gutter={[12, 12]}>
+            {shortcuts.map((s) => (
+              <Col
+                key={s.key}
+                xs={12}
+                sm={8}
+                md={6}
+                lg={4}
               >
-                <Checkbox
-                  checked={item.done}
-                  onChange={() => handleToggle(item.id)}
-                  className='min-w-0'
+                <button
+                  type='button'
+                  className='flex w-full cursor-pointer flex-col gap-1 rounded-lg border border-neutral-200 bg-white px-3 py-3 text-left transition hover:border-blue-400 hover:shadow-sm'
+                  onClick={() => navigate(s.path)}
                 >
-                  <span className={item.done ? 'text-gray-300 line-through' : 'text-gray-700'}>{item.text}</span>
-                </Checkbox>
+                  <span className='text-lg text-blue-600'>{s.icon}</span>
+                  <span className='text-sm font-medium text-neutral-800'>{s.label}</span>
+                  <span className='text-xs text-neutral-500'>{s.desc}</span>
+                </button>
+              </Col>
+            ))}
+          </Row>
+        ) : (
+          <Typography.Text type='secondary'>暂无可用模块权限，请联系管理员开通菜单。</Typography.Text>
+        )}
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        {showExpose ? (
+          <Col
+            xs={24}
+            lg={showMyWork || showManage || showArticle ? 14 : 24}
+          >
+            <Card
+              size='small'
+              loading={exposeLoading}
+              title={`露出速览（近 7 日）`}
+              extra={
                 <Button
                   type='link'
-                  size='small'
-                  icon={<RightOutlined />}
-                  className='shrink-0'
+                  className='px-0'
+                  onClick={() => navigate(has('geo:expose:list') ? '/geo/expose-board' : '/geo/daily')}
                 >
-                  处理
+                  进入{has('geo:expose:list') ? GEO_LABEL.exposeBoard : GEO_LABEL.daily}
+                  <RightOutlined />
                 </Button>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card
-          className='rounded-xl! lg:col-span-5'
-          title={
-            <div className='flex items-center gap-2 text-sm font-medium'>
-              <TrophyOutlined style={{ color: 'var(--color-amber-500)' }} />
-              畅销商品 TOP5
-            </div>
-          }
-        >
-          <div className='h-64 sm:h-80'>
-            <Suspense fallback={<div className='h-full' />}>
-              <Column {...columnConfig} />
-            </Suspense>
-          </div>
-        </Card>
-      </div>
-
-      {/* ── 快捷入口 ── */}
-      <Card
-        size='small'
-        className='rounded-xl!'
-        styles={{ body: { padding: '12px 24px' } }}
-      >
-        <div className='flex flex-wrap items-center gap-x-4 gap-y-3'>
-          <span className='shrink-0 text-sm font-medium text-gray-500'>快捷入口</span>
-          <Divider
-            orientation='vertical'
-            className='hidden h-5! sm:block'
-          />
-          {shortcuts.map((s) => (
-            <Button
-              key={s.key}
-              type={s.key === 'sale' ? 'primary' : 'default'}
-              icon={s.icon}
+              }
             >
-              {s.label}
-            </Button>
-          ))}
-        </div>
-      </Card>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Statistic
+                    title={GEO_LABEL.mentionRate}
+                    value={mentionAvg ?? '-'}
+                    suffix={mentionAvg != null ? '%' : undefined}
+                  />
+                </Col>
+                <Col span={8}>
+                  <Statistic
+                    title={GEO_LABEL.firstMentionRate}
+                    value={firstAvg ?? '-'}
+                    suffix={firstAvg != null ? '%' : undefined}
+                  />
+                </Col>
+                <Col span={8}>
+                  <Statistic
+                    title='负面/错误条数'
+                    value={negativeCount}
+                  />
+                </Col>
+              </Row>
+              <div className='mt-4 h-52'>
+                {mentionLineData.length ? (
+                  <Suspense fallback={null}>
+                    <Line
+                      data={mentionLineData}
+                      xField='date'
+                      yField='value'
+                      height={200}
+                      smooth
+                    />
+                  </Suspense>
+                ) : (
+                  <div className='flex h-full items-center justify-center text-sm text-neutral-400'>
+                    暂无露出走势数据
+                  </div>
+                )}
+              </div>
+            </Card>
+          </Col>
+        ) : null}
+
+        {showMyWork ? (
+          <Col
+            xs={24}
+            lg={showExpose ? 10 : 12}
+          >
+            <Card
+              size='small'
+              loading={myTasksLoading}
+              title='我的待办投放'
+              extra={
+                <Button
+                  type='link'
+                  className='px-0'
+                  onClick={() => navigate('/geo/content-placement-work')}
+                >
+                  {GEO_LABEL.contentWork}
+                  <RightOutlined />
+                </Button>
+              }
+            >
+              <Table<GeoContentPlacementListItem>
+                size='small'
+                rowKey='id'
+                pagination={false}
+                dataSource={myTasks}
+                locale={{ emptyText: '暂无待办，棒棒哒' }}
+                columns={[
+                  {
+                    title: '目标问题',
+                    dataIndex: 'targetQuestion',
+                    ellipsis: true,
+                  },
+                  {
+                    title: '进度',
+                    dataIndex: 'aggregateStatus',
+                    width: 100,
+                    render: (v?: string) => <Tag color={AGG_COLOR[v || '未投放'] || 'default'}>{v || '未投放'}</Tag>,
+                  },
+                ]}
+              />
+            </Card>
+          </Col>
+        ) : null}
+
+        {showManage ? (
+          <Col
+            xs={24}
+            lg={showExpose || showMyWork ? 10 : 12}
+          >
+            <Card
+              size='small'
+              loading={manageLoading}
+              title='投放进度概览'
+              extra={
+                <Button
+                  type='link'
+                  className='px-0'
+                  onClick={() => navigate('/geo/content-placement-manage')}
+                >
+                  {GEO_LABEL.contentManage}
+                  <RightOutlined />
+                </Button>
+              }
+            >
+              <Row gutter={12}>
+                <Col span={8}>
+                  <Statistic
+                    title='投放完成'
+                    value={manageStats.done}
+                  />
+                </Col>
+                <Col span={8}>
+                  <Statistic
+                    title='部分投放'
+                    value={manageStats.partial}
+                  />
+                </Col>
+                <Col span={8}>
+                  <Statistic
+                    title='未投放'
+                    value={manageStats.none}
+                  />
+                </Col>
+              </Row>
+              <div className='mt-4'>
+                <div className='mb-1 flex justify-between text-xs text-neutral-500'>
+                  <span>完成率（本页抽样）</span>
+                  <span>
+                    {manageStats.done + manageStats.partial + manageStats.none
+                      ? Math.round(
+                          (manageStats.done / (manageStats.done + manageStats.partial + manageStats.none)) * 100,
+                        )
+                      : 0}
+                    %
+                  </span>
+                </div>
+                <Progress
+                  percent={
+                    manageStats.done + manageStats.partial + manageStats.none
+                      ? Math.round(
+                          (manageStats.done / (manageStats.done + manageStats.partial + manageStats.none)) * 100,
+                        )
+                      : 0
+                  }
+                  showInfo={false}
+                />
+                <div className='mt-2 text-xs text-neutral-400'>列表共 {manageStats.total} 条目标问题</div>
+              </div>
+            </Card>
+          </Col>
+        ) : null}
+
+        {showArticle ? (
+          <Col
+            xs={24}
+            lg={12}
+          >
+            <Card
+              size='small'
+              loading={articleLoading}
+              title={`${GEO_LABEL.articleBoard}速览（近 14 日）`}
+              extra={
+                <Button
+                  type='link'
+                  className='px-0'
+                  onClick={() => navigate('/geo/article-board')}
+                >
+                  进入{GEO_LABEL.articleBoard}
+                  <RightOutlined />
+                </Button>
+              }
+            >
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Statistic
+                    title='发布量合计'
+                    value={articleStats.publish}
+                  />
+                </Col>
+                <Col span={12}>
+                  <Statistic
+                    title='收录率均值'
+                    value={articleStats.citeRate ?? '-'}
+                    suffix={articleStats.citeRate != null ? '%' : undefined}
+                  />
+                </Col>
+              </Row>
+            </Card>
+          </Col>
+        ) : null}
+      </Row>
     </div>
   );
 }
