@@ -67,6 +67,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.TemporalAdjusters;
 import java.time.temporal.WeekFields;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -75,6 +76,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -396,7 +398,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         if (aiChatService.isEnabled()) {
             try {
                 String system = """
-                        你是 GEO 内容投放助手。请围绕给定目标问题，生成 3 到 5 条语义相近但表述不同的「待投放目标问题」。
+                        你是 GEO 内容投放助手。请围绕给定目标问题，生成 3 到 8 条语义相近但表述不同的「待投放目标问题」。
                         要求：
                         1. 只输出 JSON 数组，例如 ["问题1","问题2"]，不要 markdown，不要解释；
                         2. 问题要适合中文内容投放，口语化、可检索；
@@ -406,7 +408,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 String content = aiChatService.chat(system, user);
                 List<String> parsed = parseQuestionArray(content);
                 if (!parsed.isEmpty()) {
-                    return parsed.stream().filter(q -> !q.equals(question)).distinct().limit(5).toList();
+                    int take = ThreadLocalRandom.current().nextInt(3, 9);
+                    return parsed.stream().filter(q -> !q.equals(question)).distinct().limit(take).toList();
                 }
             } catch (Exception e) {
                 log.warn("AI 生成相似问题失败，改用本地启发式: {}", e.getMessage());
@@ -442,19 +445,21 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private List<String> heuristicSimilarQuestions(String topic, String question) {
         String base = question.replaceAll("[？?！!。]$", "").trim();
         String topicPrefix = StringUtils.hasText(topic) ? topic : "相关场景";
-        List<String> templates = List.of(
-                "2026 年" + base + "有哪些靠谱推荐？",
-                base + "怎么选更划算？",
-                "第一次了解" + topicPrefix + "，" + base + "该怎么入手？",
-                "对比同类产品后，" + base + "更推荐哪类？",
-                "送礼场景下，" + base + "怎么挑更体面？"
-        );
-        return templates.stream()
-                .map(String::trim)
-                .filter(q -> !q.equals(question))
-                .distinct()
-                .limit(4)
-                .toList();
+        List<String> pool = new ArrayList<>(GeoSimilarQuestionTemplates.ALL);
+        Collections.shuffle(pool, ThreadLocalRandom.current());
+        int take = ThreadLocalRandom.current().nextInt(3, 9);
+        List<String> picked = new ArrayList<>();
+        for (String tpl : pool) {
+            String q = tpl.replace("{base}", base).replace("{topic}", topicPrefix).trim();
+            if (!StringUtils.hasText(q) || q.equals(question) || picked.contains(q)) {
+                continue;
+            }
+            picked.add(q);
+            if (picked.size() >= take) {
+                break;
+            }
+        }
+        return picked;
     }
 
     @Override
