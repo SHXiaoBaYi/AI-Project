@@ -22,6 +22,7 @@ import {
   saveGeoYearTargetApi,
 } from '@/api/geo';
 import type { GeoTopic, GeoYearTarget, GeoYearlyBoard, GeoYearlyRow } from '@/types/geo';
+import { GEO_TERM_TYPES } from '@/constants/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
 
@@ -180,6 +181,7 @@ const YearlyPage = memo(function YearlyPage() {
       endDate: end.endOf('year').format('YYYY-MM-DD'),
       topicId: values?.topicId,
       keyword: values?.keyword?.trim() || undefined,
+      termType: values?.termType || undefined,
       platforms: values?.platforms?.length ? values.platforms : undefined,
     });
     setBoard({
@@ -222,6 +224,12 @@ const YearlyPage = memo(function YearlyPage() {
             name='yearRange'
             label='年份范围'
             fieldProps={{ picker: 'year', format: 'YYYY', placeholder: ['开始年', '结束年'] }}
+          />
+          <ProFormSelect
+            name='termType'
+            label='话题类型'
+            allowClear
+            options={[...GEO_TERM_TYPES]}
           />
           <ProFormSelect
             name='topicId'

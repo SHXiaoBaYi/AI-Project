@@ -57,6 +57,9 @@ public interface GeoMonitorService {
 
     GeoDailyBoardVO dailyBoard(GeoBoardQueryDTO query);
 
+    /** 负面/错误内容明细（可点开） */
+    List<GeoDailyVO> listNegativeDaily(GeoBoardQueryDTO query);
+
     GeoYearlyBoardVO yearlyBoard(GeoBoardQueryDTO query);
 
     GeoPersistResultVO persistWeeklyBoard(GeoBoardQueryDTO query);

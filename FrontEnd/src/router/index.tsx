@@ -8,6 +8,7 @@ import type { MenuTree } from '@/types/menu';
 import { PageLoading } from '@ant-design/pro-components';
 import { RouteErrorPage } from '@/components/PageErrorBoundary';
 import { getRouterBasename } from '@/utils/basePath';
+import { resolveMenuFullPath, toMenuRelativePath } from '@/utils/menuPath';
 
 // eslint-disable-next-line react-refresh/only-export-components
 function PagePlaceholder() {
@@ -43,32 +44,44 @@ function withSuspense(Component: LazyExoticComponent<any>) {
 
 function buildDynamicRoutes(menus: MenuTree[], parentPath = ''): any[] {
   if (!menus || !Array.isArray(menus)) return [];
-  return menus
-    .filter((menu) => menu.path)
-    .map((menu) => {
-      const cleanPath = menu.path.replace(/^\//, '');
-      const relativePath =
-        parentPath && cleanPath.startsWith(parentPath + '/') ? cleanPath.slice(parentPath.length + 1) : cleanPath;
-      const fullPath = parentPath ? `${parentPath}/${relativePath}` : relativePath;
-      const elementKey = '/' + fullPath;
-      const hasComponent = !!componentMap[elementKey];
-      const hasChildren = menu.children && menu.children.length > 0;
+  const routes: any[] = [];
 
-      if (!hasComponent && hasChildren) {
-        return {
-          path: relativePath,
-          errorElement: <RouteErrorPage />,
-          children: buildDynamicRoutes(menu.children, fullPath),
-        };
+  for (const menu of menus) {
+    if (!menu.path) continue;
+
+    const clean = menu.path.replace(/^\//, '');
+    const fullPath = resolveMenuFullPath(menu.path, parentPath);
+    const relativePath = toMenuRelativePath(fullPath, parentPath);
+    const elementKey = '/' + fullPath;
+    const hasComponent = !!componentMap[elementKey];
+    const hasChildren = !!(menu.children && menu.children.length > 0);
+    const isDir = menu.menuType === 'M' || (!hasComponent && hasChildren);
+
+    if (isDir && hasChildren) {
+      // 中间分组目录（如 geo/config）：扁平挂到当前父级，不改变叶子 URL（仍为 /geo/topic）
+      // 顶层业务目录（geo / system）：保留一层 layout 路由
+      const isGroupingOnly = clean.includes('/') || (!!parentPath && !clean.startsWith(parentPath));
+      if (isGroupingOnly) {
+        routes.push(...buildDynamicRoutes(menu.children, parentPath));
+        continue;
       }
-
-      return {
+      routes.push({
         path: relativePath,
-        element: hasComponent ? withSuspense(componentMap[elementKey]) : <PagePlaceholder />,
         errorElement: <RouteErrorPage />,
-        children: hasChildren ? buildDynamicRoutes(menu.children, fullPath) : undefined,
-      };
+        children: buildDynamicRoutes(menu.children, fullPath),
+      });
+      continue;
+    }
+
+    routes.push({
+      path: relativePath,
+      element: hasComponent ? withSuspense(componentMap[elementKey]) : <PagePlaceholder />,
+      errorElement: <RouteErrorPage />,
+      children: hasChildren ? buildDynamicRoutes(menu.children, fullPath) : undefined,
     });
+  }
+
+  return routes;
 }
 
 export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
@@ -122,7 +135,6 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
               />
             ),
           },
-          // 测试页面需要放到动态路由前
           {
             path: '/demo',
             element: withSuspense(Demo),

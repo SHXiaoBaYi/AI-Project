@@ -26,4 +26,8 @@ public class GeoBoardPersistProperties {
     private String monthlyCron = "0 10 2 1 * ?";
 
     private String yearlyCron = "0 20 2 1 1 ?";
+
+    private String contentWeeklyCron = "0 15 2 ? * MON";
+
+    private String contentMonthlyCron = "0 25 2 1 * ?";
 }

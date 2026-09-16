@@ -27,6 +27,9 @@ import type {
   GeoContentPlacementListItem,
   GeoContentPublisherWeekBoard,
   GeoContentPublisherWeekDetail,
+  GeoContentArticleBoard,
+  GeoContentArticleBoardQuery,
+  GeoContentArticleDetailRow,
 } from '@/types/geo';
 
 export function getGeoTopicListApi(data: PageQuery & { topicName?: string }) {
@@ -283,4 +286,18 @@ export function importGeoContentPlacementApi(file: File) {
   return request.post<unknown, GeoImportResult>('/geo/content-placement/import', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
+}
+
+export function getGeoNegativeDailyApi(data: GeoBoardQuery) {
+  return request.post<unknown, GeoDailyVO[]>('/geo/day/negatives', data);
+}
+
+export function getGeoContentArticleBoardApi(data: GeoContentArticleBoardQuery) {
+  return request.post<unknown, GeoContentArticleBoard>('/geo/content-placement/article-board', data);
+}
+
+export function getGeoContentArticleDetailApi(
+  data: GeoContentArticleBoardQuery & { detailType: string; dimensionKey?: string },
+) {
+  return request.post<unknown, GeoContentArticleDetailRow[]>('/geo/content-placement/article-board/detail', data);
 }

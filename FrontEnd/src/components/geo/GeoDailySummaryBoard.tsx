@@ -156,7 +156,7 @@ export function GeoDailySummaryBoard({
     }
     base.push(
       {
-        title: '提及',
+        title: '露出',
         dataIndex: 'mentioned',
         width: 64,
         render: (v) => (Number(v) ? <Tag color='success'>是</Tag> : <Tag>否</Tag>),
@@ -201,7 +201,7 @@ export function GeoDailySummaryBoard({
         render: (v) => v || '-',
       },
       {
-        title: '负面内容',
+        title: '负面/错误内容',
         dataIndex: 'negativeContent',
         width: 120,
         ellipsis: true,
@@ -294,7 +294,7 @@ export function GeoDailySummaryBoard({
     return (
       <Card title={dimension === 'owner' ? '日报汇总（负责人维度）' : '日报汇总'}>
         <div className='py-8 text-center text-neutral-400'>
-          当前筛选范围内暂无汇总数据，请调整日期范围或先在「日监测」录入数据
+          当前筛选范围内暂无汇总数据，请调整日期范围或先在「日监测数据」录入
         </div>
       </Card>
     );
@@ -317,7 +317,7 @@ export function GeoDailySummaryBoard({
         />
         <div className='mb-2 text-sm text-neutral-500'>
           已切换到 <b>{activeGroup?.inspectDate}</b>，共 {activeGroup?.topics?.length || 0}{' '}
-          {dimension === 'owner' ? '位负责人' : '个话题'}；下方提及率/首位提及率/推荐次数为完整日期范围
+          {dimension === 'owner' ? '位负责人' : '个话题'}；下方露出率/首位露出率/推荐次数为完整日期范围
         </div>
         <Table<GeoDailySummaryTopic>
           key={`summary-table-${dimension}-${currentKey}`}

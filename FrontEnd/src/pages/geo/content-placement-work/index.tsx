@@ -127,7 +127,7 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
         rowKey='id'
         actionRef={actionRef}
         columns={columns}
-        headerTitle='投放执行（我的话题 · 平台投放 · 引用）'
+        headerTitle='投放执行'
         search={{ labelWidth: 'auto' }}
         toolBarRender={() => [
           <span

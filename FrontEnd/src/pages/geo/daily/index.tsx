@@ -116,7 +116,7 @@ const DailyPage = memo(function DailyPage() {
       render: (_, r) => r.ownerName || '-',
     },
     {
-      title: '提及',
+      title: '露出',
       dataIndex: 'mentioned',
       width: 80,
       valueType: 'select',
@@ -336,7 +336,7 @@ const DailyPage = memo(function DailyPage() {
       />
 
       <BaseModalForm
-        title='导入日监测 Excel'
+        title='导入日监测数据 Excel'
         open={importOpen}
         onOpenChange={(v) => {
           if (!v) setFile(null);

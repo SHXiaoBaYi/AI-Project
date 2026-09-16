@@ -275,6 +275,12 @@ export interface GeoDailyBoard {
   mentionChart: GeoChartPoint[];
   firstMentionChart: GeoChartPoint[];
   recommendChart: GeoChartPoint[];
+  sampleChart?: GeoChartPoint[];
+  rankChart?: GeoChartPoint[];
+  negativeChart?: GeoChartPoint[];
+  compareSummary?: GeoBoardCompareSummary;
+  negativeCount?: number;
+  negativeRows?: GeoNegativeSummaryRow[];
   rows: GeoDailyRow[];
   summaryGroups?: GeoDailySummaryDate[];
   ownerMentionChart?: GeoChartPoint[];
@@ -282,6 +288,15 @@ export interface GeoDailyBoard {
   ownerRecommendChart?: GeoChartPoint[];
   ownerRows?: GeoDailyRow[];
   ownerSummaryGroups?: GeoDailySummaryDate[];
+}
+
+export interface GeoNegativeSummaryRow {
+  inspectDate?: string;
+  topicId?: number;
+  topicName?: string;
+  platform?: string;
+  termType?: string;
+  negativeCount?: number;
 }
 
 export interface GeoYearlyRow {
@@ -334,6 +349,7 @@ export interface GeoBoardQuery {
   endDate?: string;
   topicId?: number;
   keyword?: string;
+  termType?: string;
   platforms?: string[];
 }
 
@@ -456,6 +472,87 @@ export interface GeoContentPublisherWeekDetail {
 
 export type GeoContentWeekMetric =
   'produced' | 'pendingReview' | 'published' | 'pendingProduce' | 'videoPublished' | 'videoPendingReview';
+
+export interface GeoContentArticleBoardQuery {
+  startDate?: string;
+  endDate?: string;
+  topicId?: number;
+  publisherUserId?: number;
+  publisherUserIds?: number[];
+  publishPlatforms?: string[];
+  aiPlatforms?: string[];
+  contentForm?: string;
+}
+
+export interface GeoRankItem {
+  name: string;
+  value: number;
+  extra?: string;
+}
+
+export interface GeoContentPublishAggRow {
+  dateLabel?: string;
+  topicName?: string;
+  publisherName?: string;
+  publisherUserId?: number;
+  publishPlatform?: string;
+  contentForm?: string;
+  publishCount?: number;
+}
+
+export interface GeoContentCiteAggRow {
+  dateLabel?: string;
+  topicName?: string;
+  publisherName?: string;
+  publishPlatform?: string;
+  aiPlatform?: string;
+  successCount?: number;
+  citedCount?: number;
+  citeRate?: number;
+}
+
+export interface GeoContentPublisherCiteRow {
+  publisherUserId?: number;
+  publisherName?: string;
+  successCount?: number;
+  citedCount?: number;
+  citeHitCount?: number;
+  citeRate?: number;
+  citeRateMom?: number | null;
+  citeRateYoy?: number | null;
+  citeHitCountMom?: number | null;
+  citeHitCountYoy?: number | null;
+}
+
+export interface GeoContentArticleBoard {
+  publishCountChart: GeoChartPoint[];
+  citeRateChart: GeoChartPoint[];
+  publisherCiteCompareChart: GeoChartPoint[];
+  publishPlatformCiteRank: GeoRankItem[];
+  articleCiteRank: GeoRankItem[];
+  publishRows: GeoContentPublishAggRow[];
+  citeRows: GeoContentCiteAggRow[];
+  publisherCiteRows: GeoContentPublisherCiteRow[];
+  publisherCompareHint?: string;
+}
+
+export interface GeoContentArticleDetailRow {
+  placementId?: number;
+  itemId?: number;
+  targetQuestion?: string;
+  title?: string;
+  topicName?: string;
+  publisherName?: string;
+  publishPlatform?: string;
+  contentForm?: string;
+  publishStatus?: string;
+  publishTime?: string;
+  publishUrl?: string;
+  aiPlatform?: string;
+  citeUrl?: string;
+  askQuestion?: string;
+  citeCount?: number;
+}
 
 export interface GeoContentPlacementCiteDTO {
   id?: number;

@@ -6,6 +6,7 @@ import { getGeoMonthlyBoardApi, getGeoPlatformsApi, getGeoTopicOptionsApi } from
 import type { GeoMonthlyBoard, GeoTopic } from '@/types/geo';
 import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
+import { GEO_TERM_TYPES } from '@/constants/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
 
@@ -25,6 +26,7 @@ const MonthlyPage = memo(function MonthlyPage() {
       endDate: end.endOf('month').format('YYYY-MM-DD'),
       topicId: values?.topicId,
       keyword: values?.keyword?.trim() || undefined,
+      termType: values?.termType || undefined,
       platforms: values?.platforms?.length ? values.platforms : undefined,
     });
     setBoard({
@@ -72,6 +74,12 @@ const MonthlyPage = memo(function MonthlyPage() {
             }}
           />
           <ProFormSelect
+            name='termType'
+            label='话题类型'
+            allowClear
+            options={[...GEO_TERM_TYPES]}
+          />
+          <ProFormSelect
             name='topicId'
             label='话题'
             allowClear
@@ -94,7 +102,8 @@ const MonthlyPage = memo(function MonthlyPage() {
       </Card>
       <Card size='small'>
         <span className='text-sm text-neutral-600'>
-          月报只读查看；已结束月由定时任务自动落库（已落库周期 {board.persistedPeriodCount ?? 0}）
+          月报只读查看；已结束月读落库快照（已落库周期 {board.persistedPeriodCount ?? 0}
+          ）；当前月实时聚合；筛话题类型时按实时聚合
         </span>
       </Card>
       <GeoBoardDimensionTabs

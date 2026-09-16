@@ -1,12 +1,16 @@
 package com.base.admin.service;
 
 import com.base.admin.common.PageResult;
+import com.base.admin.domain.dto.GeoContentArticleBoardQueryDTO;
+import com.base.admin.domain.dto.GeoContentArticleDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
+import com.base.admin.domain.vo.GeoContentArticleBoardVO;
+import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
 import com.base.admin.domain.vo.GeoContentPlacementItemVO;
@@ -14,6 +18,7 @@ import com.base.admin.domain.vo.GeoContentPlacementListVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekDetailVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
+import com.base.admin.domain.vo.GeoPersistResultVO;
 
 import java.io.InputStream;
 import java.util.List;
@@ -65,4 +70,16 @@ public interface GeoContentPlacementService {
 
     /** 按发布详情回填主表投放进度 */
     int backfillPlacementProgress();
+
+    /** 文章发布/收录看板 */
+    GeoContentArticleBoardVO articlePublishBoard(GeoContentArticleBoardQueryDTO query);
+
+    /** 文章发布/收录下钻明细 */
+    List<GeoContentArticleDetailRowVO> articlePublishDetail(GeoContentArticleDetailQueryDTO query);
+
+    /** 固化已结束的内容投放周报 */
+    GeoPersistResultVO autoPersistCompletedWeekly(int lookbackWeeks);
+
+    /** 固化已结束的内容投放月报 */
+    GeoPersistResultVO autoPersistCompletedMonthly(int lookbackMonths);
 }

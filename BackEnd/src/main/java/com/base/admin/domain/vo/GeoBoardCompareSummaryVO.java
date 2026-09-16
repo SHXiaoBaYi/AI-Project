@@ -7,22 +7,22 @@ import lombok.Data;
 @Schema(description = "GEO看板同比/环比指标摘要")
 public class GeoBoardCompareSummaryVO {
 
-    @Schema(description = "提及率%", example = "37.50")
+    @Schema(description = "露出率%", example = "37.50")
     private Double mentionRate;
 
-    @Schema(description = "提及率环比变化（百分点）", example = "2.50")
+    @Schema(description = "露出率环比变化（百分点）", example = "2.50")
     private Double mentionRateMom;
 
-    @Schema(description = "提及率同比变化（百分点）", example = "-1.20")
+    @Schema(description = "露出率同比变化（百分点）", example = "-1.20")
     private Double mentionRateYoy;
 
-    @Schema(description = "首位提及率%", example = "70.00")
+    @Schema(description = "首位露出率%", example = "70.00")
     private Double firstMentionRate;
 
-    @Schema(description = "首位提及率环比变化（百分点）", example = "3.00")
+    @Schema(description = "首位露出率环比变化（百分点）", example = "3.00")
     private Double firstMentionRateMom;
 
-    @Schema(description = "首位提及率同比变化（百分点）", example = "1.50")
+    @Schema(description = "首位露出率同比变化（百分点）", example = "1.50")
     private Double firstMentionRateYoy;
 
     @Schema(description = "推荐次数", example = "12")

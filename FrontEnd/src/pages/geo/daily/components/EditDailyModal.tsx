@@ -47,7 +47,7 @@ const EditDailyModal = memo(function EditDailyModal({
   return (
     <BaseModalForm
       key={record?.id ?? 'edit'}
-      title='编辑日监测'
+      title='编辑日监测数据'
       width={640}
       open={open}
       onOpenChange={onOpenChange}
@@ -130,7 +130,7 @@ const EditDailyModal = memo(function EditDailyModal({
         />
         <ProFormSelect
           name='mentioned'
-          label='提及'
+          label='露出'
           options={[
             { label: '是', value: 1 },
             { label: '否', value: 0 },

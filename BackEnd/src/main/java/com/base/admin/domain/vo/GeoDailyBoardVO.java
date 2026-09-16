@@ -10,14 +10,32 @@ import java.util.List;
 @Schema(description = "GEO日报看板（由日监测实时聚合）")
 public class GeoDailyBoardVO {
 
-    @Schema(description = "提及率折线（横轴=日期，系列=平台）")
+    @Schema(description = "露出率折线（横轴=日期，系列=平台）")
     private List<GeoChartPointVO> mentionChart = new ArrayList<>();
 
-    @Schema(description = "首位提及率折线（横轴=日期，系列=平台）")
+    @Schema(description = "首位露出率折线（横轴=日期，系列=平台）")
     private List<GeoChartPointVO> firstMentionChart = new ArrayList<>();
 
     @Schema(description = "推荐次数柱状（横轴=日期，系列=平台）")
     private List<GeoChartPointVO> recommendChart = new ArrayList<>();
+
+    @Schema(description = "测试问题数量柱状（横轴=日期，系列=平台）")
+    private List<GeoChartPointVO> sampleChart = new ArrayList<>();
+
+    @Schema(description = "推荐排名分布柱状（横轴=排名档，系列=平台）")
+    private List<GeoChartPointVO> rankChart = new ArrayList<>();
+
+    @Schema(description = "负面/错误内容数量柱状（横轴=日期，系列=平台）")
+    private List<GeoChartPointVO> negativeChart = new ArrayList<>();
+
+    @Schema(description = "筛选条件下露出率同比/环比摘要")
+    private GeoBoardCompareSummaryVO compareSummary;
+
+    @Schema(description = "负面/错误内容总条数", example = "3")
+    private Integer negativeCount;
+
+    @Schema(description = "负面汇总行（可点开明细）")
+    private List<GeoNegativeSummaryRowVO> negativeRows = new ArrayList<>();
 
     @Schema(description = "日报明细（扁平）")
     private List<GeoDailyRowVO> rows = new ArrayList<>();
@@ -25,10 +43,10 @@ public class GeoDailyBoardVO {
     @Schema(description = "汇总展示（按日期 Tab：话题/关键字/负责人 + 平台明细，对齐日监测新增）")
     private List<GeoDailySummaryDateVO> summaryGroups = new ArrayList<>();
 
-    @Schema(description = "负责人维度-提及率折线")
+    @Schema(description = "负责人维度-露出率折线")
     private List<GeoChartPointVO> ownerMentionChart = new ArrayList<>();
 
-    @Schema(description = "负责人维度-首位提及率折线")
+    @Schema(description = "负责人维度-首位露出率折线")
     private List<GeoChartPointVO> ownerFirstMentionChart = new ArrayList<>();
 
     @Schema(description = "负责人维度-推荐次数柱状")
@@ -61,10 +79,10 @@ public class GeoDailyBoardVO {
         @Schema(description = "样本数", example = "12")
         private int sampleCount;
 
-        @Schema(description = "提及率%", example = "37.50")
+        @Schema(description = "露出率%", example = "37.50")
         private double mentionRate;
 
-        @Schema(description = "首位提及率%", example = "70.00")
+        @Schema(description = "首位露出率%", example = "70.00")
         private double firstMentionRate;
 
         @Schema(description = "推荐次数", example = "5")
@@ -127,7 +145,7 @@ public class GeoDailyBoardVO {
         @Schema(description = "关键字（负责人维度明细用）")
         private String keyword;
 
-        @Schema(description = "是否提及（1=是 0=否）", example = "1")
+        @Schema(description = "是否露出（1=是 0=否）", example = "1")
         private Integer mentioned;
 
         @Schema(description = "排名", example = "1")

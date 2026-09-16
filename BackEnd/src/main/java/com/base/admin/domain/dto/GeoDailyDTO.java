@@ -39,7 +39,7 @@ public class GeoDailyDTO {
     @Schema(description = "话题ID", requiredMode = Schema.RequiredMode.REQUIRED, example = "1")
     private Long topicId;
 
-    @Schema(description = "是否提及（1=是 0=否）", example = "1")
+    @Schema(description = "是否露出（1=是 0=否）", example = "1")
     private Integer mentioned;
 
     @Schema(description = "排名", example = "1", nullable = true)

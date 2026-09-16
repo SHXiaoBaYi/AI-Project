@@ -256,7 +256,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
         rowKey='id'
         actionRef={actionRef}
         columns={columns}
-        headerTitle='目标问题 · 分配 · 进度'
+        headerTitle='投放管理'
         request={async (params) => {
           const res = await getGeoContentPlacementListApi({
             pageNum: params.current,

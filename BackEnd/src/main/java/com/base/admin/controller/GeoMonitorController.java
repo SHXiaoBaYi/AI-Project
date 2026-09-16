@@ -163,31 +163,31 @@ public class GeoMonitorController {
         return Result.ok(monitorService.listOwnerOptions());
     }
 
-    @Operation(summary = "周报看板（落库优先，未落库实时聚合）")
+    @Operation(summary = "周报看板（已结束周期读落库快照，未结束实时）")
     @PostMapping("/weekly/board")
-    @RequiresPermission("geo:weekly:list")
+    @RequiresPermission({"geo:weekly:list", "geo:expose:list", "geo:day:list"})
     public Result<GeoWeeklyBoardVO> weekly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.weeklyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }
 
     @Operation(summary = "周报落库（固化后锁定对应日监测）")
     @PostMapping("/weekly/persist")
-    @RequiresPermission("geo:weekly:persist")
+    @RequiresPermission({"geo:weekly:persist", "geo:expose:persist"})
     @Log(title = "GEO周报落库", businessType = 1)
     public Result<GeoPersistResultVO> persistWeekly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.persistWeeklyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }
 
-    @Operation(summary = "月报看板（落库优先，未落库实时聚合）")
+    @Operation(summary = "月报看板（已结束周期读落库快照，未结束实时）")
     @PostMapping("/monthly/board")
-    @RequiresPermission("geo:monthly:list")
+    @RequiresPermission({"geo:monthly:list", "geo:expose:list", "geo:day:list"})
     public Result<GeoMonthlyBoardVO> monthly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.monthlyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }
 
     @Operation(summary = "月报落库（固化后锁定对应日监测）")
     @PostMapping("/monthly/persist")
-    @RequiresPermission("geo:monthly:persist")
+    @RequiresPermission({"geo:monthly:persist", "geo:expose:persist"})
     @Log(title = "GEO月报落库", businessType = 1)
     public Result<GeoPersistResultVO> persistMonthly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.persistMonthlyBoard(query == null ? new GeoBoardQueryDTO() : query));
@@ -195,21 +195,28 @@ public class GeoMonitorController {
 
     @Operation(summary = "日报看板（实时聚合，默认近14天）")
     @PostMapping("/day/board")
-    @RequiresPermission("geo:day:list")
+    @RequiresPermission({"geo:day:list", "geo:expose:list", "geo:article:list"})
     public Result<GeoDailyBoardVO> dailyBoard(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.dailyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }
 
-    @Operation(summary = "全年目标看板（落库优先，未落库实时聚合）")
+    @Operation(summary = "负面/错误内容明细")
+    @PostMapping("/day/negatives")
+    @RequiresPermission({"geo:day:list", "geo:expose:list", "geo:article:list", "geo:daily:list"})
+    public Result<List<GeoDailyVO>> negatives(@RequestBody(required = false) GeoBoardQueryDTO query) {
+        return Result.ok(monitorService.listNegativeDaily(query == null ? new GeoBoardQueryDTO() : query));
+    }
+
+    @Operation(summary = "全年目标看板（已结束周期读落库快照，未结束实时）")
     @PostMapping("/yearly/board")
-    @RequiresPermission("geo:yearly:list")
+    @RequiresPermission({"geo:yearly:list", "geo:expose:list"})
     public Result<GeoYearlyBoardVO> yearly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.yearlyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }
 
     @Operation(summary = "年报落库（固化后锁定对应日监测）")
     @PostMapping("/yearly/persist")
-    @RequiresPermission("geo:yearly:persist")
+    @RequiresPermission({"geo:yearly:persist", "geo:expose:persist"})
     @Log(title = "GEO年报落库", businessType = 1)
     public Result<GeoPersistResultVO> persistYearly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.persistYearlyBoard(query == null ? new GeoBoardQueryDTO() : query));

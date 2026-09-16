@@ -22,6 +22,7 @@ export interface MenuTree {
   icon: string;
   sortOrder: number;
   status: number;
+  menuType?: 'M' | 'C' | 'F';
   children: MenuTree[];
 }
 

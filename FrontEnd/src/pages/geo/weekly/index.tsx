@@ -6,6 +6,7 @@ import { getGeoPlatformsApi, getGeoTopicOptionsApi, getGeoWeeklyBoardApi } from 
 import type { GeoTopic, GeoWeeklyBoard } from '@/types/geo';
 import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
+import { GEO_TERM_TYPES } from '@/constants/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { endOfIsoWeek, startOfIsoWeek, toDayjs } from '@/utils/geoBoardQuery';
 
@@ -25,6 +26,7 @@ const WeeklyPage = memo(function WeeklyPage() {
       endDate: endOfIsoWeek(end).format('YYYY-MM-DD'),
       topicId: values?.topicId,
       keyword: values?.keyword?.trim() || undefined,
+      termType: values?.termType || undefined,
       platforms: values?.platforms?.length ? values.platforms : undefined,
     });
     setBoard({
@@ -72,6 +74,12 @@ const WeeklyPage = memo(function WeeklyPage() {
             }}
           />
           <ProFormSelect
+            name='termType'
+            label='话题类型'
+            allowClear
+            options={[...GEO_TERM_TYPES]}
+          />
+          <ProFormSelect
             name='topicId'
             label='话题'
             allowClear
@@ -94,7 +102,7 @@ const WeeklyPage = memo(function WeeklyPage() {
       </Card>
       <Card size='small'>
         <span className='text-sm text-neutral-600'>
-          周报只读查看；已结束周由定时任务自动落库（已落库周期 {board.persistedPeriodCount ?? 0}）
+          周报只读查看；已结束周读落库快照（已落库周期 {board.persistedPeriodCount ?? 0}）；当前周实时聚合
         </span>
       </Card>
       <GeoBoardDimensionTabs

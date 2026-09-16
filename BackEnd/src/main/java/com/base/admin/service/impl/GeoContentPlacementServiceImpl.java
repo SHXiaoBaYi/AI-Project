@@ -4,26 +4,38 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.Constants;
 import com.base.admin.common.PageResult;
+import com.base.admin.domain.dto.GeoContentArticleBoardQueryDTO;
+import com.base.admin.domain.dto.GeoContentArticleDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
+import com.base.admin.domain.entity.GeoContentPeriodStat;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoContentPlacementCite;
 import com.base.admin.domain.entity.GeoContentPlacementItem;
 import com.base.admin.domain.entity.GeoTopic;
 import com.base.admin.domain.entity.SysUser;
+import com.base.admin.domain.vo.GeoChartPointVO;
+import com.base.admin.domain.vo.GeoContentArticleBoardVO;
+import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
+import com.base.admin.domain.vo.GeoContentCiteAggRowVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
 import com.base.admin.domain.vo.GeoContentPlacementItemVO;
 import com.base.admin.domain.vo.GeoContentPlacementListVO;
+import com.base.admin.domain.vo.GeoContentPublishAggRowVO;
+import com.base.admin.domain.vo.GeoContentPublisherCiteRowVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekDetailVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekRowVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
+import com.base.admin.domain.vo.GeoPersistResultVO;
+import com.base.admin.domain.vo.GeoRankItemVO;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.mapper.GeoContentPeriodStatMapper;
 import com.base.admin.mapper.GeoContentPlacementCiteMapper;
 import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
@@ -48,10 +60,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.time.temporal.WeekFields;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,6 +87,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentPlacementItemMapper itemMapper;
     private final GeoContentPlacementCiteMapper citeMapper;
+    private final GeoContentPeriodStatMapper contentPeriodStatMapper;
     private final SysUserMapper userMapper;
     private final GeoTopicService topicService;
     private final AiChatService aiChatService;
@@ -1246,4 +1263,666 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     }
 
     private record ParsedPublish(String status, String url) {}
+
+    @Override
+    public GeoContentArticleBoardVO articlePublishBoard(GeoContentArticleBoardQueryDTO query) {
+        LocalDate[] range = articleDateRange(query);
+        ArticleDataset current = loadArticleDataset(range[0], range[1], query);
+        GeoContentArticleBoardVO board = new GeoContentArticleBoardVO();
+        board.getPublishRows().addAll(buildPublishAggRows(current));
+        board.getCiteRows().addAll(buildCiteAggRows(current));
+        board.getPublishCountChart().addAll(toPublishCountChart(board.getPublishRows()));
+        board.getCiteRateChart().addAll(toCiteRateChart(board.getCiteRows()));
+        board.getPublishPlatformCiteRank().addAll(buildPlatformCiteRank(current));
+        board.getArticleCiteRank().addAll(buildArticleCiteRank(current));
+
+        long days = Math.max(1, java.time.temporal.ChronoUnit.DAYS.between(range[0], range[1]) + 1);
+        LocalDate momEnd = range[0].minusDays(1);
+        LocalDate momStart = momEnd.minusDays(days - 1);
+        LocalDate yoyStart = range[0].minusYears(1);
+        LocalDate yoyEnd = range[1].minusYears(1);
+        ArticleDataset mom = loadArticleDataset(momStart, momEnd, query);
+        ArticleDataset yoy = loadArticleDataset(yoyStart, yoyEnd, query);
+        board.getPublisherCiteRows().addAll(buildPublisherCiteRows(current, mom, yoy));
+        board.getPublisherCiteCompareChart().addAll(toPublisherCiteChart(board.getPublisherCiteRows()));
+        board.setPublisherCompareHint("同员工：环比=等长上一区间，同比=去年同区间；多员工为当前区间直接对比");
+        return board;
+    }
+
+    @Override
+    public List<GeoContentArticleDetailRowVO> articlePublishDetail(GeoContentArticleDetailQueryDTO query) {
+        LocalDate[] range = articleDateRange(query);
+        ArticleDataset data = loadArticleDataset(range[0], range[1], query);
+        String type = query.getDetailType() == null ? "publish" : query.getDetailType().trim();
+        String dim = query.getDimensionKey();
+        List<GeoContentArticleDetailRowVO> rows = new ArrayList<>();
+        if ("cite".equalsIgnoreCase(type) || "platformRank".equalsIgnoreCase(type) || "articleRank".equalsIgnoreCase(type)) {
+            for (CiteJoin c : data.cites) {
+                if (StringUtils.hasText(dim)) {
+                    if ("platformRank".equalsIgnoreCase(type)
+                            && !dim.equals(c.item.getPlatformName())) {
+                        continue;
+                    }
+                    if ("articleRank".equalsIgnoreCase(type)
+                            && !dim.equals(articleLabel(c.placement))) {
+                        continue;
+                    }
+                    if ("cite".equalsIgnoreCase(type)
+                            && !dim.equals(c.placement.getPublisherName())
+                            && !dim.equals(c.cite.getAiPlatform())
+                            && !dim.equals(c.item.getPlatformName())) {
+                        continue;
+                    }
+                }
+                rows.add(toDetailFromCite(c));
+            }
+            return rows;
+        }
+        for (ItemJoin j : data.items) {
+            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus())) {
+                continue;
+            }
+            if (StringUtils.hasText(dim)
+                    && !dim.equals(j.item.getPublishTime() == null ? null : j.item.getPublishTime().toString())
+                    && !dim.equals(j.placement.getPublisherName())
+                    && !dim.equals(j.item.getPlatformName())
+                    && !dim.equals(j.placement.getTopicName())) {
+                continue;
+            }
+            rows.add(toDetailFromItem(j, data.citeCountByItem.getOrDefault(j.item.getId(), 0)));
+        }
+        return rows;
+    }
+
+    private LocalDate[] articleDateRange(GeoContentArticleBoardQueryDTO query) {
+        LocalDate end = parseFlexibleDate(query == null ? null : query.getEndDate());
+        LocalDate start = parseFlexibleDate(query == null ? null : query.getStartDate());
+        if (end == null) {
+            end = LocalDate.now();
+        }
+        if (start == null) {
+            start = end.minusDays(27);
+        }
+        return new LocalDate[]{start, end};
+    }
+
+    private ArticleDataset loadArticleDataset(LocalDate start, LocalDate end, GeoContentArticleBoardQueryDTO query) {
+        Set<Long> publisherFilter = new HashSet<>();
+        if (query != null) {
+            if (query.getPublisherUserId() != null) {
+                publisherFilter.add(query.getPublisherUserId());
+            }
+            if (query.getPublisherUserIds() != null) {
+                for (Long id : query.getPublisherUserIds()) {
+                    if (id != null) {
+                        publisherFilter.add(id);
+                    }
+                }
+            }
+        }
+        List<String> publishPlatforms = query == null || query.getPublishPlatforms() == null ? List.of()
+                : query.getPublishPlatforms().stream().filter(StringUtils::hasText).toList();
+        List<String> aiPlatforms = query == null || query.getAiPlatforms() == null ? List.of()
+                : query.getAiPlatforms().stream().filter(StringUtils::hasText).toList();
+        String contentForm = query == null ? null : query.getContentForm();
+        Long topicId = query == null ? null : query.getTopicId();
+
+        LambdaQueryWrapper<GeoContentPlacement> placementWrapper = new LambdaQueryWrapper<GeoContentPlacement>()
+                .eq(topicId != null, GeoContentPlacement::getTopicId, topicId)
+                .in(!publisherFilter.isEmpty(), GeoContentPlacement::getPublisherUserId, publisherFilter);
+        List<GeoContentPlacement> placements = placementMapper.selectList(placementWrapper);
+        Map<Long, GeoContentPlacement> placementMap = placements.stream()
+                .collect(Collectors.toMap(GeoContentPlacement::getId, p -> p, (a, b) -> a));
+        if (placementMap.isEmpty()) {
+            return ArticleDataset.empty();
+        }
+
+        List<GeoContentPlacementItem> items = itemMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementItem>()
+                .in(GeoContentPlacementItem::getPlacementId, placementMap.keySet())
+                .ge(GeoContentPlacementItem::getPublishTime, start)
+                .le(GeoContentPlacementItem::getPublishTime, end)
+                .in(!publishPlatforms.isEmpty(), GeoContentPlacementItem::getPlatformName, publishPlatforms));
+        List<ItemJoin> joins = new ArrayList<>();
+        for (GeoContentPlacementItem item : items) {
+            GeoContentPlacement placement = placementMap.get(item.getPlacementId());
+            if (placement == null) {
+                continue;
+            }
+            String form = normalizeContentForm(item.getContentForm(), item.getPlatformName());
+            if (StringUtils.hasText(contentForm) && !contentForm.equals(form)) {
+                continue;
+            }
+            joins.add(new ItemJoin(placement, item, form));
+        }
+
+        Set<Long> itemIds = joins.stream().map(j -> j.item.getId()).collect(Collectors.toSet());
+        Set<Long> placementIds = joins.stream().map(j -> j.placement.getId()).collect(Collectors.toSet());
+        List<CiteJoin> citeJoins = new ArrayList<>();
+        Map<Long, Integer> citeCountByItem = new HashMap<>();
+        if (!itemIds.isEmpty() || !placementIds.isEmpty()) {
+            List<GeoContentPlacementCite> cites = citeMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementCite>()
+                    .and(w -> {
+                        if (!itemIds.isEmpty()) {
+                            w.in(GeoContentPlacementCite::getItemId, itemIds);
+                        }
+                        if (!placementIds.isEmpty()) {
+                            if (!itemIds.isEmpty()) {
+                                w.or();
+                            }
+                            w.in(GeoContentPlacementCite::getPlacementId, placementIds);
+                        }
+                    })
+                    .in(!aiPlatforms.isEmpty(), GeoContentPlacementCite::getAiPlatform, aiPlatforms));
+            Map<Long, ItemJoin> itemJoinMap = joins.stream()
+                    .collect(Collectors.toMap(j -> j.item.getId(), j -> j, (a, b) -> a));
+            for (GeoContentPlacementCite cite : cites) {
+                ItemJoin itemJoin = cite.getItemId() == null ? null : itemJoinMap.get(cite.getItemId());
+                GeoContentPlacement placement = itemJoin != null
+                        ? itemJoin.placement
+                        : placementMap.get(cite.getPlacementId());
+                if (placement == null) {
+                    continue;
+                }
+                GeoContentPlacementItem item = itemJoin != null ? itemJoin.item : null;
+                if (item == null) {
+                    // placement-level cite without item: skip platform filters already applied to items
+                    continue;
+                }
+                if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(item.getPublishStatus())) {
+                    continue;
+                }
+                if (item.getPublishTime() == null
+                        || item.getPublishTime().isBefore(start)
+                        || item.getPublishTime().isAfter(end)) {
+                    continue;
+                }
+                citeJoins.add(new CiteJoin(placement, item, cite));
+                citeCountByItem.merge(item.getId(), 1, Integer::sum);
+            }
+        }
+        return new ArticleDataset(joins, citeJoins, citeCountByItem);
+    }
+
+    private List<GeoContentPublishAggRowVO> buildPublishAggRows(ArticleDataset data) {
+        Map<String, GeoContentPublishAggRowVO> map = new LinkedHashMap<>();
+        for (ItemJoin j : data.items) {
+            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus())) {
+                continue;
+            }
+            String date = j.item.getPublishTime() == null ? "-" : j.item.getPublishTime().toString();
+            String key = date + "\0" + nz(j.placement.getTopicName()) + "\0"
+                    + nz(j.placement.getPublisherName()) + "\0" + nz(j.item.getPlatformName()) + "\0" + j.form;
+            GeoContentPublishAggRowVO row = map.computeIfAbsent(key, k -> {
+                GeoContentPublishAggRowVO vo = new GeoContentPublishAggRowVO();
+                vo.setDateLabel(date);
+                vo.setTopicName(j.placement.getTopicName());
+                vo.setPublisherName(j.placement.getPublisherName());
+                vo.setPublisherUserId(j.placement.getPublisherUserId());
+                vo.setPublishPlatform(j.item.getPlatformName());
+                vo.setContentForm(j.form);
+                vo.setPublishCount(0);
+                return vo;
+            });
+            row.setPublishCount(row.getPublishCount() + 1);
+        }
+        return new ArrayList<>(map.values());
+    }
+
+    private List<GeoContentCiteAggRowVO> buildCiteAggRows(ArticleDataset data) {
+        Map<String, int[]> bag = new LinkedHashMap<>();
+        Map<String, String[]> meta = new LinkedHashMap<>();
+        Set<Long> citedItems = data.cites.stream().map(c -> c.item.getId()).collect(Collectors.toSet());
+        for (ItemJoin j : data.items) {
+            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus())) {
+                continue;
+            }
+            String date = j.item.getPublishTime() == null ? "-" : j.item.getPublishTime().toString();
+            String key = date + "\0" + nz(j.placement.getTopicName()) + "\0"
+                    + nz(j.placement.getPublisherName()) + "\0" + nz(j.item.getPlatformName()) + "\0*";
+            bag.computeIfAbsent(key, k -> new int[2]);
+            meta.putIfAbsent(key, new String[]{date, j.placement.getTopicName(), j.placement.getPublisherName(),
+                    j.item.getPlatformName(), "全部"});
+            bag.get(key)[0]++;
+            if (citedItems.contains(j.item.getId())) {
+                bag.get(key)[1]++;
+            }
+        }
+        for (CiteJoin c : data.cites) {
+            String date = c.item.getPublishTime() == null ? "-" : c.item.getPublishTime().toString();
+            String key = date + "\0" + nz(c.placement.getTopicName()) + "\0"
+                    + nz(c.placement.getPublisherName()) + "\0" + nz(c.item.getPlatformName())
+                    + "\0" + nz(c.cite.getAiPlatform());
+            // AI 平台维度仅统计命中次数用于图表，收录率仍以成功发布分母为准
+            meta.putIfAbsent(key, new String[]{date, c.placement.getTopicName(), c.placement.getPublisherName(),
+                    c.item.getPlatformName(), c.cite.getAiPlatform()});
+            bag.putIfAbsent(key, new int[]{0, 0});
+        }
+        // 按 AI 平台：分母=该日该发布平台成功数，分子=该 AI 平台有引用的 item 数
+        Map<String, Set<Long>> successByBase = new HashMap<>();
+        for (ItemJoin j : data.items) {
+            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus())) {
+                continue;
+            }
+            String date = j.item.getPublishTime() == null ? "-" : j.item.getPublishTime().toString();
+            String base = date + "\0" + nz(j.placement.getTopicName()) + "\0"
+                    + nz(j.placement.getPublisherName()) + "\0" + nz(j.item.getPlatformName());
+            successByBase.computeIfAbsent(base, k -> new HashSet<>()).add(j.item.getId());
+        }
+        Map<String, Set<Long>> citedByAi = new HashMap<>();
+        for (CiteJoin c : data.cites) {
+            String date = c.item.getPublishTime() == null ? "-" : c.item.getPublishTime().toString();
+            String key = date + "\0" + nz(c.placement.getTopicName()) + "\0"
+                    + nz(c.placement.getPublisherName()) + "\0" + nz(c.item.getPlatformName())
+                    + "\0" + nz(c.cite.getAiPlatform());
+            citedByAi.computeIfAbsent(key, k -> new HashSet<>()).add(c.item.getId());
+        }
+
+        List<GeoContentCiteAggRowVO> rows = new ArrayList<>();
+        for (Map.Entry<String, int[]> e : bag.entrySet()) {
+            String[] m = meta.get(e.getKey());
+            GeoContentCiteAggRowVO vo = new GeoContentCiteAggRowVO();
+            vo.setDateLabel(m[0]);
+            vo.setTopicName(m[1]);
+            vo.setPublisherName(m[2]);
+            vo.setPublishPlatform(m[3]);
+            vo.setAiPlatform(m[4]);
+            if ("全部".equals(m[4])) {
+                vo.setSuccessCount(e.getValue()[0]);
+                vo.setCitedCount(e.getValue()[1]);
+            } else {
+                String base = m[0] + "\0" + nz(m[1]) + "\0" + nz(m[2]) + "\0" + nz(m[3]);
+                int success = successByBase.getOrDefault(base, Set.of()).size();
+                int cited = citedByAi.getOrDefault(e.getKey(), Set.of()).size();
+                vo.setSuccessCount(success);
+                vo.setCitedCount(cited);
+            }
+            vo.setCiteRate(vo.getSuccessCount() == 0 ? 0D
+                    : Math.round(vo.getCitedCount() * 10000.0 / vo.getSuccessCount()) / 100.0);
+            rows.add(vo);
+        }
+        return rows;
+    }
+
+    private List<GeoRankItemVO> buildPlatformCiteRank(ArticleDataset data) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        for (CiteJoin c : data.cites) {
+            map.merge(StringUtils.hasText(c.item.getPlatformName()) ? c.item.getPlatformName() : "-", 1, Integer::sum);
+        }
+        return toRankList(map);
+    }
+
+    private List<GeoRankItemVO> buildArticleCiteRank(ArticleDataset data) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        for (CiteJoin c : data.cites) {
+            map.merge(articleLabel(c.placement), 1, Integer::sum);
+        }
+        return toRankList(map);
+    }
+
+    private List<GeoRankItemVO> toRankList(Map<String, Integer> map) {
+        return map.entrySet().stream()
+                .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
+                .limit(20)
+                .map(e -> {
+                    GeoRankItemVO vo = new GeoRankItemVO();
+                    vo.setName(e.getKey());
+                    vo.setValue(e.getValue());
+                    return vo;
+                })
+                .toList();
+    }
+
+    private List<GeoContentPublisherCiteRowVO> buildPublisherCiteRows(
+            ArticleDataset current, ArticleDataset mom, ArticleDataset yoy) {
+        Map<Long, PublisherCiteBag> cur = publisherBags(current);
+        Map<Long, PublisherCiteBag> momMap = publisherBags(mom);
+        Map<Long, PublisherCiteBag> yoyMap = publisherBags(yoy);
+        List<GeoContentPublisherCiteRowVO> rows = new ArrayList<>();
+        for (Map.Entry<Long, PublisherCiteBag> e : cur.entrySet()) {
+            PublisherCiteBag bag = e.getValue();
+            PublisherCiteBag m = momMap.get(e.getKey());
+            PublisherCiteBag y = yoyMap.get(e.getKey());
+            GeoContentPublisherCiteRowVO vo = new GeoContentPublisherCiteRowVO();
+            vo.setPublisherUserId(e.getKey());
+            vo.setPublisherName(bag.name);
+            vo.setSuccessCount(bag.success);
+            vo.setCitedCount(bag.cited);
+            vo.setCiteHitCount(bag.hits);
+            vo.setCiteRate(rate(bag.cited, bag.success));
+            vo.setCiteRateMom(m == null || m.success == 0 ? null : roundRate(vo.getCiteRate() - rate(m.cited, m.success)));
+            vo.setCiteRateYoy(y == null || y.success == 0 ? null : roundRate(vo.getCiteRate() - rate(y.cited, y.success)));
+            vo.setCiteHitCountMom(m == null ? null : bag.hits - m.hits);
+            vo.setCiteHitCountYoy(y == null ? null : bag.hits - y.hits);
+            rows.add(vo);
+        }
+        rows.sort((a, b) -> Integer.compare(
+                b.getCiteHitCount() == null ? 0 : b.getCiteHitCount(),
+                a.getCiteHitCount() == null ? 0 : a.getCiteHitCount()));
+        return rows;
+    }
+
+    private Map<Long, PublisherCiteBag> publisherBags(ArticleDataset data) {
+        Map<Long, PublisherCiteBag> map = new LinkedHashMap<>();
+        Set<Long> citedItems = data.cites.stream().map(c -> c.item.getId()).collect(Collectors.toSet());
+        for (ItemJoin j : data.items) {
+            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus())) {
+                continue;
+            }
+            Long id = j.placement.getPublisherUserId() == null ? -1L : j.placement.getPublisherUserId();
+            PublisherCiteBag bag = map.computeIfAbsent(id, k -> {
+                PublisherCiteBag b = new PublisherCiteBag();
+                b.name = j.placement.getPublisherName();
+                return b;
+            });
+            bag.success++;
+            if (citedItems.contains(j.item.getId())) {
+                bag.cited++;
+            }
+        }
+        for (CiteJoin c : data.cites) {
+            Long id = c.placement.getPublisherUserId() == null ? -1L : c.placement.getPublisherUserId();
+            PublisherCiteBag bag = map.computeIfAbsent(id, k -> {
+                PublisherCiteBag b = new PublisherCiteBag();
+                b.name = c.placement.getPublisherName();
+                return b;
+            });
+            bag.hits++;
+        }
+        return map;
+    }
+
+    private List<GeoChartPointVO> toPublishCountChart(List<GeoContentPublishAggRowVO> rows) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        for (GeoContentPublishAggRowVO row : rows) {
+            String series = StringUtils.hasText(row.getPublishPlatform()) ? row.getPublishPlatform() : "未命名平台";
+            String key = row.getDateLabel() + "\0" + series;
+            map.merge(key, row.getPublishCount() == null ? 0 : row.getPublishCount(), Integer::sum);
+        }
+        return toChartPoints(map);
+    }
+
+    private List<GeoChartPointVO> toCiteRateChart(List<GeoContentCiteAggRowVO> rows) {
+        List<GeoChartPointVO> points = new ArrayList<>();
+        for (GeoContentCiteAggRowVO row : rows) {
+            if (!"全部".equals(row.getAiPlatform())) {
+                continue;
+            }
+            GeoChartPointVO p = new GeoChartPointVO();
+            p.setAxis(row.getDateLabel());
+            p.setSeries(StringUtils.hasText(row.getPublishPlatform()) ? row.getPublishPlatform() : "未命名平台");
+            p.setValue(row.getCiteRate() == null ? 0D : row.getCiteRate());
+            points.add(p);
+        }
+        return points;
+    }
+
+    private List<GeoChartPointVO> toPublisherCiteChart(List<GeoContentPublisherCiteRowVO> rows) {
+        List<GeoChartPointVO> points = new ArrayList<>();
+        for (GeoContentPublisherCiteRowVO row : rows) {
+            GeoChartPointVO rate = new GeoChartPointVO();
+            rate.setAxis(row.getPublisherName() == null ? "-" : row.getPublisherName());
+            rate.setSeries("收录率%");
+            rate.setValue(row.getCiteRate() == null ? 0D : row.getCiteRate());
+            points.add(rate);
+            GeoChartPointVO hits = new GeoChartPointVO();
+            hits.setAxis(row.getPublisherName() == null ? "-" : row.getPublisherName());
+            hits.setSeries("引用次数");
+            hits.setValue(row.getCiteHitCount() == null ? 0D : row.getCiteHitCount().doubleValue());
+            points.add(hits);
+        }
+        return points;
+    }
+
+    private List<GeoChartPointVO> toChartPoints(Map<String, Integer> map) {
+        List<GeoChartPointVO> points = new ArrayList<>();
+        for (Map.Entry<String, Integer> e : map.entrySet()) {
+            String[] parts = e.getKey().split("\0", 2);
+            GeoChartPointVO p = new GeoChartPointVO();
+            p.setAxis(parts[0]);
+            p.setSeries(parts.length > 1 ? parts[1] : "-");
+            p.setValue(e.getValue().doubleValue());
+            points.add(p);
+        }
+        return points;
+    }
+
+    private GeoContentArticleDetailRowVO toDetailFromItem(ItemJoin j, int citeCount) {
+        GeoContentArticleDetailRowVO vo = new GeoContentArticleDetailRowVO();
+        vo.setPlacementId(j.placement.getId());
+        vo.setItemId(j.item.getId());
+        vo.setTargetQuestion(j.placement.getTargetQuestion());
+        vo.setTitle(StringUtils.hasText(j.item.getTitle()) ? j.item.getTitle() : j.placement.getTitle());
+        vo.setTopicName(j.placement.getTopicName());
+        vo.setPublisherName(j.placement.getPublisherName());
+        vo.setPublishPlatform(j.item.getPlatformName());
+        vo.setContentForm(j.form);
+        vo.setPublishStatus(j.item.getPublishStatus());
+        vo.setPublishTime(j.item.getPublishTime() == null ? null : j.item.getPublishTime().toString());
+        vo.setPublishUrl(j.item.getPublishUrl());
+        vo.setCiteCount(citeCount);
+        return vo;
+    }
+
+    private GeoContentArticleDetailRowVO toDetailFromCite(CiteJoin c) {
+        GeoContentArticleDetailRowVO vo = toDetailFromItem(
+                new ItemJoin(c.placement, c.item, normalizeContentForm(c.item.getContentForm(), c.item.getPlatformName())),
+                1);
+        vo.setAiPlatform(c.cite.getAiPlatform());
+        vo.setCiteUrl(c.cite.getCiteUrl());
+        vo.setAskQuestion(c.cite.getAskQuestion());
+        return vo;
+    }
+
+    private static String articleLabel(GeoContentPlacement placement) {
+        if (StringUtils.hasText(placement.getTitle())) {
+            return placement.getTitle();
+        }
+        if (StringUtils.hasText(placement.getTargetQuestion())) {
+            return placement.getTargetQuestion();
+        }
+        return "投放#" + placement.getId();
+    }
+
+    private static double rate(int cited, int success) {
+        if (success <= 0) {
+            return 0D;
+        }
+        return Math.round(cited * 10000.0 / success) / 100.0;
+    }
+
+    private static Double roundRate(double value) {
+        return Math.round(value * 100.0) / 100.0;
+    }
+
+    private static class PublisherCiteBag {
+        private String name;
+        private int success;
+        private int cited;
+        private int hits;
+    }
+
+    private record ItemJoin(GeoContentPlacement placement, GeoContentPlacementItem item, String form) {}
+
+    private record CiteJoin(GeoContentPlacement placement, GeoContentPlacementItem item, GeoContentPlacementCite cite) {}
+
+    private record ArticleDataset(
+            List<ItemJoin> items,
+            List<CiteJoin> cites,
+            Map<Long, Integer> citeCountByItem) {
+        static ArticleDataset empty() {
+            return new ArticleDataset(List.of(), List.of(), Map.of());
+        }
+    }
+
+    @Override
+    @Transactional
+    public GeoPersistResultVO autoPersistCompletedWeekly(int lookbackWeeks) {
+        LocalDate today = LocalDate.now();
+        LocalDate end = today.minusDays(1).with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY));
+        int weeks = Math.max(lookbackWeeks, 1);
+        LocalDate start = end.minusWeeks(weeks - 1L).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        return persistContentPeriods("WEEK", start, end, today);
+    }
+
+    @Override
+    @Transactional
+    public GeoPersistResultVO autoPersistCompletedMonthly(int lookbackMonths) {
+        LocalDate today = LocalDate.now();
+        LocalDate end = today.with(TemporalAdjusters.firstDayOfMonth()).minusDays(1);
+        int months = Math.max(lookbackMonths, 1);
+        LocalDate start = end.minusMonths(months - 1L).with(TemporalAdjusters.firstDayOfMonth());
+        return persistContentPeriods("MONTH", start, end, today);
+    }
+
+    private GeoPersistResultVO persistContentPeriods(String periodType, LocalDate start, LocalDate end, LocalDate today) {
+        GeoContentArticleBoardQueryDTO query = new GeoContentArticleBoardQueryDTO();
+        query.setStartDate(start.toString());
+        query.setEndDate(end.toString());
+        ArticleDataset data = loadArticleDataset(start, end, query);
+        Map<String, ContentPeriodBag> bags = new LinkedHashMap<>();
+        Set<Long> citedItems = data.cites.stream().map(c -> c.item.getId()).collect(Collectors.toSet());
+        for (ItemJoin j : data.items) {
+            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus()) || j.item.getPublishTime() == null) {
+                continue;
+            }
+            LocalDate d = j.item.getPublishTime();
+            if (d.isBefore(start) || d.isAfter(end)) {
+                continue;
+            }
+            LocalDate[] bounds = "WEEK".equals(periodType) ? weekBounds(d) : monthBounds(d);
+            if (!bounds[1].isBefore(today)) {
+                continue; // 未结束周期不落库
+            }
+            String periodKey = "WEEK".equals(periodType) ? weekKey(d) : monthKey(d);
+            String periodLabel = "WEEK".equals(periodType) ? weekLabel(d) : monthLabel(d);
+            long publisherId = j.placement.getPublisherUserId() == null ? 0L : j.placement.getPublisherUserId();
+            long topicId = j.placement.getTopicId() == null ? 0L : j.placement.getTopicId();
+            String key = periodType + "\0" + periodKey + "\0" + publisherId + "\0" + topicId + "\0*";
+            ContentPeriodBag bag = bags.computeIfAbsent(key, k -> {
+                ContentPeriodBag b = new ContentPeriodBag();
+                b.periodType = periodType;
+                b.periodKey = periodKey;
+                b.periodLabel = periodLabel;
+                b.periodStart = bounds[0];
+                b.periodEnd = bounds[1];
+                b.publisherUserId = publisherId;
+                b.publisherName = nz(j.placement.getPublisherName());
+                b.topicId = topicId;
+                b.topicName = nz(j.placement.getTopicName());
+                b.publishPlatform = "*";
+                return b;
+            });
+            bag.success++;
+            if (citedItems.contains(j.item.getId())) {
+                bag.cited++;
+            }
+        }
+        for (CiteJoin c : data.cites) {
+            if (c.item.getPublishTime() == null) {
+                continue;
+            }
+            LocalDate d = c.item.getPublishTime();
+            LocalDate[] bounds = "WEEK".equals(periodType) ? weekBounds(d) : monthBounds(d);
+            if (!bounds[1].isBefore(today)) {
+                continue;
+            }
+            String periodKey = "WEEK".equals(periodType) ? weekKey(d) : monthKey(d);
+            long publisherId = c.placement.getPublisherUserId() == null ? 0L : c.placement.getPublisherUserId();
+            long topicId = c.placement.getTopicId() == null ? 0L : c.placement.getTopicId();
+            String key = periodType + "\0" + periodKey + "\0" + publisherId + "\0" + topicId + "\0*";
+            ContentPeriodBag bag = bags.get(key);
+            if (bag != null) {
+                bag.hits++;
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        int snapshot = 0;
+        Set<String> periods = new HashSet<>();
+        for (ContentPeriodBag bag : bags.values()) {
+            upsertContentSnapshot(bag, now);
+            snapshot++;
+            periods.add(bag.periodKey);
+        }
+        GeoPersistResultVO result = new GeoPersistResultVO();
+        result.setPeriodCount(periods.size());
+        result.setSnapshotCount(snapshot);
+        result.setLockedDailyCount(0);
+        return result;
+    }
+
+    private void upsertContentSnapshot(ContentPeriodBag bag, LocalDateTime now) {
+        GeoContentPeriodStat existing = contentPeriodStatMapper.selectOne(new LambdaQueryWrapper<GeoContentPeriodStat>()
+                .eq(GeoContentPeriodStat::getPeriodType, bag.periodType)
+                .eq(GeoContentPeriodStat::getPeriodKey, bag.periodKey)
+                .eq(GeoContentPeriodStat::getPublisherUserId, bag.publisherUserId)
+                .eq(GeoContentPeriodStat::getTopicId, bag.topicId)
+                .eq(GeoContentPeriodStat::getPublishPlatform, bag.publishPlatform)
+                .last("LIMIT 1"));
+        GeoContentPeriodStat entity = existing == null ? new GeoContentPeriodStat() : existing;
+        entity.setPeriodType(bag.periodType);
+        entity.setPeriodKey(bag.periodKey);
+        entity.setPeriodLabel(bag.periodLabel);
+        entity.setPeriodStart(bag.periodStart);
+        entity.setPeriodEnd(bag.periodEnd);
+        entity.setPublisherUserId(bag.publisherUserId);
+        entity.setPublisherName(bag.publisherName);
+        entity.setTopicId(bag.topicId);
+        entity.setTopicName(bag.topicName);
+        entity.setPublishPlatform(bag.publishPlatform);
+        entity.setSuccessCount(bag.success);
+        entity.setCitedCount(bag.cited);
+        entity.setCiteHitCount(bag.hits);
+        entity.setCiteRate(BigDecimal.valueOf(rate(bag.cited, bag.success)));
+        entity.setLockedAt(now);
+        if (existing == null) {
+            contentPeriodStatMapper.insert(entity);
+        } else {
+            contentPeriodStatMapper.updateById(entity);
+        }
+    }
+
+    private static LocalDate[] weekBounds(LocalDate date) {
+        LocalDate start = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate end = date.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY));
+        return new LocalDate[]{start, end};
+    }
+
+    private static LocalDate[] monthBounds(LocalDate date) {
+        return new LocalDate[]{date.with(TemporalAdjusters.firstDayOfMonth()), date.with(TemporalAdjusters.lastDayOfMonth())};
+    }
+
+    private static String weekKey(LocalDate date) {
+        WeekFields wf = WeekFields.ISO;
+        return date.get(wf.weekBasedYear()) + "-W" + String.format("%02d", date.get(wf.weekOfWeekBasedYear()));
+    }
+
+    private static String weekLabel(LocalDate date) {
+        WeekFields wf = WeekFields.ISO;
+        return date.get(wf.weekBasedYear()) + "年第" + date.get(wf.weekOfWeekBasedYear()) + "周";
+    }
+
+    private static String monthKey(LocalDate date) {
+        return date.getYear() + "-" + String.format("%02d", date.getMonthValue());
+    }
+
+    private static String monthLabel(LocalDate date) {
+        return date.getYear() + "年" + date.getMonthValue() + "月";
+    }
+
+    private static class ContentPeriodBag {
+        private String periodType;
+        private String periodKey;
+        private String periodLabel;
+        private LocalDate periodStart;
+        private LocalDate periodEnd;
+        private long publisherUserId;
+        private String publisherName;
+        private long topicId;
+        private String topicName;
+        private String publishPlatform;
+        private int success;
+        private int cited;
+        private int hits;
+    }
 }

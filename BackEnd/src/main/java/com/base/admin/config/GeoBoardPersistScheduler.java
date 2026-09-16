@@ -1,6 +1,7 @@
 package com.base.admin.config;
 
 import com.base.admin.domain.vo.GeoPersistResultVO;
+import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoMonitorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +21,7 @@ public class GeoBoardPersistScheduler implements ApplicationRunner {
 
     private final GeoBoardPersistProperties properties;
     private final GeoMonitorService monitorService;
+    private final GeoContentPlacementService contentPlacementService;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -54,10 +56,28 @@ public class GeoBoardPersistScheduler implements ApplicationRunner {
         runYearly("cron");
     }
 
+    @Scheduled(cron = "${geo.board-persist.content-weekly-cron:0 15 2 ? * MON}")
+    public void persistContentWeekly() {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        runContentWeekly("cron");
+    }
+
+    @Scheduled(cron = "${geo.board-persist.content-monthly-cron:0 25 2 1 * ?}")
+    public void persistContentMonthly() {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        runContentMonthly("cron");
+    }
+
     private void runAll(String trigger) {
         runWeekly(trigger);
         runMonthly(trigger);
         runYearly(trigger);
+        runContentWeekly(trigger);
+        runContentMonthly(trigger);
     }
 
     private void runWeekly(String trigger) {
@@ -87,6 +107,26 @@ public class GeoBoardPersistScheduler implements ApplicationRunner {
                     trigger, result.getPeriodCount(), result.getSnapshotCount(), result.getLockedDailyCount());
         } catch (Exception e) {
             log.error("GEO年报定时落库失败[{}]", trigger, e);
+        }
+    }
+
+    private void runContentWeekly(String trigger) {
+        try {
+            GeoPersistResultVO result = contentPlacementService.autoPersistCompletedWeekly(properties.getLookbackWeeks());
+            log.info("GEO内容周报落库[{}] period={}, snapshot={}",
+                    trigger, result.getPeriodCount(), result.getSnapshotCount());
+        } catch (Exception e) {
+            log.error("GEO内容周报定时落库失败[{}]", trigger, e);
+        }
+    }
+
+    private void runContentMonthly(String trigger) {
+        try {
+            GeoPersistResultVO result = contentPlacementService.autoPersistCompletedMonthly(properties.getLookbackMonths());
+            log.info("GEO内容月报落库[{}] period={}, snapshot={}",
+                    trigger, result.getPeriodCount(), result.getSnapshotCount());
+        } catch (Exception e) {
+            log.error("GEO内容月报定时落库失败[{}]", trigger, e);
         }
     }
 }

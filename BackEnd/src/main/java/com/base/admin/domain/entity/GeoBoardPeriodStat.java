@@ -50,10 +50,10 @@ public class GeoBoardPeriodStat extends BaseEntity {
     @Schema(description = "样本数", example = "12")
     private Integer sampleCount;
 
-    @Schema(description = "提及率%", example = "37.50")
+    @Schema(description = "露出率%", example = "37.50")
     private BigDecimal mentionRate;
 
-    @Schema(description = "首位提及率%", example = "70.00")
+    @Schema(description = "首位露出率%", example = "70.00")
     private BigDecimal firstMentionRate;
 
     @Schema(description = "推荐次数", example = "5")

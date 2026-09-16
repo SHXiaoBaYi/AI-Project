@@ -31,6 +31,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v4_geo_daily_board.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v5_geo_board_snapshot.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v9_geo_content_placement.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v10_geo_optimize.sql"));
             ensureBoardLockedColumn(connection);
             ensureOwnerNameColumn(connection);
             ensureTermTypeColumn(connection);
@@ -42,6 +43,9 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureContentPlacementProgress(connection);
             ensureContentPlacementViewMenus(connection);
             ensureContentPlacementItemContentForm(connection);
+            ensureArticleBoardMenu(connection);
+            ensureDailyUniqueKeyWithTermType(connection);
+            ensureGeoMenuRestructure(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -437,6 +441,127 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
         }
         log.info("已同步内容投放管理/执行双视角菜单");
+    }
+
+    /** 我的文章看板：AI露出 + 发布收录聚合页 */
+    private void ensureArticleBoardMenu(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (129, '我的文章看板', 100, 7, 'geo/article-board', '', 'C', 'geo:article:list', 'FundOutlined', 0, 0,
+                     'AI露出情况与文章发布/收录情况聚合看板', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      path = VALUES(path),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      sort_order = VALUES(sort_order),
+                      is_active = 1
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id = 129
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+        }
+        log.info("已同步我的文章看板菜单");
+    }
+
+    /** 日监测唯一键纳入 term_type，避免日/周巡查互相覆盖 */
+    private void ensureDailyUniqueKeyWithTermType(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_monitor_daily")) {
+            return;
+        }
+        if (indexExists(connection, "geo_monitor_daily", "uk_date_platform_keyword_term")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            if (indexExists(connection, "geo_monitor_daily", "uk_date_platform_keyword")) {
+                statement.execute("ALTER TABLE geo_monitor_daily DROP INDEX uk_date_platform_keyword");
+            }
+            statement.execute("""
+                    ALTER TABLE geo_monitor_daily
+                      ADD UNIQUE KEY uk_date_platform_keyword_term (inspect_date, platform, keyword, term_type)
+                    """);
+        }
+        log.info("已更新 geo_monitor_daily 唯一键（含 term_type）");
+    }
+
+    /**
+     * 菜单三分域：基础配置 / AI露出 / 内容投放；
+     * 合并露出看板入口，隐藏旧周/月报菜单。
+     */
+    private void ensureGeoMenuRestructure(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            // 目录 path 使用 geo/xxx 前缀，避免与叶子绝对路径冲突（路由层会扁平化目录）
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (130, '基础配置', 100, 1, 'geo/config', '', 'M', '', 'AppstoreOutlined', 0, 0, '话题/平台主数据', 1),
+                    (131, 'AI露出', 100, 2, 'geo/expose', '', 'M', '', 'RadarChartOutlined', 0, 0, '日监测数据与露出看板', 1),
+                    (132, '内容投放', 100, 3, 'geo/content', '', 'M', '', 'SendOutlined', 0, 0, '发布/收录与投放作业', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      parent_id = VALUES(parent_id),
+                      sort_order = VALUES(sort_order),
+                      path = VALUES(path),
+                      menu_type = VALUES(menu_type),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      is_active = 1
+                    """);
+
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 1, menu_name = '话题管理', is_active = 1 WHERE menu_id = 101");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 2, menu_name = '平台管理', is_active = 1 WHERE menu_id = 113");
+
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 131, sort_order = 1, menu_name = '日监测数据',
+                      path = 'geo/daily', perms = 'geo:daily:list', icon = 'CalendarOutlined', is_active = 1
+                    WHERE menu_id = 102
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 131, sort_order = 2, menu_name = '露出看板',
+                      path = 'geo/expose-board', perms = 'geo:expose:list', icon = 'LineChartOutlined',
+                      remark = '日/周/月/年露出经营看板（已结束周期读落库快照）', is_active = 1
+                    WHERE menu_id = 117
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 131, sort_order = 3, menu_name = '全年目标',
+                      path = 'geo/yearly-target', perms = 'geo:yearly:list', icon = 'DashboardOutlined',
+                      remark = '全年目标配置与达成查看', is_active = 1
+                    WHERE menu_id = 104
+                    """);
+
+            statement.executeUpdate("UPDATE sys_menu SET visible = 1, is_active = 0, parent_id = 131 WHERE menu_id IN (103, 118)");
+
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 1, menu_name = '我的文章看板',
+                      path = 'geo/article-board', perms = 'geo:article:list', icon = 'FundOutlined', is_active = 1
+                    WHERE menu_id = 129
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 2, menu_name = '投放管理',
+                      path = 'geo/content-placement-manage', perms = 'geo:content:list', is_active = 1
+                    WHERE menu_id = 122
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 3, menu_name = '投放执行',
+                      path = 'geo/content-placement-work', perms = 'geo:content:work', is_active = 1
+                    WHERE menu_id = 128
+                    """);
+
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 117, perms = 'geo:expose:persist', menu_name = '露出落库' WHERE menu_id = 119");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 117, is_active = 0 WHERE menu_id IN (120, 121)");
+
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (130, 131, 132, 117, 129)
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+        }
+        log.info("已同步 GEO 菜单三分域与露出看板合并");
     }
 
     private void ensureContentPlacementItemContentForm(Connection connection) throws Exception {

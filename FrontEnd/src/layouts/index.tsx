@@ -11,19 +11,27 @@ import type { RootState, AppDispatch } from '@/store';
 import type { MenuTree } from '@/types/menu';
 import avatarPng from '@/assets/avatar.png';
 import PageErrorBoundary from '@/components/PageErrorBoundary';
+import { resolveMenuFullPath } from '@/utils/menuPath';
 
 function convertMenusToRoute(menus: MenuTree[], parentPath = ''): any[] {
   return menus.map((item) => {
-    const cleanPath = (item.path || '').replace(/^\//, '');
-    const relativePath =
-      parentPath && cleanPath.startsWith(parentPath + '/') ? cleanPath.slice(parentPath.length + 1) : cleanPath;
-    const fullPath = parentPath ? `${parentPath}/${relativePath}` : relativePath;
+    const clean = (item.path || '').replace(/^\//, '');
+    const hasChildren = !!item.children?.length;
+    const fullPath = resolveMenuFullPath(item.path, parentPath);
     const IconComp = item.icon ? getIconComponent(item.icon) : undefined;
+
+    // 分组目录 geo/config：子节点仍按 geo 解析；顶层 geo/system：按其 fullPath
+    const isGroupingOnly = clean.includes('/') && !!parentPath;
+    const childParent = isGroupingOnly ? parentPath : fullPath;
+    const leafPath = `/${clean.includes('/') ? clean : fullPath}`;
+
     return {
-      path: relativePath || undefined,
+      // ProLayout 用 path/key 做 React key；目录必须有唯一 key，避免多个 undefined → ``
+      key: item.menuId != null ? `menu-${item.menuId}` : leafPath,
+      path: hasChildren ? `/${fullPath}` : leafPath,
       name: item.menuName,
       icon: IconComp ? <IconComp /> : undefined,
-      children: item.children?.length ? convertMenusToRoute(item.children, fullPath) : undefined,
+      children: hasChildren ? convertMenusToRoute(item.children, childParent) : undefined,
     };
   });
 }
@@ -92,6 +100,10 @@ export default function BasicLayout() {
         </div>
       )}
       menuItemRender={(item, dom) => {
+        // 目录只展开，不跳转（避免进 /geo/config 等无页面路由）
+        if (item.children?.length) {
+          return dom;
+        }
         const targetPath = item.path || '/workbench';
         const normalizedPath = targetPath.startsWith('/') ? targetPath : `/${targetPath}`;
         return <Link to={normalizedPath}>{dom}</Link>;

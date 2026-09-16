@@ -38,7 +38,7 @@ public class GeoDailyVO {
     @Schema(description = "话题名称", example = "送礼")
     private String topicName;
 
-    @Schema(description = "是否提及（1=是 0=否）", example = "1")
+    @Schema(description = "是否露出（1=是 0=否）", example = "1")
     private Integer mentioned;
 
     @Schema(description = "排名", example = "1", nullable = true)

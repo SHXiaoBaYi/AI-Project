@@ -11,7 +11,7 @@ import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import { GEO_TERM_TYPES, GEO_TERM_TYPE_DEFAULT } from '@/constants/geo';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
-/** 提及=-1 表示忽略该平台，不写入数据库 */
+/** 露出=-1 表示忽略该平台，不写入数据库 */
 const MENTION_IGNORE = -1;
 const MENTION_OPTIONS = [
   { label: '是', value: 1 },
@@ -100,7 +100,7 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
         render: (v: string) => <span className='px-2 font-medium'>{v}</span>,
       },
       {
-        title: '提及',
+        title: '露出',
         dataIndex: 'mentioned',
         width: 100,
         render: (v, row) => (
@@ -184,14 +184,14 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
         ),
       },
       {
-        title: '负面内容',
+        title: '负面/错误内容',
         dataIndex: 'negativeContent',
         width: 160,
         render: (v, row) => (
           <ImeSafeInput
             variant='borderless'
             value={v}
-            placeholder='负面内容'
+            placeholder='负面/错误内容'
             onChange={(val) => patch(row.platform, { negativeContent: val })}
           />
         ),
@@ -643,7 +643,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   return (
     <>
       <Drawer
-        title='新增日监测'
+        title='新增日监测数据'
         width='95%'
         open={open}
         onClose={() => onOpenChange(false)}

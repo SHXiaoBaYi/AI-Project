@@ -10,7 +10,7 @@ public class GeoChartPointVO {
     @Schema(description = "横轴", example = "2026年第36周")
     private String axis;
 
-    @Schema(description = "系列（平台或指标名）", example = "豆包-提及率")
+    @Schema(description = "系列（平台或指标名）", example = "豆包-露出率")
     private String series;
 
     @Schema(description = "数值", example = "37.5")

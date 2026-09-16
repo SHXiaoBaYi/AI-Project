@@ -10,10 +10,10 @@ import java.util.List;
 @Schema(description = "GEO月报看板")
 public class GeoMonthlyBoardVO {
 
-    @Schema(description = "提及率折线（横轴=月，系列=平台）")
+    @Schema(description = "露出率折线（横轴=月，系列=平台）")
     private List<GeoChartPointVO> mentionChart = new ArrayList<>();
 
-    @Schema(description = "首位提及率折线（横轴=月，系列=平台）")
+    @Schema(description = "首位露出率折线（横轴=月，系列=平台）")
     private List<GeoChartPointVO> firstMentionChart = new ArrayList<>();
 
     @Schema(description = "推荐次数柱状（横轴=月，系列=平台）")
@@ -28,10 +28,10 @@ public class GeoMonthlyBoardVO {
     @Schema(description = "同比/环比汇总（按查询范围内最新周期，话题维度）")
     private GeoBoardCompareSummaryVO compareSummary;
 
-    @Schema(description = "负责人维度-提及率折线")
+    @Schema(description = "负责人维度-露出率折线")
     private List<GeoChartPointVO> ownerMentionChart = new ArrayList<>();
 
-    @Schema(description = "负责人维度-首位提及率折线")
+    @Schema(description = "负责人维度-首位露出率折线")
     private List<GeoChartPointVO> ownerFirstMentionChart = new ArrayList<>();
 
     @Schema(description = "负责人维度-推荐次数柱状")
@@ -61,22 +61,22 @@ public class GeoMonthlyBoardVO {
         @Schema(description = "样本数", example = "12")
         private int sampleCount;
 
-        @Schema(description = "提及率%", example = "37.50")
+        @Schema(description = "露出率%", example = "37.50")
         private double mentionRate;
 
-        @Schema(description = "提及率环比（百分点）", nullable = true)
+        @Schema(description = "露出率环比（百分点）", nullable = true)
         private Double mentionRateMom;
 
-        @Schema(description = "提及率同比（百分点）", nullable = true)
+        @Schema(description = "露出率同比（百分点）", nullable = true)
         private Double mentionRateYoy;
 
-        @Schema(description = "首位提及率%", example = "70.00")
+        @Schema(description = "首位露出率%", example = "70.00")
         private double firstMentionRate;
 
-        @Schema(description = "首位提及率环比（百分点）", nullable = true)
+        @Schema(description = "首位露出率环比（百分点）", nullable = true)
         private Double firstMentionRateMom;
 
-        @Schema(description = "首位提及率同比（百分点）", nullable = true)
+        @Schema(description = "首位露出率同比（百分点）", nullable = true)
         private Double firstMentionRateYoy;
 
         @Schema(description = "推荐次数", example = "5")

@@ -20,6 +20,7 @@ public class TreeUtil {
                         .path(m.getPath())
                         .component(m.getComponent())
                         .icon(m.getIcon())
+                        .menuType(m.getMenuType())
                         .sortOrder(m.getSortOrder())
                         .status(m.getStatus())
                         .children(new ArrayList<>())

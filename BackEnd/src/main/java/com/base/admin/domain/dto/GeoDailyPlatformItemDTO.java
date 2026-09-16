@@ -15,7 +15,7 @@ public class GeoDailyPlatformItemDTO {
     @Schema(description = "平台名称", requiredMode = Schema.RequiredMode.REQUIRED, example = "豆包")
     private String platform;
 
-    @Schema(description = "是否提及（1=是 0=否）", example = "1")
+    @Schema(description = "是否露出（1=是 0=否）", example = "1")
     private Integer mentioned;
 
     @Schema(description = "排名", example = "1", nullable = true)

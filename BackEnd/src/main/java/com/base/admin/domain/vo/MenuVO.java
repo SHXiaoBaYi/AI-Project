@@ -26,6 +26,9 @@ public class MenuVO {
     @Schema(description = "图标", example = "setting")
     private String icon;
 
+    @Schema(description = "菜单类型 M目录 C菜单 F按钮", example = "C")
+    private String menuType;
+
     @Schema(description = "排序", example = "1")
     private Integer sortOrder;
 

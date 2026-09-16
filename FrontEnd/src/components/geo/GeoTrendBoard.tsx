@@ -3,6 +3,7 @@ import { Card, Col, Row, Statistic, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import type { GeoBoardCompareSummary, GeoChartPoint } from '@/types/geo';
+import { GEO_LABEL } from '@/constants/geoLabels';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
@@ -127,13 +128,13 @@ export function GeoCompareSummaryCards({
   if (!data) return null;
 
   const momChart: GeoChartPoint[] = [
-    { axis: '提及率', series: '环比(pp)', value: Number(data.mentionRateMom ?? 0) },
-    { axis: '首位提及率', series: '环比(pp)', value: Number(data.firstMentionRateMom ?? 0) },
+    { axis: GEO_LABEL.mentionRate, series: '环比(pp)', value: Number(data.mentionRateMom ?? 0) },
+    { axis: GEO_LABEL.firstMentionRate, series: '环比(pp)', value: Number(data.firstMentionRateMom ?? 0) },
     { axis: '推荐次数', series: '环比', value: Number(data.recommendCountMom ?? 0) },
   ];
   const yoyChart: GeoChartPoint[] = [
-    { axis: '提及率', series: '同比(pp)', value: Number(data.mentionRateYoy ?? 0) },
-    { axis: '首位提及率', series: '同比(pp)', value: Number(data.firstMentionRateYoy ?? 0) },
+    { axis: GEO_LABEL.mentionRate, series: '同比(pp)', value: Number(data.mentionRateYoy ?? 0) },
+    { axis: GEO_LABEL.firstMentionRate, series: '同比(pp)', value: Number(data.firstMentionRateYoy ?? 0) },
     { axis: '推荐次数', series: '同比', value: Number(data.recommendCountYoy ?? 0) },
   ];
 
@@ -151,7 +152,7 @@ export function GeoCompareSummaryCards({
         >
           <Card size='small'>
             <Statistic
-              title='提及率%'
+              title='露出率%'
               value={data.mentionRate ?? 0}
               precision={2}
             />
@@ -170,7 +171,7 @@ export function GeoCompareSummaryCards({
         >
           <Card size='small'>
             <Statistic
-              title='首位提及率%'
+              title='首位露出率%'
               value={data.firstMentionRate ?? 0}
               precision={2}
             />
@@ -285,18 +286,26 @@ export function GeoTrendBoard({
     { title: groupTitle, dataIndex: 'topicName' },
     { title: '平台', dataIndex: 'platform' },
     { title: '样本', dataIndex: 'sampleCount' },
-    { title: '提及率%', dataIndex: 'mentionRate' },
+    { title: '露出率%', dataIndex: 'mentionRate' },
     ...(showCompare
       ? ([
-          { title: '提及环比', dataIndex: 'mentionRateMom', render: (v: number | null) => <DeltaTag value={v} /> },
-          { title: '提及同比', dataIndex: 'mentionRateYoy', render: (v: number | null) => <DeltaTag value={v} /> },
+          { title: '露出环比', dataIndex: 'mentionRateMom', render: (v: number | null) => <DeltaTag value={v} /> },
+          { title: '露出同比', dataIndex: 'mentionRateYoy', render: (v: number | null) => <DeltaTag value={v} /> },
         ] as ColumnsType<GeoTrendRow>)
       : []),
-    { title: '首位提及率%', dataIndex: 'firstMentionRate' },
+    { title: '首位露出率%', dataIndex: 'firstMentionRate' },
     ...(showCompare
       ? ([
-          { title: '首位环比', dataIndex: 'firstMentionRateMom', render: (v: number | null) => <DeltaTag value={v} /> },
-          { title: '首位同比', dataIndex: 'firstMentionRateYoy', render: (v: number | null) => <DeltaTag value={v} /> },
+          {
+            title: '首位露出环比',
+            dataIndex: 'firstMentionRateMom',
+            render: (v: number | null) => <DeltaTag value={v} />,
+          },
+          {
+            title: '首位露出同比',
+            dataIndex: 'firstMentionRateYoy',
+            render: (v: number | null) => <DeltaTag value={v} />,
+          },
         ] as ColumnsType<GeoTrendRow>)
       : []),
     { title: '推荐次数', dataIndex: 'recommendCount' },
@@ -342,7 +351,7 @@ export function GeoTrendBoard({
           alwaysShow
         />
       ) : null}
-      <Card title={`提及率%（折线，横轴=${axisTitle}，系列=平台）`}>
+      <Card title={`露出率%（折线，横轴=${axisTitle}，系列=平台）`}>
         <Suspense fallback={<ChartFallback height={280} />}>
           <Line
             data={mentionChart}
@@ -353,7 +362,7 @@ export function GeoTrendBoard({
           />
         </Suspense>
       </Card>
-      <Card title={`首位提及率%（折线，横轴=${axisTitle}，系列=平台）`}>
+      <Card title={`首位露出率%（折线，横轴=${axisTitle}，系列=平台）`}>
         <Suspense fallback={<ChartFallback height={280} />}>
           <Line
             data={firstMentionChart}
