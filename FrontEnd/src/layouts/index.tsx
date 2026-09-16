@@ -11,6 +11,7 @@ import type { RootState, AppDispatch } from '@/store';
 import type { MenuTree } from '@/types/menu';
 import avatarPng from '@/assets/avatar.png';
 import PageErrorBoundary from '@/components/PageErrorBoundary';
+import { ExternalLinkProvider } from '@/components/ExternalLinkDrawer';
 import { resolveMenuFullPath } from '@/utils/menuPath';
 
 function convertMenusToRoute(menus: MenuTree[], parentPath = ''): any[] {
@@ -150,9 +151,11 @@ export default function BasicLayout() {
       }}
     >
       <PageContainer pageHeaderRender={false}>
-        <PageErrorBoundary key={location.pathname}>
-          <Outlet />
-        </PageErrorBoundary>
+        <ExternalLinkProvider>
+          <PageErrorBoundary key={location.pathname}>
+            <Outlet />
+          </PageErrorBoundary>
+        </ExternalLinkProvider>
       </PageContainer>
     </ProLayout>
   );

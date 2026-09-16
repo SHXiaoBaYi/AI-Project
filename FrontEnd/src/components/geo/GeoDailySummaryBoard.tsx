@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Drawer, Table, Tabs, Tag, Typography } from 'antd';
+import { Card, Table, Tabs, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { GeoDailySummaryDate, GeoDailySummaryPlatform, GeoDailySummaryTopic, GeoDailyVO } from '@/types/geo';
+import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
 import GeoScreenshot from '@/components/geo/GeoScreenshot';
 
 /** 用日监测原始记录组装汇总（含排名/链接等明细字段） */
@@ -69,13 +70,6 @@ function hasDetailFields(groups?: GeoDailySummaryDate[]) {
   );
 }
 
-function resolveUrl(url?: string) {
-  if (!url) return '';
-  if (/^https?:\/\//i.test(url)) return url;
-  if (url.startsWith('/')) return url;
-  return `https://${url}`;
-}
-
 export function GeoDailySummaryBoard({
   groups,
   records,
@@ -102,7 +96,6 @@ export function GeoDailySummaryBoard({
   }, [groups, records, dimension]);
 
   const [innerKey, setInnerKey] = useState<string>();
-  const [iframeUrl, setIframeUrl] = useState<string>();
 
   useEffect(() => {
     if (!data.length) {
@@ -179,19 +172,12 @@ export function GeoDailySummaryBoard({
         dataIndex: 'thirdPartyUrl',
         width: 160,
         ellipsis: true,
-        render: (v?: string) =>
-          v ? (
-            <Typography.Link
-              ellipsis
-              title={v}
-              className='max-w-full'
-              onClick={() => setIframeUrl(resolveUrl(v))}
-            >
-              {v}
-            </Typography.Link>
-          ) : (
-            '-'
-          ),
+        render: (v?: string) => (
+          <ExternalLinkText
+            href={v}
+            drawerTitle='第三方页面'
+          />
+        ),
       },
       {
         title: '竞品',
@@ -331,35 +317,6 @@ export function GeoDailySummaryBoard({
           dataSource={[...(activeGroup?.topics || [])]}
         />
       </Card>
-
-      <Drawer
-        title='第三方页面'
-        width='70%'
-        open={!!iframeUrl}
-        onClose={() => setIframeUrl(undefined)}
-        destroyOnHidden
-        extra={
-          iframeUrl ? (
-            <Button
-              type='link'
-              href={iframeUrl}
-              target='_blank'
-              rel='noreferrer'
-            >
-              新窗口打开
-            </Button>
-          ) : null
-        }
-      >
-        {iframeUrl ? (
-          <iframe
-            title='geo-link-preview'
-            src={iframeUrl}
-            className='h-[75vh] w-full border-0'
-            sandbox='allow-scripts allow-same-origin allow-popups allow-forms'
-          />
-        ) : null}
-      </Drawer>
     </>
   );
 }

@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useEffect, useMemo, useState } from 'react';
 import { ProFormDateRangePicker, ProFormSelect, QueryFilter } from '@ant-design/pro-components';
-import { Button, Card, Col, Modal, Row, Segmented, Table, Tag, Typography } from 'antd';
+import { Button, Card, Col, Modal, Row, Segmented, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import {
@@ -17,7 +17,8 @@ import type {
 import { GEO_CONTENT_WEEK_METRICS } from '@/constants/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { endOfIsoWeek, startOfIsoWeek, toDayjs } from '@/utils/geoBoardQuery';
-import { STATUS_COLOR, isHttpUrl } from '@/components/geo/content-placement/constants';
+import { STATUS_COLOR } from '@/components/geo/content-placement/constants';
+import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
@@ -75,7 +76,6 @@ const PublisherWeeklyBoard = memo(function PublisherWeeklyBoard() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTitle, setDetailTitle] = useState('');
   const [detailRows, setDetailRows] = useState<GeoContentPublisherWeekDetail[]>([]);
-  const [iframeUrl, setIframeUrl] = useState<string>();
 
   useEffect(() => {
     void getGeoOwnerOptionsApi().then(setOwners);
@@ -403,29 +403,15 @@ const PublisherWeeklyBoard = memo(function PublisherWeeklyBoard() {
               title: '链接',
               dataIndex: 'publishUrl',
               ellipsis: true,
-              render: (v?: string) =>
-                isHttpUrl(v) ? <Typography.Link onClick={() => setIframeUrl(v)}>{v}</Typography.Link> : v || '-',
+              render: (v?: string) => (
+                <ExternalLinkText
+                  href={v}
+                  drawerTitle='投放链接'
+                />
+              ),
             },
           ]}
         />
-      </Modal>
-
-      <Modal
-        title='外部链接'
-        open={!!iframeUrl}
-        onCancel={() => setIframeUrl(undefined)}
-        footer={null}
-        width='70%'
-        destroyOnClose
-      >
-        {iframeUrl ? (
-          <iframe
-            title='week-detail-link'
-            src={iframeUrl}
-            className='h-[70vh] w-full border-0'
-            sandbox='allow-scripts allow-same-origin allow-popups allow-forms'
-          />
-        ) : null}
       </Modal>
     </>
   );

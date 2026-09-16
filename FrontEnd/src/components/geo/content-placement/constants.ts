@@ -16,7 +16,7 @@ export const SOURCE_COLOR: Record<string, string> = {
   AI生成: 'purple',
 };
 
-export const isHttpUrl = (v?: string) => !!v && /^https?:\/\//i.test(v);
+export { isHttpUrl, canOpenExternalInApp, resolveExternalUrl } from '@/utils/externalUrl';
 
 export const derivePlacementProgress = (list: { publishStatus?: string }[]) => {
   const platformCount = list.length;

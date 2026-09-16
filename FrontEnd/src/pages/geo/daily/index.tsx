@@ -1,11 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Drawer, Tag, Typography, Upload } from 'antd';
+import { App, Button, Tag, Upload } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
+import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
 import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import {
   deleteGeoDailyApi,
@@ -34,7 +35,6 @@ const DailyPage = memo(function DailyPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [iframeUrl, setIframeUrl] = useState<string>();
 
   const refreshMeta = () => {
     getGeoTopicOptionsApi().then(setTopics);
@@ -175,19 +175,12 @@ const DailyPage = memo(function DailyPage() {
       search: {
         transform: (value) => ({ hasThirdPartyUrl: value }),
       },
-      render: (_, r) =>
-        r.thirdPartyUrl ? (
-          <Typography.Link
-            ellipsis
-            title={r.thirdPartyUrl}
-            className='max-w-full'
-            onClick={() => setIframeUrl(r.thirdPartyUrl)}
-          >
-            {r.thirdPartyUrl}
-          </Typography.Link>
-        ) : (
-          '-'
-        ),
+      render: (_, r) => (
+        <ExternalLinkText
+          href={r.thirdPartyUrl}
+          drawerTitle='第三方页面'
+        />
+      ),
     },
     {
       title: '竞品',
@@ -377,33 +370,6 @@ const DailyPage = memo(function DailyPage() {
           </Button>
         </div>
       </BaseModalForm>
-
-      <Drawer
-        title='第三方页面'
-        width='70%'
-        open={!!iframeUrl}
-        onClose={() => setIframeUrl(undefined)}
-        extra={
-          iframeUrl ? (
-            <Button
-              type='link'
-              href={iframeUrl}
-              target='_blank'
-            >
-              新窗口打开
-            </Button>
-          ) : null
-        }
-      >
-        {iframeUrl ? (
-          <iframe
-            title='geo-link'
-            src={iframeUrl}
-            className='h-[70vh] w-full border-0'
-            sandbox='allow-scripts allow-same-origin allow-popups allow-forms'
-          />
-        ) : null}
-      </Drawer>
     </>
   );
 });

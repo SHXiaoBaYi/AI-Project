@@ -24,6 +24,7 @@ import type {
 import { GEO_CONTENT_FORMS, GEO_PLATFORM_TYPE_AI, GEO_PLATFORM_TYPE_CONTENT } from '@/constants/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
+import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
@@ -430,19 +431,14 @@ const PublishPanel = memo(function PublishPanel() {
             {
               title: '链接',
               dataIndex: 'publishUrl',
-              width: 120,
-              render: (v) =>
-                v ? (
-                  <a
-                    href={v}
-                    target='_blank'
-                    rel='noreferrer'
-                  >
-                    打开
-                  </a>
-                ) : (
-                  '-'
-                ),
+              width: 160,
+              ellipsis: true,
+              render: (v) => (
+                <ExternalLinkText
+                  href={v}
+                  drawerTitle='投放链接'
+                />
+              ),
             },
           ]}
         />

@@ -1,8 +1,9 @@
 import { memo, useEffect, useState } from 'react';
 import type { ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Drawer, Modal, Space, Table, Tag, Typography } from 'antd';
+import { App, Button, Drawer, Modal, Space, Table, Tag } from 'antd';
 import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
+import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
 import {
   createGeoContentPlacementCiteApi,
   createGeoContentPlacementItemApi,
@@ -26,7 +27,7 @@ import {
   GEO_PLATFORM_TYPE_AI,
   GEO_PLATFORM_TYPE_CONTENT,
 } from '@/constants/geo';
-import { AGG_COLOR, STATUS_COLOR, derivePlacementProgress, isHttpUrl } from './constants';
+import { AGG_COLOR, STATUS_COLOR, derivePlacementProgress } from './constants';
 
 type Props = {
   open: boolean;
@@ -60,7 +61,6 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
   const [cites, setCites] = useState<GeoContentPlacementCite[]>([]);
   const [citeFormOpen, setCiteFormOpen] = useState(false);
   const [editingCite, setEditingCite] = useState<GeoContentPlacementCite | null>(null);
-  const [iframeUrl, setIframeUrl] = useState<string>();
 
   useEffect(() => {
     if (!open) return;
@@ -102,11 +102,6 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, placement?.id]);
-
-  const openExternal = (url?: string) => {
-    if (!isHttpUrl(url)) return;
-    setIframeUrl(url);
-  };
 
   const itemFormColumns: ProColumnType<GeoContentPlacementItem>[] = [
     {
@@ -269,12 +264,12 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
               title: '链接',
               dataIndex: 'publishUrl',
               ellipsis: true,
-              render: (v?: string) =>
-                isHttpUrl(v) ? (
-                  <Typography.Link onClick={() => openExternal(v)}>{v}</Typography.Link>
-                ) : (
-                  <span>{v || '-'}</span>
-                ),
+              render: (v?: string) => (
+                <ExternalLinkText
+                  href={v}
+                  drawerTitle='投放链接'
+                />
+              ),
             },
             { title: '平台名称', dataIndex: 'platformName', width: 100 },
             {
@@ -421,8 +416,12 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
               title: '引用链接',
               dataIndex: 'citeUrl',
               ellipsis: true,
-              render: (v?: string) =>
-                isHttpUrl(v) ? <Typography.Link onClick={() => openExternal(v)}>{v}</Typography.Link> : '-',
+              render: (v?: string) => (
+                <ExternalLinkText
+                  href={v}
+                  drawerTitle='引用链接'
+                />
+              ),
             },
           ]}
         />
@@ -456,35 +455,6 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
           return true;
         }}
       />
-
-      <Drawer
-        title='外部链接'
-        width='70%'
-        open={!!iframeUrl}
-        onClose={() => setIframeUrl(undefined)}
-        destroyOnClose
-        extra={
-          iframeUrl ? (
-            <Button
-              type='link'
-              href={iframeUrl}
-              target='_blank'
-              rel='noreferrer'
-            >
-              新窗口打开
-            </Button>
-          ) : null
-        }
-      >
-        {iframeUrl ? (
-          <iframe
-            title='content-placement-link'
-            src={iframeUrl}
-            className='h-[75vh] w-full border-0'
-            sandbox='allow-scripts allow-same-origin allow-popups allow-forms'
-          />
-        ) : null}
-      </Drawer>
     </>
   );
 });
