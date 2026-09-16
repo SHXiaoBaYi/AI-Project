@@ -167,7 +167,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
     {
       title: '来源',
       dataIndex: 'source',
-      width: 120,
+      width: 160,
       valueType: 'select',
       valueEnum: Object.fromEntries(GEO_CONTENT_SOURCES.map((s) => [s.value, { text: s.label }])),
       fieldProps: { options: [...GEO_CONTENT_SOURCES], allowClear: true },
@@ -175,6 +175,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       render: (_, record) => {
         const source = record.source || '手动新增';
         if (source === 'AI生成') {
+          const model = record.sourceAiModel?.trim();
           return (
             <Tag
               color={SOURCE_COLOR[source]}
@@ -184,7 +185,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
                 setSourceOpen(true);
               }}
             >
-              AI生成 · 查看参照
+              {model ? `AI生成 · ${model}` : 'AI生成 · 查看参照'}
             </Tag>
           );
         }
@@ -480,6 +481,10 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
           <div>
             <div className='mb-1 text-neutral-500'>当前目标问题</div>
             <div>{sourceRecord?.targetQuestion || '-'}</div>
+          </div>
+          <div>
+            <div className='mb-1 text-neutral-500'>生成模型</div>
+            <div>{sourceRecord?.sourceAiModel || '-'}</div>
           </div>
           <div>
             <div className='mb-1 text-neutral-500'>参照的目标问题</div>

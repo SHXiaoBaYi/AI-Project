@@ -366,6 +366,7 @@ export interface GeoContentPlacementListItem {
   source?: string;
   sourcePlacementId?: number;
   sourceTargetQuestion?: string;
+  sourceAiModel?: string;
   aggregateStatus?: string;
   publishProgress?: number | null;
   platformCount?: number;

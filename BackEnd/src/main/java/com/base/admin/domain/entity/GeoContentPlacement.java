@@ -48,6 +48,9 @@ public class GeoContentPlacement extends BaseEntity {
     @Schema(description = "AI生成时参照的内容投放ID", example = "1", nullable = true)
     private Long sourcePlacementId;
 
+    @Schema(description = "AI生成所用模型展示名", example = "DeepSeek（deepseek-chat）", nullable = true)
+    private String sourceAiModel;
+
     @Schema(description = "投放进度（投放完成/部分投放/未投放）", example = "部分投放")
     private String placementProgress;
 

@@ -178,6 +178,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         detail.setTitle(resolveDisplayTitle(entity, items));
         detail.setSource(entity.getSource());
         detail.setSourcePlacementId(entity.getSourcePlacementId());
+        detail.setSourceAiModel(entity.getSourceAiModel());
         if (entity.getSourcePlacementId() != null) {
             GeoContentPlacement source = placementMapper.selectById(entity.getSourcePlacementId());
             if (source != null) {
@@ -365,7 +366,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         if (!StringUtils.hasText(source.getTargetQuestion())) {
             throw new BusinessException("当前记录缺少目标问题，无法生成相似问题");
         }
-        List<String> questions = generateSimilarQuestions(source, provider);
+        SimilarQuestionsResult gen = generateSimilarQuestions(source, provider);
+        List<String> questions = gen.questions();
         if (questions.isEmpty()) {
             throw new BusinessException("未能生成相似问题，请稍后重试");
         }
@@ -387,6 +389,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             row.setTitle("");
             row.setSource(Constants.CONTENT_SOURCE_AI);
             row.setSourcePlacementId(source.getId());
+            row.setSourceAiModel(gen.sourceAiModel());
             row.setPlacementProgress(Constants.CONTENT_AGG_NONE);
             row.setRemark("由「" + source.getTargetQuestion() + "」生成，待分配发布人/归属人");
             placementMapper.insert(row);
@@ -401,7 +404,10 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         return sysAiProviderService.listReadyOptions();
     }
 
-    private List<String> generateSimilarQuestions(GeoContentPlacement source, String provider) {
+    private record SimilarQuestionsResult(List<String> questions, String sourceAiModel) {
+    }
+
+    private SimilarQuestionsResult generateSimilarQuestions(GeoContentPlacement source, String provider) {
         String topic = nz(source.getTopicName());
         String question = source.getTargetQuestion().trim();
         String p = StringUtils.hasText(provider) ? provider : null;
@@ -422,7 +428,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 List<String> parsed = parseQuestionArray(content);
                 if (!parsed.isEmpty()) {
                     int take = ThreadLocalRandom.current().nextInt(3, 9);
-                    return parsed.stream().filter(q -> !q.equals(question)).distinct().limit(take).toList();
+                    List<String> questions = parsed.stream().filter(q -> !q.equals(question)).distinct().limit(take).toList();
+                    return new SimilarQuestionsResult(questions, resolveAiSourceLabel(p));
                 }
             } catch (BusinessException e) {
                 if (p != null && !"local".equalsIgnoreCase(p.trim())) {
@@ -438,7 +445,23 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         } else if (p != null && !"local".equalsIgnoreCase(p.trim()) && !aiChatService.isProviderConfigured(p)) {
             throw new BusinessException("所选模型未配置 API Key，请到「系统管理 → AI模型配置」中填写");
         }
-        return heuristicSimilarQuestions(topic, question);
+        return new SimilarQuestionsResult(heuristicSimilarQuestions(topic, question), "本地模板");
+    }
+
+    /** 生成来源展示：厂商名（模型名） */
+    private String resolveAiSourceLabel(String provider) {
+        if (!StringUtils.hasText(provider) || "local".equalsIgnoreCase(provider.trim())) {
+            return "本地模板";
+        }
+        return sysAiProviderService.findReady(provider)
+                .map(row -> {
+                    String name = StringUtils.hasText(row.getProviderName()) ? row.getProviderName() : row.getProvider();
+                    if (StringUtils.hasText(row.getModel())) {
+                        return name + "（" + row.getModel().trim() + "）";
+                    }
+                    return name;
+                })
+                .orElseGet(() -> provider.trim());
     }
 
     private List<String> parseQuestionArray(String content) {
@@ -982,6 +1005,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setTitle(resolveDisplayTitle(entity, items));
         vo.setSource(entity.getSource());
         vo.setSourcePlacementId(entity.getSourcePlacementId());
+        vo.setSourceAiModel(entity.getSourceAiModel());
         vo.setRemark(entity.getRemark());
         vo.setPlatformCount(items.size());
         vo.setSuccessCount(success);

@@ -39,6 +39,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensurePlatformType(connection);
             ensureContentPlacementItemTitle(connection);
             ensureContentPlacementSource(connection);
+            ensureContentPlacementAiModel(connection);
             ensureContentPlacementRelations(connection);
             ensureContentPlacementProgress(connection);
             ensureContentPlacementViewMenus(connection);
@@ -286,6 +287,25 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     ON DUPLICATE KEY UPDATE is_active = 1
                     """);
         }
+    }
+
+    /** AI 生成来源附带模型展示名 */
+    private void ensureContentPlacementAiModel(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement")) {
+            return;
+        }
+        if (columnExists(connection, "geo_content_placement", "source_ai_model")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    ALTER TABLE geo_content_placement
+                      ADD COLUMN source_ai_model VARCHAR(128) NULL
+                      COMMENT 'AI生成所用模型展示名'
+                      AFTER source_placement_id
+                    """);
+        }
+        log.info("已为 geo_content_placement 增加 source_ai_model 字段");
     }
 
     private void ensureContentPlacementRelations(Connection connection) throws Exception {
