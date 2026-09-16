@@ -1,39 +1,53 @@
-.ant-table-wrapper .ant-table {
-  scrollbar-color: initial;
-}
-.ant-table-wrapper .ant-table *::-webkit-scrollbar {
-  height: 6px;
+/* 全局纵向滚动条：约 18px，弱化默认系统样式 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c4c4c4 transparent;
 }
 
-.ant-table-wrapper .ant-table *::-webkit-scrollbar-button {
+*::-webkit-scrollbar {
+  width: 18px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-.ant-table-wrapper .ant-table *::-webkit-scrollbar-track {
+*::-webkit-scrollbar-track {
   background: transparent;
-  border-radius: 3px;
+  border-radius: 9px;
 }
 
-.ant-table-wrapper .ant-table *::-webkit-scrollbar-thumb {
+*::-webkit-scrollbar-thumb {
   background: #d0d0d0;
-  border-radius: 3px;
+  border-radius: 9px;
+  border: 4px solid transparent;
+  background-clip: content-box;
 }
 
-.ant-table-wrapper .ant-table *::-webkit-scrollbar-thumb:hover {
-  background: #a0a0a0;
+*::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+  border: 4px solid transparent;
+  background-clip: content-box;
 }
 
-/* 嵌套「各平台监测」表：禁用 sticky/scroll 伪列，避免左侧约 40px 空白 */
+.ant-table-wrapper .ant-table {
+  scrollbar-color: #c4c4c4 transparent;
+}
+
+/* 嵌套「各平台监测」表：固定铺满父列，列宽一致；禁用 sticky/伪滚动条 */
 .geo-nested-platform-scroll {
-  margin: -8px;
-  overflow-y: hidden;
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .geo-nested-platform-table.ant-table-wrapper {
   margin: 0;
   margin-left: 0 !important;
-  overflow-y: hidden;
+  width: 100%;
+  overflow: hidden;
 }
 .geo-nested-platform-table .ant-table,
 .geo-nested-platform-table .ant-table-container,
@@ -41,9 +55,9 @@
 .geo-nested-platform-table .ant-table-body {
   margin: 0;
   margin-left: 0 !important;
-  overflow-y: hidden !important;
+  overflow: hidden !important;
 }
-.geo-nested-platform-table .ant-table *::-webkit-scrollbar:vertical {
+.geo-nested-platform-table .ant-table *::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
@@ -70,7 +84,7 @@
   inset-inline-end: auto !important;
 }
 .geo-nested-platform-table table {
-  width: max-content;
-  min-width: 100%;
+  width: 100% !important;
+  table-layout: fixed;
   margin-inline-start: 0 !important;
 }

@@ -186,6 +186,7 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
       {
         title: '负面内容',
         dataIndex: 'negativeContent',
+        width: 160,
         render: (v, row) => (
           <ImeSafeInput
             variant='borderless'
@@ -230,25 +231,16 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
   }, [tabKey, topicKey, onUpdate]);
 
   return (
-    <div className='geo-nested-platform-scroll max-w-full overflow-x-auto overflow-y-hidden'>
+    <div className='geo-nested-platform-scroll'>
       <Table<PlatformRow>
         size='small'
         bordered
         pagination={false}
-        tableLayout='auto'
+        tableLayout='fixed'
         rowKey='platform'
         columns={columns}
         dataSource={platforms}
         className='geo-nested-platform-table bg-white'
-        style={{ marginLeft: 0 }}
-        components={{
-          table: (props) => (
-            <table
-              {...props}
-              style={{ ...props.style, marginLeft: 0 }}
-            />
-          ),
-        }}
       />
     </div>
   );

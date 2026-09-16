@@ -112,8 +112,14 @@ function YearlyBoardSlice({
         <Table
           rowKey={(r) => `${r.periodLabel}-${r.ownerName || r.topicName}-${r.platform}`}
           dataSource={rows}
-          pagination={false}
-          scroll={{ x: 'max-content' }}
+          size='small'
+          pagination={{
+            pageSize: 20,
+            hideOnSinglePage: true,
+            showSizeChanger: false,
+            showTotal: (total) => `共 ${total} 条`,
+          }}
+          scroll={{ x: 'max-content', y: 300 }}
           columns={[
             { title: '时间', dataIndex: 'periodLabel' },
             {

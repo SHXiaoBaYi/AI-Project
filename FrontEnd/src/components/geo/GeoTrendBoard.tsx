@@ -379,8 +379,14 @@ export function GeoTrendBoard({
         <Table
           rowKey={(r) => `${r.axisLabel}-${r.topicName}-${r.platform}`}
           dataSource={rows}
-          pagination={false}
-          scroll={{ x: 'max-content' }}
+          size='small'
+          pagination={{
+            pageSize: 20,
+            hideOnSinglePage: true,
+            showSizeChanger: false,
+            showTotal: (total) => `共 ${total} 条`,
+          }}
+          scroll={{ x: 'max-content', y: 300 }}
           columns={columns}
         />
       </Card>

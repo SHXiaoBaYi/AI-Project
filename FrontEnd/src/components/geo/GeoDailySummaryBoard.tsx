@@ -131,8 +131,9 @@ export function GeoDailySummaryBoard({
       {
         title: '平台',
         dataIndex: 'platform',
-        width: 100,
-        render: (v) => <span className='px-2 font-medium'>{v}</span>,
+        width: 88,
+        ellipsis: true,
+        render: (v) => <span className='px-1 font-medium'>{v}</span>,
       },
     ];
     if (dimension === 'owner') {
@@ -140,14 +141,14 @@ export function GeoDailySummaryBoard({
         {
           title: '话题',
           dataIndex: 'topicName',
-          width: 120,
+          width: 100,
           ellipsis: true,
           render: (v) => v || '-',
         },
         {
           title: '关键字',
           dataIndex: 'keyword',
-          width: 160,
+          width: 120,
           ellipsis: true,
           render: (v) => v || '-',
         },
@@ -157,25 +158,26 @@ export function GeoDailySummaryBoard({
       {
         title: '提及',
         dataIndex: 'mentioned',
-        width: 72,
+        width: 64,
         render: (v) => (Number(v) ? <Tag color='success'>是</Tag> : <Tag>否</Tag>),
       },
       {
         title: '排名',
         dataIndex: 'rankNo',
-        width: 72,
+        width: 56,
         render: (v) => (v == null || v === '' ? '-' : v),
       },
       {
         title: '推荐状态',
         dataIndex: 'recommendStatus',
-        width: 120,
+        width: 100,
+        ellipsis: true,
         render: (v) => v || '-',
       },
       {
         title: '第三方链接',
         dataIndex: 'thirdPartyUrl',
-        width: 220,
+        width: 160,
         ellipsis: true,
         render: (v?: string) =>
           v ? (
@@ -194,20 +196,21 @@ export function GeoDailySummaryBoard({
       {
         title: '竞品',
         dataIndex: 'competitors',
-        width: 140,
+        width: 100,
         ellipsis: true,
         render: (v) => v || '-',
       },
       {
         title: '负面内容',
         dataIndex: 'negativeContent',
+        width: 120,
         ellipsis: true,
         render: (v) => v || '-',
       },
       {
         title: '截图',
         dataIndex: 'screenshotUrl',
-        width: 90,
+        width: 72,
         render: (v?: string) => (
           <GeoScreenshot
             src={v}
@@ -221,25 +224,16 @@ export function GeoDailySummaryBoard({
 
   const topicColumns: ColumnsType<GeoDailySummaryTopic> = useMemo(() => {
     const renderPlatformTable = (row: GeoDailySummaryTopic, rowKey: string) => (
-      <div className='geo-nested-platform-scroll max-w-full overflow-x-auto overflow-y-hidden'>
+      <div className='geo-nested-platform-scroll'>
         <Table<GeoDailySummaryPlatform>
           size='small'
           bordered
           pagination={false}
-          tableLayout='auto'
+          tableLayout='fixed'
           rowKey={(r) => `${rowKey}-${r.platform}-${r.id ?? ''}-${r.keyword ?? ''}`}
           columns={platformColumns}
           dataSource={row.platforms}
           className='geo-nested-platform-table bg-white'
-          style={{ marginLeft: 0 }}
-          components={{
-            table: (props) => (
-              <table
-                {...props}
-                style={{ ...props.style, marginLeft: 0 }}
-              />
-            ),
-          }}
         />
       </div>
     );
@@ -249,7 +243,8 @@ export function GeoDailySummaryBoard({
         {
           title: '负责人',
           dataIndex: 'ownerName',
-          width: 140,
+          width: 120,
+          ellipsis: true,
           render: (v, row) => <span className='px-2 font-medium'>{v || row.topicName || '未指定'}</span>,
         },
         {
@@ -263,26 +258,28 @@ export function GeoDailySummaryBoard({
       {
         title: '话题',
         dataIndex: 'topicName',
-        width: 140,
+        width: 120,
+        ellipsis: true,
         render: (v) => <span className='px-2 font-medium'>{v}</span>,
       },
       {
         title: '关键字',
         dataIndex: 'keyword',
-        width: 200,
+        width: 160,
         ellipsis: true,
         render: (v) => v || '-',
       },
       {
         title: '长短词',
         dataIndex: 'termType',
-        width: 90,
+        width: 80,
         render: (v) => v || '日巡查',
       },
       {
         title: '负责人',
         dataIndex: 'ownerName',
-        width: 110,
+        width: 96,
+        ellipsis: true,
         render: (v) => v || '-',
       },
       {
@@ -322,18 +319,17 @@ export function GeoDailySummaryBoard({
           已切换到 <b>{activeGroup?.inspectDate}</b>，共 {activeGroup?.topics?.length || 0}{' '}
           {dimension === 'owner' ? '位负责人' : '个话题'}；下方提及率/首位提及率/推荐次数为完整日期范围
         </div>
-        <div className='max-h-[calc(100vh-360px)] overflow-auto'>
-          <Table<GeoDailySummaryTopic>
-            key={`summary-table-${dimension}-${currentKey}`}
-            size='small'
-            bordered
-            pagination={false}
-            tableLayout='auto'
-            rowKey={(r) => `${currentKey}-${r.topicId}-${r.keyword}-${r.topicName}-${r.ownerName}`}
-            columns={topicColumns}
-            dataSource={[...(activeGroup?.topics || [])]}
-          />
-        </div>
+        <Table<GeoDailySummaryTopic>
+          key={`summary-table-${dimension}-${currentKey}`}
+          size='small'
+          bordered
+          pagination={false}
+          tableLayout='fixed'
+          scroll={{ y: 300 }}
+          rowKey={(r) => `${currentKey}-${r.topicId}-${r.keyword}-${r.topicName}-${r.ownerName}`}
+          columns={topicColumns}
+          dataSource={[...(activeGroup?.topics || [])]}
+        />
       </Card>
 
       <Drawer
