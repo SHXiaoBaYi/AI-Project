@@ -423,10 +423,9 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             statement.execute("""
                     INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
-                    (128, '投放执行', 100, 9, 'geo/content-placement-work', '', 'C', 'geo:content:work', 'FormOutlined', 0, 0,
+                    (128, '我的投放', 100, 9, 'geo/content-placement-work', '', 'C', 'geo:content:work', 'FormOutlined', 0, 0,
                      '一线视角：维护本人话题/目标问题的平台投放与引用详情', 1)
                     ON DUPLICATE KEY UPDATE
-                      menu_name = VALUES(menu_name),
                       path = VALUES(path),
                       perms = VALUES(perms),
                       icon = VALUES(icon),
@@ -440,7 +439,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     ON DUPLICATE KEY UPDATE is_active = 1
                     """);
         }
-        log.info("已同步内容投放管理/执行双视角菜单");
+        log.info("已同步内容投放管理/我的投放双视角菜单");
     }
 
     /** 数据看板：AI露出 + 发布收录聚合页 */
@@ -555,9 +554,13 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     WHERE menu_id = 122
                     """);
             statement.executeUpdate("""
-                    UPDATE sys_menu SET parent_id = 132, sort_order = 3, menu_name = '投放执行',
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 3,
                       path = 'geo/content-placement-work', perms = 'geo:content:work', is_active = 1
                     WHERE menu_id = 128
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET menu_name = '我的投放'
+                    WHERE menu_id = 128 AND menu_name IN ('投放执行', '')
                     """);
 
             statement.executeUpdate("UPDATE sys_menu SET parent_id = 117, perms = 'geo:expose:persist', menu_name = '露出落库' WHERE menu_id = 119");

@@ -5,7 +5,7 @@ export const GEO_LABEL = {
   yearlyTarget: '全年目标',
   articleBoard: '数据看板',
   contentManage: '投放管理',
-  contentWork: '投放执行',
+  contentWork: '我的投放',
   topic: '话题管理',
   platform: '平台管理',
   mentionRate: '露出率',
