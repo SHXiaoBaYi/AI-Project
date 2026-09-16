@@ -20,7 +20,12 @@ import type {
   GeoContentPlacementListItem,
   GeoPlatform,
 } from '@/types/geo';
-import { GEO_CONTENT_PUBLISH_STATUS, GEO_PLATFORM_TYPE_AI, GEO_PLATFORM_TYPE_CONTENT } from '@/constants/geo';
+import {
+  GEO_CONTENT_FORMS,
+  GEO_CONTENT_PUBLISH_STATUS,
+  GEO_PLATFORM_TYPE_AI,
+  GEO_PLATFORM_TYPE_CONTENT,
+} from '@/constants/geo';
 import { AGG_COLOR, STATUS_COLOR, derivePlacementProgress, isHttpUrl } from './constants';
 
 type Props = {
@@ -120,6 +125,13 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
       formItemProps: { rules: [{ required: true, message: '请选择发布平台' }] },
     },
     {
+      title: '内容形态',
+      dataIndex: 'contentForm',
+      valueType: 'select',
+      fieldProps: { options: [...GEO_CONTENT_FORMS] },
+      formItemProps: { rules: [{ required: true, message: '请选择内容形态' }] },
+    },
+    {
       title: '发布状态',
       dataIndex: 'publishStatus',
       valueType: 'select',
@@ -203,6 +215,12 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
           size='small'
           columns={[
             { title: '标题', dataIndex: 'title', ellipsis: true, width: 180 },
+            {
+              title: '形态',
+              dataIndex: 'contentForm',
+              width: 70,
+              render: (v?: string) => v || '图文',
+            },
             {
               title: '发布状态',
               dataIndex: 'publishStatus',
@@ -295,6 +313,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
         initialValues={
           editingItem ?? {
             title: placement?.title || '',
+            contentForm: '图文',
             publishStatus: '未投放',
           }
         }
@@ -304,6 +323,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
             placementId: placement.id,
             title: values.title,
             platformName: values.platformName,
+            contentForm: values.contentForm || '图文',
             publishStatus: values.publishStatus,
             publishUrl: values.publishUrl,
             publishTime: values.publishTime,

@@ -5,10 +5,14 @@ import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
+import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
+import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
 import com.base.admin.domain.vo.GeoContentPlacementItemVO;
 import com.base.admin.domain.vo.GeoContentPlacementListVO;
+import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
+import com.base.admin.domain.vo.GeoContentPublisherWeekDetailVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 
 import java.io.InputStream;
@@ -17,6 +21,12 @@ import java.util.List;
 public interface GeoContentPlacementService {
 
     PageResult<GeoContentPlacementListVO> list(GeoContentPlacementQueryDTO query);
+
+    /** 发布人维度周看板（按 ISO 周拆行） */
+    GeoContentPublisherWeekBoardVO publisherWeeklyBoard(GeoContentPublisherWeekQueryDTO query);
+
+    /** 发布人周看板指标明细 */
+    List<GeoContentPublisherWeekDetailVO> publisherWeeklyDetail(GeoContentPublisherWeekDetailQueryDTO query);
 
     GeoContentPlacementDetailVO getDetail(Long id);
 

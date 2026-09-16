@@ -55,6 +55,11 @@ public class Constants {
     /** 内容投放来源：AI生成 */
     public static final String CONTENT_SOURCE_AI = "AI生成";
 
+    /** 内容投放形态：图文 */
+    public static final String CONTENT_FORM_ARTICLE = "图文";
+    /** 内容投放形态：视频 */
+    public static final String CONTENT_FORM_VIDEO = "视频";
+
     /** 内容投放待分配占位 */
     public static final String CONTENT_UNASSIGNED = "待分配";
 

@@ -41,6 +41,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureContentPlacementRelations(connection);
             ensureContentPlacementProgress(connection);
             ensureContentPlacementViewMenus(connection);
+            ensureContentPlacementItemContentForm(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -436,6 +437,41 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
         }
         log.info("已同步内容投放管理/执行双视角菜单");
+    }
+
+    private void ensureContentPlacementItemContentForm(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement_item")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_content_placement_item", "content_form")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement_item
+                          ADD COLUMN content_form VARCHAR(16) NOT NULL DEFAULT '图文'
+                          COMMENT '内容形态：图文/视频'
+                          AFTER platform_name
+                        """);
+            }
+            log.info("已为 geo_content_placement_item 增加 content_form");
+        }
+        try (Statement statement = connection.createStatement()) {
+            int updated = statement.executeUpdate("""
+                    UPDATE geo_content_placement_item
+                    SET content_form = '视频'
+                    WHERE content_form = '图文'
+                      AND (
+                        platform_name LIKE '%bilibili%'
+                        OR platform_name LIKE '%哔哩%'
+                        OR platform_name LIKE '%抖音%'
+                        OR platform_name LIKE '%快手%'
+                        OR platform_name LIKE '%视频号%'
+                        OR platform_name LIKE '%视频%'
+                      )
+                    """);
+            if (updated > 0) {
+                log.info("已按平台回填视频形态 {} 条", updated);
+            }
+        }
     }
 
     private boolean tableExists(Connection connection, String table) throws Exception {

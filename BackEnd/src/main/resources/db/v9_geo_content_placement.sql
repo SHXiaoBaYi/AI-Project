@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS geo_content_placement_item (
   placement_id     BIGINT        NOT NULL                COMMENT '投放主表ID',
   title            VARCHAR(500)  NOT NULL DEFAULT ''     COMMENT '标题（归属发布详情）',
   platform_name    VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '发布平台',
+  content_form     VARCHAR(16)   NOT NULL DEFAULT '图文'  COMMENT '内容形态：图文/视频',
   publish_status   VARCHAR(32)   NOT NULL DEFAULT '未投放' COMMENT '投放状态：投放成功/审核未通过/未投放',
   publish_url      VARCHAR(1000) DEFAULT ''              COMMENT '投放链接',
   publish_time     DATE          DEFAULT NULL            COMMENT '发布时间',

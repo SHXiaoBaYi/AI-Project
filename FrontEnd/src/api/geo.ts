@@ -25,6 +25,8 @@ import type {
   GeoContentPlacementItem,
   GeoContentPlacementItemDTO,
   GeoContentPlacementListItem,
+  GeoContentPublisherWeekBoard,
+  GeoContentPublisherWeekDetail,
 } from '@/types/geo';
 
 export function getGeoTopicListApi(data: PageQuery & { topicName?: string }) {
@@ -202,6 +204,23 @@ export function getGeoContentPlacementListApi(
   },
 ) {
   return request.post<unknown, PageResult<GeoContentPlacementListItem>>('/geo/content-placement/list', data);
+}
+
+export function getGeoContentPublisherWeeklyBoardApi(data: {
+  startDate: string;
+  endDate: string;
+  publisherUserId?: number;
+}) {
+  return request.post<unknown, GeoContentPublisherWeekBoard>('/geo/content-placement/publisher-weekly-board', data);
+}
+
+export function getGeoContentPublisherWeeklyDetailApi(data: {
+  startDate: string;
+  endDate: string;
+  publisherUserId: number;
+  metric: string;
+}) {
+  return request.post<unknown, GeoContentPublisherWeekDetail[]>('/geo/content-placement/publisher-weekly-detail', data);
 }
 
 export function getGeoContentPlacementDetailApi(id: number) {

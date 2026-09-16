@@ -8,6 +8,8 @@ import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
+import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
+import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoContentPlacementCite;
 import com.base.admin.domain.entity.GeoContentPlacementItem;
@@ -17,6 +19,9 @@ import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
 import com.base.admin.domain.vo.GeoContentPlacementItemVO;
 import com.base.admin.domain.vo.GeoContentPlacementListVO;
+import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
+import com.base.admin.domain.vo.GeoContentPublisherWeekDetailVO;
+import com.base.admin.domain.vo.GeoContentPublisherWeekRowVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoContentPlacementCiteMapper;
@@ -43,7 +48,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.temporal.WeekFields;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -189,6 +196,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             vo.setPlacementId(item.getPlacementId());
             vo.setTitle(item.getTitle());
             vo.setPlatformName(item.getPlatformName());
+            vo.setContentForm(normalizeContentForm(item.getContentForm(), item.getPlatformName()));
             vo.setPublishStatus(item.getPublishStatus());
             vo.setPublishUrl(item.getPublishUrl());
             vo.setPublishTime(item.getPublishTime());
@@ -197,6 +205,89 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             result.add(vo);
         }
         return result;
+    }
+
+    @Override
+    public GeoContentPublisherWeekBoardVO publisherWeeklyBoard(GeoContentPublisherWeekQueryDTO query) {
+        LocalDate start = parseRequiredDate(query.getStartDate(), "开始日期");
+        LocalDate end = parseRequiredDate(query.getEndDate(), "结束日期");
+        if (end.isBefore(start)) {
+            throw new BusinessException("结束日期不能早于开始日期");
+        }
+
+        List<LocalDate[]> weeks = splitIsoWeeks(start, end);
+        List<GeoContentPlacement> placements = placementMapper.selectList(new LambdaQueryWrapper<GeoContentPlacement>()
+                .eq(query.getPublisherUserId() != null, GeoContentPlacement::getPublisherUserId, query.getPublisherUserId())
+                .isNotNull(GeoContentPlacement::getPublisherUserId)
+                .orderByAsc(GeoContentPlacement::getPublisherName)
+                .orderByAsc(GeoContentPlacement::getId));
+
+        Map<Long, List<GeoContentPlacement>> byPublisher = placements.stream()
+                .filter(p -> p.getPublisherUserId() != null)
+                .collect(Collectors.groupingBy(GeoContentPlacement::getPublisherUserId, LinkedHashMap::new, Collectors.toList()));
+
+        List<Long> placementIds = placements.stream().map(GeoContentPlacement::getId).toList();
+        Map<Long, List<GeoContentPlacementItem>> itemsByPlacement = placementIds.isEmpty() ? Map.of()
+                : itemMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementItem>()
+                        .in(GeoContentPlacementItem::getPlacementId, placementIds)
+                        .orderByAsc(GeoContentPlacementItem::getId))
+                .stream()
+                .collect(Collectors.groupingBy(GeoContentPlacementItem::getPlacementId));
+
+        List<GeoContentPublisherWeekRowVO> rows = new ArrayList<>();
+        for (LocalDate[] week : weeks) {
+            LocalDate weekStart = week[0];
+            LocalDate weekEnd = week[1];
+            for (Map.Entry<Long, List<GeoContentPlacement>> entry : byPublisher.entrySet()) {
+                Long publisherId = entry.getKey();
+                List<GeoContentPlacement> pubs = entry.getValue();
+                String publisherName = pubs.getFirst().getPublisherName();
+                List<GeoContentPlacementItem> items = new ArrayList<>();
+                for (GeoContentPlacement p : pubs) {
+                    items.addAll(itemsByPlacement.getOrDefault(p.getId(), List.of()));
+                }
+                rows.add(buildPublisherWeekRow(publisherId, publisherName, weekStart, weekEnd, items));
+            }
+        }
+
+        GeoContentPublisherWeekBoardVO board = new GeoContentPublisherWeekBoardVO();
+        board.setStartDate(start.toString());
+        board.setEndDate(end.toString());
+        board.setRows(rows);
+        return board;
+    }
+
+    @Override
+    public List<GeoContentPublisherWeekDetailVO> publisherWeeklyDetail(GeoContentPublisherWeekDetailQueryDTO query) {
+        LocalDate start = parseRequiredDate(query.getStartDate(), "开始日期");
+        LocalDate end = parseRequiredDate(query.getEndDate(), "结束日期");
+        String metric = normalizeMetric(query.getMetric());
+        Long publisherUserId = query.getPublisherUserId();
+
+        List<GeoContentPlacement> placements = placementMapper.selectList(new LambdaQueryWrapper<GeoContentPlacement>()
+                .eq(GeoContentPlacement::getPublisherUserId, publisherUserId));
+        if (placements.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, GeoContentPlacement> placementMap = placements.stream()
+                .collect(Collectors.toMap(GeoContentPlacement::getId, p -> p, (a, b) -> a));
+        List<GeoContentPlacementItem> items = itemMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementItem>()
+                .in(GeoContentPlacementItem::getPlacementId, placementMap.keySet())
+                .orderByDesc(GeoContentPlacementItem::getPublishTime)
+                .orderByDesc(GeoContentPlacementItem::getId));
+
+        List<GeoContentPublisherWeekDetailVO> details = new ArrayList<>();
+        for (GeoContentPlacementItem item : items) {
+            if (!matchMetric(item, metric, start, end)) {
+                continue;
+            }
+            GeoContentPlacement placement = placementMap.get(item.getPlacementId());
+            if (placement == null) {
+                continue;
+            }
+            details.add(toWeekDetailVo(placement, item));
+        }
+        return details;
     }
 
     @Override
@@ -526,6 +617,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                     item.setPlacementId(currentPlacementId);
                     item.setTitle(nz(title));
                     item.setPlatformName(platform.trim());
+                    item.setContentForm(inferContentForm(platform));
                     ParsedPublish parsed = parsePublish(linkOrStatus);
                     item.setPublishStatus(parsed.status());
                     item.setPublishUrl(parsed.url());
@@ -745,6 +837,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         item.setPlacementId(dto.getPlacementId());
         item.setTitle(nz(dto.getTitle()));
         item.setPlatformName(nz(dto.getPlatformName()));
+        item.setContentForm(normalizeContentForm(dto.getContentForm(), dto.getPlatformName()));
         item.setPublishStatus(normalizePublishStatus(dto.getPublishStatus()));
         item.setPublishUrl(nz(dto.getPublishUrl()));
         item.setPublishTime(dto.getPublishTime());
@@ -909,6 +1002,163 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             return Constants.CONTENT_AGG_DONE;
         }
         return Constants.CONTENT_AGG_PARTIAL;
+    }
+
+    private GeoContentPublisherWeekRowVO buildPublisherWeekRow(
+            Long publisherId, String publisherName, LocalDate weekStart, LocalDate weekEnd,
+            List<GeoContentPlacementItem> items) {
+        int produced = 0;
+        int pendingReview = 0;
+        int published = 0;
+        int pendingProduce = 0;
+        int videoPublished = 0;
+        int videoPendingReview = 0;
+        for (GeoContentPlacementItem item : items) {
+            String form = normalizeContentForm(item.getContentForm(), item.getPlatformName());
+            String status = item.getPublishStatus();
+            boolean inWeek = item.getPublishTime() != null
+                    && !item.getPublishTime().isBefore(weekStart)
+                    && !item.getPublishTime().isAfter(weekEnd);
+            boolean article = Constants.CONTENT_FORM_ARTICLE.equals(form);
+            boolean video = Constants.CONTENT_FORM_VIDEO.equals(form);
+
+            if (Constants.CONTENT_PUBLISH_NONE.equals(status)) {
+                pendingProduce++;
+            }
+            if (Constants.CONTENT_PUBLISH_REJECTED.equals(status)) {
+                if (article) {
+                    pendingReview++;
+                }
+                if (video) {
+                    videoPendingReview++;
+                }
+            }
+            if (inWeek && !Constants.CONTENT_PUBLISH_NONE.equals(status) && article) {
+                produced++;
+            }
+            if (inWeek && Constants.CONTENT_PUBLISH_SUCCESS.equals(status) && article) {
+                published++;
+            }
+            if (inWeek && Constants.CONTENT_PUBLISH_SUCCESS.equals(status) && video) {
+                videoPublished++;
+            }
+        }
+        GeoContentPublisherWeekRowVO row = new GeoContentPublisherWeekRowVO();
+        row.setWeekLabel(isoWeekLabel(weekStart));
+        row.setWeekStart(weekStart.toString());
+        row.setWeekEnd(weekEnd.toString());
+        row.setPublisherUserId(publisherId);
+        row.setPublisherName(publisherName);
+        row.setProducedCount(produced);
+        row.setPendingReviewCount(pendingReview);
+        row.setHasPendingReview(pendingReview > 0);
+        row.setPublishedCount(published);
+        row.setPendingProduceCount(pendingProduce);
+        row.setVideoPublishedCount(videoPublished);
+        row.setVideoPendingReviewCount(videoPendingReview);
+        row.setHasVideoPendingReview(videoPendingReview > 0);
+        return row;
+    }
+
+    private boolean matchMetric(GeoContentPlacementItem item, String metric, LocalDate start, LocalDate end) {
+        String form = normalizeContentForm(item.getContentForm(), item.getPlatformName());
+        String status = item.getPublishStatus();
+        boolean inWeek = item.getPublishTime() != null
+                && !item.getPublishTime().isBefore(start)
+                && !item.getPublishTime().isAfter(end);
+        boolean article = Constants.CONTENT_FORM_ARTICLE.equals(form);
+        boolean video = Constants.CONTENT_FORM_VIDEO.equals(form);
+        return switch (metric) {
+            case "produced" -> inWeek && article && !Constants.CONTENT_PUBLISH_NONE.equals(status);
+            case "pendingReview" -> article && Constants.CONTENT_PUBLISH_REJECTED.equals(status);
+            case "published" -> inWeek && article && Constants.CONTENT_PUBLISH_SUCCESS.equals(status);
+            case "pendingProduce" -> Constants.CONTENT_PUBLISH_NONE.equals(status);
+            case "videoPublished" -> inWeek && video && Constants.CONTENT_PUBLISH_SUCCESS.equals(status);
+            case "videoPendingReview" -> video && Constants.CONTENT_PUBLISH_REJECTED.equals(status);
+            default -> false;
+        };
+    }
+
+    private GeoContentPublisherWeekDetailVO toWeekDetailVo(GeoContentPlacement placement, GeoContentPlacementItem item) {
+        GeoContentPublisherWeekDetailVO vo = new GeoContentPublisherWeekDetailVO();
+        vo.setItemId(item.getId());
+        vo.setPlacementId(placement.getId());
+        vo.setPublisherName(placement.getPublisherName());
+        vo.setTopicName(placement.getTopicName());
+        vo.setTargetQuestion(placement.getTargetQuestion());
+        vo.setTitle(item.getTitle());
+        vo.setPlatformName(item.getPlatformName());
+        vo.setContentForm(normalizeContentForm(item.getContentForm(), item.getPlatformName()));
+        vo.setPublishStatus(item.getPublishStatus());
+        vo.setPublishUrl(item.getPublishUrl());
+        vo.setPublishTime(item.getPublishTime());
+        return vo;
+    }
+
+    private static List<LocalDate[]> splitIsoWeeks(LocalDate start, LocalDate end) {
+        LocalDate cursor = start.with(DayOfWeek.MONDAY);
+        if (cursor.isAfter(start)) {
+            cursor = cursor.minusWeeks(1);
+        }
+        List<LocalDate[]> weeks = new ArrayList<>();
+        while (!cursor.isAfter(end)) {
+            LocalDate weekStart = cursor;
+            LocalDate weekEnd = cursor.plusDays(6);
+            weeks.add(new LocalDate[]{weekStart, weekEnd});
+            cursor = cursor.plusWeeks(1);
+        }
+        return weeks;
+    }
+
+    private static String isoWeekLabel(LocalDate date) {
+        WeekFields wf = WeekFields.ISO;
+        int week = date.get(wf.weekOfWeekBasedYear());
+        int year = date.get(wf.weekBasedYear());
+        return "%d-W%02d".formatted(year, week);
+    }
+
+    private static LocalDate parseRequiredDate(String raw, String label) {
+        if (!StringUtils.hasText(raw)) {
+            throw new BusinessException(label + "不能为空");
+        }
+        try {
+            return LocalDate.parse(raw.trim());
+        } catch (Exception e) {
+            throw new BusinessException(label + "格式错误，应为 yyyy-MM-dd");
+        }
+    }
+
+    private static String normalizeMetric(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            throw new BusinessException("指标类型不能为空");
+        }
+        String metric = raw.trim();
+        return switch (metric) {
+            case "produced", "pendingReview", "published", "pendingProduce", "videoPublished", "videoPendingReview" -> metric;
+            case "产出", "产出篇数" -> "produced";
+            case "待审", "有无待审" -> "pendingReview";
+            case "已发布", "发布了多少篇" -> "published";
+            case "待产出", "目前待产出" -> "pendingProduce";
+            case "视频发布", "视频已发布" -> "videoPublished";
+            case "视频待审" -> "videoPendingReview";
+            default -> throw new BusinessException("不支持的指标类型: " + metric);
+        };
+    }
+
+    private static String normalizeContentForm(String raw, String platformName) {
+        if (Constants.CONTENT_FORM_VIDEO.equals(raw) || Constants.CONTENT_FORM_ARTICLE.equals(raw)) {
+            return raw;
+        }
+        return inferContentForm(platformName);
+    }
+
+    private static String inferContentForm(String platformName) {
+        String name = nz(platformName).toLowerCase(Locale.ROOT);
+        if (name.contains("bilibili") || name.contains("哔哩") || name.contains("抖音")
+                || name.contains("快手") || name.contains("视频号") || name.contains("视频")) {
+            return Constants.CONTENT_FORM_VIDEO;
+        }
+        return Constants.CONTENT_FORM_ARTICLE;
     }
 
     private static String normalizeProgressFilter(String raw) {

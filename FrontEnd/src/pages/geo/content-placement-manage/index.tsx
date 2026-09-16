@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Modal, Progress, Tag, Upload } from 'antd';
+import { App, Button, Modal, Progress, Tabs, Tag, Upload } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
@@ -8,6 +8,7 @@ import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PlacementExecutionPanel from '@/components/geo/content-placement/PlacementExecutionPanel';
+import PublisherWeeklyBoard from '@/components/geo/content-placement/PublisherWeeklyBoard';
 import { AGG_COLOR, SOURCE_COLOR } from '@/components/geo/content-placement/constants';
 import {
   createGeoContentPlacementApi,
@@ -22,7 +23,7 @@ import {
 import type { GeoContentPlacementListItem, GeoOwnerOption, GeoTopic } from '@/types/geo';
 import { GEO_CONTENT_AGG_STATUS, GEO_CONTENT_SOURCES } from '@/constants/geo';
 
-/** 管理视角：目标问题生成、分配发布人、投放进度报表 */
+/** 管理视角：目标问题生成/分配 + 发布人周看板 */
 const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
@@ -249,13 +250,13 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
     },
   ];
 
-  return (
+  const questionPanel = (
     <>
       <BaseProTable<GeoContentPlacementListItem>
         rowKey='id'
         actionRef={actionRef}
         columns={columns}
-        headerTitle='投放管理（目标问题 · 分配 · 进度）'
+        headerTitle='目标问题 · 分配 · 进度'
         request={async (params) => {
           const res = await getGeoContentPlacementListApi({
             pageNum: params.current,
@@ -408,6 +409,16 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
         </div>
       </Modal>
     </>
+  );
+
+  return (
+    <Tabs
+      type='card'
+      items={[
+        { key: 'board', label: '发布人周看板', children: <PublisherWeeklyBoard /> },
+        { key: 'questions', label: '目标问题管理', children: questionPanel },
+      ]}
+    />
   );
 });
 

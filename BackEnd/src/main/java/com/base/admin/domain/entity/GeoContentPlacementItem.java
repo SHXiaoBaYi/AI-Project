@@ -30,6 +30,9 @@ public class GeoContentPlacementItem extends BaseEntity {
     @Schema(description = "发布平台", example = "搜狐")
     private String platformName;
 
+    @Schema(description = "内容形态（图文/视频）", example = "图文")
+    private String contentForm;
+
     @Schema(description = "投放状态（投放成功/审核未通过/未投放）", example = "投放成功")
     private String publishStatus;
 

@@ -27,6 +27,9 @@ public class GeoContentPlacementItemDTO {
     @Schema(description = "发布平台", requiredMode = Schema.RequiredMode.REQUIRED, example = "搜狐")
     private String platformName;
 
+    @Schema(description = "内容形态（图文/视频）", example = "图文")
+    private String contentForm;
+
     @NotBlank(message = "投放状态不能为空")
     @Schema(description = "投放状态（投放成功/审核未通过/未投放）", requiredMode = Schema.RequiredMode.REQUIRED, example = "投放成功")
     private String publishStatus;

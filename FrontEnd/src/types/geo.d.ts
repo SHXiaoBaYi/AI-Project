@@ -363,6 +363,7 @@ export interface GeoContentPlacementItem {
   placementId: number;
   title?: string;
   platformName?: string;
+  contentForm?: string;
   publishStatus?: string;
   publishUrl?: string;
   publishTime?: string;
@@ -409,12 +410,52 @@ export interface GeoContentPlacementItemDTO {
   placementId: number;
   title: string;
   platformName: string;
+  contentForm?: string;
   publishStatus: string;
   publishUrl?: string;
   publishTime?: string;
   sortOrder?: number;
   remark?: string;
 }
+
+export interface GeoContentPublisherWeekRow {
+  weekLabel?: string;
+  weekStart?: string;
+  weekEnd?: string;
+  publisherUserId?: number;
+  publisherName?: string;
+  producedCount?: number;
+  pendingReviewCount?: number;
+  hasPendingReview?: boolean;
+  publishedCount?: number;
+  pendingProduceCount?: number;
+  videoPublishedCount?: number;
+  videoPendingReviewCount?: number;
+  hasVideoPendingReview?: boolean;
+}
+
+export interface GeoContentPublisherWeekBoard {
+  startDate?: string;
+  endDate?: string;
+  rows: GeoContentPublisherWeekRow[];
+}
+
+export interface GeoContentPublisherWeekDetail {
+  itemId: number;
+  placementId: number;
+  publisherName?: string;
+  topicName?: string;
+  targetQuestion?: string;
+  title?: string;
+  platformName?: string;
+  contentForm?: string;
+  publishStatus?: string;
+  publishUrl?: string;
+  publishTime?: string;
+}
+
+export type GeoContentWeekMetric =
+  'produced' | 'pendingReview' | 'published' | 'pendingProduce' | 'videoPublished' | 'videoPendingReview';
 
 export interface GeoContentPlacementCiteDTO {
   id?: number;
