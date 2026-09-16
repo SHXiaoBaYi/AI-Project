@@ -17,7 +17,7 @@ public class GeoDailyVO {
     @Schema(description = "巡查日期", example = "2026-09-01")
     private LocalDate inspectDate;
 
-    @Schema(description = "长短词（日巡查/周巡查，默认日巡查）", example = "日巡查")
+    @Schema(description = "话题类型（日巡查/周巡查，默认日巡查）", example = "日巡查")
     private String termType;
 
     @Schema(description = "平台", example = "豆包")

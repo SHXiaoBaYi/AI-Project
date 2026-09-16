@@ -581,7 +581,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       ),
     },
     {
-      title: '长短词',
+      title: '话题类型',
       dataIndex: 'termType',
       width: 120,
       render: (v, row) => (

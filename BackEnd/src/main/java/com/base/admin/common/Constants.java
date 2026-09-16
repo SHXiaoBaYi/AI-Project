@@ -19,9 +19,9 @@ public class Constants {
     /** 当前会话已被其他设备强制下线 */
     public static final int CODE_SESSION_KICKED = 4011;
 
-    /** 日监测长短词：日巡查 */
+    /** 日监测话题类型：日巡查 */
     public static final String TERM_TYPE_DAILY = "日巡查";
-    /** 日监测长短词：周巡查 */
+    /** 日监测话题类型：周巡查 */
     public static final String TERM_TYPE_WEEKLY = "周巡查";
 
     /** 平台类型：AI平台（日监测可选） */

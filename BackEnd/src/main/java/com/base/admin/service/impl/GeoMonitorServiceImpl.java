@@ -1267,7 +1267,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     }
 
     /**
-     * 已结束周期：以落库快照指标为准；未结束周期 / 关键字·长短词筛选：实时聚合。
+     * 已结束周期：以落库快照指标为准；未结束周期 / 关键字·话题类型筛选：实时聚合。
      * 快照覆盖同维度 live 行，并补齐 live 已删但快照仍有的历史周期。
      */
     private Map<String, TrendAgg> mergeTrendWithSnapshots(GeoPeriodType type, LocalDate[] range,
@@ -1276,7 +1276,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         for (TrendAgg row : live) {
             merged.put(rowKey(row), row);
         }
-        // 关键字/长短词筛选口径与快照不一致，不读快照
+        // 关键字/话题类型筛选口径与快照不一致，不读快照
         if (StringUtils.hasText(query.getKeyword()) || StringUtils.hasText(query.getTermType())) {
             return merged;
         }
@@ -1561,7 +1561,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         }
         if (existing != null && dto.getId() != null && !existing.getId().equals(dto.getId())
                 && Integer.valueOf(1).equals(existing.getIsActive())) {
-            throw new BusinessException("同一天、同一平台、同一关键字、同一长短词已存在记录");
+            throw new BusinessException("同一天、同一平台、同一关键字、同一话题类型已存在记录");
         }
         if (existing == null) {
             if (!allowInsert) {

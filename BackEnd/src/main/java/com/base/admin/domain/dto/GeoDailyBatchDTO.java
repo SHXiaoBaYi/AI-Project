@@ -18,7 +18,7 @@ public class GeoDailyBatchDTO {
     @Schema(description = "巡查日期", requiredMode = Schema.RequiredMode.REQUIRED, example = "2026-09-01")
     private LocalDate inspectDate;
 
-    @Schema(description = "长短词（日巡查/周巡查，默认日巡查）", example = "日巡查")
+    @Schema(description = "话题类型（日巡查/周巡查，默认日巡查）", example = "日巡查")
     private String termType;
 
     @NotNull(message = "话题不能为空")

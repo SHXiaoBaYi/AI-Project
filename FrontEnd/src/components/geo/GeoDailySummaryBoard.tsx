@@ -270,7 +270,7 @@ export function GeoDailySummaryBoard({
         render: (v) => v || '-',
       },
       {
-        title: '长短词',
+        title: '话题类型',
         dataIndex: 'termType',
         width: 80,
         render: (v) => v || '日巡查',

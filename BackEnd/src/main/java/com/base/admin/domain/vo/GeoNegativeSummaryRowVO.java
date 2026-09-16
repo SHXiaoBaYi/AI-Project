@@ -19,7 +19,7 @@ public class GeoNegativeSummaryRowVO {
     @Schema(description = "AI平台")
     private String platform;
 
-    @Schema(description = "长短词/话题类型", example = "日巡查")
+    @Schema(description = "话题类型（日巡查/周巡查）", example = "日巡查")
     private String termType;
 
     @Schema(description = "负面条数", example = "2")

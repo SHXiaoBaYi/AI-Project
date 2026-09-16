@@ -91,7 +91,7 @@ const DailyPage = memo(function DailyPage() {
     },
     { title: '关键字', dataIndex: 'keyword', ellipsis: true, width: 220 },
     {
-      title: '长短词',
+      title: '话题类型',
       dataIndex: 'termType',
       width: 100,
       valueType: 'select',

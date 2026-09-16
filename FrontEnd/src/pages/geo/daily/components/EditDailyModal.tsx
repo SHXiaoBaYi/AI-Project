@@ -108,8 +108,8 @@ const EditDailyModal = memo(function EditDailyModal({
         />
         <ProFormSelect
           name='termType'
-          label='长短词'
-          rules={[{ required: true, message: '请选择长短词' }]}
+          label='话题类型'
+          rules={[{ required: true, message: '请选择话题类型' }]}
           options={[...GEO_TERM_TYPES]}
           initialValue={GEO_TERM_TYPE_DEFAULT}
         />

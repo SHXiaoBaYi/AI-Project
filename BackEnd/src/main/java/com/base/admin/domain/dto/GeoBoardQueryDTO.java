@@ -22,7 +22,7 @@ public class GeoBoardQueryDTO {
     @Schema(description = "关键字")
     private String keyword;
 
-    @Schema(description = "话题类型/长短词（日巡查/周巡查）", example = "日巡查")
+    @Schema(description = "话题类型（日巡查/周巡查）", example = "日巡查")
     private String termType;
 
     @Schema(description = "平台（多选）")

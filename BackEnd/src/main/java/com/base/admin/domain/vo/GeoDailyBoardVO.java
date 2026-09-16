@@ -117,7 +117,7 @@ public class GeoDailyBoardVO {
         @Schema(description = "关键字")
         private String keyword;
 
-        @Schema(description = "长短词（日巡查/周巡查）", example = "日巡查")
+        @Schema(description = "话题类型（日巡查/周巡查）", example = "日巡查")
         private String termType;
 
         @Schema(description = "负责人用户ID", example = "1", nullable = true)

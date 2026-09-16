@@ -90,7 +90,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                 statement.execute("""
                         ALTER TABLE geo_monitor_daily
                           ADD COLUMN term_type VARCHAR(16) NOT NULL DEFAULT '日巡查'
-                          COMMENT '长短词：日巡查/周巡查'
+                          COMMENT '话题类型：日巡查/周巡查'
                           AFTER inspect_date
                         """);
             }
@@ -106,7 +106,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     WHERE term_type IS NULL OR term_type = ''
                     """);
             if (updated > 0) {
-                log.info("已将 {} 条空长短词补全为日巡查", updated);
+                log.info("已将 {} 条空话题类型补全为日巡查", updated);
             }
         }
     }
