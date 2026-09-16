@@ -213,7 +213,45 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
           dataSource={items}
           pagination={false}
           size='small'
+          scroll={{ x: 'max-content' }}
           columns={[
+            ...(editable
+              ? [
+                  {
+                    title: '操作',
+                    width: 120,
+                    fixed: 'left' as const,
+                    render: (_: unknown, row: GeoContentPlacementItem) => (
+                      <Space size='small'>
+                        <PermissionButton
+                          type='link'
+                          className='px-0'
+                          perm={editPerm}
+                          onClick={() => {
+                            setEditingItem(row);
+                            setItemOpen(true);
+                          }}
+                        >
+                          编辑
+                        </PermissionButton>
+                        <PermissionButton
+                          type='link'
+                          danger
+                          className='px-0'
+                          perm={editPerm}
+                          onClick={async () => {
+                            await deleteGeoContentPlacementItemApi(row.id);
+                            message.success('已删除');
+                            if (placement) await reloadItems(placement.id);
+                          }}
+                        >
+                          删除
+                        </PermissionButton>
+                      </Space>
+                    ),
+                  } as any,
+                ]
+              : []),
             { title: '标题', dataIndex: 'title', ellipsis: true, width: 180 },
             {
               title: '形态',
@@ -264,42 +302,6 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
                 </Button>
               ),
             },
-            ...(editable
-              ? [
-                  {
-                    title: '操作',
-                    width: 120,
-                    render: (_: unknown, row: GeoContentPlacementItem) => (
-                      <Space size='small'>
-                        <PermissionButton
-                          type='link'
-                          className='px-0'
-                          perm={editPerm}
-                          onClick={() => {
-                            setEditingItem(row);
-                            setItemOpen(true);
-                          }}
-                        >
-                          编辑
-                        </PermissionButton>
-                        <PermissionButton
-                          type='link'
-                          danger
-                          className='px-0'
-                          perm={editPerm}
-                          onClick={async () => {
-                            await deleteGeoContentPlacementItemApi(row.id);
-                            message.success('已删除');
-                            if (placement) await reloadItems(placement.id);
-                          }}
-                        >
-                          删除
-                        </PermissionButton>
-                      </Space>
-                    ),
-                  } as any,
-                ]
-              : []),
           ]}
         />
       </Drawer>
@@ -374,21 +376,14 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
           dataSource={cites}
           pagination={false}
           size='small'
+          scroll={{ x: 'max-content' }}
           columns={[
-            { title: '提问问题', dataIndex: 'askQuestion', ellipsis: true },
-            { title: 'AI平台', dataIndex: 'aiPlatform', width: 90 },
-            {
-              title: '引用链接',
-              dataIndex: 'citeUrl',
-              ellipsis: true,
-              render: (v?: string) =>
-                isHttpUrl(v) ? <Typography.Link onClick={() => openExternal(v)}>{v}</Typography.Link> : '-',
-            },
             ...(editable
               ? [
                   {
                     title: '操作',
                     width: 120,
+                    fixed: 'left' as const,
                     render: (_: unknown, row: GeoContentPlacementCite) => (
                       <Space size='small'>
                         <PermissionButton
@@ -420,6 +415,15 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
                   } as any,
                 ]
               : []),
+            { title: '提问问题', dataIndex: 'askQuestion', ellipsis: true },
+            { title: 'AI平台', dataIndex: 'aiPlatform', width: 90 },
+            {
+              title: '引用链接',
+              dataIndex: 'citeUrl',
+              ellipsis: true,
+              render: (v?: string) =>
+                isHttpUrl(v) ? <Typography.Link onClick={() => openExternal(v)}>{v}</Typography.Link> : '-',
+            },
           ]}
         />
       </Modal>

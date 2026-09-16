@@ -22,6 +22,25 @@ const tableListDataSource = createTableDataSource({
 
 const columns: ProColumns<TableListItem>[] = [
   {
+    title: '操作',
+    width: 180,
+    key: 'option',
+    valueType: 'option',
+    fixed: 'left',
+    render: () => [
+      <a key='detail'>详情</a>,
+      <a key='log'>日志</a>,
+      <a key='monitor'>监控</a>,
+      <TableDropdown
+        key='actionGroup'
+        menus={[
+          { key: 'restart', name: '重启' },
+          { key: 'delete', name: '下线' },
+        ]}
+      />,
+    ],
+  },
+  {
     title: '应用名称',
     width: 120,
     dataIndex: 'name',
@@ -45,24 +64,6 @@ const columns: ProColumns<TableListItem>[] = [
     width: 80,
     dataIndex: 'creator',
     valueEnum: DEMO_CREATOR_VALUE_ENUM,
-  },
-  {
-    title: '操作',
-    width: 180,
-    key: 'option',
-    valueType: 'option',
-    render: () => [
-      <a key='detail'>详情</a>,
-      <a key='log'>日志</a>,
-      <a key='monitor'>监控</a>,
-      <TableDropdown
-        key='actionGroup'
-        menus={[
-          { key: 'restart', name: '重启' },
-          { key: 'delete', name: '下线' },
-        ]}
-      />,
-    ],
   },
 ];
 
@@ -88,6 +89,7 @@ const App: React.FC = () => {
           }}
           columns={columns}
           search={false}
+          scroll={{ x: 'max-content' }}
           dateFormatter='string'
           headerTitle='微服务应用列表'
           toolBarRender={() => [

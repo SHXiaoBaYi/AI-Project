@@ -551,6 +551,21 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
 
   const buildTopicColumns = (tabKey: string): ColumnsType<TopicRow> => [
     {
+      title: '操作',
+      width: 72,
+      fixed: 'left',
+      render: (_, row) => (
+        <Button
+          type='link'
+          danger
+          className='px-0'
+          onClick={() => removeTopic(tabKey, row.rowKey)}
+        >
+          删除
+        </Button>
+      ),
+    },
+    {
       title: '话题',
       dataIndex: 'topicId',
       width: 160,
@@ -624,20 +639,6 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
         />
       ),
     },
-    {
-      title: '操作',
-      width: 72,
-      render: (_, row) => (
-        <Button
-          type='link'
-          danger
-          className='px-0'
-          onClick={() => removeTopic(tabKey, row.rowKey)}
-        >
-          删除
-        </Button>
-      ),
-    },
   ];
 
   return (
@@ -700,6 +701,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
                     bordered
                     pagination={false}
                     tableLayout='auto'
+                    scroll={{ x: 'max-content' }}
                     rowKey='rowKey'
                     columns={buildTopicColumns(tab.key)}
                     dataSource={tab.topics}

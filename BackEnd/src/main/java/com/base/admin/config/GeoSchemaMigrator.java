@@ -443,16 +443,15 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         log.info("已同步内容投放管理/执行双视角菜单");
     }
 
-    /** 我的文章看板：AI露出 + 发布收录聚合页 */
+    /** 数据看板：AI露出 + 发布收录聚合页 */
     private void ensureArticleBoardMenu(Connection connection) throws Exception {
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
                     INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
-                    (129, '我的文章看板', 100, 7, 'geo/article-board', '', 'C', 'geo:article:list', 'FundOutlined', 0, 0,
+                    (129, '数据看板', 100, 7, 'geo/article-board', '', 'C', 'geo:article:list', 'FundOutlined', 0, 0,
                      'AI露出情况与文章发布/收录情况聚合看板', 1)
                     ON DUPLICATE KEY UPDATE
-                      menu_name = VALUES(menu_name),
                       path = VALUES(path),
                       perms = VALUES(perms),
                       icon = VALUES(icon),
@@ -466,7 +465,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     ON DUPLICATE KEY UPDATE is_active = 1
                     """);
         }
-        log.info("已同步我的文章看板菜单");
+        log.info("已同步数据看板菜单");
     }
 
     /** 日监测唯一键纳入 term_type，避免日/周巡查互相覆盖 */
@@ -537,9 +536,18 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             statement.executeUpdate("UPDATE sys_menu SET visible = 1, is_active = 0, parent_id = 131 WHERE menu_id IN (103, 118)");
 
             statement.executeUpdate("""
-                    UPDATE sys_menu SET parent_id = 132, sort_order = 1, menu_name = '我的文章看板',
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 1,
                       path = 'geo/article-board', perms = 'geo:article:list', icon = 'FundOutlined', is_active = 1
                     WHERE menu_id = 129
+                    """);
+            // 修复：菜单管理曾把父级 path 拼到绝对叶子 path 上
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET path = 'geo/article-board'
+                    WHERE menu_id = 129 AND path <> 'geo/article-board' AND path LIKE '%article-board%'
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET menu_name = '数据看板'
+                    WHERE menu_id = 129 AND menu_name IN ('我的文章看板', '')
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 132, sort_order = 2, menu_name = '投放管理',

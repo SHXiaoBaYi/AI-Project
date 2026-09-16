@@ -170,7 +170,6 @@ const UserManage = memo(function UserManage() {
         title: '操作',
         valueType: 'option',
         width: 200,
-        fixed: 'right',
         render: (_, record) => (
           <ActionButtons
             items={[

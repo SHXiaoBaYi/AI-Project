@@ -44,6 +44,26 @@ const App: React.FC = () => {
 
   const columns: ProColumns<DataSourceType>[] = [
     {
+      title: '操作',
+      valueType: 'option',
+      width: 150,
+      fixed: 'left',
+      render: (_text, record, _, action) => [
+        <a
+          key='editable'
+          onClick={() => action?.startEditable?.(record.id)}
+        >
+          编辑
+        </a>,
+        <a
+          key='delete'
+          onClick={() => setDataSource(dataSource.filter((item) => item.id !== record.id))}
+        >
+          删除
+        </a>,
+      ],
+    },
+    {
       title: '任务名称',
       dataIndex: 'title',
       width: '30%',
@@ -62,25 +82,6 @@ const App: React.FC = () => {
       title: '创建时间',
       dataIndex: 'created_at',
       valueType: 'date',
-    },
-    {
-      title: '操作',
-      valueType: 'option',
-      width: 150,
-      render: (_text, record, _, action) => [
-        <a
-          key='editable'
-          onClick={() => action?.startEditable?.(record.id)}
-        >
-          编辑
-        </a>,
-        <a
-          key='delete'
-          onClick={() => setDataSource(dataSource.filter((item) => item.id !== record.id))}
-        >
-          删除
-        </a>,
-      ],
     },
   ];
 
@@ -116,6 +117,7 @@ const App: React.FC = () => {
             rowKey='id'
             headerTitle='编辑模式切换'
             columns={columns}
+            scroll={{ x: 'max-content' }}
             request={async () => ({
               data: defaultData,
               total: defaultData.length,

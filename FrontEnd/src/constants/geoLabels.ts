@@ -3,7 +3,7 @@ export const GEO_LABEL = {
   daily: '日监测数据',
   exposeBoard: '露出看板',
   yearlyTarget: '全年目标',
-  articleBoard: '我的文章看板',
+  articleBoard: '数据看板',
   contentManage: '投放管理',
   contentWork: '投放执行',
   topic: '话题管理',

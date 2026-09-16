@@ -13,6 +13,18 @@ interface DataType {
 
 const columns: TableProps<DataType>['columns'] = [
   {
+    title: 'Action',
+    key: 'action',
+    fixed: 'left',
+    width: 180,
+    render: (_, record) => (
+      <Space size='medium'>
+        <a>Invite {record.name}</a>
+        <a>Delete</a>
+      </Space>
+    ),
+  },
+  {
     title: 'Name',
     dataIndex: 'name',
     key: 'name',
@@ -55,16 +67,6 @@ const columns: TableProps<DataType>['columns'] = [
       </Flex>
     ),
   },
-  {
-    title: 'Action',
-    key: 'action',
-    render: (_, record) => (
-      <Space size='medium'>
-        <a>Invite {record.name}</a>
-        <a>Delete</a>
-      </Space>
-    ),
-  },
 ];
 
 const data: DataType[] = [
@@ -96,12 +98,13 @@ const App: React.FC = () => (
     <ProCard>
       <div className='mb-3 text-xl font-medium'>基础表格示例</div>
       <div className='text-gray-500'>当有大量结构化的数据需要展现时；</div>
-      <div className='text-gray-500'>简单的表格，最后一列是各种操作。</div>
+      <div className='text-gray-500'>简单的表格，第一列是各种操作。</div>
     </ProCard>
     <ProCard styles={{ body: { paddingTop: '40px' } }}>
       <Table<DataType>
         columns={columns}
         dataSource={data}
+        scroll={{ x: 'max-content' }}
       />
     </ProCard>
   </div>

@@ -283,14 +283,12 @@ const YearlyPage = memo(function YearlyPage() {
           rowKey='id'
           dataSource={targets}
           pagination={false}
+          scroll={{ x: 'max-content' }}
           columns={[
-            { title: '时间段', dataIndex: 'periodLabel' },
-            { title: '话题', dataIndex: 'topicId', render: (id) => topics.find((t) => t.id === id)?.topicName || id },
-            { title: '开始', dataIndex: 'periodStart' },
-            { title: '结束', dataIndex: 'periodEnd' },
-            { title: '目标%', dataIndex: 'targetRate' },
             {
               title: '操作',
+              width: 80,
+              fixed: 'left',
               render: (_, r) => (
                 <Popconfirm
                   title='确定删除该目标？'
@@ -311,6 +309,11 @@ const YearlyPage = memo(function YearlyPage() {
                 </Popconfirm>
               ),
             },
+            { title: '时间段', dataIndex: 'periodLabel' },
+            { title: '话题', dataIndex: 'topicId', render: (id) => topics.find((t) => t.id === id)?.topicName || id },
+            { title: '开始', dataIndex: 'periodStart' },
+            { title: '结束', dataIndex: 'periodEnd' },
+            { title: '目标%', dataIndex: 'targetRate' },
           ]}
         />
       </Card>

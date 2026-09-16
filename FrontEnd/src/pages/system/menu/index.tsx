@@ -32,6 +32,7 @@ import { getMenuTreeApi, getMenuListApi, createMenuApi, updateMenuApi, deleteMen
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import type { MenuVO, MenuTree } from '@/types/menu';
 import IconPicker from '@/components/IconPicker';
+import { resolveMenuFullPath } from '@/utils/menuPath';
 import styles from './index.module.css';
 
 const menuTypeMap: Record<string, { text: string; color: string; icon: ReactNode }> = {
@@ -59,10 +60,7 @@ export default function MenuManage() {
 
   const buildFullPathMap = useCallback((tree: MenuTree[], parentPath = '') => {
     for (const node of tree) {
-      const cleanPath = (node.path || '').replace(/^\//, '');
-      const relativePath =
-        parentPath && cleanPath.startsWith(parentPath + '/') ? cleanPath.slice(parentPath.length + 1) : cleanPath;
-      const fullPath = parentPath ? `${parentPath}/${relativePath}` : relativePath;
+      const fullPath = resolveMenuFullPath(node.path, parentPath);
       fullPathMap.current.set(node.menuId, fullPath);
       if (node.children?.length) {
         // eslint-disable-next-line react-hooks/immutability
@@ -92,6 +90,15 @@ export default function MenuManage() {
 
   const selectedMenu = selectedMenuId != null ? (flatMenus.find((m) => m.menuId === selectedMenuId) ?? null) : null;
 
+  /** 表单展示用：绝对 path（含 /）原样显示；相对片段才相对父级展示 */
+  const getFormPath = (menuId: number) => {
+    const menu = menuMap.current.get(menuId);
+    const stored = (menu?.path || '').replace(/^\//, '');
+    if (!stored) return '';
+    if (stored.includes('/')) return stored;
+    return getLeafPath(menuId);
+  };
+
   const getLeafPath = (menuId: number) => {
     const fullPath = fullPathMap.current.get(menuId) || '';
     const menu = menuMap.current.get(menuId);
@@ -110,7 +117,7 @@ export default function MenuManage() {
         menuName: selectedMenu.menuName,
         menuType: selectedMenu.menuType,
         parentId: selectedMenu.parentId,
-        path: getLeafPath(selectedMenu.menuId),
+        path: getFormPath(selectedMenu.menuId),
         component: selectedMenu.component,
         perms: selectedMenu.perms,
         icon: selectedMenu.icon,
@@ -132,7 +139,7 @@ export default function MenuManage() {
         menuName: menu.menuName,
         menuType: menu.menuType,
         parentId: menu.parentId,
-        path: getLeafPath(menu.menuId),
+        path: getFormPath(menu.menuId),
         component: menu.component,
         perms: menu.perms,
         icon: menu.icon,
@@ -198,7 +205,8 @@ export default function MenuManage() {
         visible: 0,
         status: statusValue,
       };
-      dto.path = parentPathPrefix ? `${parentPathPrefix}/${values.path}` : values.path;
+      // 与路由层一致：绝对 path（如 geo/article-board）不再拼接父级，避免改名保存后变成页面开发中
+      dto.path = resolveMenuFullPath(values.path, parentPathPrefix || '');
 
       if (isAddChild) {
         await createMenuApi(dto);
@@ -419,14 +427,26 @@ export default function MenuManage() {
                       {type !== 'F' && (
                         <>
                           <Form.Item
-                            name='path'
-                            label='路由路径'
-                            rules={[{ required: true, message: '请输入路由地址' }]}
+                            noStyle
+                            shouldUpdate={(prev, cur) => prev.path !== cur.path}
                           >
-                            <Input
-                              placeholder='例如: user'
-                              addonBefore={parentPathPrefix ? parentPathPrefix + '/' : undefined}
-                            />
+                            {({ getFieldValue }) => {
+                              const pathVal = (getFieldValue('path') || '').replace(/^\//, '');
+                              const absolute = pathVal.includes('/');
+                              return (
+                                <Form.Item
+                                  name='path'
+                                  label='路由路径'
+                                  extra='与 src/pages 目录对应；含 / 的绝对路径不会拼接父级。菜单名称仅展示，改名不影响路由。'
+                                  rules={[{ required: true, message: '请输入路由地址' }]}
+                                >
+                                  <Input
+                                    placeholder={absolute ? '例如: geo/article-board' : '例如: user'}
+                                    addonBefore={!absolute && parentPathPrefix ? parentPathPrefix + '/' : undefined}
+                                  />
+                                </Form.Item>
+                              );
+                            }}
                           </Form.Item>
                           {/* 已改为vite自动扫描目录加载组件 */}
                           {/* <Form.Item
