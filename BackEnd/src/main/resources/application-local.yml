@@ -6,3 +6,13 @@ spring:
     username: ${xby.rds.username}
     password: ${xby.rds.password}
     driver-class-name: com.mysql.cj.jdbc.Driver
+
+# AI 试用（任选一家配 key，设 enabled=true 后重启）：
+# xby:
+#   ai:
+#     enabled: true
+#     provider: tongyi          # deepseek | tongyi | zhipu | moonshot
+#     tongyi-api-key: sk-ws-H.PHPIRMI.qxoO.MEQCIH-ZOpcLKJfrbSio4z0HI0Y27xvw2ZK4x4fIYJKxzGRuAiAfLNiAN3LYcDH_0aHLIfYrJYw8xoUcNW4tpVbOsm0ozw  # 通义 DashScope API-KEY
+#     # deepseek-api-key: sk-xxxx
+#     # zhipu-api-key: xxxx.xxxx
+#     # moonshot-api-key: sk-xxxx

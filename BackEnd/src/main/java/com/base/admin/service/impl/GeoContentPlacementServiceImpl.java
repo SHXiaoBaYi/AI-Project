@@ -18,6 +18,7 @@ import com.base.admin.domain.entity.GeoContentPlacementCite;
 import com.base.admin.domain.entity.GeoContentPlacementItem;
 import com.base.admin.domain.entity.GeoTopic;
 import com.base.admin.domain.entity.SysUser;
+import com.base.admin.domain.vo.GeoAiProviderOptionVO;
 import com.base.admin.domain.vo.GeoChartPointVO;
 import com.base.admin.domain.vo.GeoContentArticleBoardVO;
 import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
@@ -43,6 +44,7 @@ import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.AiChatService;
 import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoTopicService;
+import com.base.admin.service.SysAiProviderService;
 import com.base.admin.util.ExcelCellUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -93,6 +95,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final SysUserMapper userMapper;
     private final GeoTopicService topicService;
     private final AiChatService aiChatService;
+    private final SysAiProviderService sysAiProviderService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -357,12 +360,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
 
     @Override
     @Transactional
-    public List<GeoContentPlacementListVO> generateSimilar(Long placementId) {
+    public List<GeoContentPlacementListVO> generateSimilar(Long placementId, String provider) {
         GeoContentPlacement source = requirePlacement(placementId);
         if (!StringUtils.hasText(source.getTargetQuestion())) {
             throw new BusinessException("当前记录缺少目标问题，无法生成相似问题");
         }
-        List<String> questions = generateSimilarQuestions(source);
+        List<String> questions = generateSimilarQuestions(source, provider);
         if (questions.isEmpty()) {
             throw new BusinessException("未能生成相似问题，请稍后重试");
         }
@@ -385,17 +388,27 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             row.setSource(Constants.CONTENT_SOURCE_AI);
             row.setSourcePlacementId(source.getId());
             row.setPlacementProgress(Constants.CONTENT_AGG_NONE);
-            row.setRemark("由「" + source.getTargetQuestion() + "」AI生成，待分配发布人/归属人");
+            row.setRemark("由「" + source.getTargetQuestion() + "」生成，待分配发布人/归属人");
             placementMapper.insert(row);
             created.add(toListVo(row, List.of(), 0));
         }
         return created;
     }
 
-    private List<String> generateSimilarQuestions(GeoContentPlacement source) {
+    @Override
+    public List<GeoAiProviderOptionVO> listAiProviders() {
+        // 仅返回本地模板 + 系统管理中已配 Key 且启用的云厂商
+        return sysAiProviderService.listReadyOptions();
+    }
+
+    private List<String> generateSimilarQuestions(GeoContentPlacement source, String provider) {
         String topic = nz(source.getTopicName());
         String question = source.getTargetQuestion().trim();
-        if (aiChatService.isEnabled()) {
+        String p = StringUtils.hasText(provider) ? provider : null;
+        // 显式选本地，或未选且默认也是本地
+        boolean forceLocal = p != null && "local".equalsIgnoreCase(p.trim());
+        boolean useAi = !forceLocal && (p != null ? aiChatService.isProviderConfigured(p) : aiChatService.isEnabled());
+        if (useAi) {
             try {
                 String system = """
                         你是 GEO 内容投放助手。请围绕给定目标问题，生成 3 到 8 条语义相近但表述不同的「待投放目标问题」。
@@ -405,15 +418,25 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                         3. 不要与原问题完全相同，也不要重复。
                         """;
                 String user = "话题：" + (topic.isEmpty() ? "未指定" : topic) + "\n原目标问题：" + question;
-                String content = aiChatService.chat(system, user);
+                String content = aiChatService.chat(system, user, p);
                 List<String> parsed = parseQuestionArray(content);
                 if (!parsed.isEmpty()) {
                     int take = ThreadLocalRandom.current().nextInt(3, 9);
                     return parsed.stream().filter(q -> !q.equals(question)).distinct().limit(take).toList();
                 }
+            } catch (BusinessException e) {
+                if (p != null && !"local".equalsIgnoreCase(p.trim())) {
+                    throw e;
+                }
+                log.warn("AI 生成相似问题失败，改用本地启发式: {}", e.getMessage());
             } catch (Exception e) {
+                if (p != null && !"local".equalsIgnoreCase(p.trim())) {
+                    throw new BusinessException("AI 生成失败: " + e.getMessage());
+                }
                 log.warn("AI 生成相似问题失败，改用本地启发式: {}", e.getMessage());
             }
+        } else if (p != null && !"local".equalsIgnoreCase(p.trim()) && !aiChatService.isProviderConfigured(p)) {
+            throw new BusinessException("所选模型未配置 API Key，请到「系统管理 → AI模型配置」中填写");
         }
         return heuristicSimilarQuestions(topic, question);
     }

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Modal, Progress, Tabs, Tag, Upload } from 'antd';
+import { App, Button, Modal, Progress, Select, Tabs, Tag, Upload } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
@@ -14,6 +14,7 @@ import {
   createGeoContentPlacementApi,
   deleteGeoContentPlacementApi,
   generateSimilarGeoContentPlacementApi,
+  getGeoAiProvidersApi,
   getGeoContentPlacementListApi,
   getGeoOwnerOptionsApi,
   getGeoTopicOptionsApi,
@@ -22,6 +23,14 @@ import {
 } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoOwnerOption, GeoTopic } from '@/types/geo';
 import { GEO_CONTENT_AGG_STATUS, GEO_CONTENT_SOURCES } from '@/constants/geo';
+
+type AiProviderOption = {
+  provider: string;
+  label: string;
+  model: string;
+  available: boolean;
+  hint?: string;
+};
 
 /** 管理视角：目标问题生成/分配 + 发布人周看板 */
 const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
@@ -38,6 +47,10 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sourceRecord, setSourceRecord] = useState<GeoContentPlacementListItem | null>(null);
   const [generatingId, setGeneratingId] = useState<number | null>(null);
+  const [aiProviders, setAiProviders] = useState<AiProviderOption[]>([]);
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [generateRecord, setGenerateRecord] = useState<GeoContentPlacementListItem | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<string>('local');
 
   useEffect(() => {
     void (async () => {
@@ -47,14 +60,53 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
     })();
   }, []);
 
+  useEffect(() => {
+    void getGeoAiProvidersApi()
+      .then((list) => {
+        setAiProviders(list ?? []);
+        const preferred =
+          list?.find((p) => p.available && p.provider !== 'local')?.provider ||
+          list?.find((p) => p.available)?.provider ||
+          'local';
+        setSelectedProvider(preferred);
+      })
+      .catch(() => {
+        setAiProviders([{ provider: 'local', label: '本地模板', model: 'local-template', available: true }]);
+        setSelectedProvider('local');
+      });
+  }, []);
+
   const userOptions = owners.map((u) => ({ label: u.displayName, value: u.userId }));
   const topicOptions = topics.map((t) => ({ label: t.topicName, value: t.id }));
 
-  const handleGenerateSimilar = async (record: GeoContentPlacementListItem) => {
-    setGeneratingId(record.id);
+  const openGenerateModal = (record: GeoContentPlacementListItem) => {
+    setGenerateRecord(record);
+    setGenerateOpen(true);
+    void getGeoAiProvidersApi()
+      .then((list) => {
+        const next = list ?? [];
+        setAiProviders(next);
+        const preferred =
+          next.find((p) => p.available && p.provider !== 'local')?.provider ||
+          next.find((p) => p.available)?.provider ||
+          'local';
+        setSelectedProvider(preferred);
+      })
+      .catch(() => {
+        setAiProviders([{ provider: 'local', label: '本地模板', model: 'local-template', available: true }]);
+        setSelectedProvider('local');
+      });
+  };
+
+  const handleGenerateSimilar = async () => {
+    if (!generateRecord) return;
+    setGeneratingId(generateRecord.id);
     try {
-      const rows = await generateSimilarGeoContentPlacementApi(record.id);
-      message.success(`已生成 ${rows.length} 条相似问题（待分配发布人/归属人）`);
+      const rows = await generateSimilarGeoContentPlacementApi(generateRecord.id, selectedProvider);
+      const providerLabel = aiProviders.find((p) => p.provider === selectedProvider)?.label || selectedProvider;
+      message.success(`已用「${providerLabel}」生成 ${rows.length} 条相似问题（待分配）`);
+      setGenerateOpen(false);
+      setGenerateRecord(null);
       actionRef.current?.reload();
     } finally {
       setGeneratingId(null);
@@ -222,7 +274,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
               label: generatingId === record.id ? '生成中...' : '生成相似问题',
               perm: 'geo:content:generate',
               disabled: generatingId === record.id,
-              onClick: () => handleGenerateSimilar(record),
+              onClick: () => openGenerateModal(record),
             },
             {
               key: 'edit',
@@ -330,6 +382,36 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
           return true;
         }}
       />
+
+      <Modal
+        title='生成相似问题'
+        open={generateOpen}
+        onCancel={() => {
+          if (generatingId) return;
+          setGenerateOpen(false);
+          setGenerateRecord(null);
+        }}
+        onOk={() => void handleGenerateSimilar()}
+        okText={generatingId ? '生成中...' : '开始生成'}
+        confirmLoading={!!generatingId}
+        destroyOnHidden
+      >
+        <div className='mb-3 text-sm text-neutral-600'>源问题：{generateRecord?.targetQuestion || '-'}</div>
+        <div className='mb-1 text-sm text-neutral-700'>选择生成模型</div>
+        <Select
+          className='w-full'
+          value={selectedProvider}
+          onChange={setSelectedProvider}
+          options={aiProviders.map((p) => ({
+            value: p.provider,
+            label: `${p.label}（${p.model}）`,
+          }))}
+        />
+        <div className='mt-2 text-xs text-neutral-500'>
+          {aiProviders.find((p) => p.provider === selectedProvider)?.hint ||
+            '未在「系统管理 → AI模型配置」中填写 Key 时，仅可使用本地模板启发式生成。'}
+        </div>
+      </Modal>
 
       <BaseModalForm
         title='导入内容投放 Excel'

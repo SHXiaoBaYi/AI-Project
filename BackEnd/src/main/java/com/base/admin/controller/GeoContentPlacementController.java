@@ -12,6 +12,8 @@ import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
+import com.base.admin.domain.dto.GeoGenerateSimilarDTO;
+import com.base.admin.domain.vo.GeoAiProviderOptionVO;
 import com.base.admin.domain.vo.GeoContentArticleBoardVO;
 import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
@@ -134,12 +136,22 @@ public class GeoContentPlacementController {
         return Result.ok();
     }
 
+    @Operation(summary = "生成相似问题可用的 AI 厂商")
+    @GetMapping("/ai-providers")
+    @RequiresPermission("geo:content:generate")
+    public Result<List<GeoAiProviderOptionVO>> listAiProviders() {
+        return Result.ok(contentPlacementService.listAiProviders());
+    }
+
     @Operation(summary = "生成相似目标问题（AI）")
     @PostMapping("/{id}/generate-similar")
     @RequiresPermission("geo:content:generate")
     @Log(title = "GEO内容投放-生成相似问题", businessType = 1)
-    public Result<List<GeoContentPlacementListVO>> generateSimilar(@PathVariable Long id) {
-        return Result.ok(contentPlacementService.generateSimilar(id));
+    public Result<List<GeoContentPlacementListVO>> generateSimilar(
+            @PathVariable Long id,
+            @RequestBody(required = false) GeoGenerateSimilarDTO dto) {
+        String provider = dto == null ? null : dto.getProvider();
+        return Result.ok(contentPlacementService.generateSimilar(id, provider));
     }
 
     @Operation(summary = "新增发布详情")

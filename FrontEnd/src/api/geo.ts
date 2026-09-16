@@ -276,8 +276,16 @@ export function deleteGeoContentPlacementCiteApi(citeId: number) {
   return request.delete(`/geo/content-placement/cites/${citeId}`);
 }
 
-export function generateSimilarGeoContentPlacementApi(id: number) {
-  return request.post<unknown, GeoContentPlacementListItem[]>(`/geo/content-placement/${id}/generate-similar`);
+export function generateSimilarGeoContentPlacementApi(id: number, provider?: string) {
+  return request.post<unknown, GeoContentPlacementListItem[]>(`/geo/content-placement/${id}/generate-similar`, {
+    provider: provider || undefined,
+  });
+}
+
+export function getGeoAiProvidersApi() {
+  return request.get<unknown, { provider: string; label: string; model: string; available: boolean; hint?: string }[]>(
+    '/geo/content-placement/ai-providers',
+  );
 }
 
 export function importGeoContentPlacementApi(file: File) {

@@ -28,13 +28,22 @@ xby:
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
   upload-dir: ${UPLOAD_DIR:./uploads}
-  # 通用 AI 大模型（OpenAI 兼容）。未启用或未配 key 时，相似问题走本地启发式生成
+  # 通用 AI（OpenAI 兼容）。未启用或未配 key 时，相似问题走本地启发式
+  # provider: deepseek | tongyi | zhipu | moonshot
+  # 你有阿里云账号时优先试 tongyi（DashScope 兼容模式）
   ai:
     enabled: ${XBY_AI_ENABLED:false}
-    base-url: ${XBY_AI_BASE_URL:https://api.deepseek.com/v1}
+    provider: ${XBY_AI_PROVIDER:tongyi}
+    # 通用 key；也可按厂商单独配下面几个
     api-key: ${XBY_AI_API_KEY:}
-    model: ${XBY_AI_MODEL:deepseek-chat}
-    timeout-seconds: 60
+    deepseek-api-key: ${DEEPSEEK_API_KEY:}
+    tongyi-api-key: ${TONGYI_API_KEY:}
+    zhipu-api-key: ${ZHIPU_API_KEY:}
+    moonshot-api-key: ${MOONSHOT_API_KEY:}
+    # 一般不用改；改了会覆盖厂商预设
+    base-url: ${XBY_AI_BASE_URL:}
+    model: ${XBY_AI_MODEL:}
+    timeout-seconds: ${XBY_AI_TIMEOUT_SECONDS:60}
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml

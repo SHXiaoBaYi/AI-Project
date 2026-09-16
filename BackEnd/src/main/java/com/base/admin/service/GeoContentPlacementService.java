@@ -9,6 +9,7 @@ import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
+import com.base.admin.domain.vo.GeoAiProviderOptionVO;
 import com.base.admin.domain.vo.GeoContentArticleBoardVO;
 import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
@@ -45,8 +46,12 @@ public interface GeoContentPlacementService {
 
     void delete(Long id);
 
-    /** 基于指定内容投放，生成 3~5 条相似目标问题（待投放、待分配） */
-    List<GeoContentPlacementListVO> generateSimilar(Long placementId);
+    /** 基于指定内容投放，生成相似目标问题（可指定 AI 厂商） */
+    List<GeoContentPlacementListVO> generateSimilar(Long placementId, String provider);
+
+    /** 生成相似问题可用的 AI 厂商列表 */
+    List<GeoAiProviderOptionVO> listAiProviders();
+
 
     Long createItem(GeoContentPlacementItemDTO dto);
 
