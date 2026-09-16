@@ -1,10 +1,11 @@
 import { memo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App } from 'antd';
+import { App, Modal } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
+import PlatformAccountPanel from '@/components/geo/PlatformAccountPanel';
 import { createGeoPlatformApi, deleteGeoPlatformApi, getGeoPlatformListApi, updateGeoPlatformApi } from '@/api/geo';
 import type { GeoPlatform } from '@/types/geo';
 import { GEO_PLATFORM_TYPE_DEFAULT, GEO_PLATFORM_TYPES } from '@/constants/geo';
@@ -14,6 +15,8 @@ const PlatformPage = memo(function PlatformPage() {
   const actionRef = useRef<ActionType>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<GeoPlatform | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountPlatform, setAccountPlatform] = useState<GeoPlatform | null>(null);
 
   const columns: ProColumnType<GeoPlatform>[] = [
     {
@@ -34,15 +37,33 @@ const PlatformPage = memo(function PlatformPage() {
       formItemProps: { rules: [{ required: true, message: '请选择平台类型' }] },
       render: (_, r) => r.platformType || GEO_PLATFORM_TYPE_DEFAULT,
     },
+    {
+      title: '登录地址',
+      dataIndex: 'loginUrl',
+      width: 220,
+      search: false,
+      ellipsis: true,
+      fieldProps: { placeholder: '如 https://www.xxx.com/login' },
+      render: (_, r) => r.loginUrl || '-',
+    },
     { title: '排序', dataIndex: 'sortOrder', search: false, valueType: 'digit' },
     { title: '备注', dataIndex: 'remark', search: false, ellipsis: true },
     {
       title: '操作',
       valueType: 'option',
-      width: 160,
+      width: 220,
       render: (_, record) => (
         <ActionButtons
           items={[
+            {
+              key: 'accounts',
+              label: '账号管理',
+              perm: 'geo:platformAccount:list',
+              onClick: () => {
+                setAccountPlatform(record);
+                setAccountOpen(true);
+              },
+            },
             {
               key: 'edit',
               label: '编辑',
@@ -105,11 +126,12 @@ const PlatformPage = memo(function PlatformPage() {
         columns={columns as any}
         open={open}
         onOpenChange={setOpen}
-        initialValues={editing ?? { sortOrder: 0, platformType: GEO_PLATFORM_TYPE_DEFAULT }}
+        initialValues={editing ?? { sortOrder: 0, platformType: GEO_PLATFORM_TYPE_DEFAULT, loginUrl: '' }}
         onFinish={async (values) => {
           const payload = {
             ...values,
             platformType: values.platformType || GEO_PLATFORM_TYPE_DEFAULT,
+            loginUrl: values.loginUrl || '',
           };
           if (editing) {
             await updateGeoPlatformApi({ ...payload, id: editing.id });
@@ -122,6 +144,28 @@ const PlatformPage = memo(function PlatformPage() {
           return true;
         }}
       />
+
+      <Modal
+        title={accountPlatform ? `${accountPlatform.platformName} · 账号管理` : '账号管理'}
+        open={accountOpen}
+        onCancel={() => {
+          setAccountOpen(false);
+          setAccountPlatform(null);
+        }}
+        footer={null}
+        width={1100}
+        destroyOnHidden
+        styles={{ body: { paddingTop: 8 } }}
+      >
+        {accountPlatform ? (
+          <PlatformAccountPanel
+            key={accountPlatform.id}
+            fixedPlatformId={accountPlatform.id}
+            fixedPlatformName={accountPlatform.platformName}
+            embedded
+          />
+        ) : null}
+      </Modal>
     </>
   );
 });

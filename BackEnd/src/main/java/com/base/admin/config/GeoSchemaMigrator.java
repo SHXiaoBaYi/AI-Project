@@ -32,11 +32,13 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v5_geo_board_snapshot.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v9_geo_content_placement.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v10_geo_optimize.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v11_geo_platform_account.sql"));
             ensureBoardLockedColumn(connection);
             ensureOwnerNameColumn(connection);
             ensureTermTypeColumn(connection);
             ensureOwnerUserIdColumn(connection);
             ensurePlatformType(connection);
+            ensurePlatformLoginUrl(connection);
             ensureContentPlacementItemTitle(connection);
             ensureContentPlacementSource(connection);
             ensureContentPlacementAiModel(connection);
@@ -187,6 +189,31 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             }
         }
         log.info("内容发布平台默认数据已同步");
+    }
+
+    /** 登录地址归属平台，并从账号表移除旧字段 */
+    private void ensurePlatformLoginUrl(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_platform")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_platform", "login_url")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_platform
+                          ADD COLUMN login_url VARCHAR(500) NOT NULL DEFAULT ''
+                          COMMENT '平台登录地址'
+                          AFTER platform_type
+                        """);
+            }
+            log.info("已为 geo_platform 增加 login_url 字段");
+        }
+        if (tableExists(connection, "geo_platform_account")
+                && columnExists(connection, "geo_platform_account", "login_url")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("ALTER TABLE geo_platform_account DROP COLUMN login_url");
+            }
+            log.info("已从 geo_platform_account 移除 login_url 字段");
+        }
     }
 
     private void ensureContentPlacementItemTitle(Connection connection) throws Exception {
@@ -533,6 +560,11 @@ public class GeoSchemaMigrator implements ApplicationRunner {
 
             statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 1, menu_name = '话题管理', is_active = 1 WHERE menu_id = 101");
             statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 2, menu_name = '平台管理', is_active = 1 WHERE menu_id = 113");
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 130, sort_order = 3, menu_name = '平台账号管理',
+                      path = 'geo/platform-account', perms = 'geo:platformAccount:list', icon = 'IdcardOutlined', is_active = 1
+                    WHERE menu_id = 133
+                    """);
 
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 131, sort_order = 1, menu_name = '日监测数据',

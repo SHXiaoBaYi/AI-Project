@@ -69,6 +69,7 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
         GeoPlatform platform = new GeoPlatform();
         platform.setPlatformName(name);
         platform.setPlatformType(type);
+        platform.setLoginUrl(dto.getLoginUrl() == null ? "" : dto.getLoginUrl().trim());
         platform.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : 0);
         platform.setRemark(dto.getRemark());
         platformMapper.insert(platform);
@@ -83,6 +84,7 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
         String oldName = platform.getPlatformName();
         platform.setPlatformName(name);
         platform.setPlatformType(type);
+        platform.setLoginUrl(dto.getLoginUrl() == null ? "" : dto.getLoginUrl().trim());
         platform.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : 0);
         platform.setRemark(dto.getRemark());
         platformMapper.updateById(platform);

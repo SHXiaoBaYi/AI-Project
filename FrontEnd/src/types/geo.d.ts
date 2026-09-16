@@ -9,6 +9,59 @@ export interface GeoPlatform {
   id: number;
   platformName: string;
   platformType?: string;
+  loginUrl?: string;
+  sortOrder?: number;
+  remark?: string;
+}
+
+export interface GeoPlatformAccount {
+  id: number;
+  platformId: number;
+  platformName?: string;
+  account: string;
+  passwordMasked?: string;
+  hasPassword?: boolean;
+  accountNickname?: string;
+  managerUserId?: number;
+  managerName?: string;
+  holderUserId?: number;
+  holderName?: string;
+  openerUserId?: number;
+  openerName?: string;
+  recharged?: number;
+  openTime?: string;
+  expireTime?: string;
+  loginMethod?: string;
+  verified?: number;
+  verifyMethod?: string;
+  bindPhone?: string;
+  bindEmail?: string;
+  accountStatus?: string;
+  lastLoginTime?: string;
+  sortOrder?: number;
+  remark?: string;
+}
+
+export interface GeoPlatformAccountDTO {
+  id?: number;
+  platformId: number;
+  account: string;
+  password?: string;
+  clearPassword?: boolean;
+  accountNickname?: string;
+  managerUserId?: number | null;
+  holderUserId?: number | null;
+  openerUserId?: number | null;
+  recharged?: number;
+  openTime?: string;
+  expireTime?: string;
+  loginMethod?: string;
+  verified?: number;
+  verifyMethod?: string;
+  bindPhone?: string;
+  bindEmail?: string;
+  accountStatus?: string;
+  lastLoginTime?: string;
   sortOrder?: number;
   remark?: string;
 }

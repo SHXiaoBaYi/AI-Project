@@ -14,6 +14,8 @@ import type {
   GeoOwnerOption,
   GeoPersistResult,
   GeoPlatform,
+  GeoPlatformAccount,
+  GeoPlatformAccountDTO,
   GeoTopic,
   GeoWeeklyBoard,
   GeoYearTarget,
@@ -72,6 +74,34 @@ export function updateGeoPlatformApi(data: Partial<GeoPlatform>) {
 
 export function deleteGeoPlatformApi(id: number) {
   return request.delete(`/geo/platform/${id}`);
+}
+
+export function getGeoPlatformAccountListApi(
+  data: PageQuery & {
+    platformId?: number;
+    account?: string;
+    managerUserId?: number;
+    holderUserId?: number;
+    openerUserId?: number;
+    recharged?: number;
+    verified?: number;
+    accountStatus?: string;
+    loginMethod?: string;
+  },
+) {
+  return request.post<unknown, PageResult<GeoPlatformAccount>>('/geo/platform-account/list', data);
+}
+
+export function createGeoPlatformAccountApi(data: GeoPlatformAccountDTO) {
+  return request.post('/geo/platform-account', data);
+}
+
+export function updateGeoPlatformAccountApi(data: GeoPlatformAccountDTO) {
+  return request.put('/geo/platform-account', data);
+}
+
+export function deleteGeoPlatformAccountApi(id: number) {
+  return request.delete(`/geo/platform-account/${id}`);
 }
 
 export function getGeoDailyListApi(

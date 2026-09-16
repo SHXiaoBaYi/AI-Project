@@ -24,6 +24,9 @@ public class GeoPlatform extends BaseEntity {
     @Schema(description = "平台类型（AI平台/内容发布平台）", example = "AI平台")
     private String platformType;
 
+    @Schema(description = "平台登录地址", example = "https://www.douyin.com")
+    private String loginUrl;
+
     @Schema(description = "排序", example = "1")
     private Integer sortOrder;
 
