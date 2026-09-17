@@ -58,3 +58,58 @@ export type BoardChartDrillQuery = {
 export function boardChartDrillApi(data: BoardChartDrillQuery) {
   return request.post<unknown, BoardChartDrill>('/board/chart/drill', data);
 }
+
+export type BoardTaskTofuChartType =
+  'publishCount' | 'citeRate' | 'employeeCiteCompare' | 'employeeCiteMom' | 'employeeCiteYoy' | 'topicCiteCount';
+
+export type BoardTaskTofuQuery = {
+  startDate?: string;
+  endDate?: string;
+  grain?: string;
+  chartType: BoardTaskTofuChartType;
+  topicId?: number;
+  targetQuestion?: string;
+  publisherUserId?: number;
+  publisherName?: string;
+  contentPlatform?: string;
+  aiPlatform?: string;
+};
+
+export type BoardTaskTofuChart = {
+  chartType: string;
+  level: string;
+  seriesField?: string;
+  grain?: string;
+  metricLabel?: string;
+  topicId?: number;
+  topicName?: string;
+  targetQuestion?: string;
+  publisherUserId?: number;
+  publisherName?: string;
+  contentPlatform?: string;
+  aiPlatform?: string;
+  chart?: { axis: string; series: string; value: number; key?: string }[];
+};
+
+export type BoardTaskPublishDetail = {
+  placementId?: number;
+  itemId?: number;
+  targetQuestion?: string;
+  title?: string;
+  topicName?: string;
+  publisherName?: string;
+  publishPlatform?: string;
+  contentForm?: string;
+  publishStatus?: string;
+  publishTime?: string;
+  publishUrl?: string;
+  citeCount?: number;
+};
+
+export function boardTaskTofuChartApi(data: BoardTaskTofuQuery) {
+  return request.post<unknown, BoardTaskTofuChart>('/board/task/tofu-chart', data);
+}
+
+export function boardTaskTofuPublishDetailApi(data: BoardTaskTofuQuery) {
+  return request.post<unknown, BoardTaskPublishDetail[]>('/board/task/tofu-publish-detail', data);
+}
