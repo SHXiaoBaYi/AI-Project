@@ -42,4 +42,28 @@ public class FileStorageService {
             throw new BusinessException("截图保存失败: " + e.getMessage());
         }
     }
+
+    /** 任务完成证明等通用附件（不限图片） */
+    public String saveTaskAttachment(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("请选择附件文件");
+        }
+        String original = file.getOriginalFilename() == null ? "file" : file.getOriginalFilename();
+        String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')).toLowerCase(Locale.ROOT) : "";
+        if (ext.length() > 16) {
+            throw new BusinessException("不支持的文件扩展名");
+        }
+        try {
+            Path dir = Path.of(uploadDir, "task").toAbsolutePath().normalize();
+            Files.createDirectories(dir);
+            String name = UUID.randomUUID().toString().replace("-", "") + ext;
+            Path dest = dir.resolve(name);
+            try (var in = file.getInputStream()) {
+                Files.copy(in, dest);
+            }
+            return "/uploads/task/" + name;
+        } catch (IOException e) {
+            throw new BusinessException("附件保存失败: " + e.getMessage());
+        }
+    }
 }

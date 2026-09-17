@@ -6,18 +6,25 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.Constants;
 import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.SysTaskAssignDTO;
+import com.base.admin.domain.dto.SysTaskBatchAssignDTO;
+import com.base.admin.domain.dto.SysTaskBatchCompleteDTO;
+import com.base.admin.domain.dto.SysTaskCompleteDTO;
 import com.base.admin.domain.dto.SysTaskDTO;
+import com.base.admin.domain.dto.SysTaskFileItemDTO;
 import com.base.admin.domain.dto.SysTaskQueryDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysTaskAssignee;
+import com.base.admin.domain.entity.SysTaskFile;
 import com.base.admin.domain.entity.SysTaskType;
 import com.base.admin.domain.entity.SysUser;
 import com.base.admin.domain.vo.SysTaskAssigneeVO;
+import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.domain.vo.SysTaskVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoContentPlacementMapper;
 import com.base.admin.mapper.SysTaskAssigneeMapper;
+import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.SysTaskService;
@@ -50,6 +57,7 @@ public class SysTaskServiceImpl implements SysTaskService {
 
     private final SysTaskMapper taskMapper;
     private final SysTaskAssigneeMapper assigneeMapper;
+    private final SysTaskFileMapper taskFileMapper;
     private final SysUserMapper userMapper;
     private final GeoContentPlacementMapper placementMapper;
     private final SysTaskTypeService taskTypeService;
@@ -125,7 +133,11 @@ public class SysTaskServiceImpl implements SysTaskService {
 
     @Override
     public SysTaskVO getById(Long id) {
-        return toVo(require(id), loadAssignees(List.of(id)).getOrDefault(id, List.of()));
+        SysTaskVO vo = toVo(require(id), loadAssignees(List.of(id)).getOrDefault(id, List.of()));
+        List<SysTaskFileVO> files = listFilesByTaskId(id);
+        vo.setFiles(files);
+        vo.setFileCount(files.size());
+        return vo;
     }
 
     @Override
@@ -205,6 +217,298 @@ public class SysTaskServiceImpl implements SysTaskService {
         if ("已完成".equals(task.getStatus()) && hasSpawnConfig(task.getTaskType())) {
             assigneeMapper.physicalDeleteByTaskId(task.getId());
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String batchAssign(SysTaskBatchAssignDTO dto) {
+        if (dto.getTaskIds() == null || dto.getTaskIds().isEmpty()) {
+            throw new BusinessException("请选择至少一条任务");
+        }
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        for (Long id : dto.getTaskIds()) {
+            if (id != null) {
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) {
+            throw new BusinessException("请选择至少一条任务");
+        }
+        if (ids.size() > 100) {
+            throw new BusinessException("单次最多批量分配 100 条");
+        }
+        int ok = 0;
+        int skip = 0;
+        List<String> errors = new ArrayList<>();
+        for (Long id : ids) {
+            SysTask task = taskMapper.selectById(id);
+            if (task == null || !isAssignable(task)) {
+                skip++;
+                continue;
+            }
+            try {
+                SysTaskAssignDTO one = new SysTaskAssignDTO();
+                one.setOwnerUserId(dto.getOwnerUserId());
+                one.setAssigneeUserIds(dto.getAssigneeUserIds());
+                assign(id, one);
+                ok++;
+            } catch (BusinessException e) {
+                errors.add("#" + id + " " + e.getMessage());
+            }
+        }
+        if (ok == 0) {
+            throw new BusinessException(errors.isEmpty()
+                    ? "没有可分配的任务（请选择状态为待分配或可分配的任务）"
+                    : "批量分配失败：" + String.join("；", errors));
+        }
+        String msg = "成功分配 " + ok + " 条";
+        if (skip > 0) {
+            msg += "，跳过 " + skip + " 条";
+        }
+        if (!errors.isEmpty()) {
+            msg += "，失败 " + errors.size() + " 条";
+        }
+        return msg;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void complete(Long id, SysTaskCompleteDTO dto) {
+        SysTask task = require(id);
+        Long uid = SecurityUtils.getCurrentUserId();
+        if (uid == null) {
+            throw new BusinessException("未登录");
+        }
+        boolean isOwner = Objects.equals(task.getOwnerUserId(), uid);
+        boolean isAssignee = isUserAssignee(id, uid);
+        if (!isOwner && !isAssignee) {
+            throw new BusinessException("仅负责人或执行人可完成该任务");
+        }
+        if ("已完成".equals(task.getStatus()) || "已取消".equals(task.getStatus())) {
+            throw new BusinessException("任务已结束，无法再次完成");
+        }
+        if ("待分配".equals(task.getStatus())) {
+            throw new BusinessException("待分配任务请先分配后再完成");
+        }
+
+        SysTaskType typeCfg = taskTypeService.getByTypeName(task.getTaskType());
+        boolean requireProof = typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1);
+        List<SysTaskFileItemDTO> files = dto == null || dto.getFiles() == null ? List.of() : dto.getFiles();
+        if (requireProof && files.isEmpty()) {
+            throw new BusinessException("该任务类型完成前必须上传完成证明附件");
+        }
+
+        String oldStatus = task.getStatus();
+        if (dto != null && StringUtils.hasText(dto.getRemark())) {
+            String extra = dto.getRemark().trim();
+            if (StringUtils.hasText(task.getRemark())) {
+                task.setRemark(task.getRemark().trim() + "；完成说明：" + extra);
+            } else {
+                task.setRemark("完成说明：" + extra);
+            }
+        }
+        task.setStatus("已完成");
+        task.setProgress(100);
+        applyStatusSideEffects(task, oldStatus);
+        taskMapper.updateById(task);
+
+        List<SysTaskFile> saved = saveProofFiles(task, files, uid);
+        if (!saved.isEmpty()) {
+            copyFilesToRelatedTasks(task, saved);
+        }
+
+        // 执行人标记完成
+        if (isAssignee) {
+            assigneeMapper.update(null, new LambdaUpdateWrapper<SysTaskAssignee>()
+                    .eq(SysTaskAssignee::getTaskId, id)
+                    .eq(SysTaskAssignee::getUserId, uid)
+                    .set(SysTaskAssignee::getDone, 1));
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String batchComplete(SysTaskBatchCompleteDTO dto) {
+        if (dto.getTaskIds() == null || dto.getTaskIds().isEmpty()) {
+            throw new BusinessException("请选择至少一条任务");
+        }
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        for (Long id : dto.getTaskIds()) {
+            if (id != null) {
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) {
+            throw new BusinessException("请选择至少一条任务");
+        }
+        if (ids.size() > 100) {
+            throw new BusinessException("单次最多批量完成 100 条");
+        }
+        int ok = 0;
+        int skip = 0;
+        List<String> errors = new ArrayList<>();
+        for (Long id : ids) {
+            SysTask task = taskMapper.selectById(id);
+            if (task == null || !isCompletable(task)) {
+                skip++;
+                continue;
+            }
+            SysTaskType typeCfg = taskTypeService.getByTypeName(task.getTaskType());
+            if (typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1)) {
+                skip++;
+                continue;
+            }
+            try {
+                SysTaskCompleteDTO one = new SysTaskCompleteDTO();
+                one.setRemark(dto.getRemark());
+                one.setFiles(List.of());
+                complete(id, one);
+                ok++;
+            } catch (BusinessException e) {
+                errors.add("#" + id + " " + e.getMessage());
+            }
+        }
+        if (ok == 0) {
+            throw new BusinessException(errors.isEmpty()
+                    ? "没有可批量完成的任务（需证明附件的类型请单独「去完成」并上传附件）"
+                    : "批量完成失败：" + String.join("；", errors));
+        }
+        String msg = "成功完成 " + ok + " 条";
+        if (skip > 0) {
+            msg += "，跳过 " + skip + " 条（需附件或不可完成）";
+        }
+        if (!errors.isEmpty()) {
+            msg += "，失败 " + errors.size() + " 条";
+        }
+        return msg;
+    }
+
+    @Override
+    public List<SysTaskFileVO> listFilesByTaskId(Long taskId) {
+        if (taskId == null) {
+            return List.of();
+        }
+        return taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                        .eq(SysTaskFile::getTaskId, taskId)
+                        .orderByAsc(SysTaskFile::getId))
+                .stream()
+                .map(this::toFileVo)
+                .toList();
+    }
+
+    @Override
+    public List<SysTaskFileVO> listFilesByBiz(String bizType, Long bizId) {
+        if (!StringUtils.hasText(bizType) || bizId == null) {
+            return List.of();
+        }
+        return taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                        .eq(SysTaskFile::getBizType, bizType.trim())
+                        .eq(SysTaskFile::getBizId, bizId)
+                        .orderByDesc(SysTaskFile::getId))
+                .stream()
+                .map(this::toFileVo)
+                .toList();
+    }
+
+    private List<SysTaskFile> saveProofFiles(SysTask task, List<SysTaskFileItemDTO> items, Long uploadUserId) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        SysUser uploader = uploadUserId == null ? null : userMapper.selectById(uploadUserId);
+        String uploaderName = userDisplayName(uploader);
+        if (!StringUtils.hasText(uploaderName)) {
+            uploaderName = SecurityUtils.getCurrentUsername();
+        }
+        List<SysTaskFile> saved = new ArrayList<>();
+        for (SysTaskFileItemDTO item : items) {
+            if (item == null || !StringUtils.hasText(item.getFileUrl()) || !StringUtils.hasText(item.getFileName())) {
+                continue;
+            }
+            SysTaskFile row = new SysTaskFile();
+            row.setTaskId(task.getId());
+            row.setBizType(nz(task.getBizType()));
+            row.setBizId(task.getBizId());
+            row.setFileName(item.getFileName().trim());
+            row.setFileUrl(item.getFileUrl().trim());
+            row.setFileSize(item.getFileSize() == null ? 0L : Math.max(0L, item.getFileSize()));
+            row.setContentType(nz(item.getContentType()));
+            row.setUploadUserId(uploadUserId);
+            row.setUploadUserName(uploaderName);
+            row.setRemark("完成证明");
+            taskFileMapper.insert(row);
+            saved.add(row);
+        }
+        return saved;
+    }
+
+    /** 将附件复制到同业务未完成子任务 / 派发目标任务（共享同一文件 URL） */
+    private void copyFilesToRelatedTasks(SysTask source, List<SysTaskFile> files) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        LinkedHashSet<Long> targetIds = new LinkedHashSet<>();
+        SysTaskType typeCfg = taskTypeService.getByTypeName(source.getTaskType());
+        if (typeCfg != null && StringUtils.hasText(typeCfg.getSpawnTaskType())
+                && StringUtils.hasText(source.getBizType()) && source.getBizId() != null) {
+            String spawnType = typeCfg.getSpawnTaskType().trim();
+            taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                            .eq(SysTask::getBizType, source.getBizType())
+                            .eq(SysTask::getBizId, source.getBizId())
+                            .eq(SysTask::getTaskType, spawnType)
+                            .ne(SysTask::getStatus, "已取消")
+                            .ne(SysTask::getId, source.getId()))
+                    .forEach(t -> targetIds.add(t.getId()));
+        }
+        if (StringUtils.hasText(source.getBizType()) && source.getBizId() != null) {
+            taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                            .eq(SysTask::getBizType, source.getBizType())
+                            .eq(SysTask::getBizId, source.getBizId())
+                            .ne(SysTask::getId, source.getId())
+                            .notIn(SysTask::getStatus, List.of("已完成", "已取消", "待分配")))
+                    .forEach(t -> targetIds.add(t.getId()));
+        }
+        taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                        .eq(SysTask::getParentId, source.getId())
+                        .notIn(SysTask::getStatus, List.of("已完成", "已取消")))
+                .forEach(t -> targetIds.add(t.getId()));
+
+        for (Long targetId : targetIds) {
+            for (SysTaskFile src : files) {
+                Long exists = taskFileMapper.selectCount(new LambdaQueryWrapper<SysTaskFile>()
+                        .eq(SysTaskFile::getTaskId, targetId)
+                        .eq(SysTaskFile::getFileUrl, src.getFileUrl()));
+                if (exists != null && exists > 0) {
+                    continue;
+                }
+                SysTaskFile copy = new SysTaskFile();
+                copy.setTaskId(targetId);
+                copy.setBizType(src.getBizType());
+                copy.setBizId(src.getBizId());
+                copy.setFileName(src.getFileName());
+                copy.setFileUrl(src.getFileUrl());
+                copy.setFileSize(src.getFileSize());
+                copy.setContentType(src.getContentType());
+                copy.setUploadUserId(src.getUploadUserId());
+                copy.setUploadUserName(src.getUploadUserName());
+                copy.setRemark("由任务#" + source.getId() + "完成时带入");
+                taskFileMapper.insert(copy);
+            }
+        }
+    }
+
+    private SysTaskFileVO toFileVo(SysTaskFile f) {
+        SysTaskFileVO vo = new SysTaskFileVO();
+        vo.setId(f.getId());
+        vo.setTaskId(f.getTaskId());
+        vo.setBizType(f.getBizType());
+        vo.setBizId(f.getBizId());
+        vo.setFileName(f.getFileName());
+        vo.setFileUrl(f.getFileUrl());
+        vo.setFileSize(f.getFileSize());
+        vo.setContentType(f.getContentType());
+        vo.setUploadUserName(f.getUploadUserName());
+        vo.setCreateTime(f.getCreateTime());
+        return vo;
     }
 
     @Override
@@ -561,10 +865,26 @@ public class SysTaskServiceImpl implements SysTaskService {
             return List.of();
         }
         Map<Long, List<SysTaskAssignee>> map = loadAssignees(tasks.stream().map(SysTask::getId).toList());
-        return tasks.stream().map(t -> toVo(t, map.getOrDefault(t.getId(), List.of()))).toList();
+        Map<String, SysTaskType> typeMap = taskTypeService.listOptions().stream()
+                .collect(Collectors.toMap(SysTaskType::getTypeName, t -> t, (a, b) -> a));
+        Map<Long, Long> fileCountMap = loadFileCounts(tasks.stream().map(SysTask::getId).toList());
+        return tasks.stream()
+                .map(t -> toVo(t, map.getOrDefault(t.getId(), List.of()), typeMap, fileCountMap))
+                .toList();
     }
 
     private SysTaskVO toVo(SysTask task, List<SysTaskAssignee> assignees) {
+        Map<String, SysTaskType> typeMap = Map.of();
+        SysTaskType cfg = taskTypeService.getByTypeName(task.getTaskType());
+        if (cfg != null) {
+            typeMap = Map.of(cfg.getTypeName(), cfg);
+        }
+        Map<Long, Long> fileCountMap = loadFileCounts(List.of(task.getId()));
+        return toVo(task, assignees, typeMap, fileCountMap);
+    }
+
+    private SysTaskVO toVo(SysTask task, List<SysTaskAssignee> assignees,
+                           Map<String, SysTaskType> typeMap, Map<Long, Long> fileCountMap) {
         SysTaskVO vo = new SysTaskVO();
         vo.setId(task.getId());
         vo.setTitle(task.getTitle());
@@ -589,6 +909,10 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setOverdue(isOverdue(task));
         vo.setDeletable(isDeletable(task));
         vo.setAssignable(isAssignable(task));
+        vo.setCompletable(isCompletable(task));
+        SysTaskType typeCfg = typeMap.get(task.getTaskType());
+        vo.setRequireProof(typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1));
+        vo.setFileCount(fileCountMap.getOrDefault(task.getId(), 0L).intValue());
 
         List<SysTaskAssigneeVO> list = new ArrayList<>();
         List<Long> ids = new ArrayList<>();
@@ -607,6 +931,21 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setAssigneeUserIds(ids);
         vo.setAssigneeNames(String.join("、", names));
         return vo;
+    }
+
+    private Map<Long, Long> loadFileCounts(List<Long> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return Map.of();
+        }
+        return taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                        .select(SysTaskFile::getId, SysTaskFile::getTaskId)
+                        .in(SysTaskFile::getTaskId, taskIds))
+                .stream()
+                .collect(Collectors.groupingBy(SysTaskFile::getTaskId, Collectors.counting()));
+    }
+
+    private boolean isCompletable(SysTask task) {
+        return "未开始".equals(task.getStatus()) || "进行中".equals(task.getStatus());
     }
 
     private boolean isAssignable(SysTask task) {

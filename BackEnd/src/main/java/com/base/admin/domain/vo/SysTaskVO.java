@@ -91,6 +91,18 @@ public class SysTaskVO {
     @Schema(description = "是否可分配", example = "true")
     private boolean assignable = false;
 
+    @Schema(description = "是否可去完成（未开始/进行中）", example = "true")
+    private boolean completable = false;
+
+    @Schema(description = "完成时是否必须上传证明", example = "true")
+    private boolean requireProof = false;
+
+    @Schema(description = "附件数量")
+    private Integer fileCount = 0;
+
+    @Schema(description = "任务附件（详情时返回）")
+    private List<SysTaskFileVO> files = new ArrayList<>();
+
     @Schema(description = "创建时间")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;

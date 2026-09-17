@@ -35,4 +35,7 @@ public class SysTaskType extends BaseEntity {
 
     @Schema(description = "分配完成后派发的下一任务类型", example = "文章撰写")
     private String spawnTaskType;
+
+    @Schema(description = "完成时是否必须上传证明附件 1=是 0=否", example = "1")
+    private Integer requireProof;
 }

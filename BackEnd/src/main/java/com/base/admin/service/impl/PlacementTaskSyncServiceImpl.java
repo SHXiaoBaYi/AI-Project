@@ -106,16 +106,17 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
 
     private void ensureTaskTypes() {
         ensureType(Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER, 10, "投放管理：目标问题缺少发布人",
-                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_PUBLISHER, "文章发布");
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_PUBLISHER, "文章发布", false);
         ensureType(Constants.TASK_TYPE_GEO_ASSIGN_WRITER, 11, "投放管理：目标问题缺少撰写人",
-                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_WRITER, "文章撰写");
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_WRITER, "文章撰写", false);
         ensureType("文章撰写", 12, "撰写人执行任务",
-                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "");
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", true);
         ensureType("文章发布", 13, "发布人执行任务",
-                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "");
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", true);
     }
 
-    private void ensureType(String name, int sort, String remark, String bizType, String assignField, String spawnTaskType) {
+    private void ensureType(String name, int sort, String remark, String bizType, String assignField,
+                            String spawnTaskType, boolean requireProof) {
         SysTaskType existing = taskTypeService.getByTypeName(name);
         if (existing == null) {
             SysTaskTypeDTO dto = new SysTaskTypeDTO();
@@ -125,12 +126,16 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
             dto.setBizType(bizType);
             dto.setAssignField(assignField);
             dto.setSpawnTaskType(spawnTaskType);
+            dto.setRequireProof(requireProof);
             taskTypeService.create(dto);
             return;
         }
+        int wantProof = requireProof ? 1 : 0;
+        int gotProof = existing.getRequireProof() == null ? 0 : existing.getRequireProof();
         boolean needFix = !bizType.equals(nz(existing.getBizType()))
                 || !assignField.equals(nz(existing.getAssignField()))
-                || !spawnTaskType.equals(nz(existing.getSpawnTaskType()));
+                || !spawnTaskType.equals(nz(existing.getSpawnTaskType()))
+                || wantProof != gotProof;
         if (needFix) {
             SysTaskTypeDTO dto = new SysTaskTypeDTO();
             dto.setId(existing.getId());
@@ -140,6 +145,7 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
             dto.setBizType(bizType);
             dto.setAssignField(assignField);
             dto.setSpawnTaskType(spawnTaskType);
+            dto.setRequireProof(requireProof);
             taskTypeService.update(dto);
         }
     }

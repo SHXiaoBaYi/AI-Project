@@ -32,11 +32,27 @@ public class TaskSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v15_task_type_biz_binding.sql"));
             ensureSpawnTaskTypeColumn(connection);
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v16_task_flow.sql"));
+            ensureRequireProofColumn(connection);
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v18_task_complete_proof.sql"));
         } catch (Exception e) {
             log.error("Task schema migrate failed", e);
             throw e;
         }
         log.info("任务模块表与菜单已同步");
+    }
+
+    private void ensureRequireProofColumn(Connection connection) throws Exception {
+        if (!columnExists(connection, "sys_task_type", "require_proof")) {
+            try (Statement st = connection.createStatement()) {
+                st.execute("""
+                        ALTER TABLE sys_task_type
+                          ADD COLUMN require_proof TINYINT NOT NULL DEFAULT 0
+                          COMMENT '完成时是否必须上传证明附件 1=是 0=否'
+                          AFTER spawn_task_type
+                        """);
+            }
+            log.info("已为 sys_task_type 增加 require_proof");
+        }
     }
 
     private void ensureTaskTypeBizColumns(Connection connection) throws Exception {

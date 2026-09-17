@@ -91,6 +91,15 @@ const TaskTypePage = memo(function TaskTypePage() {
         render: (_, r) => r.spawnTaskType || '-',
       },
       {
+        title: '完成需证明',
+        dataIndex: 'requireProof',
+        width: 110,
+        valueType: 'switch',
+        search: false,
+        fieldProps: { checkedChildren: '是', unCheckedChildren: '否' },
+        render: (_, r) => (Number(r.requireProof) === 1 || r.requireProof === true ? '是' : '否'),
+      },
+      {
         title: '排序',
         dataIndex: 'sortOrder',
         width: 80,
@@ -188,8 +197,9 @@ const TaskTypePage = memo(function TaskTypePage() {
                 bizType: editing.bizType || '',
                 assignField: editing.assignField || '',
                 spawnTaskType: editing.spawnTaskType || '',
+                requireProof: Number(editing.requireProof) === 1 || editing.requireProof === true,
               }
-            : { sortOrder: 0, bizType: '', assignField: '', spawnTaskType: '' }
+            : { sortOrder: 0, bizType: '', assignField: '', spawnTaskType: '', requireProof: false }
         }
         onFinish={async (values) => {
           const typeName = String(values.typeName || '').trim();
@@ -205,6 +215,7 @@ const TaskTypePage = memo(function TaskTypePage() {
             bizType: values.bizType || '',
             assignField: values.assignField || '',
             spawnTaskType,
+            requireProof: !!values.requireProof,
           };
           if (editing) {
             await updateTaskTypeApi({ ...payload, id: editing.id });

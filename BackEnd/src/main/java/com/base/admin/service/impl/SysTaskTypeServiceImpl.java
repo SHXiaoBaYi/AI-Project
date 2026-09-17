@@ -56,6 +56,7 @@ public class SysTaskTypeServiceImpl implements SysTaskTypeService {
         row.setBizType(nz(dto.getBizType()));
         row.setAssignField(nz(dto.getAssignField()));
         row.setSpawnTaskType(spawn);
+        row.setRequireProof(Boolean.TRUE.equals(dto.getRequireProof()) ? 1 : 0);
         taskTypeMapper.insert(row);
     }
 
@@ -80,6 +81,7 @@ public class SysTaskTypeServiceImpl implements SysTaskTypeService {
         row.setBizType(nz(dto.getBizType()));
         row.setAssignField(nz(dto.getAssignField()));
         row.setSpawnTaskType(spawn);
+        row.setRequireProof(Boolean.TRUE.equals(dto.getRequireProof()) ? 1 : 0);
         taskTypeMapper.updateById(row);
         if (!oldName.equals(name)) {
             taskMapper.update(null, new LambdaUpdateWrapper<SysTask>()

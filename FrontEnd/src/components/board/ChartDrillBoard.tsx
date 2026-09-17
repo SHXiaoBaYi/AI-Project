@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Select, Space, Statistic, Tag, message } from 'antd';
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -146,40 +146,69 @@ export default function ChartDrillBoard({ domain, title }: Props) {
       .map((p) => ({
         axis: formatBoardAxis(p.axis),
         value: p.value,
+        // 图例展示短名；下钻用完整 seriesKey（单根柱/单条线）
         series: p.series,
         seriesKey: p.seriesKey || p.series,
         drillable: p.drillable !== false && !!data?.chartDrillable,
       }));
   }, [data]);
 
-  const onSeriesDrill = (payload?: { seriesKey?: string; series?: string; key?: string; drillable?: boolean }) => {
-    if (!data?.chartDrillable || payload?.drillable === false) return;
-    const seriesKey = payload?.seriesKey || payload?.key || payload?.series;
-    if (!seriesKey) return;
-    const trendHit = (data.trend || []).find((t) => t.seriesKey === seriesKey || t.series === seriesKey);
-    const barHit = (data.bars || []).find(
-      (b) =>
-        b.key === seriesKey ||
-        b.label === seriesKey ||
-        (trendHit != null && (b.key === trendHit.seriesKey || b.label === trendHit.series)),
-    );
-    if (barHit?.drillable === false || trendHit?.drillable === false) return;
-    void load(stack, barHit?.key || trendHit?.seriesKey || seriesKey);
-  };
+  const onSeriesDrill = useCallback(
+    (payload?: { seriesKey?: string; series?: string; key?: string; drillable?: boolean }) => {
+      if (!data?.chartDrillable || payload?.drillable === false) return;
+      // 优先完整 key：点中分组里的某一根柱 = 只下钻该主题
+      const seriesKey = payload?.seriesKey || payload?.key;
+      const seriesName = payload?.series;
+      if (!seriesKey && !seriesName) return;
 
-  const bindChartDrill = (plot: { chart?: { on: (event: string, handler: (evt: any) => void) => void } }) => {
-    plot?.chart?.on?.('element:click', (evt: any) => {
-      const datum = evt?.data?.data as
-        { seriesKey?: string; series?: string; key?: string; drillable?: boolean } | undefined;
-      if (!datum) return;
-      onSeriesDrill({
-        seriesKey: datum.seriesKey,
-        series: datum.series,
-        key: datum.key,
-        drillable: datum.drillable,
+      const trendHit = (data.trend || []).find(
+        (t) =>
+          (seriesKey && (t.seriesKey === seriesKey || t.series === seriesKey)) ||
+          (seriesName && (t.series === seriesName || t.seriesKey === seriesName)),
+      );
+      const barHit = (data.bars || []).find(
+        (b) =>
+          (seriesKey && (b.key === seriesKey || b.label === seriesKey)) ||
+          (seriesName && (b.label === seriesName || b.key === seriesName)) ||
+          (trendHit != null && (b.key === trendHit.seriesKey || b.label === trendHit.series)),
+      );
+      if (barHit?.drillable === false || trendHit?.drillable === false) return;
+
+      const drillKey = barHit?.key || trendHit?.seriesKey || seriesKey || seriesName;
+      if (!drillKey) return;
+      // 日期范围不变：仍用当前 range，只追加 stack
+      void load(stack, drillKey);
+    },
+    [data, load, stack],
+  );
+
+  const drillRef = useRef(onSeriesDrill);
+  drillRef.current = onSeriesDrill;
+
+  const bindChartDrill = useCallback(
+    (plot: { chart?: { on: (event: string, handler: (evt: any) => void) => void } }) => {
+      const chart = plot?.chart;
+      if (!chart?.on) return;
+      chart.on('element:click', (evt: any) => {
+        const raw = evt?.data?.data ?? evt?.data ?? {};
+        const datum = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined;
+        if (!datum) return;
+        // 分组柱：每根柱带独立 series / seriesKey
+        const seriesKey = String(datum.seriesKey ?? datum.key ?? '');
+        const series = String(datum.series ?? datum.color ?? '');
+        const drillable = datum.drillable !== false;
+        if (!seriesKey && !series) return;
+        drillRef.current({
+          seriesKey: seriesKey || undefined,
+          series: series || undefined,
+          drillable,
+        });
       });
-    });
-  };
+    },
+    [],
+  );
+
+  const chartRenderKey = `${data?.axisField || 'root'}-${stack.map((s) => s.key).join('|')}-${timeSeriesData.length}`;
 
   const onBack = () => {
     if (!stack.length) return;
@@ -316,9 +345,10 @@ export default function ChartDrillBoard({ domain, title }: Props) {
           </Col>
         </Row>
 
-        <div className='mb-2 text-sm font-medium text-neutral-700'>折线图（X 轴=日期，点击系列下钻）</div>
+        <div className='mb-2 text-sm font-medium text-neutral-700'>折线图（X 轴=日期，点击某条线下钻该主题）</div>
         <Suspense fallback={<ChartFallback height={300} />}>
           <Line
+            key={`line-${chartRenderKey}`}
             data={timeSeriesData}
             xField='axis'
             yField='value'
@@ -330,9 +360,12 @@ export default function ChartDrillBoard({ domain, title }: Props) {
           />
         </Suspense>
 
-        <div className='mt-6 mb-2 text-sm font-medium text-neutral-700'>柱状图（X 轴=日期，点击系列下钻）</div>
+        <div className='mt-6 mb-2 text-sm font-medium text-neutral-700'>
+          分组柱状图（X 轴=日期；点击分组中的某一根柱 = 下钻该主题，日期范围不变）
+        </div>
         <Suspense fallback={<ChartFallback />}>
           <Column
+            key={`col-${chartRenderKey}`}
             data={timeSeriesData}
             xField='axis'
             yField='value'
@@ -365,7 +398,7 @@ export default function ChartDrillBoard({ domain, title }: Props) {
           <div className='mt-2 text-xs text-neutral-400'>当前已到最细层级，折线/柱状均不可再下钻</div>
         ) : (
           <div className='mt-2 text-xs text-neutral-400'>
-            所有图 X 轴均为日期（如 26/09/16，斜向）；同日多系列为不同主题/人，点击折线点或柱体下钻
+            点中分组里的某一根柱（或某条折线）只下钻该主题；日期范围保持不变
           </div>
         )}
       </Card>

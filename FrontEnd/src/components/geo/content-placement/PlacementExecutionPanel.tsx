@@ -15,6 +15,7 @@ import {
   updateGeoContentPlacementCiteApi,
   updateGeoContentPlacementItemApi,
 } from '@/api/geo';
+import { getTaskFilesByBizApi, type SysTaskFile } from '@/api/task';
 import type {
   GeoContentPlacementCite,
   GeoContentPlacementItem,
@@ -61,6 +62,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
   const [cites, setCites] = useState<GeoContentPlacementCite[]>([]);
   const [citeFormOpen, setCiteFormOpen] = useState(false);
   const [editingCite, setEditingCite] = useState<GeoContentPlacementCite | null>(null);
+  const [taskFiles, setTaskFiles] = useState<SysTaskFile[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -85,6 +87,14 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
     }
   };
 
+  const reloadTaskFiles = async (placementId: number) => {
+    try {
+      setTaskFiles(await getTaskFilesByBizApi('geo_content_placement', placementId));
+    } catch {
+      setTaskFiles([]);
+    }
+  };
+
   const reloadCites = async (placementId: number, itemId: number) => {
     setCiteLoading(true);
     try {
@@ -97,8 +107,10 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
   useEffect(() => {
     if (open && placement?.id) {
       void reloadItems(placement.id);
+      void reloadTaskFiles(placement.id);
     } else {
       setItems([]);
+      setTaskFiles([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, placement?.id]);
@@ -200,6 +212,33 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
                 ? `（${placement.successCount || 0}/${placement.platformCount}，${placement.publishProgress}%）`
                 : ''}
             </div>
+          </div>
+        ) : null}
+        {taskFiles.length > 0 ? (
+          <div className='mb-4 rounded border border-neutral-200 bg-neutral-50 px-3 py-2'>
+            <div className='mb-2 text-sm font-medium text-neutral-700'>任务完成证明 / 附件</div>
+            <ul className='m-0 list-none space-y-1 p-0'>
+              {taskFiles.map((f) => (
+                <li
+                  key={f.id}
+                  className='flex items-center justify-between gap-2 text-sm'
+                >
+                  <span className='truncate'>{f.fileName}</span>
+                  <a
+                    href={
+                      /^https?:\/\//i.test(f.fileUrl)
+                        ? f.fileUrl
+                        : `${String(import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080').replace(/\/$/, '')}${f.fileUrl}`
+                    }
+                    target='_blank'
+                    rel='noreferrer'
+                    download={f.fileName}
+                  >
+                    查看/下载
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
         ) : null}
         <Table<GeoContentPlacementItem>

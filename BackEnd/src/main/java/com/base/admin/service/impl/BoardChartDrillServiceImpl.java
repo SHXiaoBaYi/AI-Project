@@ -74,7 +74,7 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
             BoardChartStackItemDTO node = new BoardChartStackItemDTO();
             node.setField(field);
             node.setKey(query.getClickKey().trim());
-            node.setLabel(query.getClickKey().trim());
+            node.setLabel(shortLabel(query.getClickKey().trim()));
             stack.add(node);
         }
 

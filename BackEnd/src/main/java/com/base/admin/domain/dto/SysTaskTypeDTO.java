@@ -29,4 +29,7 @@ public class SysTaskTypeDTO {
 
     @Schema(description = "分配完成后派发的下一任务类型", example = "文章撰写")
     private String spawnTaskType;
+
+    @Schema(description = "完成时是否必须上传证明附件", example = "true")
+    private Boolean requireProof;
 }
