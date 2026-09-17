@@ -230,6 +230,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       title: '状态',
       dataIndex: 'status',
       width: 100,
+      search: false,
       hideInSearch: true,
       valueType: 'select',
       fieldProps: { options: statusOptions, allowClear: true },

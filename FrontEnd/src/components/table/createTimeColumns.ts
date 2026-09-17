@@ -11,6 +11,7 @@ export function createTimeRangeColumn<T extends Record<string, any>>(
     dataIndex: 'createTime',
     valueType: 'dateRange',
     hideInTable: true,
+    hideInForm: true,
     ...(defaultDemoRange ? { initialValue: DEMO_CREATE_TIME_RANGE } : {}),
     search: {
       transform: (value) => ({
@@ -32,6 +33,7 @@ export function createTimeDisplayColumn<T extends Record<string, any>>(
     valueType: 'dateTime',
     width: 170,
     search: false,
+    hideInForm: true,
     ...options,
   };
 }

@@ -1,4 +1,5 @@
 import request from './request';
+import type { PageResult } from '@/types/api';
 
 export type BoardChartStackItem = {
   field: string;
@@ -112,4 +113,82 @@ export function boardTaskTofuChartApi(data: BoardTaskTofuQuery) {
 
 export function boardTaskTofuPublishDetailApi(data: BoardTaskTofuQuery) {
   return request.post<unknown, BoardTaskPublishDetail[]>('/board/task/tofu-publish-detail', data);
+}
+
+export type BoardTaskOpsMetric =
+  'todayDue' | 'todayOverdue' | 'weekDue' | 'weekOverdue' | 'todayDone' | 'weekDone' | 'onTimeRate' | 'completionRate';
+
+export type BoardTaskOpsQuery = {
+  startDate?: string;
+  endDate?: string;
+  asOfDate?: string;
+};
+
+export type BoardTaskOpsSummary = {
+  asOfDate?: string;
+  todayDue: number;
+  todayOverdue: number;
+  weekDue: number;
+  weekOverdue: number;
+  todayDone: number;
+  weekDone: number;
+  onTimeDone: number;
+  rangeDone: number;
+  onTimeRate: number;
+  rangeCompleted: number;
+  rangeTotal: number;
+  completionRate: number;
+  startDate?: string;
+  endDate?: string;
+};
+
+export type BoardTaskOpsDrillQuery = BoardTaskOpsQuery & {
+  metric: BoardTaskOpsMetric;
+  subFilter?: string;
+  level?: 'person' | 'task';
+  personUserId?: number;
+  pageNum?: number;
+  pageSize?: number;
+};
+
+export type BoardTaskOpsRow = {
+  id: number;
+  title: string;
+  taskType?: string;
+  status?: string;
+  priority?: number;
+  progress?: number;
+  ownerName?: string;
+  assigneeNames?: string;
+  planEndTime?: string;
+  actualEndTime?: string;
+  overdue?: boolean;
+  overdueDays?: number | null;
+  timingTag?: string | null;
+  timingDays?: number | null;
+  timingLabel?: string | null;
+};
+
+export type BoardTaskOpsPersonRate = {
+  userId: number;
+  userName: string;
+  numerator: number;
+  denominator: number;
+  rate: number;
+  onTimeCount?: number | null;
+  earlyCount?: number | null;
+  lateCount?: number | null;
+  openCount?: number | null;
+};
+
+export function boardTaskOpsSummaryApi(data?: BoardTaskOpsQuery) {
+  return request.post<unknown, BoardTaskOpsSummary>('/board/work/summary', data ?? {});
+}
+
+export function boardTaskOpsPersonRateApi(data: BoardTaskOpsDrillQuery) {
+  return request.post<unknown, PageResult<BoardTaskOpsPersonRate>>('/board/work/person-rate', data);
+}
+
+export function boardTaskOpsDrillApi(data: BoardTaskOpsDrillQuery) {
+  return request.post<unknown, PageResult<BoardTaskOpsRow>>('/board/work/drill', data);
 }
