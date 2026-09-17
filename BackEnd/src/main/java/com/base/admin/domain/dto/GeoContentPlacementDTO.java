@@ -14,7 +14,7 @@ public class GeoContentPlacementDTO {
     @Schema(description = "发布人用户ID（空表示待分配）", example = "1", nullable = true)
     private Long publisherUserId;
 
-    @Schema(description = "归属人用户ID（空表示待分配）", example = "2", nullable = true)
+    @Schema(description = "撰写人用户ID（空表示待分配）", example = "2", nullable = true)
     private Long ownerUserId;
 
     @Schema(description = "话题ID（优先；与话题名称二选一）", example = "1", nullable = true)

@@ -44,6 +44,7 @@ import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.AiChatService;
 import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoTopicService;
+import com.base.admin.service.PlacementTaskSyncService;
 import com.base.admin.service.SysAiProviderService;
 import com.base.admin.util.ExcelCellUtils;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -96,6 +97,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final GeoTopicService topicService;
     private final AiChatService aiChatService;
     private final SysAiProviderService sysAiProviderService;
+    private final PlacementTaskSyncService placementTaskSyncService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -334,6 +336,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         placement.setSourcePlacementId(null);
         placement.setPlacementProgress(Constants.CONTENT_AGG_NONE);
         placementMapper.insert(placement);
+        placementTaskSyncService.ensureTasksForPlacement(placement);
         return placement.getId();
     }
 
@@ -346,6 +349,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         GeoContentPlacement placement = requirePlacement(dto.getId());
         fillPlacement(placement, dto);
         placementMapper.updateById(placement);
+        placementTaskSyncService.ensureTasksForPlacement(placement);
     }
 
     @Override
@@ -391,8 +395,9 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             row.setSourcePlacementId(source.getId());
             row.setSourceAiModel(gen.sourceAiModel());
             row.setPlacementProgress(Constants.CONTENT_AGG_NONE);
-            row.setRemark("由「" + source.getTargetQuestion() + "」生成，待分配发布人/归属人");
+            row.setRemark("由「" + source.getTargetQuestion() + "」生成，待分配发布人/撰写人");
             placementMapper.insert(row);
+            placementTaskSyncService.ensureTasksForPlacement(row);
             created.add(toListVo(row, List.of(), 0));
         }
         return created;
@@ -653,6 +658,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                             existing.setPlacementProgress(Constants.CONTENT_AGG_NONE);
                             applyUsersAndTopic(existing, publisher, owner, topic);
                             placementMapper.updateById(existing);
+                            placementTaskSyncService.ensureTasksForPlacement(existing);
                             result.setUpdateCount(result.getUpdateCount() + 1);
                         } else {
                             GeoContentPlacement placement = new GeoContentPlacement();
@@ -663,6 +669,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                             placement.setRemark(remark);
                             applyUsersAndTopic(placement, publisher, owner, topic);
                             placementMapper.insert(placement);
+                            placementTaskSyncService.ensureTasksForPlacement(placement);
                             existingId = placement.getId();
                             result.setInsertCount(result.getInsertCount() + 1);
                         }
@@ -854,7 +861,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         SysUser user = userMapper.selectById(userId);
         if (user == null || !Objects.equals(user.getStatus(), Constants.STATUS_ACTIVE)) {
-            throw new BusinessException((publisher ? "发布人" : "归属人") + "用户不存在或已停用");
+            throw new BusinessException((publisher ? "发布人" : "撰写人") + "用户不存在或已停用");
         }
         if (publisher) {
             placement.setPublisherUserId(user.getUserId());

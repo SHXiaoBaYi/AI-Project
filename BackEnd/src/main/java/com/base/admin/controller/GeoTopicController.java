@@ -40,7 +40,7 @@ public class GeoTopicController {
 
     @Operation(summary = "全部话题（下拉）")
     @GetMapping("/options")
-    @RequiresPermission("geo:topic:list")
+    @RequiresPermission({"geo:topic:list", "board:view", "geo:expose:list", "geo:article:list", "geo:daily:list", "geo:content:list"})
     public Result<List<GeoTopic>> options() {
         return Result.ok(topicService.listAll());
     }

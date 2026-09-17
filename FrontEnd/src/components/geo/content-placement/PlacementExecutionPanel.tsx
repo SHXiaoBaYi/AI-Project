@@ -184,7 +184,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
         {placement ? (
           <div className='mb-4 space-y-1 text-sm text-neutral-600'>
             <div>
-              发布人：{placement.publisherName || '-'}　归属人：{placement.ownerName || '-'}　话题：
+              发布人：{placement.publisherName || '-'}　撰写人：{placement.ownerName || '-'}　话题：
               {placement.topicName || '-'}
             </div>
             <div>目标问题：{placement.targetQuestion || '-'}</div>

@@ -63,5 +63,16 @@ public class Constants {
     /** 内容投放待分配占位 */
     public static final String CONTENT_UNASSIGNED = "待分配";
 
+    /** 任务关联业务：GEO内容投放 */
+    public static final String TASK_BIZ_GEO_CONTENT_PLACEMENT = "geo_content_placement";
+    /** 任务类型：待分配发布人 */
+    public static final String TASK_TYPE_GEO_ASSIGN_PUBLISHER = "GEO文章待分配发布人";
+    /** 任务类型：待分配撰写人 */
+    public static final String TASK_TYPE_GEO_ASSIGN_WRITER = "GEO文章待分配撰写人";
+    /** 分配回写字段：发布人 */
+    public static final String TASK_ASSIGN_FIELD_PUBLISHER = "publisher";
+    /** 分配回写字段：撰写人 */
+    public static final String TASK_ASSIGN_FIELD_WRITER = "writer";
+
     private Constants() {}
 }

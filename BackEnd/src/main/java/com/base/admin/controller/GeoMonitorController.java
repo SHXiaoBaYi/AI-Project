@@ -128,7 +128,7 @@ public class GeoMonitorController {
 
     @Operation(summary = "最近一次更新对应的巡查日期")
     @GetMapping("/daily/latest-date")
-    @RequiresPermission("geo:daily:list")
+    @RequiresPermission({"geo:daily:list", "board:view", "geo:expose:list", "geo:day:list"})
     public Result<GeoLatestDateVO> latestDate() {
         return Result.ok(monitorService.latestInspectDate());
     }
@@ -151,21 +151,21 @@ public class GeoMonitorController {
 
     @Operation(summary = "平台下拉")
     @GetMapping("/daily/platforms")
-    @RequiresPermission("geo:daily:list")
+    @RequiresPermission({"geo:daily:list", "board:view", "geo:expose:list", "geo:day:list"})
     public Result<List<String>> platforms() {
         return Result.ok(monitorService.listPlatforms());
     }
 
     @Operation(summary = "负责人下拉（系统用户，展示昵称或用户名）")
     @GetMapping("/daily/owners")
-    @RequiresPermission("geo:daily:list")
+    @RequiresPermission({"geo:daily:list", "board:view", "geo:expose:list", "geo:article:list"})
     public Result<List<GeoOwnerOptionVO>> owners() {
         return Result.ok(monitorService.listOwnerOptions());
     }
 
     @Operation(summary = "周报看板（已结束周期读落库快照，未结束实时）")
     @PostMapping("/weekly/board")
-    @RequiresPermission({"geo:weekly:list", "geo:expose:list", "geo:day:list"})
+    @RequiresPermission({"geo:weekly:list", "geo:expose:list", "geo:day:list", "board:view"})
     public Result<GeoWeeklyBoardVO> weekly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.weeklyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }
@@ -180,7 +180,7 @@ public class GeoMonitorController {
 
     @Operation(summary = "月报看板（已结束周期读落库快照，未结束实时）")
     @PostMapping("/monthly/board")
-    @RequiresPermission({"geo:monthly:list", "geo:expose:list", "geo:day:list"})
+    @RequiresPermission({"geo:monthly:list", "geo:expose:list", "geo:day:list", "board:view"})
     public Result<GeoMonthlyBoardVO> monthly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.monthlyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }
@@ -195,21 +195,21 @@ public class GeoMonitorController {
 
     @Operation(summary = "日报看板（实时聚合，默认近14天）")
     @PostMapping("/day/board")
-    @RequiresPermission({"geo:day:list", "geo:expose:list", "geo:article:list"})
+    @RequiresPermission({"geo:day:list", "geo:expose:list", "geo:article:list", "board:view"})
     public Result<GeoDailyBoardVO> dailyBoard(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.dailyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }
 
     @Operation(summary = "负面/错误内容明细")
     @PostMapping("/day/negatives")
-    @RequiresPermission({"geo:day:list", "geo:expose:list", "geo:article:list", "geo:daily:list"})
+    @RequiresPermission({"geo:day:list", "geo:expose:list", "geo:article:list", "geo:daily:list", "board:view"})
     public Result<List<GeoDailyVO>> negatives(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.listNegativeDaily(query == null ? new GeoBoardQueryDTO() : query));
     }
 
     @Operation(summary = "全年目标看板（已结束周期读落库快照，未结束实时）")
     @PostMapping("/yearly/board")
-    @RequiresPermission({"geo:yearly:list", "geo:expose:list"})
+    @RequiresPermission({"geo:yearly:list", "geo:expose:list", "board:view"})
     public Result<GeoYearlyBoardVO> yearly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.yearlyBoard(query == null ? new GeoBoardQueryDTO() : query));
     }

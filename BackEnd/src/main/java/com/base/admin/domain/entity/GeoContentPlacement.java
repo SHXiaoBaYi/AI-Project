@@ -24,10 +24,10 @@ public class GeoContentPlacement extends BaseEntity {
     @Schema(description = "发布人展示名", example = "李金瑜")
     private String publisherName;
 
-    @Schema(description = "归属人用户ID", example = "2", nullable = true)
+    @Schema(description = "撰写人用户ID", example = "2", nullable = true)
     private Long ownerUserId;
 
-    @Schema(description = "归属人展示名", example = "甄德明")
+    @Schema(description = "撰写人展示名", example = "甄德明")
     private String ownerName;
 
     @Schema(description = "话题ID", example = "1", nullable = true)

@@ -13,7 +13,7 @@ public class GeoContentPlacementQueryDTO extends PageQuery {
     @Schema(description = "发布人用户ID", example = "1")
     private Long publisherUserId;
 
-    @Schema(description = "归属人用户ID", example = "2")
+    @Schema(description = "撰写人用户ID", example = "2")
     private Long ownerUserId;
 
     @Schema(description = "话题ID", example = "1")
@@ -31,6 +31,6 @@ public class GeoContentPlacementQueryDTO extends PageQuery {
     @Schema(description = "投放进度（投放完成/部分投放/未投放）", example = "部分投放")
     private String aggregateStatus;
 
-    @Schema(description = "关联用户ID（发布人或归属人，一线视角筛选用）", example = "1")
+    @Schema(description = "关联用户ID（发布人或撰写人，一线视角筛选用）", example = "1")
     private Long relatedUserId;
 }

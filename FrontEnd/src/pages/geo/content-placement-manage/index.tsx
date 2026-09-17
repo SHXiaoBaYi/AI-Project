@@ -129,7 +129,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       render: (_, r) => r.publisherName || '待分配',
     },
     {
-      title: '归属人',
+      title: '撰写人',
       dataIndex: 'ownerUserId',
       width: 120,
       valueType: 'select',

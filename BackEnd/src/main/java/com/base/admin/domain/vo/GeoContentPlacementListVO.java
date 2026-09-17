@@ -16,10 +16,10 @@ public class GeoContentPlacementListVO {
     @Schema(description = "发布人")
     private String publisherName;
 
-    @Schema(description = "归属人用户ID", example = "2", nullable = true)
+    @Schema(description = "撰写人用户ID", example = "2", nullable = true)
     private Long ownerUserId;
 
-    @Schema(description = "归属人")
+    @Schema(description = "撰写人")
     private String ownerName;
 
     @Schema(description = "话题ID", example = "1", nullable = true)

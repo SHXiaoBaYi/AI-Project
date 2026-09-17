@@ -58,14 +58,14 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "发布人维度周看板")
     @PostMapping("/publisher-weekly-board")
-    @RequiresPermission("geo:content:list")
+    @RequiresPermission({"geo:content:list", "geo:article:list", "board:view"})
     public Result<GeoContentPublisherWeekBoardVO> publisherWeeklyBoard(@RequestBody GeoContentPublisherWeekQueryDTO query) {
         return Result.ok(contentPlacementService.publisherWeeklyBoard(query));
     }
 
     @Operation(summary = "发布人周看板指标明细")
     @PostMapping("/publisher-weekly-detail")
-    @RequiresPermission("geo:content:list")
+    @RequiresPermission({"geo:content:list", "geo:article:list", "board:view"})
     public Result<List<GeoContentPublisherWeekDetailVO>> publisherWeeklyDetail(
             @Valid @RequestBody GeoContentPublisherWeekDetailQueryDTO query) {
         return Result.ok(contentPlacementService.publisherWeeklyDetail(query));
@@ -73,7 +73,7 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "文章发布/收录看板")
     @PostMapping("/article-board")
-    @RequiresPermission({"geo:content:list", "geo:article:list"})
+    @RequiresPermission({"geo:content:list", "geo:article:list", "board:view"})
     public Result<GeoContentArticleBoardVO> articleBoard(@RequestBody(required = false) GeoContentArticleBoardQueryDTO query) {
         return Result.ok(contentPlacementService.articlePublishBoard(
                 query == null ? new GeoContentArticleBoardQueryDTO() : query));
@@ -81,7 +81,7 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "文章发布/收录看板下钻明细")
     @PostMapping("/article-board/detail")
-    @RequiresPermission({"geo:content:list", "geo:article:list"})
+    @RequiresPermission({"geo:content:list", "geo:article:list", "board:view"})
     public Result<List<GeoContentArticleDetailRowVO>> articleBoardDetail(
             @Valid @RequestBody GeoContentArticleDetailQueryDTO query) {
         return Result.ok(contentPlacementService.articlePublishDetail(query));

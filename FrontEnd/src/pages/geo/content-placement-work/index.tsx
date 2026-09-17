@@ -61,7 +61,7 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
       render: (v) => v || '待分配',
     },
     {
-      title: '归属人',
+      title: '撰写人',
       dataIndex: 'ownerName',
       width: 110,
       search: false,
@@ -134,7 +134,7 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
             key='hint'
             className='text-sm text-neutral-500'
           >
-            仅显示发布人或归属人为当前账号的任务
+            仅显示发布人或撰写人为当前账号的任务
           </span>,
         ]}
         params={{ relatedUserId: currentUserId }}

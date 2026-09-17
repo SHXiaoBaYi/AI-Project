@@ -4,8 +4,6 @@ import {
   CalendarOutlined,
   DashboardOutlined,
   FormOutlined,
-  FundOutlined,
-  LineChartOutlined,
   SendOutlined,
   SettingOutlined,
   TagsOutlined,
@@ -19,7 +17,7 @@ import dayjs from 'dayjs';
 import type { RootState } from '@/store';
 import { usePermission } from '@/hooks/usePermission';
 import { GEO_LABEL } from '@/constants/geoLabels';
-import { getGeoContentArticleBoardApi, getGeoContentPlacementListApi, getGeoDailyBoardApi } from '@/api/geo';
+import { getGeoContentPlacementListApi, getGeoDailyBoardApi } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoDailyBoard } from '@/types/geo';
 import { AGG_COLOR } from '@/components/geo/content-placement/constants';
 
@@ -42,22 +40,6 @@ const SHORTCUTS: Shortcut[] = [
     path: '/geo/daily',
     perm: 'geo:daily:list',
     icon: <CalendarOutlined />,
-  },
-  {
-    key: 'expose',
-    label: GEO_LABEL.exposeBoard,
-    desc: '日/周/月/年露出看板',
-    path: '/geo/expose-board',
-    perm: 'geo:expose:list',
-    icon: <LineChartOutlined />,
-  },
-  {
-    key: 'article',
-    label: GEO_LABEL.articleBoard,
-    desc: '发布收录与发布人周看板',
-    path: '/geo/article-board',
-    perm: 'geo:article:list',
-    icon: <FundOutlined />,
   },
   {
     key: 'work',
@@ -182,7 +164,6 @@ export default function Workbench() {
   const showExpose = has('geo:expose:list') || has('geo:daily:list') || has('geo:day:list');
   const showMyWork = has('geo:content:work');
   const showManage = has('geo:content:list');
-  const showArticle = has('geo:article:list');
 
   const [exposeLoading, setExposeLoading] = useState(false);
   const [exposeBoard, setExposeBoard] = useState<GeoDailyBoard | null>(null);
@@ -190,8 +171,6 @@ export default function Workbench() {
   const [myTasksLoading, setMyTasksLoading] = useState(false);
   const [manageStats, setManageStats] = useState({ done: 0, partial: 0, none: 0, total: 0 });
   const [manageLoading, setManageLoading] = useState(false);
-  const [articleStats, setArticleStats] = useState({ publish: 0, citeRate: null as number | null });
-  const [articleLoading, setArticleLoading] = useState(false);
 
   useEffect(() => {
     if (!showExpose) return;
@@ -240,24 +219,6 @@ export default function Workbench() {
       .catch(() => setManageStats({ done: 0, partial: 0, none: 0, total: 0 }))
       .finally(() => setManageLoading(false));
   }, [showManage]);
-
-  useEffect(() => {
-    if (!showArticle) return;
-    setArticleLoading(true);
-    const end = dayjs();
-    const start = end.subtract(13, 'day');
-    void getGeoContentArticleBoardApi({
-      startDate: start.format('YYYY-MM-DD'),
-      endDate: end.format('YYYY-MM-DD'),
-    })
-      .then((board) => {
-        const publish = (board.publishCountChart ?? []).reduce((s, p) => s + (Number(p.value) || 0), 0);
-        const citeAvg = avgChart(board.citeRateChart);
-        setArticleStats({ publish, citeRate: citeAvg });
-      })
-      .catch(() => setArticleStats({ publish: 0, citeRate: null }))
-      .finally(() => setArticleLoading(false));
-  }, [showArticle]);
 
   const mentionAvg = exposeBoard?.compareSummary?.mentionRate ?? avgChart(exposeBoard?.mentionChart);
   const firstAvg = exposeBoard?.compareSummary?.firstMentionRate ?? avgChart(exposeBoard?.firstMentionChart);
@@ -334,7 +295,7 @@ export default function Workbench() {
         {showExpose ? (
           <Col
             xs={24}
-            lg={showMyWork || showManage || showArticle ? 14 : 24}
+            lg={showMyWork || showManage ? 14 : 24}
           >
             <Card
               size='small'
@@ -344,9 +305,9 @@ export default function Workbench() {
                 <Button
                   type='link'
                   className='px-0'
-                  onClick={() => navigate(has('geo:expose:list') ? '/geo/expose-board' : '/geo/daily')}
+                  onClick={() => navigate('/geo/daily')}
                 >
-                  进入{has('geo:expose:list') ? GEO_LABEL.exposeBoard : GEO_LABEL.daily}
+                  进入{GEO_LABEL.daily}
                   <RightOutlined />
                 </Button>
               }
@@ -502,45 +463,6 @@ export default function Workbench() {
                 />
                 <div className='mt-2 text-xs text-neutral-400'>列表共 {manageStats.total} 条目标问题</div>
               </div>
-            </Card>
-          </Col>
-        ) : null}
-
-        {showArticle ? (
-          <Col
-            xs={24}
-            lg={12}
-          >
-            <Card
-              size='small'
-              loading={articleLoading}
-              title={`${GEO_LABEL.articleBoard}速览（近 14 日）`}
-              extra={
-                <Button
-                  type='link'
-                  className='px-0'
-                  onClick={() => navigate('/geo/article-board')}
-                >
-                  进入{GEO_LABEL.articleBoard}
-                  <RightOutlined />
-                </Button>
-              }
-            >
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Statistic
-                    title='发布量合计'
-                    value={articleStats.publish}
-                  />
-                </Col>
-                <Col span={12}>
-                  <Statistic
-                    title='收录率均值'
-                    value={articleStats.citeRate ?? '-'}
-                    suffix={articleStats.citeRate != null ? '%' : undefined}
-                  />
-                </Col>
-              </Row>
             </Card>
           </Col>
         ) : null}
