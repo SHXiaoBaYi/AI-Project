@@ -32,6 +32,7 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
                 .eq(StringUtils.hasText(query.getPlatformType()), GeoPlatform::getPlatformType, normalizeType(query.getPlatformType()))
                 .orderByAsc(GeoPlatform::getSortOrder)
                 .orderByAsc(GeoPlatform::getId);
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, GeoPlatform::getCreateTime);
         Page<GeoPlatform> page = platformMapper.selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         return new PageResult<>(page.getTotal(), page.getRecords());
     }

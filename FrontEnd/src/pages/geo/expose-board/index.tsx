@@ -1,11 +1,6 @@
-import { Card, Typography } from 'antd';
+import DayBoardPanel from '@/pages/geo/day/DayBoardPanel';
 
-/** 旧露出看板已下线，统一数据看板前端待重做 */
-export default function ExposeBoardRetired() {
-  return (
-    <Card>
-      <Typography.Title level={5}>露出看板已下线</Typography.Title>
-      <Typography.Paragraph type='secondary'>统一数据看板前端交互待重新实现。</Typography.Paragraph>
-    </Card>
-  );
+/** GEO 露出看板：日监测聚合 + 话题×平台分组柱状下钻 */
+export default function ExposeBoardPage() {
+  return <DayBoardPanel />;
 }

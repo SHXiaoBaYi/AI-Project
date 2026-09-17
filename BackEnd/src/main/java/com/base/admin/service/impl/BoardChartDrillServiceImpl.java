@@ -61,7 +61,8 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         if ("task".equals(domain) && "topic".equals(dim)) {
             dim = "theme";
         }
-        if ("geo".equals(domain) && "theme".equals(dim)) {
+        if ("geo".equals(domain)) {
+            // GEO 仅话题维
             dim = "topic";
         }
         if (StringUtils.hasText(query.getClickKey())) {
@@ -147,16 +148,18 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
 
         Map<String, Agg> map = new LinkedHashMap<>();
         for (GeoMonitorDaily d : dailies) {
-            String topicKey = topicKey(d, topicNames);
+            String topicKey = topicNameKey(d, topicNames);
+            String questionKey = questionKey(d);
             PersonRef person = resolveGeoPerson(d, personRole, topicPerson);
             String personKey = person == null ? "未分配" : person.label();
             String platform = StringUtils.hasText(d.getPlatform()) ? d.getPlatform().trim() : "未知平台";
 
-            if (!matchStackGeo(stack, topicKey, personKey, platform)) {
+            if (!matchStackGeo(stack, topicKey, questionKey, personKey, platform)) {
                 continue;
             }
             String bucket = switch (axis) {
                 case "topic" -> topicKey;
+                case "question" -> questionKey;
                 case "person" -> personKey;
                 case "platform" -> platform;
                 default -> topicKey;
@@ -341,7 +344,8 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         return t;
     }
 
-    private boolean matchStackGeo(List<BoardChartStackItemDTO> stack, String topic, String person, String platform) {
+    private boolean matchStackGeo(List<BoardChartStackItemDTO> stack, String topic, String question,
+                                  String person, String platform) {
         for (BoardChartStackItemDTO s : stack) {
             if (s == null || !StringUtils.hasText(s.getKey())) {
                 continue;
@@ -349,6 +353,9 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
             String f = nz(s.getField(), "");
             String k = s.getKey().trim();
             if ("topic".equals(f) && !k.equals(topic)) {
+                return false;
+            }
+            if ("question".equals(f) && !k.equals(question)) {
                 return false;
             }
             if ("person".equals(f) && !k.equals(person)) {
@@ -383,10 +390,8 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
 
     private List<String> drillPath(String domain, String primaryDim) {
         if ("geo".equals(domain)) {
-            if ("person".equals(primaryDim)) {
-                return List.of("person", "topic", "platform");
-            }
-            return List.of("topic", "person", "platform");
+            // GEO：话题 → 目标问题 → 平台（无人维）
+            return List.of("topic", "question", "platform");
         }
         if ("person".equals(primaryDim)) {
             return List.of("person", "theme", "stage");
@@ -418,8 +423,18 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         crumbs.add(new BoardChartStackItemVO("root", "root", "大盘"));
         if (stack != null) {
             for (BoardChartStackItemDTO s : stack) {
-                crumbs.add(new BoardChartStackItemVO(s.getField(), s.getKey(),
-                        StringUtils.hasText(s.getLabel()) ? s.getLabel() : s.getKey()));
+                String raw = shortLabel(StringUtils.hasText(s.getKey()) ? s.getKey() : s.getLabel());
+                String fieldTag = switch (nz(s.getField(), "")) {
+                    case "topic" -> "话题";
+                    case "question" -> "目标问题";
+                    case "person" -> "人";
+                    case "platform" -> "平台";
+                    case "theme" -> "主题";
+                    case "stage" -> "状态";
+                    default -> null;
+                };
+                String label = fieldTag == null ? raw : fieldTag + "：" + raw;
+                crumbs.add(new BoardChartStackItemVO(s.getField(), s.getKey(), label));
             }
         }
         vo.setBreadcrumb(crumbs);
@@ -437,14 +452,17 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         Map<Long, PersonRef> topicPerson = buildTopicPersonIndex(personRole);
         Map<String, Agg> cells = new LinkedHashMap<>();
         for (GeoMonitorDaily d : dailies) {
-            String topicKey = topicKey(d, topicNames);
+            String topicKey = topicNameKey(d, topicNames);
+            String questionKey = questionKey(d);
             PersonRef person = resolveGeoPerson(d, personRole, topicPerson);
             String personKey = person == null ? "未分配" : person.label();
             String platform = StringUtils.hasText(d.getPlatform()) ? d.getPlatform().trim() : "未知平台";
-            if (!matchStackGeo(stack, topicKey, personKey, platform)) {
+            if (!matchStackGeo(stack, topicKey, questionKey, personKey, platform)) {
                 continue;
             }
             String series = switch (axis) {
+                case "topic" -> topicKey;
+                case "question" -> questionKey;
                 case "person" -> personKey;
                 case "platform" -> platform;
                 default -> topicKey;
@@ -612,7 +630,7 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         if (!StringUtils.hasText(key)) {
             return "-";
         }
-        // 话题｜目标问题 → 保留两边，过长截断
+        // 兼容旧「话题｜目标问题」合成 key
         if (key.contains("｜")) {
             String[] p = key.split("｜", 2);
             String left = p[0];
@@ -629,18 +647,13 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
     }
 
     private String geoTitle(String dim, String role, String axis, List<BoardChartStackItemDTO> stack) {
-        String roleLabel = switch (role) {
-            case "publisher" -> "发布人";
-            case "owner" -> "监测负责人";
-            default -> "撰写人";
-        };
         String axisLabel = switch (axis) {
-            case "person" -> "人";
+            case "topic" -> "话题";
+            case "question" -> "目标问题";
             case "platform" -> "平台";
-            default -> "话题+目标问题";
+            default -> "话题";
         };
-        String base = "person".equals(dim) ? ("GEO · 人维（" + roleLabel + "）") : "GEO · 主题维";
-        return base + " · 按" + axisLabel + (stack == null || stack.isEmpty() ? "" : "（已下钻）");
+        return "GEO · 话题维 · 按" + axisLabel + (stack == null || stack.isEmpty() ? "" : "（已下钻）");
     }
 
     private String taskTitle(String dim, String axis, List<BoardChartStackItemDTO> stack) {
@@ -669,13 +682,15 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
                         (a, b) -> a));
     }
 
-    private String topicKey(GeoMonitorDaily d, Map<Long, String> names) {
-        String topic = "未分话题";
+    private String topicNameKey(GeoMonitorDaily d, Map<Long, String> names) {
         if (d.getTopicId() != null && names.containsKey(d.getTopicId())) {
-            topic = names.get(d.getTopicId());
+            return names.get(d.getTopicId());
         }
-        String question = StringUtils.hasText(d.getKeyword()) ? d.getKeyword().trim() : "未填目标问题";
-        return topic + "｜" + question;
+        return "未分话题";
+    }
+
+    private String questionKey(GeoMonitorDaily d) {
+        return StringUtils.hasText(d.getKeyword()) ? d.getKeyword().trim() : "未填目标问题";
     }
 
     private Map<Long, PersonRef> buildTopicPersonIndex(String personRole) {

@@ -26,6 +26,7 @@ import {
 import { getGeoOwnerOptionsApi } from '@/api/geo';
 import type { GeoOwnerOption } from '@/types/geo';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
+import { DEMO_CREATE_TIME_RANGE } from '@/constants/demoData';
 
 type Props = {
   mineOnly?: boolean;
@@ -92,7 +93,8 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
 
   const userOptions = useMemo(() => owners.map((u) => ({ label: u.displayName, value: u.userId })), [owners]);
 
-  const isGeoAssignTask = (r: SysTask) => r.taskType === 'GEO文章待分配发布人' || r.taskType === 'GEO文章待分配撰写人';
+  const isGeoAssignTask = (r: SysTask) =>
+    !!r.bizAssign || r.taskType === 'GEO文章待分配发布人' || r.taskType === 'GEO文章待分配撰写人';
 
   const batchAllGeo = useMemo(
     () => selectedRows.length > 0 && selectedRows.every((r) => isGeoAssignTask(r)),
@@ -357,6 +359,20 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
     {
       title: '创建时间',
       dataIndex: 'createTime',
+      valueType: 'dateRange',
+      hideInTable: true,
+      hideInForm: true,
+      initialValue: DEMO_CREATE_TIME_RANGE,
+      search: {
+        transform: (value) => ({
+          createTimeStart: value?.[0],
+          createTimeEnd: value?.[1],
+        }),
+      },
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'createTime',
       width: 170,
       valueType: 'dateTime',
       search: false,
@@ -481,6 +497,8 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             ownerUserId: params.ownerUserId,
             overdueOnly: params.overdueOnly === true || params.overdueOnly === 'true',
             mineOnly,
+            createTimeStart: params.createTimeStart,
+            createTimeEnd: params.createTimeEnd,
           });
           return { data: res.rows, success: true, total: res.total };
         }}

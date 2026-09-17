@@ -16,6 +16,12 @@ public class SysTaskFileVO {
     @Schema(description = "任务ID")
     private Long taskId;
 
+    @Schema(description = "任务标题")
+    private String taskTitle;
+
+    @Schema(description = "任务类型")
+    private String taskType;
+
     @Schema(description = "关联业务类型")
     private String bizType;
 

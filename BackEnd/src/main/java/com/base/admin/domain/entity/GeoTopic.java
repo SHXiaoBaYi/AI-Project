@@ -26,4 +26,7 @@ public class GeoTopic extends BaseEntity {
 
     @Schema(description = "备注")
     private String remark;
+
+    @Schema(description = "是否演示数据 1=是 0=否", example = "0")
+    private Integer isDemo;
 }

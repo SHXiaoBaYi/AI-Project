@@ -23,6 +23,7 @@ import com.base.admin.domain.vo.GeoContentPlacementListVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekDetailVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
+import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.service.GeoContentPlacementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -108,6 +109,13 @@ public class GeoContentPlacementController {
             @PathVariable Long id,
             @RequestParam(required = false) Long itemId) {
         return Result.ok(contentPlacementService.listCites(id, itemId));
+    }
+
+    @Operation(summary = "附件（任务同步）")
+    @GetMapping("/{id}/proof-files")
+    @RequiresPermission({"geo:content:list", "geo:content:work"})
+    public Result<List<SysTaskFileVO>> proofFiles(@PathVariable Long id) {
+        return Result.ok(contentPlacementService.listProofFiles(id));
     }
 
     @Operation(summary = "新增内容投放")

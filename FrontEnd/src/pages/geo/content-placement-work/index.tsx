@@ -6,10 +6,12 @@ import type { RootState } from '@/store';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PlacementExecutionPanel from '@/components/geo/content-placement/PlacementExecutionPanel';
+import PlacementProofFilesModal from '@/components/geo/content-placement/PlacementProofFilesModal';
 import { AGG_COLOR } from '@/components/geo/content-placement/constants';
 import { getGeoContentPlacementListApi, getGeoTopicOptionsApi } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoTopic } from '@/types/geo';
 import { GEO_CONTENT_AGG_STATUS } from '@/constants/geo';
+import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 /** 一线视角：维护本人负责的话题/目标问题在各平台的投放详情与引用 */
 const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
@@ -18,6 +20,8 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
   const [topics, setTopics] = useState<GeoTopic[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [currentPlacement, setCurrentPlacement] = useState<GeoContentPlacementListItem | null>(null);
+  const [proofOpen, setProofOpen] = useState(false);
+  const [proofPlacement, setProofPlacement] = useState<GeoContentPlacementListItem | null>(null);
 
   useEffect(() => {
     void getGeoTopicOptionsApi().then(setTopics);
@@ -28,6 +32,11 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
   const openWorkDrawer = (record: GeoContentPlacementListItem) => {
     setCurrentPlacement(record);
     setDrawerOpen(true);
+  };
+
+  const openProofFiles = (record: GeoContentPlacementListItem) => {
+    setProofPlacement(record);
+    setProofOpen(true);
   };
 
   const columns: ProColumnType<GeoContentPlacementListItem>[] = [
@@ -101,6 +110,29 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
       hideInForm: true,
       render: (v) => v ?? 0,
     },
+    createTimeRangeColumn<GeoContentPlacementListItem>({ defaultDemoRange: true }),
+    createTimeDisplayColumn<GeoContentPlacementListItem>(),
+    {
+      title: '附件',
+      dataIndex: 'proofFileCount',
+      width: 90,
+      search: false,
+      hideInForm: true,
+      render: (_, r) => {
+        const n = r.proofFileCount ?? 0;
+        if (n <= 0) return '-';
+        return (
+          <a
+            onClick={(e) => {
+              e.preventDefault();
+              openProofFiles(r);
+            }}
+          >
+            {n} 个
+          </a>
+        );
+      },
+    },
     {
       title: '操作',
       valueType: 'option',
@@ -149,6 +181,8 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
             topicId: params.topicId,
             targetQuestion: params.targetQuestion,
             aggregateStatus: params.aggregateStatus,
+            createTimeStart: params.createTimeStart,
+            createTimeEnd: params.createTimeEnd,
           });
           return { data: res.rows, success: true, total: res.total };
         }}
@@ -166,6 +200,16 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
         }}
         onChanged={(next) => {
           setCurrentPlacement((prev) => (prev ? { ...prev, ...next } : prev));
+        }}
+      />
+
+      <PlacementProofFilesModal
+        open={proofOpen}
+        placementId={proofPlacement?.id ?? null}
+        title={proofPlacement ? `附件：${proofPlacement.targetQuestion || proofPlacement.id}` : '附件'}
+        onClose={() => {
+          setProofOpen(false);
+          setProofPlacement(null);
         }}
       />
     </>

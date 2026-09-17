@@ -11,15 +11,16 @@ import {
   deleteGeoContentPlacementItemApi,
   getGeoContentPlacementCitesApi,
   getGeoContentPlacementItemsApi,
+  getGeoContentPlacementProofFilesApi,
   getGeoPlatformOptionsApi,
   updateGeoContentPlacementCiteApi,
   updateGeoContentPlacementItemApi,
 } from '@/api/geo';
-import { getTaskFilesByBizApi, type SysTaskFile } from '@/api/task';
 import type {
   GeoContentPlacementCite,
   GeoContentPlacementItem,
   GeoContentPlacementListItem,
+  GeoContentPlacementProofFile,
   GeoPlatform,
 } from '@/types/geo';
 import {
@@ -38,6 +39,12 @@ type Props = {
   editPerm?: string;
   onClose: () => void;
   onChanged?: (next: Partial<GeoContentPlacementListItem>) => void;
+};
+
+const fileHref = (url?: string) => {
+  if (!url) return '#';
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${String(import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080').replace(/\/$/, '')}${url}`;
 };
 
 const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
@@ -62,7 +69,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
   const [cites, setCites] = useState<GeoContentPlacementCite[]>([]);
   const [citeFormOpen, setCiteFormOpen] = useState(false);
   const [editingCite, setEditingCite] = useState<GeoContentPlacementCite | null>(null);
-  const [taskFiles, setTaskFiles] = useState<SysTaskFile[]>([]);
+  const [taskFiles, setTaskFiles] = useState<GeoContentPlacementProofFile[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -89,7 +96,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
 
   const reloadTaskFiles = async (placementId: number) => {
     try {
-      setTaskFiles(await getTaskFilesByBizApi('geo_content_placement', placementId));
+      setTaskFiles(await getGeoContentPlacementProofFilesApi(placementId));
     } catch {
       setTaskFiles([]);
     }
@@ -216,20 +223,28 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
         ) : null}
         {taskFiles.length > 0 ? (
           <div className='mb-4 rounded border border-neutral-200 bg-neutral-50 px-3 py-2'>
-            <div className='mb-2 text-sm font-medium text-neutral-700'>任务完成证明 / 附件</div>
-            <ul className='m-0 list-none space-y-1 p-0'>
+            <div className='mb-2 text-sm font-medium text-neutral-700'>附件</div>
+            <ul className='m-0 list-none space-y-2 p-0'>
               {taskFiles.map((f) => (
                 <li
                   key={f.id}
-                  className='flex items-center justify-between gap-2 text-sm'
+                  className='flex items-start justify-between gap-2 text-sm'
                 >
-                  <span className='truncate'>{f.fileName}</span>
+                  <div className='min-w-0 flex-1'>
+                    <div className='truncate font-medium'>{f.fileName}</div>
+                    <div className='mt-0.5 text-xs text-neutral-500'>
+                      {f.taskType ? `${f.taskType} · ` : ''}
+                      任务：
+                      {f.taskTitle?.trim() ? f.taskTitle : f.taskId != null ? `（未取到标题）#${f.taskId}` : '-'}
+                    </div>
+                    <div className='text-xs text-neutral-400'>
+                      上传人：{f.uploadUserName || '-'}
+                      {f.createTime ? ` · ${f.createTime}` : ''}
+                    </div>
+                  </div>
                   <a
-                    href={
-                      /^https?:\/\//i.test(f.fileUrl)
-                        ? f.fileUrl
-                        : `${String(import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080').replace(/\/$/, '')}${f.fileUrl}`
-                    }
+                    className='shrink-0'
+                    href={fileHref(f.fileUrl)}
                     target='_blank'
                     rel='noreferrer'
                     download={f.fileName}

@@ -32,6 +32,7 @@ import com.base.admin.domain.vo.GeoMonthlyBoardVO;
 import com.base.admin.domain.vo.GeoNegativeSummaryRowVO;
 import com.base.admin.domain.vo.GeoOwnerOptionVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
+import com.base.admin.domain.vo.GeoTopicPlatformChartsVO;
 import com.base.admin.domain.vo.GeoWeeklyBoardVO;
 import com.base.admin.domain.vo.GeoYearlyBoardVO;
 import com.base.admin.exception.BusinessException;
@@ -67,6 +68,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -555,7 +557,10 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             board.getRows().add(vo);
         }
         fillChartsFromTrend(topicRows, board.getMentionChart(), board.getFirstMentionChart(), board.getRecommendChart());
-        fillDailyExtraCharts(records, board);
+        GeoTopicPlatformChartsVO tofu = buildTopicPlatformCharts(records, topicNames, null, null, "day");
+        board.setRankChart(tofu.getRankChart());
+        board.setSampleChart(tofu.getSampleChart());
+        board.setNegativeChart(tofu.getNegativeChart());
         board.setSummaryGroups(buildDailySummaryGroups(records, topicNames));
         board.setCompareSummary(buildDailyPeriodCompare(range, query));
         fillNegativeSummary(records, topicNames, board);
@@ -581,6 +586,23 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 board.getOwnerRecommendChart());
         board.setOwnerSummaryGroups(buildDailyOwnerSummaryGroups(records, topicNames));
         return board;
+    }
+
+    @Override
+    public GeoTopicPlatformChartsVO topicPlatformCharts(GeoBoardQueryDTO query) {
+        GeoBoardQueryDTO q = query == null ? new GeoBoardQueryDTO() : query;
+        LocalDate[] range = dayRange(q);
+        Long drillTopicId = q.getTopicId();
+        String keyword = StringUtils.hasText(q.getKeyword()) ? q.getKeyword().trim() : null;
+        String grain = StringUtils.hasText(q.getGrain()) ? q.getGrain().trim().toLowerCase() : "day";
+        if (!List.of("day", "week", "month", "year").contains(grain)) {
+            grain = "day";
+        }
+        // 下钻时按话题过滤；关键字在聚合内再筛，便于同请求返回问题列表
+        List<GeoMonitorDaily> records = loadActiveDaily(
+                range[0], range[1], drillTopicId, null, q.getPlatforms(), q.getTermType());
+        Map<Long, String> topicNames = topicNameMap();
+        return buildTopicPlatformCharts(records, topicNames, drillTopicId, keyword, grain);
     }
 
     @Override
@@ -1645,6 +1667,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .eq(query.getBoardLocked() != null, GeoMonitorDaily::getBoardLocked, query.getBoardLocked())
                 .ge(query.getUpdateTimeStart() != null, GeoMonitorDaily::getUpdateTime, query.getUpdateTimeStart())
                 .le(query.getUpdateTimeEnd() != null, GeoMonitorDaily::getUpdateTime, query.getUpdateTimeEnd());
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, GeoMonitorDaily::getCreateTime);
         applyHasTextFilter(wrapper, query.getHasScreenshot(), GeoMonitorDaily::getScreenshotUrl);
         applyHasTextFilter(wrapper, query.getHasThirdPartyUrl(), GeoMonitorDaily::getThirdPartyUrl);
         return wrapper;
@@ -1934,57 +1957,147 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         sortChart(recommendChart);
     }
 
-    private void fillDailyExtraCharts(List<GeoMonitorDaily> records, GeoDailyBoardVO board) {
-        Map<String, Integer> sampleBag = new LinkedHashMap<>();
-        Map<String, Integer> negativeBag = new LinkedHashMap<>();
-        Map<String, Integer> rankBag = new LinkedHashMap<>();
-        for (GeoMonitorDaily r : records) {
-            String date = r.getInspectDate() == null ? "-" : r.getInspectDate().toString();
-            String platform = StringUtils.hasText(r.getPlatform()) ? r.getPlatform() : "-";
-            String sampleKey = date + "\0" + platform;
-            sampleBag.merge(sampleKey, 1, Integer::sum);
-            if (StringUtils.hasText(r.getNegativeContent())) {
-                negativeBag.merge(sampleKey, 1, Integer::sum);
-            }
-            String rankBucket = rankBucket(r);
-            String rankKey = rankBucket + "\0" + platform;
-            rankBag.merge(rankKey, 1, Integer::sum);
+    /**
+     * 三级下钻分组柱：横轴始终=日期。
+     * topic：系列=话题；question：系列=目标问题；platform：系列=平台。
+     */
+    private GeoTopicPlatformChartsVO buildTopicPlatformCharts(List<GeoMonitorDaily> records,
+                                                              Map<Long, String> topicNames,
+                                                              Long drillTopicId,
+                                                              String keyword,
+                                                              String grain) {
+        GeoTopicPlatformChartsVO vo = new GeoTopicPlatformChartsVO();
+        vo.setGrain(grain);
+        vo.setTopicId(drillTopicId);
+        if (drillTopicId != null) {
+            vo.setTopicName(topicNames.getOrDefault(drillTopicId, "话题#" + drillTopicId));
         }
-        sampleBag.forEach((key, value) -> {
-            String[] parts = key.split("\0", 2);
-            addChart(board.getSampleChart(), parts[0], parts[1], value);
-        });
-        negativeBag.forEach((key, value) -> {
-            String[] parts = key.split("\0", 2);
-            addChart(board.getNegativeChart(), parts[0], parts[1], value);
-        });
-        rankBag.forEach((key, value) -> {
-            String[] parts = key.split("\0", 2);
-            addChart(board.getRankChart(), parts[0], parts[1], value);
-        });
-        sortChart(board.getSampleChart());
-        sortChart(board.getNegativeChart());
-        sortChart(board.getRankChart());
+        vo.setKeyword(keyword);
+
+        String seriesMode;
+        if (drillTopicId == null) {
+            seriesMode = "topic";
+            vo.setLevel("topic");
+        } else if (!StringUtils.hasText(keyword)) {
+            seriesMode = "question";
+            vo.setLevel("question");
+        } else {
+            seriesMode = "platform";
+            vo.setLevel("platform");
+        }
+        vo.setSeriesField(seriesMode);
+
+        Map<String, RankBag> rankBags = new LinkedHashMap<>();
+        Map<String, Integer> sampleCnt = new LinkedHashMap<>();
+        Map<String, Set<String>> sampleQuestions = new LinkedHashMap<>();
+        Map<String, Integer> negativeCnt = new LinkedHashMap<>();
+        Map<String, String> seriesLabel = new LinkedHashMap<>();
+
+        for (GeoMonitorDaily r : records) {
+            if (drillTopicId != null && !Objects.equals(r.getTopicId(), drillTopicId)) {
+                continue;
+            }
+            String kw = StringUtils.hasText(r.getKeyword()) ? r.getKeyword().trim() : "未填目标问题";
+            if (StringUtils.hasText(keyword) && !keyword.equals(kw)) {
+                continue;
+            }
+            if (r.getInspectDate() == null) {
+                continue;
+            }
+            String axis = timeBucket(r.getInspectDate(), grain);
+            String platform = StringUtils.hasText(r.getPlatform()) ? r.getPlatform().trim() : "未知平台";
+            String seriesKey;
+            String seriesName;
+            switch (seriesMode) {
+                case "question" -> {
+                    seriesKey = kw;
+                    seriesName = kw;
+                }
+                case "platform" -> {
+                    seriesKey = platform;
+                    seriesName = platform;
+                }
+                default -> {
+                    Long tid = r.getTopicId();
+                    if (tid == null) {
+                        seriesKey = "0";
+                        seriesName = "未分话题";
+                    } else {
+                        seriesKey = String.valueOf(tid);
+                        seriesName = topicNames.getOrDefault(tid, "话题#" + tid);
+                    }
+                }
+            }
+            String cell = axis + "\0" + seriesKey;
+            seriesLabel.put(seriesKey, seriesName);
+
+            sampleCnt.merge(cell, 1, Integer::sum);
+            sampleQuestions.computeIfAbsent(cell, k -> new LinkedHashSet<>()).add(kw);
+            if (StringUtils.hasText(r.getNegativeContent())) {
+                negativeCnt.merge(cell, 1, Integer::sum);
+            }
+            if (Objects.equals(r.getMentioned(), 1) && r.getRankNo() != null && r.getRankNo() > 0) {
+                RankBag bag = rankBags.computeIfAbsent(cell, k -> new RankBag());
+                bag.sum += r.getRankNo();
+                bag.n++;
+            }
+        }
+
+        Set<String> cells = new LinkedHashSet<>();
+        cells.addAll(sampleCnt.keySet());
+        cells.addAll(negativeCnt.keySet());
+        cells.addAll(rankBags.keySet());
+        for (String cell : cells) {
+            String[] parts = cell.split("\0", 2);
+            String axis = parts[0];
+            String sKey = parts.length > 1 ? parts[1] : "-";
+            String series = seriesLabel.getOrDefault(sKey, sKey);
+            RankBag rb = rankBags.get(cell);
+            if (rb != null && rb.n > 0) {
+                addChart(vo.getRankChart(), axis, series, (double) rb.sum / rb.n, sKey);
+            }
+            if ("platform".equals(seriesMode)) {
+                Integer sc = sampleCnt.get(cell);
+                if (sc != null && sc > 0) {
+                    addChart(vo.getSampleChart(), axis, series, sc, sKey);
+                }
+            } else {
+                Set<String> qs = sampleQuestions.get(cell);
+                if (qs != null && !qs.isEmpty()) {
+                    addChart(vo.getSampleChart(), axis, series, qs.size(), sKey);
+                }
+            }
+            Integer nc = negativeCnt.get(cell);
+            if (nc != null && nc > 0) {
+                addChart(vo.getNegativeChart(), axis, series, nc, sKey);
+            }
+        }
+        sortChart(vo.getRankChart());
+        sortChart(vo.getSampleChart());
+        sortChart(vo.getNegativeChart());
+        return vo;
     }
 
-    private static String rankBucket(GeoMonitorDaily r) {
-        if (r.getMentioned() == null || r.getMentioned() == 0) {
-            return "未露出";
+    private static String timeBucket(LocalDate date, String grain) {
+        if (date == null) {
+            return "-";
         }
-        Integer rank = r.getRankNo();
-        if (rank == null) {
-            return "已露出未排名";
-        }
-        if (rank <= 1) {
-            return "第1位";
-        }
-        if (rank == 2) {
-            return "第2位";
-        }
-        if (rank == 3) {
-            return "第3位";
-        }
-        return "第4位及以后";
+        return switch (grain == null ? "day" : grain) {
+            case "month" -> date.getYear() + "-" + String.format("%02d", date.getMonthValue());
+            case "year" -> String.valueOf(date.getYear());
+            case "week" -> {
+                java.time.temporal.WeekFields wf = java.time.temporal.WeekFields.of(Locale.CHINA);
+                int w = date.get(wf.weekOfWeekBasedYear());
+                int y = date.get(wf.weekBasedYear());
+                yield y + "-W" + String.format("%02d", w);
+            }
+            default -> date.toString();
+        };
+    }
+
+    private static final class RankBag {
+        long sum;
+        int n;
     }
 
     private void fillNegativeSummary(List<GeoMonitorDaily> records, Map<Long, String> topicNames, GeoDailyBoardVO board) {
@@ -2202,10 +2315,15 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     }
 
     private static void addChart(List<GeoChartPointVO> chart, String axis, String series, double value) {
+        addChart(chart, axis, series, value, null);
+    }
+
+    private static void addChart(List<GeoChartPointVO> chart, String axis, String series, double value, String key) {
         GeoChartPointVO p = new GeoChartPointVO();
         p.setAxis(axis);
         p.setSeries(series);
         p.setValue(round(value));
+        p.setKey(key);
         chart.add(p);
     }
 

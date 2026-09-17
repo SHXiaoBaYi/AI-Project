@@ -17,6 +17,8 @@ import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoContentPlacementCite;
 import com.base.admin.domain.entity.GeoContentPlacementItem;
 import com.base.admin.domain.entity.GeoTopic;
+import com.base.admin.domain.entity.SysTask;
+import com.base.admin.domain.entity.SysTaskFile;
 import com.base.admin.domain.entity.SysUser;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
 import com.base.admin.domain.vo.GeoChartPointVO;
@@ -35,11 +37,14 @@ import com.base.admin.domain.vo.GeoContentPublisherWeekRowVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
 import com.base.admin.domain.vo.GeoRankItemVO;
+import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoContentPeriodStatMapper;
 import com.base.admin.mapper.GeoContentPlacementCiteMapper;
 import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
+import com.base.admin.mapper.SysTaskFileMapper;
+import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.AiChatService;
 import com.base.admin.service.GeoContentPlacementService;
@@ -74,6 +79,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -99,6 +105,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final SysAiProviderService sysAiProviderService;
     private final PlacementTaskSyncService placementTaskSyncService;
     private final ObjectMapper objectMapper;
+    private final SysTaskMapper taskMapper;
+    private final SysTaskFileMapper taskFileMapper;
 
     @Override
     public PageResult<GeoContentPlacementListVO> list(GeoContentPlacementQueryDTO query) {
@@ -116,6 +124,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                         .or()
                         .eq(GeoContentPlacement::getOwnerUserId, query.getRelatedUserId()))
                 .orderByDesc(GeoContentPlacement::getId);
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, GeoContentPlacement::getCreateTime);
 
         int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
         int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 10 : query.getPageSize();
@@ -142,6 +151,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 .stream()
                 .collect(Collectors.groupingBy(GeoContentPlacementCite::getPlacementId, Collectors.counting()));
 
+        Map<Long, Integer> proofCountMap = loadProofFileCounts(ids);
+
         Set<Long> sourceIds = candidates.stream()
                 .map(GeoContentPlacement::getSourcePlacementId)
                 .filter(Objects::nonNull)
@@ -154,6 +165,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         for (GeoContentPlacement entity : candidates) {
             List<GeoContentPlacementItem> items = itemsByPlacement.getOrDefault(entity.getId(), List.of());
             GeoContentPlacementListVO vo = toListVo(entity, items, citeCountMap.getOrDefault(entity.getId(), 0L).intValue());
+            vo.setProofFileCount(proofCountMap.getOrDefault(entity.getId(), 0));
             if (entity.getSourcePlacementId() != null) {
                 vo.setSourceTargetQuestion(sourceQuestionMap.get(entity.getSourcePlacementId()));
             }
@@ -190,6 +202,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         detail.setRemark(entity.getRemark());
         detail.setItems(items);
         detail.setCites(cites);
+        detail.setProofFiles(listProofFiles(id));
         String progress = StringUtils.hasText(entity.getPlacementProgress())
                 ? entity.getPlacementProgress()
                 : aggregateStatus(items.stream().map(GeoContentPlacementItemVO::getPublishStatus).toList());
@@ -197,6 +210,117 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         detail.setPublishProgress(publishProgress(items.size(),
                 (int) items.stream().filter(i -> Constants.CONTENT_PUBLISH_SUCCESS.equals(i.getPublishStatus())).count()));
         return detail;
+    }
+
+    @Override
+    public List<SysTaskFileVO> listProofFiles(Long placementId) {
+        requirePlacement(placementId);
+        String bizType = Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT;
+        // 先按文件主键收集，再按 fileUrl 去重：完成时会复制到关联任务，业务侧不应重复展示
+        LinkedHashMap<Long, SysTaskFile> byId = new LinkedHashMap<>();
+        for (SysTaskFile f : taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                .eq(SysTaskFile::getBizType, bizType)
+                .eq(SysTaskFile::getBizId, placementId)
+                .orderByAsc(SysTaskFile::getId))) {
+            byId.put(f.getId(), f);
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, bizType)
+                .eq(SysTask::getBizId, placementId));
+        Map<Long, SysTask> taskMap = tasks.stream()
+                .filter(t -> t.getId() != null)
+                .collect(Collectors.toMap(SysTask::getId, t -> t, (a, b) -> a));
+        if (!taskMap.isEmpty()) {
+            for (SysTaskFile f : taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                    .in(SysTaskFile::getTaskId, taskMap.keySet())
+                    .orderByAsc(SysTaskFile::getId))) {
+                byId.putIfAbsent(f.getId(), f);
+                if (!StringUtils.hasText(f.getBizType()) || f.getBizId() == null) {
+                    f.setBizType(bizType);
+                    f.setBizId(placementId);
+                    taskFileMapper.updateById(f);
+                }
+            }
+        }
+        LinkedHashMap<String, SysTaskFile> uniqueByUrl = new LinkedHashMap<>();
+        for (SysTaskFile f : byId.values()) {
+            String key = proofFileDedupeKey(f);
+            SysTaskFile existing = uniqueByUrl.get(key);
+            if (existing == null || preferProofFile(f, existing)) {
+                uniqueByUrl.put(key, f);
+            }
+        }
+        // 按附件上的 taskId 全量回查任务标题/类型（避免只显示 #id）
+        Set<Long> fileTaskIds = uniqueByUrl.values().stream()
+                .map(SysTaskFile::getTaskId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, SysTask> fileTaskMap = new HashMap<>(taskMap);
+        if (!fileTaskIds.isEmpty()) {
+            for (SysTask t : taskMapper.selectBatchIds(fileTaskIds)) {
+                if (t != null && t.getId() != null) {
+                    fileTaskMap.put(t.getId(), t);
+                }
+            }
+        }
+        List<SysTaskFileVO> result = new ArrayList<>();
+        for (SysTaskFile f : uniqueByUrl.values()) {
+            SysTaskFileVO vo = toTaskFileVo(f);
+            fillTaskMeta(vo, fileTaskMap.get(f.getTaskId()));
+            result.add(vo);
+        }
+        return result;
+    }
+
+    /** 同一物理文件（相同 URL）只算一份；无 URL 时退回主键 */
+    private static String proofFileDedupeKey(SysTaskFile f) {
+        if (f == null) {
+            return "";
+        }
+        if (StringUtils.hasText(f.getFileUrl())) {
+            return f.getFileUrl().trim();
+        }
+        return "id:" + f.getId();
+    }
+
+    /** 业务侧优先展示原始上传，而不是「带入」关联任务的副本 */
+    private static boolean preferProofFile(SysTaskFile candidate, SysTaskFile current) {
+        boolean candCopy = isCarryCopy(candidate);
+        boolean curCopy = isCarryCopy(current);
+        if (candCopy != curCopy) {
+            return !candCopy;
+        }
+        Long candId = candidate.getId() == null ? Long.MAX_VALUE : candidate.getId();
+        Long curId = current.getId() == null ? Long.MAX_VALUE : current.getId();
+        return candId < curId;
+    }
+
+    private static boolean isCarryCopy(SysTaskFile f) {
+        String remark = f == null ? null : f.getRemark();
+        return StringUtils.hasText(remark) && remark.contains("带入");
+    }
+
+    private static void fillTaskMeta(SysTaskFileVO vo, SysTask task) {
+        if (vo == null || task == null) {
+            return;
+        }
+        vo.setTaskTitle(StringUtils.hasText(task.getTitle()) ? task.getTitle().trim() : null);
+        vo.setTaskType(StringUtils.hasText(task.getTaskType()) ? task.getTaskType().trim() : null);
+    }
+
+    private static SysTaskFileVO toTaskFileVo(SysTaskFile f) {
+        SysTaskFileVO vo = new SysTaskFileVO();
+        vo.setId(f.getId());
+        vo.setTaskId(f.getTaskId());
+        vo.setBizType(f.getBizType());
+        vo.setBizId(f.getBizId());
+        vo.setFileName(f.getFileName());
+        vo.setFileUrl(f.getFileUrl());
+        vo.setFileSize(f.getFileSize());
+        vo.setContentType(f.getContentType());
+        vo.setUploadUserName(f.getUploadUserName());
+        vo.setCreateTime(f.getCreateTime());
+        return vo;
     }
 
     @Override
@@ -1017,12 +1141,60 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setPlatformCount(items.size());
         vo.setSuccessCount(success);
         vo.setCiteCount(citeCount);
+        vo.setProofFileCount(0);
         String progress = StringUtils.hasText(entity.getPlacementProgress())
                 ? entity.getPlacementProgress()
                 : aggregateStatus(items.stream().map(GeoContentPlacementItem::getPublishStatus).toList());
         vo.setAggregateStatus(progress);
         vo.setPublishProgress(publishProgress(items.size(), success));
         return vo;
+    }
+
+    /** 批量统计附件数：按 fileUrl 去重（完成复制到关联任务后业务侧不重复计数） */
+    private Map<Long, Integer> loadProofFileCounts(List<Long> placementIds) {
+        if (placementIds == null || placementIds.isEmpty()) {
+            return Map.of();
+        }
+        String bizType = Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT;
+        Map<Long, Set<String>> urlsByPlacement = new HashMap<>();
+
+        for (SysTaskFile f : taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                .eq(SysTaskFile::getBizType, bizType)
+                .in(SysTaskFile::getBizId, placementIds)
+                .select(SysTaskFile::getId, SysTaskFile::getBizId, SysTaskFile::getFileUrl))) {
+            if (f.getBizId() == null) {
+                continue;
+            }
+            urlsByPlacement.computeIfAbsent(f.getBizId(), k -> new HashSet<>()).add(proofFileDedupeKey(f));
+        }
+
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, bizType)
+                .in(SysTask::getBizId, placementIds)
+                .select(SysTask::getId, SysTask::getBizId));
+        if (!tasks.isEmpty()) {
+            Map<Long, Long> taskToPlacement = tasks.stream()
+                    .filter(t -> t.getId() != null && t.getBizId() != null)
+                    .collect(Collectors.toMap(SysTask::getId, SysTask::getBizId, (a, b) -> a));
+            List<Long> taskIds = new ArrayList<>(taskToPlacement.keySet());
+            if (!taskIds.isEmpty()) {
+                for (SysTaskFile f : taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                        .in(SysTaskFile::getTaskId, taskIds)
+                        .select(SysTaskFile::getId, SysTaskFile::getTaskId, SysTaskFile::getFileUrl))) {
+                    Long placementId = taskToPlacement.get(f.getTaskId());
+                    if (placementId == null) {
+                        continue;
+                    }
+                    urlsByPlacement.computeIfAbsent(placementId, k -> new HashSet<>()).add(proofFileDedupeKey(f));
+                }
+            }
+        }
+
+        Map<Long, Integer> counts = new HashMap<>();
+        for (Long id : placementIds) {
+            counts.put(id, urlsByPlacement.getOrDefault(id, Set.of()).size());
+        }
+        return counts;
     }
 
     private static String resolveDisplayTitle(GeoContentPlacement entity, List<?> items) {
@@ -1831,6 +2003,34 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         int months = Math.max(lookbackMonths, 1);
         LocalDate start = end.minusMonths(months - 1L).with(TemporalAdjusters.firstDayOfMonth());
         return persistContentPeriods("MONTH", start, end, today);
+    }
+
+    @Override
+    @Transactional
+    public GeoPersistResultVO persistContentBoardRange(LocalDate start, LocalDate end) {
+        if (start == null || end == null || end.isBefore(start)) {
+            return emptyPersistResult();
+        }
+        LocalDate today = LocalDate.now();
+        GeoPersistResultVO week = persistContentPeriods("WEEK", start, end, today);
+        GeoPersistResultVO month = persistContentPeriods("MONTH", start, end, today);
+        GeoPersistResultVO merged = new GeoPersistResultVO();
+        merged.setPeriodCount(nz(week.getPeriodCount()) + nz(month.getPeriodCount()));
+        merged.setSnapshotCount(nz(week.getSnapshotCount()) + nz(month.getSnapshotCount()));
+        merged.setLockedDailyCount(0);
+        return merged;
+    }
+
+    private static int nz(Integer v) {
+        return v == null ? 0 : v;
+    }
+
+    private GeoPersistResultVO emptyPersistResult() {
+        GeoPersistResultVO vo = new GeoPersistResultVO();
+        vo.setPeriodCount(0);
+        vo.setSnapshotCount(0);
+        vo.setLockedDailyCount(0);
+        return vo;
     }
 
     private GeoPersistResultVO persistContentPeriods(String periodType, LocalDate start, LocalDate end, LocalDate today) {

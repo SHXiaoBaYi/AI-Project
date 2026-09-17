@@ -32,6 +32,7 @@ public class SysTaskTypeServiceImpl implements SysTaskTypeService {
                 .like(StringUtils.hasText(query.getTypeName()), SysTaskType::getTypeName, query.getTypeName())
                 .orderByAsc(SysTaskType::getSortOrder)
                 .orderByAsc(SysTaskType::getId);
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, SysTaskType::getCreateTime);
         Page<SysTaskType> page = taskTypeMapper.selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         return new PageResult<>(page.getTotal(), page.getRecords());
     }

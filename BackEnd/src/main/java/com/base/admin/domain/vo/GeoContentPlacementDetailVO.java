@@ -63,4 +63,7 @@ public class GeoContentPlacementDetailVO {
 
     @Schema(description = "AI引用明细")
     private List<GeoContentPlacementCiteVO> cites = new ArrayList<>();
+
+    @Schema(description = "任务完成证明/业务附件")
+    private List<SysTaskFileVO> proofFiles = new ArrayList<>();
 }

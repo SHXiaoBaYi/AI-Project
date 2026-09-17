@@ -17,6 +17,7 @@ import type {
   GeoPlatformAccount,
   GeoPlatformAccountDTO,
   GeoTopic,
+  GeoTopicPlatformCharts,
   GeoWeeklyBoard,
   GeoYearTarget,
   GeoYearlyBoard,
@@ -27,6 +28,7 @@ import type {
   GeoContentPlacementItem,
   GeoContentPlacementItemDTO,
   GeoContentPlacementListItem,
+  GeoContentPlacementProofFile,
   GeoContentPublisherWeekBoard,
   GeoContentPublisherWeekDetail,
   GeoContentArticleBoard,
@@ -204,6 +206,10 @@ export function getGeoDailyBoardApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoDailyBoard>('/geo/day/board', data);
 }
 
+export function getGeoTopicPlatformChartsApi(data: GeoBoardQuery) {
+  return request.post<unknown, GeoTopicPlatformCharts>('/geo/day/topic-platform-charts', data);
+}
+
 export function getGeoYearlyBoardApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoYearlyBoard>('/geo/yearly/board', data);
 }
@@ -268,6 +274,10 @@ export function getGeoContentPlacementCitesApi(id: number, itemId?: number) {
   return request.get<unknown, GeoContentPlacementCite[]>(`/geo/content-placement/${id}/cites`, {
     params: itemId != null ? { itemId } : undefined,
   });
+}
+
+export function getGeoContentPlacementProofFilesApi(id: number) {
+  return request.get<unknown, GeoContentPlacementProofFile[]>(`/geo/content-placement/${id}/proof-files`);
 }
 
 export function deleteGeoContentPlacementApi(id: number) {

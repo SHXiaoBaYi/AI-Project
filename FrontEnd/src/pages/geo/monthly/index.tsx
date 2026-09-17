@@ -6,12 +6,12 @@ import { getGeoMonthlyBoardApi, getGeoPlatformsApi, getGeoTopicOptionsApi } from
 import type { GeoMonthlyBoard, GeoTopic } from '@/types/geo';
 import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
-import { GEO_TERM_TYPES } from '@/constants/geo';
+import { DEMO_DATA_PIVOT, demoRangeByGrain } from '@/constants/demoData';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
 
 const emptyBoard: GeoMonthlyBoard = { mentionChart: [], firstMentionChart: [], recommendChart: [], rows: [] };
-const defaultMonths = [dayjs().subtract(5, 'month').startOf('month'), dayjs().endOf('month')];
+const defaultMonths = demoRangeByGrain('month', DEMO_DATA_PIVOT);
 
 const MonthlyPage = memo(function MonthlyPage() {
   const [topics, setTopics] = useState<GeoTopic[]>([]);

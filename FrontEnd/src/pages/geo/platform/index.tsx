@@ -9,6 +9,7 @@ import PlatformAccountPanel from '@/components/geo/PlatformAccountPanel';
 import { createGeoPlatformApi, deleteGeoPlatformApi, getGeoPlatformListApi, updateGeoPlatformApi } from '@/api/geo';
 import type { GeoPlatform } from '@/types/geo';
 import { GEO_PLATFORM_TYPE_DEFAULT, GEO_PLATFORM_TYPES } from '@/constants/geo';
+import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 const PlatformPage = memo(function PlatformPage() {
   const { message } = App.useApp();
@@ -48,6 +49,8 @@ const PlatformPage = memo(function PlatformPage() {
     },
     { title: '排序', dataIndex: 'sortOrder', search: false, valueType: 'digit' },
     { title: '备注', dataIndex: 'remark', search: false, ellipsis: true },
+    createTimeRangeColumn<GeoPlatform>(),
+    createTimeDisplayColumn<GeoPlatform>(),
     {
       title: '操作',
       valueType: 'option',
@@ -103,6 +106,8 @@ const PlatformPage = memo(function PlatformPage() {
             pageSize: params.pageSize,
             platformName: params.platformName,
             platformType: params.platformType,
+            createTimeStart: params.createTimeStart,
+            createTimeEnd: params.createTimeEnd,
           });
           return { data: res.rows, success: true, total: res.total };
         }}

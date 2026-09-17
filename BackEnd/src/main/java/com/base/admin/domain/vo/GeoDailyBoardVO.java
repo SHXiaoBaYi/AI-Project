@@ -19,13 +19,13 @@ public class GeoDailyBoardVO {
     @Schema(description = "推荐次数柱状（横轴=日期，系列=平台）")
     private List<GeoChartPointVO> recommendChart = new ArrayList<>();
 
-    @Schema(description = "测试问题数量柱状（横轴=日期，系列=平台）")
+    @Schema(description = "测试问题数量柱状（横轴=话题，系列=平台）")
     private List<GeoChartPointVO> sampleChart = new ArrayList<>();
 
-    @Schema(description = "推荐排名分布柱状（横轴=排名档，系列=平台）")
+    @Schema(description = "露出平均排名柱状（横轴=话题，系列=平台；越低越好）")
     private List<GeoChartPointVO> rankChart = new ArrayList<>();
 
-    @Schema(description = "负面/错误内容数量柱状（横轴=日期，系列=平台）")
+    @Schema(description = "负面/错误内容数量柱状（横轴=话题，系列=平台）")
     private List<GeoChartPointVO> negativeChart = new ArrayList<>();
 
     @Schema(description = "筛选条件下露出率同比/环比摘要")

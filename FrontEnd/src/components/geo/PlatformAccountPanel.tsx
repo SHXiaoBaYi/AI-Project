@@ -15,6 +15,7 @@ import {
 } from '@/api/geo';
 import type { GeoOwnerOption, GeoPlatform, GeoPlatformAccount } from '@/types/geo';
 import { GEO_PLATFORM_ACCOUNT_STATUS, GEO_PLATFORM_LOGIN_METHODS, GEO_PLATFORM_VERIFY_METHODS } from '@/constants/geo';
+import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 const YES_NO = [
   { label: '是', value: 1 },
@@ -238,6 +239,8 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
       ellipsis: true,
       valueType: 'textarea',
     },
+    createTimeRangeColumn<GeoPlatformAccount>(),
+    createTimeDisplayColumn<GeoPlatformAccount>(),
     {
       title: '操作',
       valueType: 'option',
@@ -293,6 +296,8 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
             verified: params.verified,
             accountStatus: params.accountStatus,
             loginMethod: params.loginMethod,
+            createTimeStart: params.createTimeStart,
+            createTimeEnd: params.createTimeEnd,
           });
           return { data: res.rows, success: true, total: res.total };
         }}

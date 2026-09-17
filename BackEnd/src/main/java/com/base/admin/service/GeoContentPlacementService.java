@@ -20,6 +20,7 @@ import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekDetailVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
+import com.base.admin.domain.vo.SysTaskFileVO;
 
 import java.io.InputStream;
 import java.util.List;
@@ -39,6 +40,9 @@ public interface GeoContentPlacementService {
     List<GeoContentPlacementItemVO> listItems(Long placementId);
 
     List<GeoContentPlacementCiteVO> listCites(Long placementId, Long itemId);
+
+    /** 关联任务完成证明/业务附件 */
+    List<SysTaskFileVO> listProofFiles(Long placementId);
 
     Long create(GeoContentPlacementDTO dto);
 
@@ -87,4 +91,7 @@ public interface GeoContentPlacementService {
 
     /** 固化已结束的内容投放月报 */
     GeoPersistResultVO autoPersistCompletedMonthly(int lookbackMonths);
+
+    /** 按日期区间固化内容投放周/月快照（历史演示区间用） */
+    GeoPersistResultVO persistContentBoardRange(java.time.LocalDate start, java.time.LocalDate end);
 }

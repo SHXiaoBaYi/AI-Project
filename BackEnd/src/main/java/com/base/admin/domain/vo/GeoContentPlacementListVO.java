@@ -61,6 +61,9 @@ public class GeoContentPlacementListVO {
     @Schema(description = "引用条数", example = "3")
     private Integer citeCount;
 
+    @Schema(description = "附件数量", example = "2")
+    private Integer proofFileCount;
+
     @Schema(description = "备注")
     private String remark;
 }

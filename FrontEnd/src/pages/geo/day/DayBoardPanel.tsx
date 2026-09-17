@@ -7,6 +7,8 @@ import type { GeoDailyBoard, GeoTopic } from '@/types/geo';
 import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
 import { GeoCompareSummaryCards, GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
 import { GeoDailySummaryBoard } from '@/components/geo/GeoDailySummaryBoard';
+import { GeoTopicPlatformTofuBoard } from '@/components/geo/GeoTopicPlatformTofuBoard';
+import { DEMO_DATA_END, DEMO_DATA_PIVOT, DEMO_DATA_START, demoRangeByGrain } from '@/constants/demoData';
 import { GEO_TERM_TYPES } from '@/constants/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
@@ -32,7 +34,8 @@ const DayBoardPage = memo(function DayBoardPage() {
   const [topics, setTopics] = useState<GeoTopic[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [board, setBoard] = useState<GeoDailyBoard>(emptyBoard);
-  const [defaultDays, setDefaultDays] = useState<[Dayjs, Dayjs]>(rangeAround(dayjs()));
+  const [defaultDays, setDefaultDays] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('day', DEMO_DATA_PIVOT));
+  const [activeRange, setActiveRange] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('day', DEMO_DATA_PIVOT));
   const [ready, setReady] = useState(false);
   const [boardLoading, setBoardLoading] = useState(false);
   const [activeDate, setActiveDate] = useState<string>();
@@ -41,9 +44,10 @@ const DayBoardPage = memo(function DayBoardPage() {
     const base = fallbackRange ?? defaultDays;
     const start = toDayjs(values?.dateRange?.[0]) ?? base[0];
     const end = toDayjs(values?.dateRange?.[1]) ?? base[1];
+    const nextRange: [Dayjs, Dayjs] = [start.startOf('day'), end.endOf('day')];
     const query = {
-      startDate: start.format('YYYY-MM-DD'),
-      endDate: end.format('YYYY-MM-DD'),
+      startDate: nextRange[0].format('YYYY-MM-DD'),
+      endDate: nextRange[1].format('YYYY-MM-DD'),
       topicId: values?.topicId as number | undefined,
       keyword: values?.keyword?.trim() || undefined,
       termType: values?.termType || undefined,
@@ -52,8 +56,8 @@ const DayBoardPage = memo(function DayBoardPage() {
 
     setBoardLoading(true);
     try {
-      // 汇总明细已由 board.summaryGroups / ownerSummaryGroups 返回，不再额外拉 5000 条列表（远程首屏更慢）
       const data = await getGeoDailyBoardApi(query);
+      setActiveRange(nextRange);
 
       const nextBoard: GeoDailyBoard = {
         mentionChart: data?.mentionChart ?? [],
@@ -100,8 +104,10 @@ const DayBoardPage = memo(function DayBoardPage() {
       if (cancelled) return;
       setTopics(topicList);
       setPlatforms(platformList);
-      const anchor = latest?.inspectDate ? dayjs(latest.inspectDate) : dayjs();
-      const nextRange = rangeAround(anchor.isValid() ? anchor : dayjs());
+      const anchor = latest?.inspectDate ? dayjs(latest.inspectDate) : DEMO_DATA_PIVOT;
+      const inDemo =
+        anchor.isValid() && !anchor.isBefore(dayjs(DEMO_DATA_START)) && !anchor.isAfter(dayjs(DEMO_DATA_END));
+      const nextRange = inDemo ? rangeAround(anchor) : demoRangeByGrain('day', DEMO_DATA_PIVOT);
       setDefaultDays(nextRange);
       setReady(true);
       void load({ dateRange: nextRange }, nextRange);
@@ -172,6 +178,11 @@ const DayBoardPage = memo(function DayBoardPage() {
       />
 
       {boardLoading ? <Card loading /> : null}
+
+      <GeoTopicPlatformTofuBoard
+        grain='day'
+        range={activeRange}
+      />
 
       <GeoBoardDimensionTabs
         topic={

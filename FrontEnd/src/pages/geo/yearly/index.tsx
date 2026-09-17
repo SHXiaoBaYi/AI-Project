@@ -22,6 +22,7 @@ import {
   saveGeoYearTargetApi,
 } from '@/api/geo';
 import type { GeoTopic, GeoYearTarget, GeoYearlyBoard, GeoYearlyRow } from '@/types/geo';
+import { DEMO_DATA_PIVOT, demoRangeByGrain } from '@/constants/demoData';
 import { GEO_TERM_TYPES } from '@/constants/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
 import { toDayjs } from '@/utils/geoBoardQuery';
@@ -29,7 +30,7 @@ import { toDayjs } from '@/utils/geoBoardQuery';
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
 
-const defaultYears = [dayjs().subtract(1, 'year'), dayjs()];
+const defaultYears = demoRangeByGrain('year', DEMO_DATA_PIVOT);
 
 function YearlyBoardSlice({
   rows,

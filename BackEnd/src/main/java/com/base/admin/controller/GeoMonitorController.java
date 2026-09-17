@@ -20,6 +20,7 @@ import com.base.admin.domain.vo.GeoLatestDateVO;
 import com.base.admin.domain.vo.GeoMonthlyBoardVO;
 import com.base.admin.domain.vo.GeoOwnerOptionVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
+import com.base.admin.domain.vo.GeoTopicPlatformChartsVO;
 import com.base.admin.domain.vo.GeoWeeklyBoardVO;
 import com.base.admin.domain.vo.GeoYearlyBoardVO;
 import com.base.admin.service.FileStorageService;
@@ -198,6 +199,13 @@ public class GeoMonitorController {
     @RequiresPermission({"geo:day:list", "geo:expose:list", "geo:article:list", "board:view"})
     public Result<GeoDailyBoardVO> dailyBoard(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.dailyBoard(query == null ? new GeoBoardQueryDTO() : query));
+    }
+
+    @Operation(summary = "话题×平台分组柱状图（话题下钻目标问题）")
+    @PostMapping("/day/topic-platform-charts")
+    @RequiresPermission({"geo:day:list", "geo:expose:list", "geo:article:list", "board:view"})
+    public Result<GeoTopicPlatformChartsVO> topicPlatformCharts(@RequestBody(required = false) GeoBoardQueryDTO query) {
+        return Result.ok(monitorService.topicPlatformCharts(query == null ? new GeoBoardQueryDTO() : query));
     }
 
     @Operation(summary = "负面/错误内容明细")

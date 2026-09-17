@@ -74,5 +74,10 @@ public class Constants {
     /** 分配回写字段：撰写人 */
     public static final String TASK_ASSIGN_FIELD_WRITER = "writer";
 
+    /** 演示数据标记：create_by / 备注前缀 */
+    public static final String DEMO_MARKER = "【演示】";
+    /** 演示数据 create_by */
+    public static final String DEMO_CREATE_BY = "demo";
+
     private Constants() {}
 }

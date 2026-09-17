@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Select, Space, Statistic, Tag, message } from 'antd';
+import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Space, Statistic, Tag, message } from 'antd';
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { boardChartDrillApi, type BoardChartDrill, type BoardChartStackItem } from '@/api/board';
+import { DEMO_DATA_PIVOT, demoRangeByGrain } from '@/constants/demoData';
 
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
@@ -62,6 +63,25 @@ function formatBoardAxis(raw: string): string {
   return raw;
 }
 
+function axisFieldLabel(field?: string): string {
+  switch (field) {
+    case 'topic':
+      return '话题';
+    case 'question':
+      return '目标问题';
+    case 'person':
+      return '人';
+    case 'platform':
+      return '平台';
+    case 'theme':
+      return '主题';
+    case 'stage':
+      return '状态';
+    default:
+      return field || '';
+  }
+}
+
 const dateAxisProps = {
   labelTransform: 'rotate(35)' as const,
   labelFontSize: 11,
@@ -69,21 +89,8 @@ const dateAxisProps = {
   labelAutoRotate: false,
 };
 
-function rangeByGrain(grain: BoardGrain, pivot: Dayjs = dayjs()): [Dayjs, Dayjs] {
-  if (grain === 'day') {
-    // 最近 30 天（含当天）
-    return [pivot.subtract(29, 'day').startOf('day'), pivot.endOf('day')];
-  }
-  if (grain === 'week') {
-    // 之前 4 周（含本周）
-    return [pivot.subtract(3, 'week').startOf('week'), pivot.endOf('week')];
-  }
-  if (grain === 'month') {
-    // 之前 6 个月（含本月）
-    return [pivot.subtract(5, 'month').startOf('month'), pivot.endOf('month')];
-  }
-  // 之前 4 年（含本年）
-  return [pivot.subtract(3, 'year').startOf('year'), pivot.endOf('year')];
+function rangeByGrain(grain: BoardGrain, pivot: Dayjs = DEMO_DATA_PIVOT): [Dayjs, Dayjs] {
+  return demoRangeByGrain(grain, pivot);
 }
 
 function normalizeRange(grain: BoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
@@ -96,13 +103,22 @@ function normalizeRange(grain: BoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Da
 type Props = {
   domain: BoardDomain;
   title: string;
+  /** 受控时间粒度（传入后与父级共用） */
+  grain?: BoardGrain;
+  /** 受控日期范围 */
+  range?: [Dayjs, Dayjs];
+  /** 隐藏本组件内日/周/月/年与日期选择（由父级统一提供时） */
+  hideTimeFilter?: boolean;
 };
 
-export default function ChartDrillBoard({ domain, title }: Props) {
+export default function ChartDrillBoard({ domain, title, grain: grainProp, range: rangeProp, hideTimeFilter }: Props) {
+  const controlled = grainProp != null && rangeProp != null;
   const [dim, setDim] = useState<BoardDim>('topic');
-  const [grain, setGrain] = useState<BoardGrain>('week');
+  const [innerGrain, setInnerGrain] = useState<BoardGrain>('week');
   const [personRole, setPersonRole] = useState<BoardPersonRole>('writer');
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => rangeByGrain('week'));
+  const [innerRange, setInnerRange] = useState<[Dayjs, Dayjs]>(() => rangeByGrain('week'));
+  const grain = controlled ? grainProp : innerGrain;
+  const range = controlled ? rangeProp : innerRange;
   const [stack, setStack] = useState<BoardChartStackItem[]>([]);
   const [data, setData] = useState<BoardChartDrill | null>(null);
   const [loading, setLoading] = useState(false);
@@ -113,8 +129,8 @@ export default function ChartDrillBoard({ domain, title }: Props) {
       try {
         const res = await boardChartDrillApi({
           domain,
-          dim: domain === 'task' && dim === 'topic' ? 'theme' : dim,
-          personRole: domain === 'geo' ? personRole : undefined,
+          dim: domain === 'geo' ? 'topic' : domain === 'task' && dim === 'topic' ? 'theme' : dim,
+          personRole: domain === 'task' && dim === 'person' ? personRole : undefined,
           grain,
           startDate: range[0].format('YYYY-MM-DD'),
           endDate: range[1].format('YYYY-MM-DD'),
@@ -218,8 +234,9 @@ export default function ChartDrillBoard({ domain, title }: Props) {
   };
 
   const onGrainChange = (g: BoardGrain) => {
-    setGrain(g);
-    setRange(rangeByGrain(g));
+    if (controlled) return;
+    setInnerGrain(g);
+    setInnerRange(rangeByGrain(g));
   };
 
   const pickerProps =
@@ -234,64 +251,71 @@ export default function ChartDrillBoard({ domain, title }: Props) {
   const pctSuffix = domain === 'geo' || data?.metric === 'doneRate' ? '%' : '';
   const deltaSuffix = domain === 'geo' || data?.metric === 'doneRate' ? 'pp' : '';
 
+  const showFilterBar = !hideTimeFilter || domain !== 'geo';
+
   return (
-    <div className='flex flex-col gap-4 p-4'>
-      <Card
-        size='small'
-        title={title}
-      >
-        <Space
-          wrap
-          size='middle'
+    <div className={hideTimeFilter ? 'flex flex-col gap-4' : 'flex flex-col gap-4 p-4'}>
+      {showFilterBar ? (
+        <Card
+          size='small'
+          title={title}
         >
-          <Radio.Group
-            value={dim}
-            optionType='button'
-            buttonStyle='solid'
-            options={[
-              { label: '话题+问题', value: 'topic' },
-              { label: '人维', value: 'person' },
-            ]}
-            onChange={(e) => setDim(e.target.value)}
-          />
-          {domain === 'geo' && dim === 'person' ? (
-            <Select
-              style={{ width: 140 }}
-              value={personRole}
-              options={[
-                { label: '撰写人', value: 'writer' },
-                { label: '发布人', value: 'publisher' },
-                { label: '监测负责人', value: 'owner' },
-              ]}
-              onChange={(v) => setPersonRole(v)}
-            />
-          ) : null}
-          <Radio.Group
-            value={grain}
-            optionType='button'
-            options={[
-              { label: '日', value: 'day' },
-              { label: '周', value: 'week' },
-              { label: '月', value: 'month' },
-              { label: '年', value: 'year' },
-            ]}
-            onChange={(e) => onGrainChange(e.target.value)}
-          />
-          <DatePicker.RangePicker
-            {...pickerProps}
-            value={range}
-            onChange={(v) => {
-              if (v?.[0] && v?.[1]) setRange(normalizeRange(grain, v[0], v[1]));
-            }}
-          />
-        </Space>
-      </Card>
+          <Space
+            wrap
+            size='middle'
+          >
+            {domain === 'geo' ? null : (
+              <Radio.Group
+                value={dim}
+                optionType='button'
+                buttonStyle='solid'
+                options={[
+                  { label: '主题', value: 'topic' },
+                  { label: '人', value: 'person' },
+                ]}
+                onChange={(e) => setDim(e.target.value)}
+              />
+            )}
+            {!hideTimeFilter ? (
+              <>
+                <Radio.Group
+                  value={grain}
+                  optionType='button'
+                  options={[
+                    { label: '日', value: 'day' },
+                    { label: '周', value: 'week' },
+                    { label: '月', value: 'month' },
+                    { label: '年', value: 'year' },
+                  ]}
+                  onChange={(e) => onGrainChange(e.target.value)}
+                />
+                <DatePicker.RangePicker
+                  {...pickerProps}
+                  value={range}
+                  onChange={(v) => {
+                    if (controlled || !v?.[0] || !v?.[1]) return;
+                    setInnerRange(normalizeRange(grain, v[0], v[1]));
+                  }}
+                />
+              </>
+            ) : null}
+            <span className='text-xs text-neutral-400'>
+              {domain === 'geo'
+                ? '三级：话题 → 目标问题 → 平台'
+                : dim === 'person'
+                  ? '路径：人 → 主题 → 状态'
+                  : '路径：主题 → 人 → 状态'}
+            </span>
+          </Space>
+        </Card>
+      ) : null}
 
       <Card
         size='small'
         loading={loading}
         title={
           <div className='flex flex-wrap items-center gap-3'>
+            {!showFilterBar ? <span className='font-medium'>{title}</span> : null}
             <Button
               type='link'
               disabled={!stack.length}
@@ -306,6 +330,7 @@ export default function ChartDrillBoard({ domain, title }: Props) {
               }))}
             />
             <span className='text-sm font-medium text-neutral-700'>{data?.title || '—'}</span>
+            {!showFilterBar ? <span className='text-xs text-neutral-400'>三级：话题 → 目标问题 → 平台</span> : null}
           </div>
         }
       >
@@ -345,7 +370,10 @@ export default function ChartDrillBoard({ domain, title }: Props) {
           </Col>
         </Row>
 
-        <div className='mb-2 text-sm font-medium text-neutral-700'>折线图（X 轴=日期，点击某条线下钻该主题）</div>
+        <div className='mb-2 text-sm font-medium text-neutral-700'>
+          折线图（X 轴=日期；点击系列下钻到下一级
+          {data?.axisField ? ` · 当前按${axisFieldLabel(data.axisField)}` : ''}）
+        </div>
         <Suspense fallback={<ChartFallback height={300} />}>
           <Line
             key={`line-${chartRenderKey}`}
@@ -361,7 +389,8 @@ export default function ChartDrillBoard({ domain, title }: Props) {
         </Suspense>
 
         <div className='mt-6 mb-2 text-sm font-medium text-neutral-700'>
-          分组柱状图（X 轴=日期；点击分组中的某一根柱 = 下钻该主题，日期范围不变）
+          分组柱状图（X 轴=日期；点击分组中某一根柱下钻该系列，日期范围不变
+          {data?.axisField ? ` · 当前按${axisFieldLabel(data.axisField)}` : ''}）
         </div>
         <Suspense fallback={<ChartFallback />}>
           <Column

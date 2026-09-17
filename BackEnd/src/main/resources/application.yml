@@ -56,7 +56,8 @@ mybatis-plus:
       logic-delete-value: 0
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 演示数据刷库时 StdOutImpl 会堵住控制台管道；改用 slf4j，量级由 logging 级别控制
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 
 springdoc:
   api-docs:
@@ -88,3 +89,11 @@ geo:
     content-weekly-cron: "0 15 2 ? * MON"
     # 每月 1 日 02:25 固化内容投放月报
     content-monthly-cron: "0 25 2 1 * ?"
+
+# 演示数据：2014/2015 全年 GEO+任务（is_demo=1）；约 1 万条日监测/年且每天有数
+demo:
+  seed: true
+  # true=启动时清空旧演示数据后重刷；日常保持 false
+  reseed: false
+  # true=仅按现有日监测重建周/月/年快照并对齐校验；刷完改回 false
+  rebuild-board: false

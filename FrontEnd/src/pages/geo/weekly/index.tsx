@@ -8,10 +8,11 @@ import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
 import { GeoTrendBoard } from '@/components/geo/GeoTrendBoard';
 import { GEO_TERM_TYPES } from '@/constants/geo';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
+import { DEMO_DATA_PIVOT, demoRangeByGrain } from '@/constants/demoData';
 import { endOfIsoWeek, startOfIsoWeek, toDayjs } from '@/utils/geoBoardQuery';
 
 const emptyBoard: GeoWeeklyBoard = { mentionChart: [], firstMentionChart: [], recommendChart: [], rows: [] };
-const defaultWeeks = [startOfIsoWeek(dayjs().subtract(4, 'week')), endOfIsoWeek(dayjs())];
+const defaultWeeks = demoRangeByGrain('week', DEMO_DATA_PIVOT);
 
 const WeeklyPage = memo(function WeeklyPage() {
   const [topics, setTopics] = useState<GeoTopic[]>([]);

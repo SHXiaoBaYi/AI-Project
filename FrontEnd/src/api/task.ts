@@ -42,6 +42,7 @@ export type SysTask = {
   assignable?: boolean;
   completable?: boolean;
   requireProof?: boolean;
+  bizAssign?: boolean;
   fileCount?: number;
   files?: SysTaskFile[];
 };

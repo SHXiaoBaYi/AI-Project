@@ -52,6 +52,7 @@ public class SysUserServiceImpl implements SysUserService {
                 .eq(query.getStatus() != null, SysUser::getStatus, query.getStatus())
                 .orderByDesc(SysUser::getCreateTime)
                 .orderByDesc(SysUser::getUserId);
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, SysUser::getCreateTime);
 
         if (query.getRoleIds() != null && !query.getRoleIds().isEmpty()) {
             List<Long> userIds = userRoleMapper.selectList(

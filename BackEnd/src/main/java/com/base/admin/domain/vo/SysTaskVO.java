@@ -97,6 +97,9 @@ public class SysTaskVO {
     @Schema(description = "完成时是否必须上传证明", example = "true")
     private boolean requireProof = false;
 
+    @Schema(description = "是否配置了分配回写业务字段（批量分配时用于识别 GEO 待分配类）", example = "true")
+    private boolean bizAssign = false;
+
     @Schema(description = "附件数量")
     private Integer fileCount = 0;
 

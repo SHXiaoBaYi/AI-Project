@@ -13,6 +13,7 @@ import {
   updateTaskTypeApi,
   type SysTaskType,
 } from '@/api/task';
+import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 /** 业务类型选项；新增业务回写时前后端同步扩展 */
 const BIZ_TYPE_OPTIONS = [
@@ -114,6 +115,8 @@ const TaskTypePage = memo(function TaskTypePage() {
         ellipsis: true,
         fieldProps: { maxLength: 500 },
       },
+      createTimeRangeColumn<SysTaskType>(),
+      createTimeDisplayColumn<SysTaskType>(),
       {
         title: '操作',
         valueType: 'option',
@@ -162,6 +165,8 @@ const TaskTypePage = memo(function TaskTypePage() {
             pageNum: params.current,
             pageSize: params.pageSize,
             typeName: params.typeName,
+            createTimeStart: params.createTimeStart,
+            createTimeEnd: params.createTimeEnd,
           });
           return { data: res.rows ?? [], total: res.total ?? 0, success: true };
         }}

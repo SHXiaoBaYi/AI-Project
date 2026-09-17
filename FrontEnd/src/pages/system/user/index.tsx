@@ -24,6 +24,7 @@ import tools from '@/utils/tools';
 import validate from '@/utils/validate';
 import type { UserVO } from '@/types/user';
 import ImportUserModal from './components/ImportUserModal';
+import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 const UserManage = memo(function UserManage() {
   const { message } = App.useApp();
@@ -158,14 +159,8 @@ const UserManage = memo(function UserManage() {
         },
         formItemProps: { rules: [{ required: true, message: '请选择状态' }] },
       },
-      {
-        title: '创建时间',
-        dataIndex: 'createTime',
-        width: 160,
-        search: false,
-        valueType: 'dateTime',
-        hideInForm: true,
-      },
+      createTimeRangeColumn<UserVO>(),
+      createTimeDisplayColumn<UserVO>({ width: 160 }),
       {
         title: '操作',
         valueType: 'option',

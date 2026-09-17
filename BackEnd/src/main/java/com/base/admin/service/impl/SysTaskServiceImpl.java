@@ -33,12 +33,15 @@ import com.base.admin.service.taskbiz.TaskBizFieldWriteDispatcher;
 import com.base.admin.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +65,8 @@ public class SysTaskServiceImpl implements SysTaskService {
     private final GeoContentPlacementMapper placementMapper;
     private final SysTaskTypeService taskTypeService;
     private final TaskBizFieldWriteDispatcher bizFieldWriteDispatcher;
+    /** 避免自调用导致 @Transactional 失效（批量分配需逐条独立提交并回写业务） */
+    private final ObjectProvider<SysTaskService> selfProvider;
 
     @Override
     public PageResult<SysTaskVO> list(SysTaskQueryDTO query) {
@@ -93,6 +98,7 @@ public class SysTaskServiceImpl implements SysTaskService {
                 .eq(query.getPriority() != null, SysTask::getPriority, query.getPriority())
                 .eq(query.getOwnerUserId() != null, SysTask::getOwnerUserId, query.getOwnerUserId())
                 .eq(query.getCreatorUserId() != null, SysTask::getCreatorUserId, query.getCreatorUserId());
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, SysTask::getCreateTime);
 
         List<String> statusFilters = query.getStatuses() == null ? List.of() : query.getStatuses().stream()
                 .filter(StringUtils::hasText)
@@ -193,7 +199,7 @@ public class SysTaskServiceImpl implements SysTaskService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void assign(Long id, SysTaskAssignDTO dto) {
         SysTask task = require(id);
         List<Long> assigneeIds = normalizeAssigneeIds(dto.getAssigneeUserIds());
@@ -220,7 +226,6 @@ public class SysTaskServiceImpl implements SysTaskService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public String batchAssign(SysTaskBatchAssignDTO dto) {
         if (dto.getTaskIds() == null || dto.getTaskIds().isEmpty()) {
             throw new BusinessException("请选择至少一条任务");
@@ -237,6 +242,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         if (ids.size() > 100) {
             throw new BusinessException("单次最多批量分配 100 条");
         }
+        SysTaskService self = selfProvider.getObject();
         int ok = 0;
         int skip = 0;
         List<String> errors = new ArrayList<>();
@@ -250,10 +256,14 @@ public class SysTaskServiceImpl implements SysTaskService {
                 SysTaskAssignDTO one = new SysTaskAssignDTO();
                 one.setOwnerUserId(dto.getOwnerUserId());
                 one.setAssigneeUserIds(dto.getAssigneeUserIds());
-                assign(id, one);
+                self.assign(id, one);
                 ok++;
             } catch (BusinessException e) {
                 errors.add("#" + id + " " + e.getMessage());
+                log.warn("批量分配任务 #{} 失败: {}", id, e.getMessage());
+            } catch (Exception e) {
+                errors.add("#" + id + " " + e.getMessage());
+                log.error("批量分配任务 #{} 异常", id, e);
             }
         }
         if (ok == 0) {
@@ -266,7 +276,7 @@ public class SysTaskServiceImpl implements SysTaskService {
             msg += "，跳过 " + skip + " 条";
         }
         if (!errors.isEmpty()) {
-            msg += "，失败 " + errors.size() + " 条";
+            msg += "，失败 " + errors.size() + " 条：" + String.join("；", errors);
         }
         return msg;
     }
@@ -388,11 +398,12 @@ public class SysTaskServiceImpl implements SysTaskService {
         if (taskId == null) {
             return List.of();
         }
+        SysTask task = taskMapper.selectById(taskId);
         return taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
                         .eq(SysTaskFile::getTaskId, taskId)
                         .orderByAsc(SysTaskFile::getId))
                 .stream()
-                .map(this::toFileVo)
+                .map(f -> toFileVo(f, task))
                 .toList();
     }
 
@@ -401,19 +412,94 @@ public class SysTaskServiceImpl implements SysTaskService {
         if (!StringUtils.hasText(bizType) || bizId == null) {
             return List.of();
         }
-        return taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
-                        .eq(SysTaskFile::getBizType, bizType.trim())
-                        .eq(SysTaskFile::getBizId, bizId)
-                        .orderByDesc(SysTaskFile::getId))
-                .stream()
-                .map(this::toFileVo)
-                .toList();
+        String bt = bizType.trim();
+        LinkedHashMap<Long, SysTaskFile> byId = new LinkedHashMap<>();
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, bt)
+                .eq(SysTask::getBizId, bizId));
+        Map<Long, SysTask> taskMap = tasks.stream()
+                .filter(t -> t.getId() != null)
+                .collect(Collectors.toMap(SysTask::getId, t -> t, (a, b) -> a));
+
+        for (SysTaskFile f : taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                .eq(SysTaskFile::getBizType, bt)
+                .eq(SysTaskFile::getBizId, bizId)
+                .orderByAsc(SysTaskFile::getId))) {
+            byId.put(f.getId(), f);
+        }
+        if (!taskMap.isEmpty()) {
+            for (SysTaskFile f : taskFileMapper.selectList(new LambdaQueryWrapper<SysTaskFile>()
+                    .in(SysTaskFile::getTaskId, taskMap.keySet())
+                    .orderByAsc(SysTaskFile::getId))) {
+                byId.putIfAbsent(f.getId(), f);
+                if (!StringUtils.hasText(f.getBizType()) || f.getBizId() == null) {
+                    f.setBizType(bt);
+                    f.setBizId(bizId);
+                    taskFileMapper.updateById(f);
+                }
+            }
+        }
+        LinkedHashMap<String, SysTaskFile> uniqueByUrl = new LinkedHashMap<>();
+        for (SysTaskFile f : byId.values()) {
+            String key = StringUtils.hasText(f.getFileUrl()) ? f.getFileUrl().trim() : ("id:" + f.getId());
+            SysTaskFile existing = uniqueByUrl.get(key);
+            if (existing == null || preferOriginalProofFile(f, existing)) {
+                uniqueByUrl.put(key, f);
+            }
+        }
+        Set<Long> missingTaskIds = uniqueByUrl.values().stream()
+                .map(SysTaskFile::getTaskId)
+                .filter(Objects::nonNull)
+                .filter(id -> !taskMap.containsKey(id))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!missingTaskIds.isEmpty()) {
+            for (SysTask t : taskMapper.selectBatchIds(missingTaskIds)) {
+                if (t != null && t.getId() != null) {
+                    taskMap.put(t.getId(), t);
+                }
+            }
+        }
+        List<SysTaskFileVO> list = new ArrayList<>();
+        for (SysTaskFile f : uniqueByUrl.values()) {
+            list.add(toFileVo(f, taskMap.get(f.getTaskId())));
+        }
+        return list;
+    }
+
+    private static boolean preferOriginalProofFile(SysTaskFile candidate, SysTaskFile current) {
+        boolean candCopy = candidate.getRemark() != null && candidate.getRemark().contains("带入");
+        boolean curCopy = current.getRemark() != null && current.getRemark().contains("带入");
+        if (candCopy != curCopy) {
+            return !candCopy;
+        }
+        Long candId = candidate.getId() == null ? Long.MAX_VALUE : candidate.getId();
+        Long curId = current.getId() == null ? Long.MAX_VALUE : current.getId();
+        return candId < curId;
     }
 
     private List<SysTaskFile> saveProofFiles(SysTask task, List<SysTaskFileItemDTO> items, Long uploadUserId) {
         if (items == null || items.isEmpty()) {
             return List.of();
         }
+        // 优先任务上的业务键；缺失时从任务类型配置补齐，确保写回业务主表关联
+        String bizType = nz(task.getBizType()).trim();
+        Long bizId = task.getBizId();
+        if (!StringUtils.hasText(bizType) || bizId == null) {
+            SysTaskType typeCfg = taskTypeService.getByTypeName(task.getTaskType());
+            if (typeCfg != null && StringUtils.hasText(typeCfg.getBizType())) {
+                if (!StringUtils.hasText(bizType)) {
+                    bizType = typeCfg.getBizType().trim();
+                }
+            }
+        }
+        if (StringUtils.hasText(bizType) && bizId != null) {
+            if (!StringUtils.hasText(task.getBizType()) || task.getBizId() == null) {
+                task.setBizType(bizType);
+                task.setBizId(bizId);
+                taskMapper.updateById(task);
+            }
+        }
+
         SysUser uploader = uploadUserId == null ? null : userMapper.selectById(uploadUserId);
         String uploaderName = userDisplayName(uploader);
         if (!StringUtils.hasText(uploaderName)) {
@@ -426,8 +512,8 @@ public class SysTaskServiceImpl implements SysTaskService {
             }
             SysTaskFile row = new SysTaskFile();
             row.setTaskId(task.getId());
-            row.setBizType(nz(task.getBizType()));
-            row.setBizId(task.getBizId());
+            row.setBizType(bizType);
+            row.setBizId(bizId);
             row.setFileName(item.getFileName().trim());
             row.setFileUrl(item.getFileUrl().trim());
             row.setFileSize(item.getFileSize() == null ? 0L : Math.max(0L, item.getFileSize()));
@@ -497,6 +583,10 @@ public class SysTaskServiceImpl implements SysTaskService {
     }
 
     private SysTaskFileVO toFileVo(SysTaskFile f) {
+        return toFileVo(f, null);
+    }
+
+    private SysTaskFileVO toFileVo(SysTaskFile f, SysTask task) {
         SysTaskFileVO vo = new SysTaskFileVO();
         vo.setId(f.getId());
         vo.setTaskId(f.getTaskId());
@@ -508,6 +598,16 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setContentType(f.getContentType());
         vo.setUploadUserName(f.getUploadUserName());
         vo.setCreateTime(f.getCreateTime());
+        if (task != null) {
+            vo.setTaskTitle(task.getTitle());
+            vo.setTaskType(task.getTaskType());
+        } else if (f.getTaskId() != null) {
+            SysTask t = taskMapper.selectById(f.getTaskId());
+            if (t != null) {
+                vo.setTaskTitle(t.getTitle());
+                vo.setTaskType(t.getTaskType());
+            }
+        }
         return vo;
     }
 
@@ -651,23 +751,36 @@ public class SysTaskServiceImpl implements SysTaskService {
     /** 按任务类型配置的 bizType + assignField 回写主业务，并将任务置为已完成 */
     private void applyBizAssignSideEffects(SysTask task, Long assignedUserId) {
         SysTaskType typeCfg = taskTypeService.getByTypeName(task.getTaskType());
+        String assignField = typeCfg == null ? "" : nz(typeCfg.getAssignField());
+        // 未配置回写字段：普通分配，不碰业务表
+        if (!StringUtils.hasText(assignField)) {
+            return;
+        }
         String bizType = StringUtils.hasText(task.getBizType())
                 ? task.getBizType().trim()
                 : (typeCfg == null ? "" : nz(typeCfg.getBizType()));
-        String assignField = typeCfg == null ? "" : nz(typeCfg.getAssignField());
-        if (!StringUtils.hasText(bizType) || !StringUtils.hasText(assignField) || task.getBizId() == null) {
-            return;
+        if (!StringUtils.hasText(bizType)) {
+            throw new BusinessException("任务类型「" + task.getTaskType() + "」已配置回写字段，但未绑定业务类型");
+        }
+        if (task.getBizId() == null) {
+            throw new BusinessException("任务#" + task.getId() + "缺少业务关联，无法回写「" + assignField + "」");
         }
         if (!bizFieldWriteDispatcher.supports(bizType)) {
             throw new BusinessException("任务类型已绑定业务「" + bizType + "」，但未注册回写处理器");
         }
         SysUser user = requireUser(assignedUserId, "被分配人");
-        bizFieldWriteDispatcher.write(bizType, task.getBizId(), assignField, user.getUserId(), userDisplayName(user));
+        String displayName = userDisplayName(user);
+        if (!StringUtils.hasText(displayName)) {
+            throw new BusinessException("被分配人展示名称为空，无法回写业务");
+        }
+        bizFieldWriteDispatcher.write(bizType, task.getBizId(), assignField, user.getUserId(), displayName);
         if (!StringUtils.hasText(task.getBizType())) {
             task.setBizType(bizType);
         }
         task.setStatus("已完成");
         task.setProgress(100);
+        log.info("任务#{} 分配回写业务 {}#{} 字段 {} → {}({})",
+                task.getId(), bizType, task.getBizId(), assignField, displayName, user.getUserId());
     }
 
     /** 分配类任务完成后，按 spawnTaskType 给被分配人创建执行任务 */
@@ -912,6 +1025,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setCompletable(isCompletable(task));
         SysTaskType typeCfg = typeMap.get(task.getTaskType());
         vo.setRequireProof(typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1));
+        vo.setBizAssign(typeCfg != null && StringUtils.hasText(typeCfg.getAssignField()));
         vo.setFileCount(fileCountMap.getOrDefault(task.getId(), 0L).intValue());
 
         List<SysTaskAssigneeVO> list = new ArrayList<>();

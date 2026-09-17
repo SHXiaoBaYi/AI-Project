@@ -29,6 +29,7 @@ public class GeoTopicServiceImpl implements GeoTopicService {
         LambdaQueryWrapper<GeoTopic> wrapper = new LambdaQueryWrapper<GeoTopic>()
                 .like(StringUtils.hasText(query.getTopicName()), GeoTopic::getTopicName, query.getTopicName())
                 .orderByDesc(GeoTopic::getId);
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, GeoTopic::getCreateTime);
         Page<GeoTopic> page = topicMapper.selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         return new PageResult<>(page.getTotal(), page.getRecords());
     }

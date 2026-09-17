@@ -27,4 +27,7 @@ public class GeoBoardQueryDTO {
 
     @Schema(description = "平台（多选）")
     private List<String> platforms;
+
+    @Schema(description = "时间粒度：day/week/month/year", example = "week")
+    private String grain;
 }

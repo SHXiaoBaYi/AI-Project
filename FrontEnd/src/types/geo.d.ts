@@ -191,6 +191,8 @@ export interface GeoChartPoint {
   axis: string;
   series: string;
   value: number;
+  /** 下钻键：话题ID 或目标问题原文 */
+  key?: string;
 }
 
 export interface GeoWeeklyRow {
@@ -343,6 +345,18 @@ export interface GeoDailyBoard {
   ownerSummaryGroups?: GeoDailySummaryDate[];
 }
 
+export interface GeoTopicPlatformCharts {
+  level: 'topic' | 'question' | 'platform' | string;
+  seriesField?: 'topic' | 'question' | 'platform' | string;
+  grain?: string;
+  topicId?: number;
+  topicName?: string;
+  keyword?: string;
+  rankChart?: GeoChartPoint[];
+  sampleChart?: GeoChartPoint[];
+  negativeChart?: GeoChartPoint[];
+}
+
 export interface GeoNegativeSummaryRow {
   inspectDate?: string;
   topicId?: number;
@@ -404,6 +418,7 @@ export interface GeoBoardQuery {
   keyword?: string;
   termType?: string;
   platforms?: string[];
+  grain?: 'day' | 'week' | 'month' | 'year' | string;
 }
 
 export interface GeoContentPlacementListItem {
@@ -425,6 +440,7 @@ export interface GeoContentPlacementListItem {
   platformCount?: number;
   successCount?: number;
   citeCount?: number;
+  proofFileCount?: number;
   remark?: string;
 }
 
@@ -463,6 +479,22 @@ export interface GeoContentPlacementDetail {
   remark?: string;
   items: GeoContentPlacementItem[];
   cites: GeoContentPlacementCite[];
+  proofFiles?: GeoContentPlacementProofFile[];
+}
+
+export interface GeoContentPlacementProofFile {
+  id: number;
+  taskId?: number;
+  taskTitle?: string;
+  taskType?: string;
+  bizType?: string;
+  bizId?: number;
+  fileName: string;
+  fileUrl: string;
+  fileSize?: number;
+  contentType?: string;
+  uploadUserName?: string;
+  createTime?: string;
 }
 
 export interface GeoContentPlacementDTO {

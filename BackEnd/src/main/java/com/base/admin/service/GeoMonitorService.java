@@ -12,6 +12,7 @@ import com.base.admin.domain.vo.GeoDailyBoardVO;
 import com.base.admin.domain.vo.GeoDailyBulkSaveResultVO;
 import com.base.admin.domain.vo.GeoDailyGroupVO;
 import com.base.admin.domain.vo.GeoDailyVO;
+import com.base.admin.domain.vo.GeoTopicPlatformChartsVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoLatestDateVO;
 import com.base.admin.domain.vo.GeoMonthlyBoardVO;
@@ -56,6 +57,11 @@ public interface GeoMonitorService {
     GeoMonthlyBoardVO monthlyBoard(GeoBoardQueryDTO query);
 
     GeoDailyBoardVO dailyBoard(GeoBoardQueryDTO query);
+
+    /**
+     * 话题×平台分组柱状图：不传 topicId 为话题级；传 topicId 下钻到该话题下的目标问题。
+     */
+    GeoTopicPlatformChartsVO topicPlatformCharts(GeoBoardQueryDTO query);
 
     /** 负面/错误内容明细（可点开） */
     List<GeoDailyVO> listNegativeDaily(GeoBoardQueryDTO query);

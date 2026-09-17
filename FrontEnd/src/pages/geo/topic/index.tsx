@@ -7,6 +7,7 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { createGeoTopicApi, deleteGeoTopicApi, getGeoTopicListApi, updateGeoTopicApi } from '@/api/geo';
 import type { GeoTopic } from '@/types/geo';
+import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 const TopicPage = memo(function TopicPage() {
   const { message } = App.useApp();
@@ -22,6 +23,8 @@ const TopicPage = memo(function TopicPage() {
     },
     { title: '开始优化时间', dataIndex: 'optimizeWeek', search: false },
     { title: '备注', dataIndex: 'remark', search: false, ellipsis: true },
+    createTimeRangeColumn<GeoTopic>(),
+    createTimeDisplayColumn<GeoTopic>(),
     {
       title: '操作',
       valueType: 'option',
@@ -67,6 +70,8 @@ const TopicPage = memo(function TopicPage() {
             pageNum: params.current,
             pageSize: params.pageSize,
             topicName: params.topicName,
+            createTimeStart: params.createTimeStart,
+            createTimeEnd: params.createTimeEnd,
           });
           return { data: res.rows, success: true, total: res.total };
         }}

@@ -46,6 +46,7 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
                 .eq(StringUtils.hasText(query.getLoginMethod()), GeoPlatformAccount::getLoginMethod, query.getLoginMethod())
                 .orderByAsc(GeoPlatformAccount::getSortOrder)
                 .orderByDesc(GeoPlatformAccount::getId);
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, GeoPlatformAccount::getCreateTime);
         Page<GeoPlatformAccount> page = accountMapper.selectPage(
                 new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         List<GeoPlatformAccountListVO> rows = page.getRecords().stream().map(this::toListVo).toList();

@@ -129,7 +129,7 @@ public class SysTaskController {
 
     @Operation(summary = "业务关联附件列表")
     @GetMapping("/files/by-biz")
-    @RequiresPermission({"task:list", "task:mine", "geo:content:list"})
+    @RequiresPermission({"task:list", "task:mine", "geo:content:list", "geo:content:work"})
     public Result<List<SysTaskFileVO>> listBizFiles(@RequestParam String bizType, @RequestParam Long bizId) {
         return Result.ok(taskService.listFilesByBiz(bizType, bizId));
     }

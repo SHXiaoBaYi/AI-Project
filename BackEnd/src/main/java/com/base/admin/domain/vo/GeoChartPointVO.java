@@ -15,4 +15,7 @@ public class GeoChartPointVO {
 
     @Schema(description = "数值", example = "37.5")
     private double value;
+
+    @Schema(description = "下钻键（话题ID或目标问题原文）", example = "12")
+    private String key;
 }
