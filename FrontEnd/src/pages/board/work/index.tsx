@@ -1,9 +1,11 @@
-import { useState } from 'react';
-import { Card, DatePicker, Radio, Space } from 'antd';
+import { useEffect, useState } from 'react';
+import { Card, DatePicker, Radio, Select, Space } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { TaskOpsBoard } from '@/components/board/TaskOpsBoard';
-import { type DemoBoardGrain } from '@/constants/demoData';
+import { getGeoOwnerOptionsApi } from '@/api/geo';
+import { getTaskTypeOptionsApi } from '@/api/task';
+import type { DemoBoardGrain } from '@/constants/demoData';
 
 function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
   if (grain === 'week') return [start.startOf('week'), end.endOf('week')];
@@ -12,11 +14,12 @@ function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs
   return [start.startOf('day'), end.endOf('day')];
 }
 
+/** 日/周/月/年默认落在「今日 / 本周 / 本月 / 本年」 */
 function defaultRange(grain: DemoBoardGrain): [Dayjs, Dayjs] {
   const pivot = dayjs();
-  if (grain === 'day') return [pivot.subtract(29, 'day').startOf('day'), pivot.endOf('day')];
-  if (grain === 'week') return [pivot.subtract(3, 'week').startOf('week'), pivot.endOf('week')];
-  if (grain === 'month') return [pivot.subtract(5, 'month').startOf('month'), pivot.endOf('month')];
+  if (grain === 'day') return [pivot.startOf('day'), pivot.endOf('day')];
+  if (grain === 'week') return [pivot.startOf('week'), pivot.endOf('week')];
+  if (grain === 'month') return [pivot.startOf('month'), pivot.endOf('month')];
   return [pivot.startOf('year'), pivot.endOf('year')];
 }
 
@@ -24,6 +27,19 @@ function defaultRange(grain: DemoBoardGrain): [Dayjs, Dayjs] {
 export default function WorkBoardPage() {
   const [grain, setGrain] = useState<DemoBoardGrain>('week');
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => defaultRange('week'));
+  const [filterUserId, setFilterUserId] = useState<number | undefined>();
+  const [taskType, setTaskType] = useState<string | undefined>();
+  const [userOptions, setUserOptions] = useState<{ label: string; value: number }[]>([]);
+  const [typeOptions, setTypeOptions] = useState<{ label: string; value: string }[]>([]);
+
+  useEffect(() => {
+    void getGeoOwnerOptionsApi().then((list) => {
+      setUserOptions((list ?? []).map((u) => ({ label: u.displayName, value: u.userId })));
+    });
+    void getTaskTypeOptionsApi().then((list) => {
+      setTypeOptions((list ?? []).map((t) => ({ label: t.typeName, value: t.typeName })));
+    });
+  }, []);
 
   const onGrainChange = (g: DemoBoardGrain) => {
     setGrain(g);
@@ -65,13 +81,35 @@ export default function WorkBoardPage() {
               if (v?.[0] && v?.[1]) setRange(normalizeRange(grain, v[0], v[1]));
             }}
           />
-          <span className='text-xs text-neutral-400'>仅作用于按时完成率、任务完成率</span>
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp='label'
+            placeholder='人员'
+            className='min-w-[140px]'
+            options={userOptions}
+            value={filterUserId}
+            onChange={(v) => setFilterUserId(v)}
+          />
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp='label'
+            placeholder='任务类型'
+            className='min-w-[160px]'
+            options={typeOptions}
+            value={taskType}
+            onChange={(v) => setTaskType(v)}
+          />
+          <span className='text-xs text-neutral-400'>筛选同时作用于下方四个看板</span>
         </Space>
       </Card>
 
       <TaskOpsBoard
         grain={grain}
         range={range}
+        filterUserId={filterUserId}
+        taskType={taskType}
       />
     </div>
   );

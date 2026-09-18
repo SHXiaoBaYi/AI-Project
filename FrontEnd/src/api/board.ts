@@ -115,23 +115,22 @@ export function boardTaskTofuPublishDetailApi(data: BoardTaskTofuQuery) {
   return request.post<unknown, BoardTaskPublishDetail[]>('/board/task/tofu-publish-detail', data);
 }
 
-export type BoardTaskOpsMetric =
-  'todayDue' | 'todayOverdue' | 'weekDue' | 'weekOverdue' | 'todayDone' | 'weekDone' | 'onTimeRate' | 'completionRate';
+export type BoardTaskOpsMetric = 'periodDue' | 'periodOverdue' | 'periodDone' | 'onTimeRate' | 'completionRate';
 
 export type BoardTaskOpsQuery = {
   startDate?: string;
   endDate?: string;
-  asOfDate?: string;
+  grain?: string;
+  filterUserId?: number;
+  taskType?: string;
 };
 
 export type BoardTaskOpsSummary = {
-  asOfDate?: string;
-  todayDue: number;
-  todayOverdue: number;
-  weekDue: number;
-  weekOverdue: number;
-  todayDone: number;
-  weekDone: number;
+  grain?: string;
+  periodLabel?: string;
+  periodDue: number;
+  periodOverdue: number;
+  periodDone: number;
   onTimeDone: number;
   rangeDone: number;
   onTimeRate: number;
@@ -146,6 +145,7 @@ export type BoardTaskOpsDrillQuery = BoardTaskOpsQuery & {
   metric: BoardTaskOpsMetric;
   subFilter?: string;
   level?: 'person' | 'task';
+  /** 完成率下钻到具体员工后的用户ID */
   personUserId?: number;
   pageNum?: number;
   pageSize?: number;

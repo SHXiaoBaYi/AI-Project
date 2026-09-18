@@ -10,17 +10,13 @@ import type {
   GeoDailyGroup,
   GeoDailyVO,
   GeoImportResult,
-  GeoMonthlyBoard,
   GeoOwnerOption,
-  GeoPersistResult,
   GeoPlatform,
   GeoPlatformAccount,
   GeoPlatformAccountDTO,
   GeoTopic,
   GeoTopicPlatformCharts,
-  GeoWeeklyBoard,
   GeoYearTarget,
-  GeoYearlyBoard,
   GeoContentPlacementCite,
   GeoContentPlacementCiteDTO,
   GeoContentPlacementDetail,
@@ -29,11 +25,6 @@ import type {
   GeoContentPlacementItemDTO,
   GeoContentPlacementListItem,
   GeoContentPlacementProofFile,
-  GeoContentPublisherWeekBoard,
-  GeoContentPublisherWeekDetail,
-  GeoContentArticleBoard,
-  GeoContentArticleBoardQuery,
-  GeoContentArticleDetailRow,
 } from '@/types/geo';
 
 export function getGeoTopicListApi(data: PageQuery & { topicName?: string }) {
@@ -186,36 +177,12 @@ export function getGeoOwnerOptionsApi() {
   return request.get<unknown, GeoOwnerOption[]>('/geo/daily/owners');
 }
 
-export function getGeoWeeklyBoardApi(data: GeoBoardQuery) {
-  return request.post<unknown, GeoWeeklyBoard>('/geo/weekly/board', data);
-}
-
-export function persistGeoWeeklyBoardApi(data: GeoBoardQuery) {
-  return request.post<unknown, GeoPersistResult>('/geo/weekly/persist', data);
-}
-
-export function getGeoMonthlyBoardApi(data: GeoBoardQuery) {
-  return request.post<unknown, GeoMonthlyBoard>('/geo/monthly/board', data);
-}
-
-export function persistGeoMonthlyBoardApi(data: GeoBoardQuery) {
-  return request.post<unknown, GeoPersistResult>('/geo/monthly/persist', data);
-}
-
 export function getGeoDailyBoardApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoDailyBoard>('/geo/day/board', data);
 }
 
 export function getGeoTopicPlatformChartsApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoTopicPlatformCharts>('/geo/day/topic-platform-charts', data);
-}
-
-export function getGeoYearlyBoardApi(data: GeoBoardQuery) {
-  return request.post<unknown, GeoYearlyBoard>('/geo/yearly/board', data);
-}
-
-export function persistGeoYearlyBoardApi(data: GeoBoardQuery) {
-  return request.post<unknown, GeoPersistResult>('/geo/yearly/persist', data);
 }
 
 export function getGeoYearTargetsApi() {
@@ -243,23 +210,6 @@ export function getGeoContentPlacementListApi(
   },
 ) {
   return request.post<unknown, PageResult<GeoContentPlacementListItem>>('/geo/content-placement/list', data);
-}
-
-export function getGeoContentPublisherWeeklyBoardApi(data: {
-  startDate: string;
-  endDate: string;
-  publisherUserId?: number;
-}) {
-  return request.post<unknown, GeoContentPublisherWeekBoard>('/geo/content-placement/publisher-weekly-board', data);
-}
-
-export function getGeoContentPublisherWeeklyDetailApi(data: {
-  startDate: string;
-  endDate: string;
-  publisherUserId: number;
-  metric: string;
-}) {
-  return request.post<unknown, GeoContentPublisherWeekDetail[]>('/geo/content-placement/publisher-weekly-detail', data);
 }
 
 export function getGeoContentPlacementDetailApi(id: number) {
@@ -338,14 +288,4 @@ export function importGeoContentPlacementApi(file: File) {
 
 export function getGeoNegativeDailyApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoDailyVO[]>('/geo/day/negatives', data);
-}
-
-export function getGeoContentArticleBoardApi(data: GeoContentArticleBoardQuery) {
-  return request.post<unknown, GeoContentArticleBoard>('/geo/content-placement/article-board', data);
-}
-
-export function getGeoContentArticleDetailApi(
-  data: GeoContentArticleBoardQuery & { detailType: string; dimensionKey?: string },
-) {
-  return request.post<unknown, GeoContentArticleDetailRow[]>('/geo/content-placement/article-board/detail', data);
 }

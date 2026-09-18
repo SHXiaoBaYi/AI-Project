@@ -1,23 +1,15 @@
 package com.base.admin.service;
 
 import com.base.admin.common.PageResult;
-import com.base.admin.domain.dto.GeoContentArticleBoardQueryDTO;
-import com.base.admin.domain.dto.GeoContentArticleDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
-import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
-import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
-import com.base.admin.domain.vo.GeoContentArticleBoardVO;
-import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
 import com.base.admin.domain.vo.GeoContentPlacementItemVO;
 import com.base.admin.domain.vo.GeoContentPlacementListVO;
-import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
-import com.base.admin.domain.vo.GeoContentPublisherWeekDetailVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
@@ -28,12 +20,6 @@ import java.util.List;
 public interface GeoContentPlacementService {
 
     PageResult<GeoContentPlacementListVO> list(GeoContentPlacementQueryDTO query);
-
-    /** 发布人维度周看板（按 ISO 周拆行） */
-    GeoContentPublisherWeekBoardVO publisherWeeklyBoard(GeoContentPublisherWeekQueryDTO query);
-
-    /** 发布人周看板指标明细 */
-    List<GeoContentPublisherWeekDetailVO> publisherWeeklyDetail(GeoContentPublisherWeekDetailQueryDTO query);
 
     GeoContentPlacementDetailVO getDetail(Long id);
 
@@ -79,12 +65,6 @@ public interface GeoContentPlacementService {
 
     /** 按发布详情回填主表投放进度 */
     int backfillPlacementProgress();
-
-    /** 文章发布/收录看板 */
-    GeoContentArticleBoardVO articlePublishBoard(GeoContentArticleBoardQueryDTO query);
-
-    /** 文章发布/收录下钻明细 */
-    List<GeoContentArticleDetailRowVO> articlePublishDetail(GeoContentArticleDetailQueryDTO query);
 
     /** 固化已结束的内容投放周报 */
     GeoPersistResultVO autoPersistCompletedWeekly(int lookbackWeeks);

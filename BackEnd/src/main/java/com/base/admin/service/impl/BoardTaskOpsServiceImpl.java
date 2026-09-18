@@ -44,25 +44,10 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
 
     @Override
     public BoardTaskOpsSummaryVO summary(BoardTaskOpsQueryDTO query) {
-        LocalDate asOf = parseDay(query == null ? null : query.getAsOfDate(), LocalDate.now());
-        LocalDate rangeStart = parseDay(query == null ? null : query.getStartDate(), asOf.with(ISO.dayOfWeek(), 1).minusWeeks(3));
-        LocalDate rangeEnd = parseDay(query == null ? null : query.getEndDate(), asOf.with(ISO.dayOfWeek(), 7));
-        if (rangeEnd.isBefore(rangeStart)) {
-            LocalDate tmp = rangeStart;
-            rangeStart = rangeEnd;
-            rangeEnd = tmp;
-        }
+        QueryCtx ctx = resolveCtx(query == null ? new BoardTaskOpsQueryDTO() : query);
+        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserId, ctx.taskType);
 
-        LocalDate weekStart = asOf.with(ISO.dayOfWeek(), 1);
-        LocalDate weekEnd = asOf.with(ISO.dayOfWeek(), 7);
-        LocalDateTime now = asOf.atTime(LocalTime.now());
-
-        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
-                .ne(SysTask::getStatus, "已取消")
-                .orderByDesc(SysTask::getId));
-
-        long todayDue = 0, todayOverdue = 0, weekDue = 0, weekOverdue = 0;
-        long todayDone = 0, weekDone = 0;
+        long periodDue = 0, periodOverdue = 0, periodDone = 0;
         long onTimeDone = 0, rangeDone = 0, rangeCompleted = 0, rangeTotal = 0;
 
         for (SysTask t : tasks) {
@@ -72,37 +57,20 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
             LocalDate planDay = t.getPlanEndTime() == null ? null : t.getPlanEndTime().toLocalDate();
             LocalDate actualDay = resolveActualEndDay(t);
 
-            if (open && planDay != null) {
-                if (planDay.equals(asOf)) {
-                    todayDue++;
-                    if (isOverdue(t, now)) {
-                        todayOverdue++;
-                    }
-                }
-                if (!planDay.isBefore(weekStart) && !planDay.isAfter(weekEnd)) {
-                    weekDue++;
-                    if (isOverdue(t, now)) {
-                        weekOverdue++;
-                    }
+            if (open && planDay != null && inRange(planDay, ctx.rangeStart, ctx.rangeEnd)) {
+                periodDue++;
+                if (isOverdue(t, ctx.now)) {
+                    periodOverdue++;
                 }
             }
-
-            if (done && actualDay != null) {
-                if (actualDay.equals(asOf)) {
-                    todayDone++;
-                }
-                if (!actualDay.isBefore(weekStart) && !actualDay.isAfter(weekEnd)) {
-                    weekDone++;
-                }
-                if (!actualDay.isBefore(rangeStart) && !actualDay.isAfter(rangeEnd)) {
-                    rangeDone++;
-                    if (isOnTime(t)) {
-                        onTimeDone++;
-                    }
+            if (done && actualDay != null && inRange(actualDay, ctx.rangeStart, ctx.rangeEnd)) {
+                periodDone++;
+                rangeDone++;
+                if (isOnTime(t)) {
+                    onTimeDone++;
                 }
             }
-
-            if (planDay != null && !planDay.isBefore(rangeStart) && !planDay.isAfter(rangeEnd) && !"已取消".equals(st)) {
+            if (planDay != null && inRange(planDay, ctx.rangeStart, ctx.rangeEnd) && !"已取消".equals(st)) {
                 rangeTotal++;
                 if (done) {
                     rangeCompleted++;
@@ -111,15 +79,13 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         }
 
         BoardTaskOpsSummaryVO vo = new BoardTaskOpsSummaryVO();
-        vo.setAsOfDate(asOf.format(DAY));
-        vo.setStartDate(rangeStart.format(DAY));
-        vo.setEndDate(rangeEnd.format(DAY));
-        vo.setTodayDue(todayDue);
-        vo.setTodayOverdue(todayOverdue);
-        vo.setWeekDue(weekDue);
-        vo.setWeekOverdue(weekOverdue);
-        vo.setTodayDone(todayDone);
-        vo.setWeekDone(weekDone);
+        vo.setGrain(ctx.grain);
+        vo.setPeriodLabel(periodLabel(ctx.grain));
+        vo.setStartDate(ctx.rangeStart.format(DAY));
+        vo.setEndDate(ctx.rangeEnd.format(DAY));
+        vo.setPeriodDue(periodDue);
+        vo.setPeriodOverdue(periodOverdue);
+        vo.setPeriodDone(periodDone);
         vo.setOnTimeDone(onTimeDone);
         vo.setRangeDone(rangeDone);
         vo.setOnTimeRate(pct(onTimeDone, rangeDone));
@@ -138,25 +104,15 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         if (!"onTimeRate".equals(metric) && !"completionRate".equals(metric)) {
             return new PageResult<>(0L, List.of());
         }
-        LocalDate asOf = parseDay(query.getAsOfDate(), LocalDate.now());
-        LocalDate rangeStart = parseDay(query.getStartDate(), asOf.with(ISO.dayOfWeek(), 1).minusWeeks(3));
-        LocalDate rangeEnd = parseDay(query.getEndDate(), asOf.with(ISO.dayOfWeek(), 7));
-        if (rangeEnd.isBefore(rangeStart)) {
-            LocalDate tmp = rangeStart;
-            rangeStart = rangeEnd;
-            rangeEnd = tmp;
-        }
-
-        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
-                .ne(SysTask::getStatus, "已取消")
-                .orderByDesc(SysTask::getId));
+        QueryCtx ctx = resolveCtx(query);
+        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserId, ctx.taskType);
         Map<Long, List<SysTaskAssignee>> assigneesByTask = loadAssigneesByTask(
                 tasks.stream().map(SysTask::getId).filter(Objects::nonNull).toList());
 
         Map<Long, Agg> aggMap = new LinkedHashMap<>();
         for (SysTask t : tasks) {
             if ("onTimeRate".equals(metric)) {
-                if (!matchMetric(t, "onTimeRate", "all", asOf, asOf, asOf, rangeStart, rangeEnd, asOf.atStartOfDay())) {
+                if (!matchMetric(t, "onTimeRate", "all", ctx)) {
                     continue;
                 }
                 String tag = timingTagOf(t);
@@ -175,7 +131,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
                     }
                 }
             } else {
-                if (!matchMetric(t, "completionRate", "all", asOf, asOf, asOf, rangeStart, rangeEnd, asOf.atStartOfDay())) {
+                if (!matchMetric(t, "completionRate", "all", ctx)) {
                     continue;
                 }
                 boolean done = "已完成".equals(nz(t.getStatus(), "未开始"));
@@ -224,34 +180,21 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         if (query == null || !StringUtils.hasText(query.getMetric())) {
             return new PageResult<>(0L, List.of());
         }
-        LocalDate asOf = parseDay(query.getAsOfDate(), LocalDate.now());
-        LocalDate rangeStart = parseDay(query.getStartDate(), asOf.with(ISO.dayOfWeek(), 1).minusWeeks(3));
-        LocalDate rangeEnd = parseDay(query.getEndDate(), asOf.with(ISO.dayOfWeek(), 7));
-        if (rangeEnd.isBefore(rangeStart)) {
-            LocalDate tmp = rangeStart;
-            rangeStart = rangeEnd;
-            rangeEnd = tmp;
-        }
-        LocalDate weekStart = asOf.with(ISO.dayOfWeek(), 1);
-        LocalDate weekEnd = asOf.with(ISO.dayOfWeek(), 7);
-        LocalDateTime now = asOf.atTime(LocalTime.now());
+        QueryCtx ctx = resolveCtx(query);
         String metric = query.getMetric().trim();
         String sub = query.getSubFilter() == null ? "all" : query.getSubFilter().trim();
-        Long personUserId = query.getPersonUserId();
+        Long drillPersonUserId = query.getPersonUserId();
 
-        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
-                .ne(SysTask::getStatus, "已取消")
-                .orderByDesc(SysTask::getId));
-        Map<Long, List<SysTaskAssignee>> assigneesByTask = personUserId == null
-                ? Map.of()
-                : loadAssigneesByTask(tasks.stream().map(SysTask::getId).filter(Objects::nonNull).toList());
+        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserId, ctx.taskType);
+        Map<Long, List<SysTaskAssignee>> assigneesByTask =
+                loadAssigneesByTask(tasks.stream().map(SysTask::getId).filter(Objects::nonNull).toList());
 
         List<SysTask> matched = new ArrayList<>();
         for (SysTask t : tasks) {
-            if (!matchMetric(t, metric, sub, asOf, weekStart, weekEnd, rangeStart, rangeEnd, now)) {
+            if (!matchMetric(t, metric, sub, ctx)) {
                 continue;
             }
-            if (personUserId != null && !belongsToPerson(t, personUserId, assigneesByTask)) {
+            if (drillPersonUserId != null && !belongsToPerson(t, drillPersonUserId, assigneesByTask)) {
                 continue;
             }
             matched.add(t);
@@ -269,9 +212,123 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
 
         Map<Long, String> assigneeNames = loadAssigneeNames(pageTasks.stream().map(SysTask::getId).toList());
         List<BoardTaskOpsRowVO> rows = pageTasks.stream()
-                .map(t -> toRow(t, now, assigneeNames.getOrDefault(t.getId(), "")))
+                .map(t -> toRow(t, ctx.now, assigneeNames.getOrDefault(t.getId(), "")))
                 .toList();
         return new PageResult<>((long) matched.size(), rows);
+    }
+
+    private List<SysTask> loadFilteredTasks(Long filterUserId, String taskType) {
+        LambdaQueryWrapper<SysTask> w = new LambdaQueryWrapper<SysTask>()
+                .ne(SysTask::getStatus, "已取消")
+                .eq(StringUtils.hasText(taskType), SysTask::getTaskType, taskType)
+                .orderByDesc(SysTask::getId);
+        List<SysTask> tasks = taskMapper.selectList(w);
+        if (filterUserId == null) {
+            return tasks;
+        }
+        Map<Long, List<SysTaskAssignee>> assigneesByTask = loadAssigneesByTask(
+                tasks.stream().map(SysTask::getId).filter(Objects::nonNull).toList());
+        return tasks.stream()
+                .filter(t -> belongsToPerson(t, filterUserId, assigneesByTask))
+                .toList();
+    }
+
+    private QueryCtx resolveCtx(BoardTaskOpsQueryDTO query) {
+        String grain = normalizeGrain(query.getGrain());
+        LocalDate today = LocalDate.now();
+        LocalDate[] defaults = defaultRange(grain, today);
+        LocalDate rangeStart = parseDay(query.getStartDate(), defaults[0]);
+        LocalDate rangeEnd = parseDay(query.getEndDate(), defaults[1]);
+        if (rangeEnd.isBefore(rangeStart)) {
+            LocalDate tmp = rangeStart;
+            rangeStart = rangeEnd;
+            rangeEnd = tmp;
+        }
+        return new QueryCtx(grain, rangeStart, rangeEnd, today.atTime(LocalTime.now()),
+                query.getFilterUserId(), query.getTaskType());
+    }
+
+    private QueryCtx resolveCtx(BoardTaskOpsDrillQueryDTO query) {
+        BoardTaskOpsQueryDTO q = new BoardTaskOpsQueryDTO();
+        q.setStartDate(query.getStartDate());
+        q.setEndDate(query.getEndDate());
+        q.setGrain(query.getGrain());
+        q.setFilterUserId(query.getFilterUserId());
+        q.setTaskType(query.getTaskType());
+        return resolveCtx(q);
+    }
+
+    private static LocalDate[] defaultRange(String grain, LocalDate asOf) {
+        return switch (grain) {
+            case "day" -> new LocalDate[]{asOf, asOf};
+            case "month" -> new LocalDate[]{asOf.withDayOfMonth(1), asOf.withDayOfMonth(asOf.lengthOfMonth())};
+            case "year" -> new LocalDate[]{asOf.withDayOfYear(1), asOf.withDayOfYear(asOf.lengthOfYear())};
+            default -> new LocalDate[]{asOf.with(ISO.dayOfWeek(), 1), asOf.with(ISO.dayOfWeek(), 7)};
+        };
+    }
+
+    private static String normalizeGrain(String grain) {
+        if (!StringUtils.hasText(grain)) {
+            return "week";
+        }
+        String g = grain.trim().toLowerCase();
+        if ("day".equals(g) || "month".equals(g) || "year".equals(g) || "week".equals(g)) {
+            return g;
+        }
+        return "week";
+    }
+
+    private static String periodLabel(String grain) {
+        return switch (grain) {
+            case "day" -> "今日";
+            case "month" -> "本月";
+            case "year" -> "本年";
+            default -> "本周";
+        };
+    }
+
+    private boolean matchMetric(SysTask t, String metric, String sub, QueryCtx ctx) {
+        String st = nz(t.getStatus(), "未开始");
+        boolean open = isOpen(st);
+        boolean done = "已完成".equals(st);
+        LocalDate planDay = t.getPlanEndTime() == null ? null : t.getPlanEndTime().toLocalDate();
+        LocalDate actualDay = resolveActualEndDay(t);
+
+        return switch (metric) {
+            case "periodDue", "todayDue", "weekDue" ->
+                    open && planDay != null && inRange(planDay, ctx.rangeStart, ctx.rangeEnd);
+            case "periodOverdue", "todayOverdue", "weekOverdue" ->
+                    open && planDay != null && inRange(planDay, ctx.rangeStart, ctx.rangeEnd) && isOverdue(t, ctx.now);
+            case "periodDone", "todayDone", "weekDone" -> {
+                if (!done || actualDay == null || !inRange(actualDay, ctx.rangeStart, ctx.rangeEnd)) {
+                    yield false;
+                }
+                yield matchTimingSub(t, sub);
+            }
+            case "onTimeRate" -> {
+                if (!done || actualDay == null || !inRange(actualDay, ctx.rangeStart, ctx.rangeEnd)) {
+                    yield false;
+                }
+                yield matchTimingSub(t, sub);
+            }
+            case "completionRate" -> {
+                if (planDay == null || !inRange(planDay, ctx.rangeStart, ctx.rangeEnd) || "已取消".equals(st)) {
+                    yield false;
+                }
+                if ("done".equalsIgnoreCase(sub)) {
+                    yield done;
+                }
+                if ("open".equalsIgnoreCase(sub)) {
+                    yield open;
+                }
+                yield true;
+            }
+            default -> false;
+        };
+    }
+
+    private static boolean inRange(LocalDate day, LocalDate start, LocalDate end) {
+        return day != null && !day.isBefore(start) && !day.isAfter(end);
     }
 
     private static <T> PageResult<T> pageOf(List<T> all, Integer pageNumRaw, Integer pageSizeRaw) {
@@ -280,6 +337,10 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         int from = Math.min((pageNum - 1) * pageSize, all.size());
         int to = Math.min(from + pageSize, all.size());
         return new PageResult<>((long) all.size(), all.subList(from, to));
+    }
+
+    private record QueryCtx(String grain, LocalDate rangeStart, LocalDate rangeEnd, LocalDateTime now,
+                            Long filterUserId, String taskType) {
     }
 
     private record PersonRef(Long userId, String userName) {
@@ -340,55 +401,6 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         return personsOf(t, assigneesByTask).stream().anyMatch(p -> Objects.equals(p.userId(), personUserId));
     }
 
-    private boolean matchMetric(SysTask t, String metric, String sub,
-                                LocalDate asOf, LocalDate weekStart, LocalDate weekEnd,
-                                LocalDate rangeStart, LocalDate rangeEnd, LocalDateTime now) {
-        String st = nz(t.getStatus(), "未开始");
-        boolean open = isOpen(st);
-        boolean done = "已完成".equals(st);
-        LocalDate planDay = t.getPlanEndTime() == null ? null : t.getPlanEndTime().toLocalDate();
-        LocalDate actualDay = resolveActualEndDay(t);
-
-        return switch (metric) {
-            case "todayDue" -> open && planDay != null && planDay.equals(asOf);
-            case "todayOverdue" -> open && planDay != null && planDay.equals(asOf) && isOverdue(t, now);
-            case "weekDue" -> open && planDay != null && !planDay.isBefore(weekStart) && !planDay.isAfter(weekEnd);
-            case "weekOverdue" -> open && planDay != null && !planDay.isBefore(weekStart) && !planDay.isAfter(weekEnd)
-                    && isOverdue(t, now);
-            case "todayDone" -> {
-                if (!done || actualDay == null || !actualDay.equals(asOf)) {
-                    yield false;
-                }
-                yield matchTimingSub(t, sub);
-            }
-            case "weekDone" -> {
-                if (!done || actualDay == null || actualDay.isBefore(weekStart) || actualDay.isAfter(weekEnd)) {
-                    yield false;
-                }
-                yield matchTimingSub(t, sub);
-            }
-            case "onTimeRate" -> {
-                if (!done || actualDay == null || actualDay.isBefore(rangeStart) || actualDay.isAfter(rangeEnd)) {
-                    yield false;
-                }
-                yield matchTimingSub(t, sub);
-            }
-            case "completionRate" -> {
-                if (planDay == null || planDay.isBefore(rangeStart) || planDay.isAfter(rangeEnd) || "已取消".equals(st)) {
-                    yield false;
-                }
-                if ("done".equalsIgnoreCase(sub)) {
-                    yield done;
-                }
-                if ("open".equalsIgnoreCase(sub)) {
-                    yield open;
-                }
-                yield true;
-            }
-            default -> false;
-        };
-    }
-
     private BoardTaskOpsRowVO toRow(SysTask t, LocalDateTime now, String assigneeNames) {
         BoardTaskOpsRowVO row = new BoardTaskOpsRowVO();
         row.setId(t.getId());
@@ -443,7 +455,6 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         }
     }
 
-    /** 完成明细子筛：all / onTime / early / late */
     private static boolean matchTimingSub(SysTask t, String sub) {
         if (!StringUtils.hasText(sub) || "all".equalsIgnoreCase(sub)) {
             return true;

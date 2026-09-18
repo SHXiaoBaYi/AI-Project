@@ -1,9 +1,7 @@
 /** GEO 模块用户可见文案（菜单 / 页头 / 图表统一） */
 export const GEO_LABEL = {
   daily: '日监测数据',
-  exposeBoard: '露出看板',
   yearlyTarget: '全年目标',
-  articleBoard: '数据看板',
   contentManage: '投放管理',
   contentWork: '我的投放',
   topic: '话题管理',

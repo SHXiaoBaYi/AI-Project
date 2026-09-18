@@ -4,15 +4,21 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 @Data
-@Schema(description = "任务看板汇总查询（③④受日期范围约束）")
+@Schema(description = "任务看板汇总查询（筛选作用于全部指标）")
 public class BoardTaskOpsQueryDTO {
 
-    @Schema(description = "开始日期 yyyy-MM-dd，作用于按时完成率/完成率")
+    @Schema(description = "开始日期 yyyy-MM-dd")
     private String startDate;
 
-    @Schema(description = "结束日期 yyyy-MM-dd，作用于按时完成率/完成率")
+    @Schema(description = "结束日期 yyyy-MM-dd")
     private String endDate;
 
-    @Schema(description = "锚定「今日/本周」的业务日，默认服务器当天；演示可传 2015-12-31")
-    private String asOfDate;
+    @Schema(description = "粒度 day/week/month/year，用于默认区间与文案")
+    private String grain;
+
+    @Schema(description = "人员筛选：执行人或负责人用户ID")
+    private Long filterUserId;
+
+    @Schema(description = "任务类型")
+    private String taskType;
 }

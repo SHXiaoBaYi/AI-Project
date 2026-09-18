@@ -123,11 +123,13 @@ function RateCard({
 export function TaskOpsBoard({
   grain,
   range,
-  asOfDate,
+  filterUserId,
+  taskType,
 }: {
   grain: DemoBoardGrain;
   range: [Dayjs, Dayjs];
-  asOfDate?: string;
+  filterUserId?: number;
+  taskType?: string;
 }) {
   const [summary, setSummary] = useState<BoardTaskOpsSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -140,13 +142,19 @@ export function TaskOpsBoard({
   const [drillLoading, setDrillLoading] = useState(false);
   const [subFilter, setSubFilter] = useState('all');
 
+  const periodLabel =
+    summary?.periodLabel ||
+    (grain === 'day' ? '今日' : grain === 'month' ? '本月' : grain === 'year' ? '本年' : '本周');
+
   const queryBase = useMemo(
     () => ({
       startDate: range[0].format('YYYY-MM-DD'),
       endDate: range[1].format('YYYY-MM-DD'),
-      asOfDate,
+      grain,
+      filterUserId,
+      taskType,
     }),
-    [range, asOfDate],
+    [range, grain, filterUserId, taskType],
   );
 
   const loadSummary = useCallback(async () => {
@@ -164,6 +172,10 @@ export function TaskOpsBoard({
   useEffect(() => {
     void loadSummary();
   }, [loadSummary]);
+
+  useEffect(() => {
+    setDrill(null);
+  }, [queryBase.startDate, queryBase.endDate, queryBase.grain, queryBase.filterUserId, queryBase.taskType]);
 
   const loadDrill = useCallback(
     async (state: DrillState, page: number, size: number, filter: string) => {
@@ -360,8 +372,7 @@ export function TaskOpsBoard({
   return (
     <div className='flex flex-col gap-3'>
       <div className='text-xs text-neutral-400'>
-        ①②按「今日/本周」（锚定 {summary?.asOfDate ?? asOfDate ?? '今天'}）；③④受页顶日期筛选（{grain}
-        ）；完成率先按员工再下钻任务
+        日/周/月/年对应{periodLabel}指标；页顶日期、人员、任务类型同时作用于四个看板；完成率先按员工再下钻任务
       </div>
       <Row gutter={[12, 12]}>
         <Col
@@ -371,7 +382,7 @@ export function TaskOpsBoard({
         >
           <Card
             size='small'
-            title='到期 / 超时'
+            title={`${periodLabel}到期 / 超时`}
             loading={loading}
             className='h-full'
           >
@@ -380,26 +391,15 @@ export function TaskOpsBoard({
               size={[8, 8]}
             >
               <MetricClick
-                label='今日到期'
-                value={summary?.todayDue ?? 0}
-                onClick={() => openDrill({ metric: 'todayDue', title: '今日到期任务', level: 'task' })}
+                label={`${periodLabel}到期`}
+                value={summary?.periodDue ?? 0}
+                onClick={() => openDrill({ metric: 'periodDue', title: `${periodLabel}到期任务`, level: 'task' })}
               />
               <MetricClick
-                label='今日超时'
-                value={summary?.todayOverdue ?? 0}
+                label={`${periodLabel}超时`}
+                value={summary?.periodOverdue ?? 0}
                 danger
-                onClick={() => openDrill({ metric: 'todayOverdue', title: '今日超时任务', level: 'task' })}
-              />
-              <MetricClick
-                label='本周到期'
-                value={summary?.weekDue ?? 0}
-                onClick={() => openDrill({ metric: 'weekDue', title: '本周到期任务', level: 'task' })}
-              />
-              <MetricClick
-                label='本周超时'
-                value={summary?.weekOverdue ?? 0}
-                danger
-                onClick={() => openDrill({ metric: 'weekOverdue', title: '本周超时任务', level: 'task' })}
+                onClick={() => openDrill({ metric: 'periodOverdue', title: `${periodLabel}超时任务`, level: 'task' })}
               />
             </Space>
           </Card>
@@ -411,7 +411,7 @@ export function TaskOpsBoard({
         >
           <Card
             size='small'
-            title='已完成'
+            title={`${periodLabel}完成`}
             loading={loading}
             className='h-full'
           >
@@ -420,17 +420,15 @@ export function TaskOpsBoard({
               size={[8, 8]}
             >
               <MetricClick
-                label='今日完成'
-                value={summary?.todayDone ?? 0}
+                label={`${periodLabel}完成`}
+                value={summary?.periodDone ?? 0}
                 onClick={() =>
-                  openDrill({ metric: 'todayDone', title: '今日完成任务', level: 'task', showSub: 'timing' })
-                }
-              />
-              <MetricClick
-                label='本周完成'
-                value={summary?.weekDone ?? 0}
-                onClick={() =>
-                  openDrill({ metric: 'weekDone', title: '本周完成任务', level: 'task', showSub: 'timing' })
+                  openDrill({
+                    metric: 'periodDone',
+                    title: `${periodLabel}完成任务`,
+                    level: 'task',
+                    showSub: 'timing',
+                  })
                 }
               />
             </Space>

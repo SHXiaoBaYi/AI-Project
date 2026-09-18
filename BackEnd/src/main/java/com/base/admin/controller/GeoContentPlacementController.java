@@ -4,24 +4,16 @@ import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
-import com.base.admin.domain.dto.GeoContentArticleBoardQueryDTO;
-import com.base.admin.domain.dto.GeoContentArticleDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
-import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
-import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
 import com.base.admin.domain.dto.GeoGenerateSimilarDTO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
-import com.base.admin.domain.vo.GeoContentArticleBoardVO;
-import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
 import com.base.admin.domain.vo.GeoContentPlacementItemVO;
 import com.base.admin.domain.vo.GeoContentPlacementListVO;
-import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
-import com.base.admin.domain.vo.GeoContentPublisherWeekDetailVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.service.GeoContentPlacementService;
@@ -55,37 +47,6 @@ public class GeoContentPlacementController {
     @RequiresPermission({"geo:content:list", "geo:content:work"})
     public Result<PageResult<GeoContentPlacementListVO>> list(@RequestBody GeoContentPlacementQueryDTO query) {
         return Result.ok(contentPlacementService.list(query));
-    }
-
-    @Operation(summary = "发布人维度周看板")
-    @PostMapping("/publisher-weekly-board")
-    @RequiresPermission({"geo:content:list", "geo:article:list", "board:view"})
-    public Result<GeoContentPublisherWeekBoardVO> publisherWeeklyBoard(@RequestBody GeoContentPublisherWeekQueryDTO query) {
-        return Result.ok(contentPlacementService.publisherWeeklyBoard(query));
-    }
-
-    @Operation(summary = "发布人周看板指标明细")
-    @PostMapping("/publisher-weekly-detail")
-    @RequiresPermission({"geo:content:list", "geo:article:list", "board:view"})
-    public Result<List<GeoContentPublisherWeekDetailVO>> publisherWeeklyDetail(
-            @Valid @RequestBody GeoContentPublisherWeekDetailQueryDTO query) {
-        return Result.ok(contentPlacementService.publisherWeeklyDetail(query));
-    }
-
-    @Operation(summary = "文章发布/收录看板")
-    @PostMapping("/article-board")
-    @RequiresPermission({"geo:content:list", "geo:article:list", "board:view"})
-    public Result<GeoContentArticleBoardVO> articleBoard(@RequestBody(required = false) GeoContentArticleBoardQueryDTO query) {
-        return Result.ok(contentPlacementService.articlePublishBoard(
-                query == null ? new GeoContentArticleBoardQueryDTO() : query));
-    }
-
-    @Operation(summary = "文章发布/收录看板下钻明细")
-    @PostMapping("/article-board/detail")
-    @RequiresPermission({"geo:content:list", "geo:article:list", "board:view"})
-    public Result<List<GeoContentArticleDetailRowVO>> articleBoardDetail(
-            @Valid @RequestBody GeoContentArticleDetailQueryDTO query) {
-        return Result.ok(contentPlacementService.articlePublishDetail(query));
     }
 
     @Operation(summary = "内容投放详情")
