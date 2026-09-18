@@ -48,6 +48,32 @@ public final class ExcelCellUtils {
         }
         return cell.getHyperlink().getAddress().trim();
     }
+    /** 读取数值单元格；百分比可能存为 0.8 或 80 */
+    public static java.math.BigDecimal decimal(Sheet sheet, int rowIdx, int colIdx) {
+        Cell cell = resolvedCell(sheet, rowIdx, colIdx);
+        if (cell == null) {
+            return null;
+        }
+        if (cell.getCellType() == CellType.NUMERIC) {
+            return java.math.BigDecimal.valueOf(cell.getNumericCellValue());
+        }
+        if (cell.getCellType() == CellType.FORMULA) {
+            try {
+                return java.math.BigDecimal.valueOf(cell.getNumericCellValue());
+            } catch (Exception ignored) {
+                // fall through
+            }
+        }
+        String text = FORMATTER.formatCellValue(cell).trim().replace("%", "");
+        if (text.isEmpty()) {
+            return null;
+        }
+        try {
+            return new java.math.BigDecimal(text);
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
     public static LocalDate date(Sheet sheet, int rowIdx, int colIdx) {
         Cell cell = resolvedCell(sheet, rowIdx, colIdx);

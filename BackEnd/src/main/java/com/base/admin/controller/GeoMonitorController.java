@@ -27,6 +27,7 @@ import com.base.admin.domain.vo.GeoYearlyBoardVO;
 import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoImportJobService;
 import com.base.admin.service.GeoMonitorService;
+import com.base.admin.service.GeoSeedService;
 import com.base.admin.util.GeoExcelTemplateWriter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -61,6 +62,7 @@ public class GeoMonitorController {
     private final GeoMonitorService monitorService;
     private final FileStorageService fileStorageService;
     private final GeoImportJobService importJobService;
+    private final GeoSeedService seedService;
 
     @Operation(summary = "日监测分页")
     @PostMapping("/daily/list")
@@ -262,6 +264,14 @@ public class GeoMonitorController {
     @Log(title = "GEO年报落库", businessType = 1)
     public Result<GeoPersistResultVO> persistYearly(@RequestBody(required = false) GeoBoardQueryDTO query) {
         return Result.ok(monitorService.persistYearlyBoard(query == null ? new GeoBoardQueryDTO() : query));
+    }
+
+    @Operation(summary = "洗入全年目标样例（目标默认值 + 各平台实际达成）")
+    @PostMapping("/yearly/seed-sample")
+    @RequiresPermission("geo:yearly:target")
+    @Log(title = "GEO全年目标样例", businessType = 1)
+    public Result<String> seedYearlySample() {
+        return Result.ok(seedService.seedYearlySample());
     }
 
     @Operation(summary = "全年目标配置列表")
