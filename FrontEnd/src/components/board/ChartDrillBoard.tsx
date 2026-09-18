@@ -3,6 +3,7 @@ import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Space, Statistic
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { boardChartDrillApi, type BoardChartDrill, type BoardChartStackItem } from '@/api/board';
+import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import { DEMO_DATA_PIVOT, demoRangeByGrain } from '@/constants/demoData';
 
@@ -163,8 +164,8 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
       .map((p) => ({
         axis: formatBoardAxis(p.axis),
         value: p.value,
-        // 图例展示短名；下钻用完整 seriesKey（单根柱/单条线）
-        series: p.series,
+        // 用完整 seriesKey 着色，避免短标签撞名把多根柱合成一根
+        series: p.seriesKey || p.series,
         seriesKey: p.seriesKey || p.series,
         drillable: p.drillable !== false && !!data?.chartDrillable,
       }));
@@ -394,20 +395,22 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
           {data?.axisField ? ` · 当前按${axisFieldLabel(data.axisField)}` : ''}）
         </div>
         <Suspense fallback={<ChartFallback />}>
-          <Column
-            key={`col-${chartRenderKey}`}
-            data={timeSeriesData}
-            xField='axis'
-            yField='value'
-            colorField='series'
-            height={380}
-            group
-            stack={false}
-            legend={{ position: 'top' }}
-            axis={{ x: dateAxisProps }}
-            {...boardColumnChartProps}
-            onReady={bindChartDrill}
-          />
+          <BoardColumnScrollArea data={timeSeriesData}>
+            <Column
+              key={`col-${chartRenderKey}`}
+              data={timeSeriesData}
+              xField='axis'
+              yField='value'
+              colorField='series'
+              height={380}
+              group
+              stack={false}
+              legend={{ position: 'top' }}
+              axis={{ x: dateAxisProps }}
+              {...boardColumnChartProps}
+              onReady={bindChartDrill}
+            />
+          </BoardColumnScrollArea>
         </Suspense>
 
         <div className='mt-3 flex flex-wrap gap-2'>

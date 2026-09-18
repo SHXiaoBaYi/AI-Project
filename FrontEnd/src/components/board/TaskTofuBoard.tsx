@@ -10,6 +10,7 @@ import {
   type BoardTaskTofuChartType,
   type BoardTaskTofuQuery,
 } from '@/api/board';
+import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import type { DemoBoardGrain } from '@/constants/demoData';
 
@@ -270,10 +271,10 @@ function IndependentTaskTofuCard({
     }
   };
 
-  const short = (v: string) => (v && v.length > 12 ? `${v.slice(0, 11)}…` : v);
+  // 系列必须用完整原文；截断会把目标问题前缀撞名合并成少量柱
   const chartData = charts.map((p) => ({
     axis: formatAxis(p.axis),
-    series: short(p.series),
+    series: p.series,
     fullSeries: p.series,
     value: p.value,
     drillKey: p.key,
@@ -353,27 +354,29 @@ function IndependentTaskTofuCard({
         {def.hint} · {metricLabel} · 横轴=日期
       </div>
       <Suspense fallback={<ChartFallback />}>
-        <Column
-          key={`${def.chartType}-${level}-${chartData.length}-${drill.topicId || ''}-${drill.targetQuestion || ''}`}
-          data={chartData}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={220}
-          group
-          stack={false}
-          legend={{ position: 'top' }}
-          axis={{
-            x: {
-              labelTransform: 'rotate(28)',
-              labelFontSize: 10,
-              labelAutoHide: false,
-              labelAutoRotate: false,
-            },
-          }}
-          {...boardColumnChartProps}
-          onReady={bindChartClick}
-        />
+        <BoardColumnScrollArea data={chartData}>
+          <Column
+            key={`${def.chartType}-${level}-${chartData.length}-${drill.topicId || ''}-${drill.targetQuestion || ''}`}
+            data={chartData}
+            xField='axis'
+            yField='value'
+            colorField='series'
+            height={220}
+            group
+            stack={false}
+            legend={{ position: 'top' }}
+            axis={{
+              x: {
+                labelTransform: 'rotate(28)',
+                labelFontSize: 10,
+                labelAutoHide: false,
+                labelAutoRotate: false,
+              },
+            }}
+            {...boardColumnChartProps}
+            onReady={bindChartClick}
+          />
+        </BoardColumnScrollArea>
       </Suspense>
       <div className='mt-1 text-xs text-neutral-400'>
         {level === 'contentPlatform' && def.publishDetail

@@ -4,6 +4,7 @@ import { ArrowLeftOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import { getGeoNegativeDailyApi, getGeoTopicPlatformChartsApi } from '@/api/geo';
+import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import type { GeoBoardQuery, GeoChartPoint, GeoDailyVO } from '@/types/geo';
 import type { DemoBoardGrain } from '@/constants/demoData';
@@ -195,11 +196,10 @@ function IndependentTofuCard({
     }
   };
 
-  const shortSeries = (v: string) => (v && v.length > 12 ? `${v.slice(0, 11)}…` : v);
-
+  // 系列必须用完整原文做 colorField，截断会导致「【演示】2015年第1/10/11…题」撞名合并
   const chartData = (charts || []).map((p) => ({
     axis: formatAxis(p.axis),
-    series: shortSeries(p.series),
+    series: p.series,
     fullSeries: p.series,
     value: p.value,
     drillKey: p.key,
@@ -245,27 +245,29 @@ function IndependentTofuCard({
       />
       <div className='mb-2 text-xs text-neutral-400'>{hint}</div>
       <Suspense fallback={<ChartFallback />}>
-        <Column
-          key={`${metric}-${level}-${topicId || 'root'}-${keyword || ''}-${chartData.length}`}
-          data={chartData}
-          xField='axis'
-          yField='value'
-          colorField='series'
-          height={240}
-          group
-          stack={false}
-          legend={{ position: 'top' }}
-          axis={{
-            x: {
-              labelTransform: 'rotate(28)',
-              labelFontSize: 10,
-              labelAutoHide: false,
-              labelAutoRotate: false,
-            },
-          }}
-          {...boardColumnChartProps}
-          onReady={bindChartClick}
-        />
+        <BoardColumnScrollArea data={chartData}>
+          <Column
+            key={`${metric}-${level}-${topicId || 'root'}-${keyword || ''}-${chartData.length}`}
+            data={chartData}
+            xField='axis'
+            yField='value'
+            colorField='series'
+            height={240}
+            group
+            stack={false}
+            legend={{ position: 'top' }}
+            axis={{
+              x: {
+                labelTransform: 'rotate(28)',
+                labelFontSize: 10,
+                labelAutoHide: false,
+                labelAutoRotate: false,
+              },
+            }}
+            {...boardColumnChartProps}
+            onReady={bindChartClick}
+          />
+        </BoardColumnScrollArea>
       </Suspense>
       <div className='mt-1 text-xs text-neutral-400'>{seriesHint(level, !!enablePlatformDetail)}</div>
 

@@ -509,28 +509,19 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
     }
 
     private List<BoardChartTrendPointVO> toTrendPoints(Map<String, Agg> cells, boolean rateMetric, boolean canDrillMore) {
-        Map<String, Long> seriesWeight = new HashMap<>();
-        for (Map.Entry<String, Agg> e : cells.entrySet()) {
-            String series = e.getKey().substring(e.getKey().indexOf('\0') + 1);
-            seriesWeight.merge(series, e.getValue().sample, Long::sum);
-        }
-        Set<String> topSeries = seriesWeight.entrySet().stream()
-                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-                .limit(8)
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
         List<BoardChartTrendPointVO> points = new ArrayList<>();
         cells.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
                 .forEach(e -> {
                     String[] parts = e.getKey().split("\0", 2);
-                    if (parts.length < 2 || !topSeries.contains(parts[1])) {
+                    if (parts.length < 2) {
                         return;
                     }
                     String seriesKey = parts[1];
                     BoardChartTrendPointVO p = new BoardChartTrendPointVO();
                     p.setAxis(parts[0]);
-                    p.setSeries(shortLabel(seriesKey));
+                    // 系列名用完整 key，避免目标问题截断撞名；不再截 TopN
+                    p.setSeries(seriesKey);
                     p.setSeriesKey(seriesKey);
                     p.setValue(round2(valueOf(e.getValue(), rateMetric)));
                     p.setSampleCount(e.getValue().sample);
