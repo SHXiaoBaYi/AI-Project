@@ -121,8 +121,8 @@ export type BoardTaskOpsQuery = {
   startDate?: string;
   endDate?: string;
   grain?: string;
-  filterUserId?: number;
-  taskType?: string;
+  filterUserIds?: number[];
+  taskTypes?: string[];
 };
 
 export type BoardTaskOpsSummary = {

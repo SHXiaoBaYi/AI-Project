@@ -5,6 +5,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.util.List;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @Schema(description = "任务看板下钻查询")
@@ -31,9 +33,9 @@ public class BoardTaskOpsDrillQueryDTO extends PageQuery {
     @Schema(description = "粒度")
     private String grain;
 
-    @Schema(description = "人员筛选：执行人或负责人用户ID")
-    private Long filterUserId;
+    @Schema(description = "人员筛选：执行人或负责人用户ID，多选；空表示不限")
+    private List<Long> filterUserIds;
 
-    @Schema(description = "任务类型")
-    private String taskType;
+    @Schema(description = "任务类型，多选；空表示不限")
+    private List<String> taskTypes;
 }

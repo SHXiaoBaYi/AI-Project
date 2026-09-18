@@ -123,13 +123,13 @@ function RateCard({
 export function TaskOpsBoard({
   grain,
   range,
-  filterUserId,
-  taskType,
+  filterUserIds,
+  taskTypes,
 }: {
   grain: DemoBoardGrain;
   range: [Dayjs, Dayjs];
-  filterUserId?: number;
-  taskType?: string;
+  filterUserIds?: number[];
+  taskTypes?: string[];
 }) {
   const [summary, setSummary] = useState<BoardTaskOpsSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -146,15 +146,18 @@ export function TaskOpsBoard({
     summary?.periodLabel ||
     (grain === 'day' ? '今日' : grain === 'month' ? '本月' : grain === 'year' ? '本年' : '本周');
 
+  const filterKey = (filterUserIds ?? []).join(',');
+  const typeKey = (taskTypes ?? []).join('\u0000');
+
   const queryBase = useMemo(
     () => ({
       startDate: range[0].format('YYYY-MM-DD'),
       endDate: range[1].format('YYYY-MM-DD'),
       grain,
-      filterUserId,
-      taskType,
+      filterUserIds: filterKey ? filterKey.split(',').map((id) => Number(id)) : undefined,
+      taskTypes: typeKey ? typeKey.split('\u0000') : undefined,
     }),
-    [range, grain, filterUserId, taskType],
+    [range, grain, filterKey, typeKey],
   );
 
   const loadSummary = useCallback(async () => {
@@ -175,7 +178,7 @@ export function TaskOpsBoard({
 
   useEffect(() => {
     setDrill(null);
-  }, [queryBase.startDate, queryBase.endDate, queryBase.grain, queryBase.filterUserId, queryBase.taskType]);
+  }, [queryBase.startDate, queryBase.endDate, queryBase.grain, queryBase.filterUserIds, queryBase.taskTypes]);
 
   const loadDrill = useCallback(
     async (state: DrillState, page: number, size: number, filter: string) => {
@@ -444,7 +447,7 @@ export function TaskOpsBoard({
             rate={summary?.onTimeRate ?? 0}
             numerator={summary?.onTimeDone ?? 0}
             denominator={summary?.rangeDone ?? 0}
-            formula='按时完成 / 已完成'
+            formula='按时完成 / 区间内已完成'
             rangeText={rangeText}
             onDrill={() => openDrill({ metric: 'onTimeRate', title: '按时完成率 · 员工', level: 'person' })}
           />
@@ -459,7 +462,7 @@ export function TaskOpsBoard({
             rate={summary?.completionRate ?? 0}
             numerator={summary?.rangeCompleted ?? 0}
             denominator={summary?.rangeTotal ?? 0}
-            formula='完成 / 总数'
+            formula='已完成 / 区间任务'
             rangeText={rangeText}
             onDrill={() => openDrill({ metric: 'completionRate', title: '任务完成率 · 员工', level: 'person' })}
           />

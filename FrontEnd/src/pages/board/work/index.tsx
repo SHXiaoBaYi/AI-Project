@@ -27,8 +27,8 @@ function defaultRange(grain: DemoBoardGrain): [Dayjs, Dayjs] {
 export default function WorkBoardPage() {
   const [grain, setGrain] = useState<DemoBoardGrain>('week');
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => defaultRange('week'));
-  const [filterUserId, setFilterUserId] = useState<number | undefined>();
-  const [taskType, setTaskType] = useState<string | undefined>();
+  const [filterUserIds, setFilterUserIds] = useState<number[]>([]);
+  const [taskTypes, setTaskTypes] = useState<string[]>([]);
   const [userOptions, setUserOptions] = useState<{ label: string; value: number }[]>([]);
   const [typeOptions, setTypeOptions] = useState<{ label: string; value: string }[]>([]);
 
@@ -82,24 +82,28 @@ export default function WorkBoardPage() {
             }}
           />
           <Select
+            mode='multiple'
             allowClear
             showSearch
             optionFilterProp='label'
+            maxTagCount='responsive'
             placeholder='人员'
-            className='min-w-[140px]'
+            className='min-w-[180px]'
             options={userOptions}
-            value={filterUserId}
-            onChange={(v) => setFilterUserId(v)}
+            value={filterUserIds}
+            onChange={(v) => setFilterUserIds(v ?? [])}
           />
           <Select
+            mode='multiple'
             allowClear
             showSearch
             optionFilterProp='label'
+            maxTagCount='responsive'
             placeholder='任务类型'
-            className='min-w-[160px]'
+            className='min-w-[200px]'
             options={typeOptions}
-            value={taskType}
-            onChange={(v) => setTaskType(v)}
+            value={taskTypes}
+            onChange={(v) => setTaskTypes(v ?? [])}
           />
           <span className='text-xs text-neutral-400'>筛选同时作用于下方四个看板</span>
         </Space>
@@ -108,8 +112,8 @@ export default function WorkBoardPage() {
       <TaskOpsBoard
         grain={grain}
         range={range}
-        filterUserId={filterUserId}
-        taskType={taskType}
+        filterUserIds={filterUserIds}
+        taskTypes={taskTypes}
       />
     </div>
   );

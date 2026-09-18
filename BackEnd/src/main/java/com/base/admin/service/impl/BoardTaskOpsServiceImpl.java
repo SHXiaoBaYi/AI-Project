@@ -45,7 +45,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
     @Override
     public BoardTaskOpsSummaryVO summary(BoardTaskOpsQueryDTO query) {
         QueryCtx ctx = resolveCtx(query == null ? new BoardTaskOpsQueryDTO() : query);
-        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserId, ctx.taskType);
+        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserIds, ctx.taskTypes);
 
         long periodDue = 0, periodOverdue = 0, periodDone = 0;
         long onTimeDone = 0, rangeDone = 0, rangeCompleted = 0, rangeTotal = 0;
@@ -56,21 +56,24 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
             boolean done = "已完成".equals(st);
             LocalDate planDay = t.getPlanEndTime() == null ? null : t.getPlanEndTime().toLocalDate();
             LocalDate actualDay = resolveActualEndDay(t);
+            boolean planInRange = planDay != null && inRange(planDay, ctx.rangeStart, ctx.rangeEnd);
+            boolean doneInRange = done && actualDay != null && inRange(actualDay, ctx.rangeStart, ctx.rangeEnd);
 
-            if (open && planDay != null && inRange(planDay, ctx.rangeStart, ctx.rangeEnd)) {
+            if (open && planInRange) {
                 periodDue++;
                 if (isOverdue(t, ctx.now)) {
                     periodOverdue++;
                 }
             }
-            if (done && actualDay != null && inRange(actualDay, ctx.rangeStart, ctx.rangeEnd)) {
+            if (doneInRange) {
                 periodDone++;
                 rangeDone++;
                 if (isOnTime(t)) {
                     onTimeDone++;
                 }
             }
-            if (planDay != null && inRange(planDay, ctx.rangeStart, ctx.rangeEnd) && !"已取消".equals(st)) {
+            // 完成率分母：计划截止落在区间，或本区间内实际完成（没有计划截止的完成单也要算进去）
+            if (planInRange || doneInRange) {
                 rangeTotal++;
                 if (done) {
                     rangeCompleted++;
@@ -105,7 +108,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
             return new PageResult<>(0L, List.of());
         }
         QueryCtx ctx = resolveCtx(query);
-        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserId, ctx.taskType);
+        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserIds, ctx.taskTypes);
         Map<Long, List<SysTaskAssignee>> assigneesByTask = loadAssigneesByTask(
                 tasks.stream().map(SysTask::getId).filter(Objects::nonNull).toList());
 
@@ -117,6 +120,9 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
                 }
                 String tag = timingTagOf(t);
                 for (PersonRef p : personsOf(t, assigneesByTask)) {
+                    if (!personSelected(ctx, p.userId())) {
+                        continue;
+                    }
                     Agg a = aggMap.computeIfAbsent(p.userId(), k -> new Agg(p.userId(), p.userName()));
                     a.denominator++;
                     if ("ON_TIME".equals(tag) || "EARLY".equals(tag)) {
@@ -137,6 +143,9 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
                 boolean done = "已完成".equals(nz(t.getStatus(), "未开始"));
                 boolean open = isOpen(nz(t.getStatus(), "未开始"));
                 for (PersonRef p : personsOf(t, assigneesByTask)) {
+                    if (!personSelected(ctx, p.userId())) {
+                        continue;
+                    }
                     Agg a = aggMap.computeIfAbsent(p.userId(), k -> new Agg(p.userId(), p.userName()));
                     a.denominator++;
                     if (done) {
@@ -185,7 +194,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         String sub = query.getSubFilter() == null ? "all" : query.getSubFilter().trim();
         Long drillPersonUserId = query.getPersonUserId();
 
-        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserId, ctx.taskType);
+        List<SysTask> tasks = loadFilteredTasks(ctx.filterUserIds, ctx.taskTypes);
         Map<Long, List<SysTaskAssignee>> assigneesByTask =
                 loadAssigneesByTask(tasks.stream().map(SysTask::getId).filter(Objects::nonNull).toList());
 
@@ -217,19 +226,29 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         return new PageResult<>((long) matched.size(), rows);
     }
 
-    private List<SysTask> loadFilteredTasks(Long filterUserId, String taskType) {
+    private List<SysTask> loadFilteredTasks(List<Long> filterUserIds, List<String> taskTypes) {
+        List<String> types = taskTypes == null ? List.of() : taskTypes.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        List<Long> userIds = filterUserIds == null ? List.of() : filterUserIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
         LambdaQueryWrapper<SysTask> w = new LambdaQueryWrapper<SysTask>()
                 .ne(SysTask::getStatus, "已取消")
-                .eq(StringUtils.hasText(taskType), SysTask::getTaskType, taskType)
+                .in(!types.isEmpty(), SysTask::getTaskType, types)
                 .orderByDesc(SysTask::getId);
         List<SysTask> tasks = taskMapper.selectList(w);
-        if (filterUserId == null) {
+        if (userIds.isEmpty()) {
             return tasks;
         }
+        Set<Long> wanted = Set.copyOf(userIds);
         Map<Long, List<SysTaskAssignee>> assigneesByTask = loadAssigneesByTask(
                 tasks.stream().map(SysTask::getId).filter(Objects::nonNull).toList());
         return tasks.stream()
-                .filter(t -> belongsToPerson(t, filterUserId, assigneesByTask))
+                .filter(t -> belongsToAny(t, wanted, assigneesByTask))
                 .toList();
     }
 
@@ -245,7 +264,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
             rangeEnd = tmp;
         }
         return new QueryCtx(grain, rangeStart, rangeEnd, today.atTime(LocalTime.now()),
-                query.getFilterUserId(), query.getTaskType());
+                query.getFilterUserIds(), query.getTaskTypes());
     }
 
     private QueryCtx resolveCtx(BoardTaskOpsDrillQueryDTO query) {
@@ -253,8 +272,8 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
         q.setStartDate(query.getStartDate());
         q.setEndDate(query.getEndDate());
         q.setGrain(query.getGrain());
-        q.setFilterUserId(query.getFilterUserId());
-        q.setTaskType(query.getTaskType());
+        q.setFilterUserIds(query.getFilterUserIds());
+        q.setTaskTypes(query.getTaskTypes());
         return resolveCtx(q);
     }
 
@@ -312,7 +331,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
                 yield matchTimingSub(t, sub);
             }
             case "completionRate" -> {
-                if (planDay == null || !inRange(planDay, ctx.rangeStart, ctx.rangeEnd) || "已取消".equals(st)) {
+                if (!inCompletionScope(t, planDay, actualDay, done, ctx)) {
                     yield false;
                 }
                 if ("done".equalsIgnoreCase(sub)) {
@@ -325,6 +344,26 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
             }
             default -> false;
         };
+    }
+
+    private static boolean inCompletionScope(SysTask t, LocalDate planDay, LocalDate actualDay, boolean done, QueryCtx ctx) {
+        if ("已取消".equals(nz(t.getStatus(), "未开始"))) {
+            return false;
+        }
+        boolean planInRange = planDay != null && inRange(planDay, ctx.rangeStart, ctx.rangeEnd);
+        boolean doneInRange = done && actualDay != null && inRange(actualDay, ctx.rangeStart, ctx.rangeEnd);
+        return planInRange || doneInRange;
+    }
+
+    private static boolean personSelected(QueryCtx ctx, Long userId) {
+        if (ctx.filterUserIds == null || ctx.filterUserIds.isEmpty()) {
+            return true;
+        }
+        if (userId == null) {
+            return false;
+        }
+        long uid = userId;
+        return ctx.filterUserIds.stream().anyMatch(id -> id != null && id == uid);
     }
 
     private static boolean inRange(LocalDate day, LocalDate start, LocalDate end) {
@@ -340,7 +379,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
     }
 
     private record QueryCtx(String grain, LocalDate rangeStart, LocalDate rangeEnd, LocalDateTime now,
-                            Long filterUserId, String taskType) {
+                            List<Long> filterUserIds, List<String> taskTypes) {
     }
 
     private record PersonRef(Long userId, String userName) {
@@ -380,21 +419,24 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
     }
 
     private static List<PersonRef> personsOf(SysTask t, Map<Long, List<SysTaskAssignee>> assigneesByTask) {
-        List<SysTaskAssignee> list = assigneesByTask.getOrDefault(t.getId(), List.of());
-        if (!list.isEmpty()) {
-            LinkedHashMap<Long, String> uniq = new LinkedHashMap<>();
-            for (SysTaskAssignee a : list) {
-                Long uid = a.getUserId() == null ? 0L : a.getUserId();
-                String name = StringUtils.hasText(a.getUserName()) ? a.getUserName() : ("用户" + uid);
-                uniq.putIfAbsent(uid, name);
-            }
-            return uniq.entrySet().stream().map(e -> new PersonRef(e.getKey(), e.getValue())).toList();
-        }
+        LinkedHashMap<Long, String> uniq = new LinkedHashMap<>();
         if (t.getOwnerUserId() != null) {
-            String name = StringUtils.hasText(t.getOwnerName()) ? t.getOwnerName() : ("用户" + t.getOwnerUserId());
-            return List.of(new PersonRef(t.getOwnerUserId(), name));
+            String ownerName = StringUtils.hasText(t.getOwnerName()) ? t.getOwnerName() : ("用户" + t.getOwnerUserId());
+            uniq.put(t.getOwnerUserId(), ownerName);
         }
-        return List.of(new PersonRef(0L, "未分配"));
+        for (SysTaskAssignee a : assigneesByTask.getOrDefault(t.getId(), List.of())) {
+            Long uid = a.getUserId() == null ? 0L : a.getUserId();
+            String name = StringUtils.hasText(a.getUserName()) ? a.getUserName() : ("用户" + uid);
+            uniq.putIfAbsent(uid, name);
+        }
+        if (uniq.isEmpty()) {
+            return List.of(new PersonRef(0L, "未分配"));
+        }
+        return uniq.entrySet().stream().map(e -> new PersonRef(e.getKey(), e.getValue())).toList();
+    }
+
+    private static boolean belongsToAny(SysTask t, Set<Long> userIds, Map<Long, List<SysTaskAssignee>> assigneesByTask) {
+        return personsOf(t, assigneesByTask).stream().anyMatch(p -> userIds.contains(p.userId()));
     }
 
     private static boolean belongsToPerson(SysTask t, Long personUserId, Map<Long, List<SysTaskAssignee>> assigneesByTask) {
@@ -429,8 +471,14 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
             return;
         }
         if (t.getPlanEndTime() == null) {
-            row.setTimingTag("UNKNOWN");
-            row.setTimingLabel("无计划截止");
+            LocalDateTime actualAt = resolveActualEndAt(t);
+            if (actualAt == null) {
+                row.setTimingTag("UNKNOWN");
+                row.setTimingLabel("无完成时间");
+                return;
+            }
+            row.setTimingTag("ON_TIME");
+            row.setTimingLabel("正常完成");
             return;
         }
         LocalDateTime actualAt = resolveActualEndAt(t);
@@ -473,12 +521,12 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
     }
 
     private static String timingTagOf(SysTask t) {
-        if (t.getPlanEndTime() == null) {
-            return "UNKNOWN";
-        }
         LocalDateTime actualAt = resolveActualEndAt(t);
         if (actualAt == null) {
             return "UNKNOWN";
+        }
+        if (t.getPlanEndTime() == null) {
+            return "ON_TIME";
         }
         long days = ChronoUnit.DAYS.between(t.getPlanEndTime().toLocalDate(), actualAt.toLocalDate());
         if (days < 0) {
