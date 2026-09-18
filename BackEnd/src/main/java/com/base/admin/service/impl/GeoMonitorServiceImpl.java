@@ -41,6 +41,7 @@ import com.base.admin.mapper.GeoMonitorDailyMapper;
 import com.base.admin.mapper.GeoTopicMapper;
 import com.base.admin.mapper.GeoYearTargetMapper;
 import com.base.admin.mapper.SysUserMapper;
+import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoMonitorService;
 import com.base.admin.service.GeoPlatformService;
 import com.base.admin.service.GeoTopicService;
@@ -48,9 +49,15 @@ import com.base.admin.util.ExcelCellUtils;
 import com.base.admin.util.GeoExcelTemplateWriter;
 import com.base.admin.util.GeoImportProgress;
 import lombok.RequiredArgsConstructor;
+import org.apache.poi.ss.usermodel.ClientAnchor;
+import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xssf.usermodel.XSSFDrawing;
+import org.apache.poi.xssf.usermodel.XSSFPicture;
+import org.apache.poi.xssf.usermodel.XSSFShape;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -83,8 +90,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GeoMonitorServiceImpl implements GeoMonitorService {
 
-    private static final int DATE_START_COL = 4;
-    /** 每个日期下的指标块数：提及、排名、推荐、截图、负面、竞品 */
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GeoMonitorServiceImpl.class);
+
     private static final int METRIC_COUNT = 6;
 
     private final GeoMonitorDailyMapper dailyMapper;
@@ -94,6 +101,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private final GeoTopicService topicService;
     private final GeoPlatformService platformService;
     private final SysUserMapper userMapper;
+    private final FileStorageService fileStorageService;
 
     @Override
     public PageResult<GeoDailyVO> listDaily(GeoDailyQueryDTO query) {
@@ -401,7 +409,6 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     }
 
     @Override
-    @Transactional
     public GeoImportResultVO importDaily(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException("请上传 Excel 文件");
@@ -416,91 +423,24 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     }
 
     @Override
-    @Transactional
     public GeoImportResultVO importDaily(java.io.InputStream inputStream) {
         GeoImportResultVO result = new GeoImportResultVO();
+        log.info("正在打开监测工作簿");
         try (Workbook wb = WorkbookFactory.create(inputStream)) {
-            Sheet sheet = wb.getSheetAt(0);
-            int lastRow = sheet.getLastRowNum();
-            int lastCol = 0;
-            if (sheet.getRow(0) != null) {
-                lastCol = Math.max(lastCol, sheet.getRow(0).getLastCellNum());
+            int totalRows = 0;
+            for (int s = 0; s < wb.getNumberOfSheets(); s++) {
+                totalRows += Math.max(wb.getSheetAt(s).getLastRowNum() + 1, 1);
             }
-            if (sheet.getRow(2) != null) {
-                lastCol = Math.max(lastCol, sheet.getRow(2).getLastCellNum());
-            }
-            List<DateGroup> groups = parseDateGroups(sheet, lastCol);
-            int slots = 0;
-            for (DateGroup group : groups) {
-                slots += group.platforms.size();
-            }
-            int rowUnits = Math.max(slots, 1);
-            int totalUnits = Math.max(Math.max(lastRow - 2, 0) * rowUnits, 1);
-            int doneUnits = 0;
-            String lastTopic = "";
-            String lastWeek = "";
-            for (int r = 3; r <= lastRow; r++) {
-                String keyword = ExcelCellUtils.str(sheet, r, 3);
-                if (!StringUtils.hasText(keyword) || keyword.contains(GeoExcelTemplateWriter.SAMPLE_MARK)) {
-                    doneUnits += rowUnits;
-                    GeoImportProgress.report(doneUnits, totalUnits);
+            int doneRows = 0;
+            for (int s = 0; s < wb.getNumberOfSheets(); s++) {
+                Sheet sheet = wb.getSheetAt(s);
+                String sheetName = sheet.getSheetName() == null ? "" : sheet.getSheetName().trim();
+                if (isInstructionSheet(sheetName)) {
+                    doneRows += Math.max(sheet.getLastRowNum() + 1, 1);
+                    GeoImportProgress.report(Math.min(doneRows, totalRows), totalRows);
                     continue;
                 }
-                String week = ExcelCellUtils.str(sheet, r, 1);
-                String topicName = ExcelCellUtils.str(sheet, r, 2);
-                if (StringUtils.hasText(week)) {
-                    lastWeek = week;
-                }
-                if (StringUtils.hasText(topicName)) {
-                    lastTopic = topicName;
-                }
-                if (!StringUtils.hasText(lastTopic)) {
-                    result.setTotalCount(result.getTotalCount() + 1);
-                    result.setFailureCount(result.getFailureCount() + 1);
-                    result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(r + 1, "话题", "话题不能为空"));
-                    doneUnits += rowUnits;
-                    GeoImportProgress.report(doneUnits, totalUnits);
-                    continue;
-                }
-                // 名称已存在则只关联；不存在则建档后再关联
-                GeoTopic topic = topicService.getOrCreate(lastTopic, lastWeek);
-                for (DateGroup group : groups) {
-                    int n = group.platformCount;
-                    for (int i = 0; i < group.platforms.size(); i++) {
-                        int p = group.platformIndex.get(i);
-                        result.setTotalCount(result.getTotalCount() + 1);
-                        try {
-                            GeoDailyDTO dto = new GeoDailyDTO();
-                            dto.setInspectDate(group.date);
-                            dto.setPlatform(group.platforms.get(i));
-                            platformService.getOrCreate(dto.getPlatform());
-                            dto.setKeyword(keyword.trim());
-                            dto.setTermType(Constants.TERM_TYPE_DAILY);
-                            dto.setTopicId(topic.getId());
-                            dto.setMentioned(parseMentioned(ExcelCellUtils.str(sheet, r, group.startCol + p)));
-                            dto.setRankNo(parseRank(ExcelCellUtils.str(sheet, r, group.startCol + n + p)));
-                            dto.setRecommendStatus(ExcelCellUtils.str(sheet, r, group.startCol + 2 * n + p));
-                            String shot = ExcelCellUtils.str(sheet, r, group.startCol + 3 * n + p);
-                            if (isHttp(shot)) {
-                                dto.setThirdPartyUrl(shot);
-                            }
-                            dto.setNegativeContent(ExcelCellUtils.str(sheet, r, group.startCol + 4 * n + p));
-                            dto.setCompetitors(ExcelCellUtils.str(sheet, r, group.startCol + 5 * n + p));
-                            boolean inserted = upsertDaily(dto, true);
-                            if (inserted) {
-                                result.setInsertCount(result.getInsertCount() + 1);
-                            } else {
-                                result.setUpdateCount(result.getUpdateCount() + 1);
-                            }
-                        } catch (Exception e) {
-                            result.setFailureCount(result.getFailureCount() + 1);
-                            result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(
-                                    r + 1, group.platforms.get(i), e.getMessage()));
-                        }
-                        doneUnits++;
-                        GeoImportProgress.report(doneUnits, totalUnits);
-                    }
-                }
+                doneRows = importDailySheet(sheet, sheetName, result, doneRows, totalRows);
             }
         } catch (BusinessException e) {
             throw e;
@@ -1823,12 +1763,240 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         return Constants.TERM_TYPE_DAILY;
     }
 
-    private List<DateGroup> parseDateGroups(Sheet sheet, int lastCol) {
+    private int importDailySheet(Sheet sheet, String sheetName, GeoImportResultVO result, int doneRows, int totalRows) {
+        SysUser owner = findActiveUserByName(sheetName);
+        Long ownerUserId = owner == null ? null : owner.getUserId();
+        String ownerName = owner == null ? sheetName : userDisplayName(owner);
+        Map<Long, XSSFPicture> pictures = indexSheetPictures(sheet);
+        log.info("清洗工作表 {}，负责人 {}，贴图 {} 张", sheetName, ownerName, pictures.size());
+        String lastTopic = "";
+        String lastWeek = "";
+        DailyBlock block = null;
+        int lastRow = sheet.getLastRowNum();
+        for (int r = 0; r <= lastRow; r++) {
+            doneRows++;
+            GeoImportProgress.report(Math.min(doneRows, totalRows), totalRows);
+            if (isMonthGapRow(sheet, r)) {
+                continue;
+            }
+            if (isDateHeaderRow(sheet, r)) {
+                block = parseDailyBlock(sheet, r);
+                int skipped = Math.max(block.headerEnd - r, 0);
+                doneRows += skipped;
+                GeoImportProgress.report(Math.min(doneRows, totalRows), totalRows);
+                r = block.headerEnd;
+                continue;
+            }
+            if (block == null || block.groups.isEmpty() || isRepeatHeaderRow(sheet, r, block)) {
+                continue;
+            }
+            String topicName = block.topicCol >= 0 ? ExcelCellUtils.str(sheet, r, block.topicCol) : "";
+            String week = block.weekCol >= 0 ? ExcelCellUtils.str(sheet, r, block.weekCol) : "";
+            String keyword = ExcelCellUtils.str(sheet, r, block.keywordCol);
+            if (StringUtils.hasText(topicName) && !topicName.contains(GeoExcelTemplateWriter.SAMPLE_MARK)) {
+                lastTopic = topicName.trim();
+            }
+            if (StringUtils.hasText(week) && !week.contains(GeoExcelTemplateWriter.SAMPLE_MARK)) {
+                lastWeek = week.trim();
+            }
+            if (!StringUtils.hasText(keyword) || keyword.contains(GeoExcelTemplateWriter.SAMPLE_MARK)) {
+                continue;
+            }
+            if (!StringUtils.hasText(lastTopic)) {
+                result.setTotalCount(result.getTotalCount() + 1);
+                result.setFailureCount(result.getFailureCount() + 1);
+                result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(r + 1, "话题", "话题不能为空"));
+                continue;
+            }
+            GeoTopic topic = topicService.getOrCreate(lastTopic, lastWeek);
+            for (DateGroup group : block.groups) {
+                int n = group.platformCount;
+                for (int i = 0; i < group.platforms.size(); i++) {
+                    int p = group.platformIndex.get(i);
+                    try {
+                        GeoDailyDTO dto = new GeoDailyDTO();
+                        dto.setInspectDate(group.date);
+                        dto.setPlatform(group.platforms.get(i));
+                        platformService.getOrCreate(dto.getPlatform());
+                        dto.setKeyword(keyword.trim());
+                        dto.setTermType(Constants.TERM_TYPE_DAILY);
+                        dto.setTopicId(topic.getId());
+                        dto.setOwnerUserId(ownerUserId);
+                        dto.setOwnerName(ownerName);
+                        String mentionRaw = ExcelCellUtils.str(sheet, r, group.startCol + p);
+                        String rankRaw = ExcelCellUtils.str(sheet, r, group.startCol + n + p);
+                        String recommend = ExcelCellUtils.str(sheet, r, group.startCol + 2 * n + p);
+                        int shotCol = group.startCol + 3 * n + p;
+                        String shot = ExcelCellUtils.str(sheet, r, shotCol);
+                        String link = firstHttp(shot, ExcelCellUtils.hyperlink(sheet, r, shotCol));
+                        String negative = ExcelCellUtils.str(sheet, r, group.startCol + 4 * n + p);
+                        String competitors = ExcelCellUtils.str(sheet, r, group.startCol + 5 * n + p);
+                        XSSFPicture picture = pictures.get(pictureKey(r, shotCol));
+                        if (!hasPlatformContent(mentionRaw, rankRaw, recommend, link, negative, competitors, picture != null)) {
+                            continue;
+                        }
+                        result.setTotalCount(result.getTotalCount() + 1);
+                        dto.setMentioned(parseMentioned(mentionRaw));
+                        dto.setRankNo(parseRank(rankRaw));
+                        dto.setRecommendStatus(recommend);
+                        if (isHttp(link)) {
+                            dto.setThirdPartyUrl(link);
+                        }
+                        if (picture != null && picture.getPictureData() != null) {
+                            String url = fileStorageService.saveGeoImageBytes(
+                                    picture.getPictureData().getData(),
+                                    picture.getPictureData().suggestFileExtension());
+                            if (StringUtils.hasText(url)) {
+                                dto.setScreenshotUrl(url);
+                            }
+                        }
+                        dto.setNegativeContent(negative);
+                        dto.setCompetitors(competitors);
+                        boolean inserted = upsertDaily(dto, true);
+                        if (inserted) {
+                            result.setInsertCount(result.getInsertCount() + 1);
+                        } else {
+                            result.setUpdateCount(result.getUpdateCount() + 1);
+                        }
+                    } catch (Exception e) {
+                        result.setFailureCount(result.getFailureCount() + 1);
+                        result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(
+                                r + 1, group.platforms.get(i), e.getMessage()));
+                    }
+                }
+            }
+        }
+        return doneRows;
+    }
+
+    private SysUser findActiveUserByName(String name) {
+        if (!StringUtils.hasText(name)) {
+            return null;
+        }
+        String key = name.trim();
+        List<SysUser> users = userMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getStatus, Constants.STATUS_ACTIVE)
+                .and(w -> w.eq(SysUser::getNickname, key).or().eq(SysUser::getUsername, key))
+                .last("LIMIT 1"));
+        return users.isEmpty() ? null : users.getFirst();
+    }
+
+    private static boolean isInstructionSheet(String sheetName) {
+        return !StringUtils.hasText(sheetName) || sheetName.contains("说明");
+    }
+
+    private boolean isDateHeaderRow(Sheet sheet, int row) {
+        for (int c = 0; c < 6; c++) {
+            if ("巡查日期".equals(normalizeHeader(ExcelCellUtils.str(sheet, row, c)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isMonthGapRow(Sheet sheet, int row) {
+        List<String> texts = new ArrayList<>();
+        Row raw = sheet.getRow(row);
+        if (raw == null) {
+            return false;
+        }
+        int max = Math.min(Math.max(raw.getLastCellNum(), 0), 8);
+        for (int c = 0; c < max; c++) {
+            String text = ExcelCellUtils.str(sheet, row, c).trim();
+            if (StringUtils.hasText(text)) {
+                texts.add(text.replace(" ", ""));
+            }
+        }
+        return !texts.isEmpty() && texts.size() <= 2 && texts.stream().allMatch(GeoMonitorServiceImpl::isMonthLabel);
+    }
+
+    private static boolean isMonthLabel(String text) {
+        return text.matches("\\d{1,2}月(份)?") || text.matches("\\d{4}年\\d{1,2}月(份)?");
+    }
+
+    private boolean isRepeatHeaderRow(Sheet sheet, int row, DailyBlock block) {
+        String keyword = normalizeHeader(ExcelCellUtils.str(sheet, row, block.keywordCol));
+        if (keyword.contains("提问") || keyword.contains("目标问题") || "问题".equals(keyword)) {
+            return true;
+        }
+        String first = normalizeHeader(ExcelCellUtils.str(sheet, row, 0));
+        return "序号".equals(first) || "巡查维度".equals(first) || "巡查日期".equals(first);
+    }
+
+    private DailyBlock parseDailyBlock(Sheet sheet, int dateRow) {
+        int last = sheet.getLastRowNum();
+        int metricRow = dateRow + 1;
+        int platformRow = dateRow + 2;
+        for (int i = 1; i <= 3 && dateRow + i <= last; i++) {
+            int candidate = dateRow + i;
+            if (rowContains(sheet, candidate, "提及")) {
+                metricRow = candidate;
+            }
+            if (rowContains(sheet, candidate, "提问") || rowContains(sheet, candidate, "序号")) {
+                platformRow = candidate;
+            }
+        }
+        int scanEnd = 12;
+        int keywordCol = -1;
+        int topicCol = -1;
+        int weekCol = -1;
+        for (int c = 0; c < scanEnd; c++) {
+            String header = normalizeHeader(ExcelCellUtils.str(sheet, platformRow, c));
+            if (!StringUtils.hasText(header)) {
+                continue;
+            }
+            if (header.contains("提问") || header.contains("目标问题")) {
+                keywordCol = c;
+            } else if (header.contains("话题")) {
+                topicCol = c;
+            } else if (header.contains("优化")) {
+                weekCol = c;
+            }
+        }
+        if (keywordCol < 0) {
+            keywordCol = topicCol >= 0 ? topicCol + 1 : 3;
+        }
+        int dateStart = Math.max(keywordCol, Math.max(topicCol, weekCol)) + 1;
+        int lastCol = 0;
+        for (int headerRow : new int[]{dateRow, metricRow, platformRow}) {
+            Row raw = sheet.getRow(headerRow);
+            if (raw != null) {
+                lastCol = Math.max(lastCol, raw.getLastCellNum());
+            }
+        }
+        DailyBlock block = new DailyBlock();
+        block.keywordCol = keywordCol;
+        block.topicCol = topicCol;
+        block.weekCol = weekCol;
+        block.headerEnd = Math.max(platformRow, metricRow);
+        block.groups = parseDateGroups(sheet, dateRow, platformRow, dateStart, lastCol);
+        return block;
+    }
+
+    private static boolean rowContains(Sheet sheet, int row, String token) {
+        Row raw = sheet.getRow(row);
+        if (raw == null) {
+            return false;
+        }
+        int max = Math.min(Math.max(raw.getLastCellNum(), 0), 40);
+        for (int c = 0; c < max; c++) {
+            if (normalizeHeader(ExcelCellUtils.str(sheet, row, c)).contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeHeader(String raw) {
+        return raw == null ? "" : raw.replace(" ", "").replace("（必填）", "").replace("(必填)", "").trim();
+    }
+
+    private List<DateGroup> parseDateGroups(Sheet sheet, int dateRow, int platformRow, int startCol, int lastCol) {
         List<Integer> dateCols = new ArrayList<>();
         LocalDate prevDate = null;
         int prevCol = -1;
-        for (int col = DATE_START_COL; col < lastCol; col++) {
-            LocalDate date = ExcelCellUtils.date(sheet, 0, col);
+        for (int col = startCol; col < lastCol; col++) {
+            LocalDate date = ExcelCellUtils.date(sheet, dateRow, col);
             if (date == null) {
                 continue;
             }
@@ -1850,23 +2018,20 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 continue;
             }
             DateGroup group = new DateGroup();
-            group.date = ExcelCellUtils.date(sheet, 0, start);
+            group.date = ExcelCellUtils.date(sheet, dateRow, start);
             group.startCol = start;
             group.platformCount = platformCount;
             for (int p = 0; p < platformCount; p++) {
-                String platform = ExcelCellUtils.str(sheet, 2, start + p);
+                String platform = normalizeHeader(ExcelCellUtils.str(sheet, platformRow, start + p));
                 if (!StringUtils.hasText(platform)) {
                     continue;
                 }
                 group.platformIndex.add(p);
                 group.platforms.add(platform.trim());
             }
-            if (!group.platforms.isEmpty()) {
+            if (!group.platforms.isEmpty() && group.date != null) {
                 groups.add(group);
             }
-        }
-        if (groups.isEmpty()) {
-            throw new BusinessException("未识别到巡查日期列，请使用与样例一致的宽表格式");
         }
         return groups;
     }
@@ -1891,6 +2056,54 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
 
     private static boolean isHttp(String value) {
         return value != null && value.toLowerCase(Locale.ROOT).startsWith("http");
+    }
+
+    private static String firstHttp(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (isHttp(value)) {
+                return value.trim();
+            }
+        }
+        return "";
+    }
+
+    private static boolean hasPlatformContent(String mention, String rank, String recommend, String link,
+                                              String negative, String competitors, boolean hasPicture) {
+        return StringUtils.hasText(mention)
+                || StringUtils.hasText(rank)
+                || StringUtils.hasText(recommend)
+                || isHttp(link)
+                || StringUtils.hasText(negative)
+                || StringUtils.hasText(competitors)
+                || hasPicture;
+    }
+
+    private static Map<Long, XSSFPicture> indexSheetPictures(Sheet sheet) {
+        Map<Long, XSSFPicture> map = new HashMap<>();
+        if (!(sheet instanceof XSSFSheet xssf)) {
+            return map;
+        }
+        XSSFDrawing drawing = xssf.getDrawingPatriarch();
+        if (drawing == null) {
+            return map;
+        }
+        for (XSSFShape shape : drawing.getShapes()) {
+            if (!(shape instanceof XSSFPicture picture)) {
+                continue;
+            }
+            if (!(picture.getAnchor() instanceof ClientAnchor anchor)) {
+                continue;
+            }
+            map.putIfAbsent(pictureKey(anchor.getRow1(), anchor.getCol1()), picture);
+        }
+        return map;
+    }
+
+    private static long pictureKey(int row, int col) {
+        return (((long) row) << 32) | (col & 0xffffffffL);
     }
 
     private static LocalDate[] weekRange(GeoBoardQueryDTO query) {
@@ -2406,6 +2619,14 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .limit(n)
                 .map(e -> e.getKey() + "(" + e.getValue() + ")")
                 .collect(Collectors.joining("、"));
+    }
+
+    private static class DailyBlock {
+        private int keywordCol;
+        private int topicCol = -1;
+        private int weekCol = -1;
+        private int headerEnd;
+        private List<DateGroup> groups = List.of();
     }
 
     private static class DateGroup {

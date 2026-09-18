@@ -55,7 +55,42 @@ type ChartDef = {
   hint: string;
   /** 发布数量：平台级点开明细 */
   publishDetail?: boolean;
+  /** 环比/同比可为负，只允许点表格下钻，不响应柱体点击 */
+  tableDrill?: boolean;
 };
+
+type CiteTableRow = {
+  series: string;
+  drillKey: string;
+  [axis: string]: string | number | undefined;
+};
+
+function formatSigned(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  const rounded = Math.round(value * 10) / 10;
+  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return `${rounded > 0 ? `+${text}` : text}%`;
+}
+
+function buildCiteTable(charts: { axis: string; series: string; value: number; key?: string }[]) {
+  const axes: string[] = [];
+  const seen = new Set<string>();
+  const rows = new Map<string, CiteTableRow>();
+  for (const point of charts) {
+    if (!seen.has(point.axis)) {
+      seen.add(point.axis);
+      axes.push(point.axis);
+    }
+    const drillKey = point.key || point.series;
+    let row = rows.get(drillKey);
+    if (!row) {
+      row = { series: point.series, drillKey };
+      rows.set(drillKey, row);
+    }
+    row[point.axis] = point.value;
+  }
+  return { axes, rows: [...rows.values()] };
+}
 
 const CHARTS: ChartDef[] = [
   {
@@ -77,12 +112,14 @@ const CHARTS: ChartDef[] = [
   {
     chartType: 'employeeCiteMom',
     title: '员工AI收录环比',
-    hint: '员工 → AI平台 · 纵轴=百分点',
+    hint: '员工 → AI平台 · 百分点，可为负 · 点表格下钻',
+    tableDrill: true,
   },
   {
     chartType: 'employeeCiteYoy',
     title: '员工AI收录同比',
-    hint: '员工 → AI平台 · 纵轴=百分点',
+    hint: '员工 → AI平台 · 百分点，可为负 · 点表格下钻',
+    tableDrill: true,
   },
   {
     chartType: 'topicCiteCount',
@@ -279,6 +316,7 @@ function IndependentTaskTofuCard({
     value: p.value,
     drillKey: p.key,
   }));
+  const citeTable = def.tableDrill ? buildCiteTable(charts) : null;
 
   const isEmployeeRootChart = def.chartType.startsWith('employee');
   const showBack =
@@ -372,18 +410,89 @@ function IndependentTaskTofuCard({
                 labelAutoHide: false,
                 labelAutoRotate: false,
               },
+              ...(def.tableDrill
+                ? {
+                    y: {
+                      labelFormatter: (value: unknown) =>
+                        formatSigned(typeof value === 'number' ? value : Number(value)),
+                    },
+                  }
+                : {}),
             }}
             {...boardColumnChartProps}
-            onReady={bindChartClick}
+            {...(def.tableDrill
+              ? {
+                  label: {
+                    ...boardColumnChartProps.label,
+                    text: (datum: Record<string, unknown>) => {
+                      const text = formatSigned(datum?.value);
+                      return text === '-' ? '' : text;
+                    },
+                  },
+                }
+              : {})}
+            onReady={def.tableDrill ? undefined : bindChartClick}
           />
         </BoardColumnScrollArea>
       </Suspense>
+      {def.tableDrill ? (
+        <Table<CiteTableRow>
+          className='mt-3'
+          size='small'
+          bordered
+          pagination={false}
+          rowKey='drillKey'
+          scroll={{ x: 'max-content', y: 280 }}
+          locale={{ emptyText: '暂无数据' }}
+          dataSource={citeTable?.rows || []}
+          columns={[
+            {
+              title: level === 'aiPlatform' ? 'AI平台' : '员工',
+              dataIndex: 'series',
+              width: 140,
+              fixed: 'left',
+              render: (name: string, row) =>
+                level === 'employee' ? (
+                  <Button
+                    type='link'
+                    size='small'
+                    className='px-0'
+                    onClick={() => onSeriesClick(name, row.drillKey)}
+                  >
+                    {name}
+                  </Button>
+                ) : (
+                  <span className='font-medium'>{name}</span>
+                ),
+            },
+            ...(citeTable?.axes || []).map((axis) => ({
+              title: formatAxis(axis),
+              dataIndex: axis,
+              width: 100,
+              align: 'right' as const,
+              render: (value: unknown) => {
+                const text = formatSigned(value);
+                const n = typeof value === 'number' ? value : 0;
+                return (
+                  <span className={n < 0 ? 'text-red-500' : n > 0 ? 'text-emerald-600' : 'text-neutral-500'}>
+                    {text}
+                  </span>
+                );
+              },
+            })),
+          ]}
+        />
+      ) : null}
       <div className='mt-1 text-xs text-neutral-400'>
-        {level === 'contentPlatform' && def.publishDetail
-          ? '点击柱体查看该内容平台发布明细'
-          : level === 'aiPlatform'
-            ? '已到最细层级'
-            : '点击柱体下钻下一级'}
+        {def.tableDrill
+          ? level === 'employee'
+            ? '环比/同比可能为负，请点击表格中的员工姓名下钻，图表不可下钻'
+            : '已到最细层级'
+          : level === 'contentPlatform' && def.publishDetail
+            ? '点击柱体查看该内容平台发布明细'
+            : level === 'aiPlatform'
+              ? '已到最细层级'
+              : '点击柱体下钻下一级'}
       </div>
 
       <Drawer
@@ -411,7 +520,9 @@ function IndependentTaskTofuCard({
 export function TaskTofuBoard({ grain, range }: { grain: DemoBoardGrain; range: [Dayjs, Dayjs] }) {
   return (
     <div className='flex flex-col gap-3'>
-      <div className='text-xs text-neutral-400'>六个看板相互独立；页顶日期筛选统一生效；点击柱体下钻</div>
+      <div className='text-xs text-neutral-400'>
+        六个看板相互独立；页顶日期筛选统一生效。环比、同比可能为负，只点表格下钻；其余看板点击柱体下钻
+      </div>
       <Row gutter={[12, 12]}>
         {CHARTS.map((def) => (
           <Col

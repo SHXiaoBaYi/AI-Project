@@ -2,6 +2,7 @@ package com.base.admin.config;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
@@ -24,8 +25,15 @@ public class GeoSchemaMigrator implements ApplicationRunner {
 
     private final DataSource dataSource;
 
+    @Value("${geo.schema.migrate:true}")
+    private boolean migrateEnabled;
+
     @Override
     public void run(ApplicationArguments args) throws Exception {
+        if (!migrateEnabled) {
+            log.info("GEO schema migrate 已跳过");
+            return;
+        }
         try (Connection connection = dataSource.getConnection()) {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v3_geo_platform.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v4_geo_daily_board.sql"));

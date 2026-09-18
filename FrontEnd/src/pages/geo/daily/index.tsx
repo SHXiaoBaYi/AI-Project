@@ -358,7 +358,7 @@ const DailyPage = memo(function DailyPage() {
             下载导入模板
           </Button>
           <span className='text-sm text-neutral-400'>
-            黄底红字为必填；橙色行为模板示例，导入时会自动跳过。话题对得上自动关联，对不上自动建档并关联
+            黄底红字为必填；橙色行为模板示例，导入时会自动跳过。工作表名是负责人。单独的月份行和重复表头也会跳过。话题对得上自动关联，对不上自动建档并关联
           </span>
         </div>
         <Upload.Dragger
@@ -374,7 +374,7 @@ const DailyPage = memo(function DailyPage() {
           <p className='ant-upload-drag-icon'>
             <InboxOutlined />
           </p>
-          <p>请上传与「GEO优化监测样例」相同的宽表格式</p>
+          <p>请上传与「GEO优化监测」相同的宽表。一个工作表对应一位负责人</p>
         </Upload.Dragger>
         {importing ? (
           <div className='mt-4'>

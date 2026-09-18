@@ -43,6 +43,32 @@ public class FileStorageService {
         }
     }
 
+    /** 把 Excel 里贴进来的截图落到上传目录，返回可访问路径；格式不对时返回 null */
+    public String saveGeoImageBytes(byte[] bytes, String ext) {
+        if (bytes == null || bytes.length == 0) {
+            return null;
+        }
+        String dotted = ext == null ? "" : ext.trim().toLowerCase(Locale.ROOT);
+        if (!dotted.startsWith(".")) {
+            dotted = "." + dotted;
+        }
+        if (".jpeg".equals(dotted)) {
+            dotted = ".jpg";
+        }
+        if (!IMAGE_EXT.contains(dotted)) {
+            return null;
+        }
+        try {
+            Path dir = Path.of(uploadDir, "geo").toAbsolutePath().normalize();
+            Files.createDirectories(dir);
+            String name = UUID.randomUUID().toString().replace("-", "") + dotted;
+            Files.write(dir.resolve(name), bytes);
+            return "/uploads/geo/" + name;
+        } catch (IOException e) {
+            throw new BusinessException("截图保存失败: " + e.getMessage());
+        }
+    }
+
     /** 任务完成证明等通用附件（不限图片） */
     public String saveTaskAttachment(MultipartFile file) {
         if (file == null || file.isEmpty()) {

@@ -41,14 +41,25 @@ public final class ExcelCellUtils {
         return value.replace("\n", " ").replace("\r", "");
     }
 
+    public static String hyperlink(Sheet sheet, int rowIdx, int colIdx) {
+        Cell cell = resolvedCell(sheet, rowIdx, colIdx);
+        if (cell == null || cell.getHyperlink() == null || cell.getHyperlink().getAddress() == null) {
+            return "";
+        }
+        return cell.getHyperlink().getAddress().trim();
+    }
+
     public static LocalDate date(Sheet sheet, int rowIdx, int colIdx) {
         Cell cell = resolvedCell(sheet, rowIdx, colIdx);
         if (cell == null) {
             return null;
         }
-        if (cell.getCellType() == CellType.NUMERIC && DateUtil.isCellDateFormatted(cell)) {
-            Date d = cell.getDateCellValue();
-            return d.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        if (cell.getCellType() == CellType.NUMERIC) {
+            double value = cell.getNumericCellValue();
+            if (DateUtil.isCellDateFormatted(cell) || (value > 20000 && value < 80000)) {
+                Date d = DateUtil.getJavaDate(value);
+                return d.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+            }
         }
         String text = FORMATTER.formatCellValue(cell).trim();
         if (text.isEmpty()) {
