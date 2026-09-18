@@ -4,6 +4,7 @@ import { ArrowLeftOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import { getGeoNegativeDailyApi, getGeoTopicPlatformChartsApi } from '@/api/geo';
+import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import type { GeoBoardQuery, GeoChartPoint, GeoDailyVO } from '@/types/geo';
 import type { DemoBoardGrain } from '@/constants/demoData';
 
@@ -262,6 +263,7 @@ function IndependentTofuCard({
               labelAutoRotate: false,
             },
           }}
+          {...boardColumnChartProps}
           onReady={bindChartClick}
         />
       </Suspense>

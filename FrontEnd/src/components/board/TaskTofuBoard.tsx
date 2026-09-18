@@ -10,6 +10,7 @@ import {
   type BoardTaskTofuChartType,
   type BoardTaskTofuQuery,
 } from '@/api/board';
+import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import type { DemoBoardGrain } from '@/constants/demoData';
 
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
@@ -370,6 +371,7 @@ function IndependentTaskTofuCard({
               labelAutoRotate: false,
             },
           }}
+          {...boardColumnChartProps}
           onReady={bindChartClick}
         />
       </Suspense>

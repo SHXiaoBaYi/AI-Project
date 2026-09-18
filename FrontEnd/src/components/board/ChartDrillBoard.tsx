@@ -3,6 +3,7 @@ import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Space, Statistic
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { boardChartDrillApi, type BoardChartDrill, type BoardChartStackItem } from '@/api/board';
+import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import { DEMO_DATA_PIVOT, demoRangeByGrain } from '@/constants/demoData';
 
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
@@ -404,6 +405,7 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
             stack={false}
             legend={{ position: 'top' }}
             axis={{ x: dateAxisProps }}
+            {...boardColumnChartProps}
             onReady={bindChartDrill}
           />
         </Suspense>
