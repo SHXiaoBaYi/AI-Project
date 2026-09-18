@@ -1,5 +1,6 @@
 import request from './request';
 import { getToken } from '@/utils/auth';
+import { withBase } from '@/utils/basePath';
 import type { PageQuery, PageResult } from '@/types/api';
 import type {
   GeoBoardQuery,
@@ -163,7 +164,7 @@ export function importGeoDailyApi(file: File) {
 }
 
 export function downloadGeoDailyTemplateApi() {
-  return downloadBlob('/api/geo/daily/import/template', '日监测数据导入模板.xlsx');
+  return downloadBlob(withBase('/api/geo/daily/import/template'), '日监测数据导入模板.xlsx');
 }
 
 export function uploadGeoScreenshotApi(file: File) {
@@ -302,7 +303,7 @@ export function importGeoContentPlacementApi(file: File) {
 }
 
 export function downloadGeoContentPlacementTemplateApi() {
-  return downloadBlob('/api/geo/content-placement/import/template', '内容投放导入模板.xlsx');
+  return downloadBlob(withBase('/api/geo/content-placement/import/template'), '内容投放导入模板.xlsx');
 }
 
 async function downloadBlob(url: string, filename: string) {
