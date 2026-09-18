@@ -88,3 +88,13 @@
   table-layout: fixed;
   margin-inline-start: 0 !important;
 }
+
+/* 新增日监测：平台字段表按列宽展开，不要被父单元格裁成只剩平台名 */
+.geo-daily-platform-edit {
+  max-width: none;
+}
+.geo-daily-platform-edit .ant-table,
+.geo-daily-platform-edit .ant-table-container,
+.geo-daily-platform-edit .ant-table-content {
+  overflow: visible;
+}

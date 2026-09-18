@@ -19,6 +19,9 @@ const MENTION_OPTIONS = [
   { label: '忽略', value: MENTION_IGNORE },
 ];
 
+/** 各平台可编辑列宽合计。父列必须按这个宽度撑开，否则后面的输入会被裁掉 */
+const PLATFORM_TABLE_WIDTH = 88 + 108 + 88 + 148 + 200 + 150 + 180 + 168;
+
 type PlatformRow = {
   platform: string;
   /** 1=是 0=否 -1=忽略（不入库） */
@@ -96,13 +99,13 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
       {
         title: '平台',
         dataIndex: 'platform',
-        width: 100,
+        width: 88,
         render: (v: string) => <span className='px-2 font-medium'>{v}</span>,
       },
       {
-        title: '露出',
+        title: '提及',
         dataIndex: 'mentioned',
-        width: 100,
+        width: 108,
         render: (v, row) => (
           <Select
             className='w-full'
@@ -116,7 +119,7 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
       {
         title: '排名',
         dataIndex: 'rankNo',
-        width: 96,
+        width: 88,
         render: (v, row) => (
           <InputNumber
             className='w-full'
@@ -146,7 +149,7 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
       {
         title: '推荐状态',
         dataIndex: 'recommendStatus',
-        width: 140,
+        width: 148,
         render: (v, row) => (
           <Select
             className='w-full'
@@ -158,9 +161,9 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
         ),
       },
       {
-        title: '第三方链接',
+        title: '链接',
         dataIndex: 'thirdPartyUrl',
-        width: 180,
+        width: 200,
         render: (v, row) => (
           <ImeSafeInput
             variant='borderless'
@@ -173,7 +176,7 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
       {
         title: '竞品',
         dataIndex: 'competitors',
-        width: 140,
+        width: 150,
         render: (v, row) => (
           <ImeSafeInput
             variant='borderless'
@@ -184,9 +187,9 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
         ),
       },
       {
-        title: '负面/错误内容',
+        title: '负面/错误',
         dataIndex: 'negativeContent',
-        width: 160,
+        width: 180,
         render: (v, row) => (
           <ImeSafeInput
             variant='borderless'
@@ -199,7 +202,7 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
       {
         title: '截图',
         dataIndex: 'screenshotUrl',
-        width: 120,
+        width: 168,
         render: (v, row) => (
           <Space size={4}>
             <Upload
@@ -231,16 +234,20 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
   }, [tabKey, topicKey, onUpdate]);
 
   return (
-    <div className='geo-nested-platform-scroll'>
+    <div
+      className='geo-daily-platform-edit'
+      style={{ width: PLATFORM_TABLE_WIDTH, minWidth: PLATFORM_TABLE_WIDTH }}
+    >
       <Table<PlatformRow>
         size='small'
         bordered
         pagination={false}
         tableLayout='fixed'
+        scroll={{ x: PLATFORM_TABLE_WIDTH }}
         rowKey='platform'
         columns={columns}
         dataSource={platforms}
-        className='geo-nested-platform-table bg-white'
+        className='bg-white'
       />
     </div>
   );
@@ -630,6 +637,8 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
     {
       title: '各平台监测',
       dataIndex: 'platforms',
+      width: PLATFORM_TABLE_WIDTH,
+      onCell: () => ({ style: { minWidth: PLATFORM_TABLE_WIDTH, verticalAlign: 'top', padding: 0 } }),
       render: (_, row) => (
         <PlatformNestedTable
           tabKey={tabKey}

@@ -165,7 +165,7 @@ const DailyPage = memo(function DailyPage() {
       render: (_, r) => (
         <GeoScreenshot
           src={r.screenshotUrl}
-          width={40}
+          trigger='link'
         />
       ),
     },
