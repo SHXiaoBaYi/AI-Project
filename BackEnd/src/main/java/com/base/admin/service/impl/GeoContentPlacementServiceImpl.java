@@ -94,7 +94,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GeoContentPlacementServiceImpl implements GeoContentPlacementService {
 
-    private static final String[] AI_PLATFORMS = {"豆包", "DS", "元宝"};
+    private static final int CITE_START_COL = 10;
 
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentPlacementItemMapper itemMapper;
@@ -647,6 +647,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         GeoImportResultVO result = new GeoImportResultVO();
         try (Workbook workbook = WorkbookFactory.create(in)) {
             Sheet sheet = workbook.getSheetAt(0);
+            List<CiteHeader> citeHeaders = readCiteHeaders(sheet);
+            int remarkCol = citeHeaders.get(citeHeaders.size() - 1).col() + 1;
             Long currentPlacementId = null;
             Long lastItemId = null;
             int itemSort = 0;
@@ -667,15 +669,18 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 String platform = ExcelCellUtils.rawStr(sheet, r, 7);
                 String publishTimeRaw = ExcelCellUtils.rawStr(sheet, r, 8);
                 String askQuestion = ExcelCellUtils.rawStr(sheet, r, 9);
-                String doubao = ExcelCellUtils.rawStr(sheet, r, 10);
-                String ds = ExcelCellUtils.rawStr(sheet, r, 11);
-                String yuanbao = ExcelCellUtils.rawStr(sheet, r, 12);
-                String remark = ExcelCellUtils.str(sheet, r, 13);
+                boolean hasCiteUrl = false;
+                for (CiteHeader header : citeHeaders) {
+                    if (StringUtils.hasText(ExcelCellUtils.rawStr(sheet, r, header.col()))) {
+                        hasCiteUrl = true;
+                        break;
+                    }
+                }
+                String remark = ExcelCellUtils.str(sheet, r, remarkCol);
 
                 boolean newGroup = StringUtils.hasText(seq);
                 boolean hasPlatform = StringUtils.hasText(platform);
                 boolean hasAsk = StringUtils.hasText(askQuestion);
-                boolean hasCiteUrl = StringUtils.hasText(doubao) || StringUtils.hasText(ds) || StringUtils.hasText(yuanbao);
 
                 if (isTemplateSample(seq, targetQuestion, title, askQuestion, remark, linkOrStatus)) {
                     if (newGroup) {
@@ -754,13 +759,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 }
 
                 if (hasAsk && hasCiteUrl) {
-                    String[] urls = {doubao, ds, yuanbao};
-                    for (int i = 0; i < AI_PLATFORMS.length; i++) {
-                        String url = urls[i];
+                    for (CiteHeader header : citeHeaders) {
+                        String url = ExcelCellUtils.rawStr(sheet, r, header.col());
                         if (!StringUtils.hasText(url)) {
                             continue;
                         }
-                        String citeKey = askQuestion.trim() + "\0" + AI_PLATFORMS[i] + "\0" + url.trim();
+                        String citeKey = askQuestion.trim() + "\0" + header.platform() + "\0" + url.trim();
                         if (!dedupeCites.add(citeKey)) {
                             continue;
                         }
@@ -768,7 +772,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                         cite.setPlacementId(currentPlacementId);
                         cite.setItemId(lastItemId);
                         cite.setAskQuestion(askQuestion.trim());
-                        cite.setAiPlatform(AI_PLATFORMS[i]);
+                        cite.setAiPlatform(header.platform());
                         cite.setCiteUrl(url.trim());
                         cite.setSortOrder(citeSort++);
                         citeMapper.insert(cite);
@@ -1405,6 +1409,37 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             }
         }
         return false;
+    }
+
+    private record CiteHeader(int col, String platform) {}
+
+    /** 第2行从第11列起是 AI 平台名，直到「备注」列 */
+    private static List<CiteHeader> readCiteHeaders(Sheet sheet) {
+        int last = CITE_START_COL;
+        if (sheet.getRow(0) != null) {
+            last = Math.max(last, sheet.getRow(0).getLastCellNum());
+        }
+        if (sheet.getRow(1) != null) {
+            last = Math.max(last, sheet.getRow(1).getLastCellNum());
+        }
+        List<CiteHeader> headers = new ArrayList<>();
+        for (int col = CITE_START_COL; col < last; col++) {
+            String top = ExcelCellUtils.str(sheet, 0, col);
+            String name = ExcelCellUtils.str(sheet, 1, col);
+            if (top.contains("备注") || name.contains("备注")) {
+                break;
+            }
+            if (!StringUtils.hasText(name)) {
+                break;
+            }
+            headers.add(new CiteHeader(col, name.trim()));
+        }
+        if (headers.isEmpty()) {
+            headers.add(new CiteHeader(10, "豆包"));
+            headers.add(new CiteHeader(11, "DS"));
+            headers.add(new CiteHeader(12, "元宝"));
+        }
+        return headers;
     }
 
     private static String nz(String value) {

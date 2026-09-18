@@ -16,7 +16,10 @@ import com.base.admin.domain.vo.GeoContentPlacementItemVO;
 import com.base.admin.domain.vo.GeoContentPlacementListVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
+import com.base.admin.common.Constants;
+import com.base.admin.domain.entity.GeoPlatform;
 import com.base.admin.service.GeoContentPlacementService;
+import com.base.admin.service.GeoPlatformService;
 import com.base.admin.util.GeoExcelTemplateWriter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -47,6 +50,7 @@ import java.util.List;
 public class GeoContentPlacementController {
 
     private final GeoContentPlacementService contentPlacementService;
+    private final GeoPlatformService platformService;
 
     @Operation(summary = "分页查询内容投放（按内容聚合）")
     @PostMapping("/list")
@@ -188,7 +192,10 @@ public class GeoContentPlacementController {
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         String filename = URLEncoder.encode("内容投放导入模板.xlsx", StandardCharsets.UTF_8);
         response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + filename);
-        GeoExcelTemplateWriter.writePlacement(response.getOutputStream());
+        GeoExcelTemplateWriter.writePlacement(response.getOutputStream(),
+                platformService.listByType(Constants.PLATFORM_TYPE_AI).stream()
+                        .map(GeoPlatform::getPlatformName)
+                        .toList());
     }
 
     @Operation(summary = "导入内容投放 Excel")

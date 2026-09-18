@@ -147,7 +147,7 @@ public class GeoMonitorController {
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         String filename = URLEncoder.encode("日监测数据导入模板.xlsx", StandardCharsets.UTF_8);
         response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + filename);
-        GeoExcelTemplateWriter.writeDaily(response.getOutputStream());
+        GeoExcelTemplateWriter.writeDaily(response.getOutputStream(), monitorService.listPlatforms());
     }
 
     @Operation(summary = "导入日监测宽表Excel")

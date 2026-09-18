@@ -83,8 +83,8 @@ import java.util.stream.Collectors;
 public class GeoMonitorServiceImpl implements GeoMonitorService {
 
     private static final int DATE_START_COL = 4;
-    private static final int COLS_PER_DATE = 12;
-    private static final int PLATFORMS_PER_METRIC = 2;
+    /** 每个日期下的指标块数：提及、排名、推荐、截图、负面、竞品 */
+    private static final int METRIC_COUNT = 6;
 
     private final GeoMonitorDailyMapper dailyMapper;
     private final GeoTopicMapper topicMapper;
@@ -422,8 +422,11 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             Sheet sheet = wb.getSheetAt(0);
             int lastRow = sheet.getLastRowNum();
             int lastCol = 0;
+            if (sheet.getRow(0) != null) {
+                lastCol = Math.max(lastCol, sheet.getRow(0).getLastCellNum());
+            }
             if (sheet.getRow(2) != null) {
-                lastCol = sheet.getRow(2).getLastCellNum();
+                lastCol = Math.max(lastCol, sheet.getRow(2).getLastCellNum());
             }
             List<DateGroup> groups = parseDateGroups(sheet, lastCol);
             String lastTopic = "";
@@ -446,25 +449,27 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 }
                 GeoTopic topic = topicService.getOrCreate(lastTopic, lastWeek);
                 for (DateGroup group : groups) {
-                    for (int p = 0; p < group.platforms.size(); p++) {
+                    int n = group.platformCount;
+                    for (int i = 0; i < group.platforms.size(); i++) {
+                        int p = group.platformIndex.get(i);
                         result.setTotalCount(result.getTotalCount() + 1);
                         try {
                             GeoDailyDTO dto = new GeoDailyDTO();
                             dto.setInspectDate(group.date);
-                            dto.setPlatform(group.platforms.get(p));
+                            dto.setPlatform(group.platforms.get(i));
                             platformService.getOrCreate(dto.getPlatform());
                             dto.setKeyword(keyword.trim());
                             dto.setTermType(Constants.TERM_TYPE_DAILY);
                             dto.setTopicId(topic.getId());
                             dto.setMentioned(parseMentioned(ExcelCellUtils.str(sheet, r, group.startCol + p)));
-                            dto.setRankNo(parseRank(ExcelCellUtils.str(sheet, r, group.startCol + 2 + p)));
-                            dto.setRecommendStatus(ExcelCellUtils.str(sheet, r, group.startCol + 4 + p));
-                            String shot = ExcelCellUtils.str(sheet, r, group.startCol + 6 + p);
+                            dto.setRankNo(parseRank(ExcelCellUtils.str(sheet, r, group.startCol + n + p)));
+                            dto.setRecommendStatus(ExcelCellUtils.str(sheet, r, group.startCol + 2 * n + p));
+                            String shot = ExcelCellUtils.str(sheet, r, group.startCol + 3 * n + p);
                             if (isHttp(shot)) {
                                 dto.setThirdPartyUrl(shot);
                             }
-                            dto.setNegativeContent(ExcelCellUtils.str(sheet, r, group.startCol + 8 + p));
-                            dto.setCompetitors(ExcelCellUtils.str(sheet, r, group.startCol + 10 + p));
+                            dto.setNegativeContent(ExcelCellUtils.str(sheet, r, group.startCol + 4 * n + p));
+                            dto.setCompetitors(ExcelCellUtils.str(sheet, r, group.startCol + 5 * n + p));
                             boolean inserted = upsertDaily(dto, true);
                             if (inserted) {
                                 result.setInsertCount(result.getInsertCount() + 1);
@@ -474,7 +479,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                         } catch (Exception e) {
                             result.setFailureCount(result.getFailureCount() + 1);
                             result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(
-                                    r + 1, group.platforms.get(p), e.getMessage()));
+                                    r + 1, group.platforms.get(i), e.getMessage()));
                         }
                     }
                 }
@@ -1801,20 +1806,42 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     }
 
     private List<DateGroup> parseDateGroups(Sheet sheet, int lastCol) {
-        List<DateGroup> groups = new ArrayList<>();
-        for (int col = DATE_START_COL; col < lastCol; col += COLS_PER_DATE) {
+        List<Integer> dateCols = new ArrayList<>();
+        LocalDate prevDate = null;
+        int prevCol = -1;
+        for (int col = DATE_START_COL; col < lastCol; col++) {
             LocalDate date = ExcelCellUtils.date(sheet, 0, col);
             if (date == null) {
                 continue;
             }
+            // 合并单元格会让相邻列读到同一个日期，只记块起点
+            if (prevDate != null && date.equals(prevDate) && col == prevCol + 1) {
+                prevCol = col;
+                continue;
+            }
+            dateCols.add(col);
+            prevDate = date;
+            prevCol = col;
+        }
+        List<DateGroup> groups = new ArrayList<>();
+        for (int i = 0; i < dateCols.size(); i++) {
+            int start = dateCols.get(i);
+            int end = i + 1 < dateCols.size() ? dateCols.get(i + 1) : lastCol;
+            int platformCount = (end - start) / METRIC_COUNT;
+            if (platformCount < 1) {
+                continue;
+            }
             DateGroup group = new DateGroup();
-            group.date = date;
-            group.startCol = col;
-            for (int p = 0; p < PLATFORMS_PER_METRIC; p++) {
-                String platform = ExcelCellUtils.str(sheet, 2, col + p);
-                if (StringUtils.hasText(platform)) {
-                    group.platforms.add(platform);
+            group.date = ExcelCellUtils.date(sheet, 0, start);
+            group.startCol = start;
+            group.platformCount = platformCount;
+            for (int p = 0; p < platformCount; p++) {
+                String platform = ExcelCellUtils.str(sheet, 2, start + p);
+                if (!StringUtils.hasText(platform)) {
+                    continue;
                 }
+                group.platformIndex.add(p);
+                group.platforms.add(platform.trim());
             }
             if (!group.platforms.isEmpty()) {
                 groups.add(group);
@@ -2366,6 +2393,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private static class DateGroup {
         private LocalDate date;
         private int startCol;
+        private int platformCount;
+        private final List<Integer> platformIndex = new ArrayList<>();
         private final List<String> platforms = new ArrayList<>();
     }
 
