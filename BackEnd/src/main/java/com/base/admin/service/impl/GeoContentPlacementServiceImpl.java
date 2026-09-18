@@ -52,6 +52,7 @@ import com.base.admin.service.GeoTopicService;
 import com.base.admin.service.PlacementTaskSyncService;
 import com.base.admin.service.SysAiProviderService;
 import com.base.admin.util.ExcelCellUtils;
+import com.base.admin.util.GeoExcelTemplateWriter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -675,6 +676,14 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 boolean hasPlatform = StringUtils.hasText(platform);
                 boolean hasAsk = StringUtils.hasText(askQuestion);
                 boolean hasCiteUrl = StringUtils.hasText(doubao) || StringUtils.hasText(ds) || StringUtils.hasText(yuanbao);
+
+                if (isTemplateSample(seq, targetQuestion, title, askQuestion, remark, linkOrStatus)) {
+                    if (newGroup) {
+                        currentPlacementId = null;
+                        lastItemId = null;
+                    }
+                    continue;
+                }
 
                 if (!newGroup && !hasPlatform && !hasAsk && !hasCiteUrl) {
                     continue;
@@ -1384,6 +1393,18 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                                        String targetQuestion, String title) {
         return nz(publisher) + "\0" + nz(owner) + "\0" + nz(topic) + "\0"
                 + nz(targetQuestion) + "\0" + nz(title);
+    }
+
+    private static boolean isTemplateSample(String... parts) {
+        if (parts == null) {
+            return false;
+        }
+        for (String part : parts) {
+            if (part != null && part.contains(GeoExcelTemplateWriter.SAMPLE_MARK)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String nz(String value) {

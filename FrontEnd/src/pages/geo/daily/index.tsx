@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Button, Tag, Upload } from 'antd';
-import { InboxOutlined } from '@ant-design/icons';
+import { InboxOutlined, DownloadOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -15,6 +15,7 @@ import {
   getGeoPlatformsApi,
   getGeoTopicOptionsApi,
   importGeoDailyApi,
+  downloadGeoDailyTemplateApi,
 } from '@/api/geo';
 import type { GeoDailyVO, GeoOwnerOption, GeoTopic } from '@/types/geo';
 import { formatDateTime, toDateTimeParam } from '@/utils/datetime';
@@ -346,6 +347,17 @@ const DailyPage = memo(function DailyPage() {
         }}
         submitter={false}
       >
+        <div className='mb-3 flex flex-wrap items-center gap-2'>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={() => {
+              downloadGeoDailyTemplateApi().catch(() => message.error('模板下载失败'));
+            }}
+          >
+            下载导入模板
+          </Button>
+          <span className='text-sm text-neutral-400'>黄底红字为必填；橙色行为模板示例，导入时会自动跳过</span>
+        </div>
         <Upload.Dragger
           accept='.xlsx,.xls'
           maxCount={1}

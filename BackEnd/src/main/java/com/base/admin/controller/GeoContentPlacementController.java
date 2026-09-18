@@ -17,6 +17,7 @@ import com.base.admin.domain.vo.GeoContentPlacementListVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.service.GeoContentPlacementService;
+import com.base.admin.util.GeoExcelTemplateWriter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -32,6 +33,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Tag(name = "GEO内容投放", description = "内容投放管理")
@@ -173,6 +179,16 @@ public class GeoContentPlacementController {
     public Result<Void> deleteCite(@PathVariable Long citeId) {
         contentPlacementService.deleteCite(citeId);
         return Result.ok();
+    }
+
+    @Operation(summary = "下载内容投放导入模板")
+    @GetMapping("/import/template")
+    @RequiresPermission("geo:content:import")
+    public void downloadImportTemplate(HttpServletResponse response) throws IOException {
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        String filename = URLEncoder.encode("内容投放导入模板.xlsx", StandardCharsets.UTF_8);
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + filename);
+        GeoExcelTemplateWriter.writePlacement(response.getOutputStream());
     }
 
     @Operation(summary = "导入内容投放 Excel")

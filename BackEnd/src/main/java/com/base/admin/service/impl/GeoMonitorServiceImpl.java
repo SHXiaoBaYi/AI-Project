@@ -45,6 +45,7 @@ import com.base.admin.service.GeoMonitorService;
 import com.base.admin.service.GeoPlatformService;
 import com.base.admin.service.GeoTopicService;
 import com.base.admin.util.ExcelCellUtils;
+import com.base.admin.util.GeoExcelTemplateWriter;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -430,6 +431,9 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             for (int r = 3; r <= lastRow; r++) {
                 String keyword = ExcelCellUtils.str(sheet, r, 3);
                 if (!StringUtils.hasText(keyword)) {
+                    continue;
+                }
+                if (keyword.contains(GeoExcelTemplateWriter.SAMPLE_MARK)) {
                     continue;
                 }
                 String week = ExcelCellUtils.str(sheet, r, 1);

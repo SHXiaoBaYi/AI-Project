@@ -25,6 +25,7 @@ import com.base.admin.domain.vo.GeoWeeklyBoardVO;
 import com.base.admin.domain.vo.GeoYearlyBoardVO;
 import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoMonitorService;
+import com.base.admin.util.GeoExcelTemplateWriter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -40,6 +41,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -132,6 +138,16 @@ public class GeoMonitorController {
     @RequiresPermission({"geo:daily:list", "board:view", "geo:expose:list", "geo:day:list"})
     public Result<GeoLatestDateVO> latestDate() {
         return Result.ok(monitorService.latestInspectDate());
+    }
+
+    @Operation(summary = "下载日监测导入模板")
+    @GetMapping("/daily/import/template")
+    @RequiresPermission("geo:daily:import")
+    public void downloadDailyTemplate(HttpServletResponse response) throws IOException {
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        String filename = URLEncoder.encode("日监测数据导入模板.xlsx", StandardCharsets.UTF_8);
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + filename);
+        GeoExcelTemplateWriter.writeDaily(response.getOutputStream());
     }
 
     @Operation(summary = "导入日监测宽表Excel")

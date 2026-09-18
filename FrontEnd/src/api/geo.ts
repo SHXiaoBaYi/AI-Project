@@ -1,4 +1,5 @@
 import request from './request';
+import { getToken } from '@/utils/auth';
 import type { PageQuery, PageResult } from '@/types/api';
 import type {
   GeoBoardQuery,
@@ -161,6 +162,10 @@ export function importGeoDailyApi(file: File) {
   });
 }
 
+export function downloadGeoDailyTemplateApi() {
+  return downloadBlob('/api/geo/daily/import/template', '日监测数据导入模板.xlsx');
+}
+
 export function uploadGeoScreenshotApi(file: File) {
   const formData = new FormData();
   formData.append('file', file);
@@ -294,6 +299,30 @@ export function importGeoContentPlacementApi(file: File) {
   return request.post<unknown, GeoImportResult>('/geo/content-placement/import', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
+}
+
+export function downloadGeoContentPlacementTemplateApi() {
+  return downloadBlob('/api/geo/content-placement/import/template', '内容投放导入模板.xlsx');
+}
+
+async function downloadBlob(url: string, filename: string) {
+  const token = getToken();
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error('下载失败');
+  }
+  const blob = await res.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(objectUrl);
 }
 
 export function getGeoNegativeDailyApi(data: GeoBoardQuery) {
