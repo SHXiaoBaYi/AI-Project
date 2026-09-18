@@ -447,6 +447,13 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 if (StringUtils.hasText(topicName)) {
                     lastTopic = topicName;
                 }
+                if (!StringUtils.hasText(lastTopic)) {
+                    result.setTotalCount(result.getTotalCount() + 1);
+                    result.setFailureCount(result.getFailureCount() + 1);
+                    result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(r + 1, "话题", "话题不能为空"));
+                    continue;
+                }
+                // 名称已存在则只关联；不存在则建档后再关联
                 GeoTopic topic = topicService.getOrCreate(lastTopic, lastWeek);
                 for (DateGroup group : groups) {
                     int n = group.platformCount;

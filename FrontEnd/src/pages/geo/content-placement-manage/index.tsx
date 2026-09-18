@@ -462,7 +462,9 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
           >
             下载导入模板
           </Button>
-          <span className='text-sm text-neutral-400'>黄底红字为必填；橙色行为模板示例，导入时会自动跳过</span>
+          <span className='text-sm text-neutral-400'>
+            黄底红字为必填；橙色行为模板示例，导入时会自动跳过。话题对得上自动关联，对不上自动建档并关联
+          </span>
         </div>
         <Upload.Dragger
           accept='.xlsx,.xls'
@@ -486,7 +488,16 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
             onClick={async () => {
               if (!file) return;
               const res = await importGeoContentPlacementApi(file);
-              message.success(`导入完成：新增 ${res.insertCount}，更新 ${res.updateCount}，失败 ${res.failureCount}`);
+              const head = `导入完成：新增 ${res.insertCount}，更新 ${res.updateCount}，失败 ${res.failureCount}`;
+              const detail = (res.errors ?? [])
+                .slice(0, 3)
+                .map((e) => `第${e.rowIndex}行：${e.message}`)
+                .join('；');
+              if (res.failureCount > 0) {
+                message.warning(detail ? `${head}。${detail}` : head);
+              } else {
+                message.success(head);
+              }
               setImportOpen(false);
               setFile(null);
               actionRef.current?.reload();

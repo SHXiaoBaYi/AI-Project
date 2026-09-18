@@ -701,41 +701,50 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                         lastItemId = null;
                         continue;
                     }
-                    String key = placementKey(publisher, owner, topic, targetQuestion, title);
-                    Long existingId = placementKeyCache.get(key);
-                    if (existingId == null) {
-                        GeoContentPlacement existing = findByBizKey(publisher, owner, topic, targetQuestion, title);
-                        if (existing != null) {
-                            existingId = existing.getId();
-                            clearChildren(existingId);
-                            existing.setRemark(remark);
-                            existing.setSource(Constants.CONTENT_SOURCE_IMPORT);
-                            existing.setPlacementProgress(Constants.CONTENT_AGG_NONE);
-                            applyUsersAndTopic(existing, publisher, owner, topic);
-                            placementMapper.updateById(existing);
-                            placementTaskSyncService.ensureTasksForPlacement(existing);
-                            result.setUpdateCount(result.getUpdateCount() + 1);
-                        } else {
-                            GeoContentPlacement placement = new GeoContentPlacement();
-                            placement.setTargetQuestion(nz(targetQuestion));
-                            placement.setTitle(nz(title));
-                            placement.setSource(Constants.CONTENT_SOURCE_IMPORT);
-                            placement.setPlacementProgress(Constants.CONTENT_AGG_NONE);
-                            placement.setRemark(remark);
-                            applyUsersAndTopic(placement, publisher, owner, topic);
-                            placementMapper.insert(placement);
-                            placementTaskSyncService.ensureTasksForPlacement(placement);
-                            existingId = placement.getId();
-                            result.setInsertCount(result.getInsertCount() + 1);
+                    try {
+                        String key = placementKey(publisher, owner, topic, targetQuestion, title);
+                        Long existingId = placementKeyCache.get(key);
+                        if (existingId == null) {
+                            GeoContentPlacement existing = findByBizKey(publisher, owner, topic, targetQuestion, title);
+                            if (existing != null) {
+                                existingId = existing.getId();
+                                clearChildren(existingId);
+                                existing.setRemark(remark);
+                                existing.setSource(Constants.CONTENT_SOURCE_IMPORT);
+                                existing.setPlacementProgress(Constants.CONTENT_AGG_NONE);
+                                applyUsersAndTopic(existing, publisher, owner, topic);
+                                placementMapper.updateById(existing);
+                                placementTaskSyncService.ensureTasksForPlacement(existing);
+                                result.setUpdateCount(result.getUpdateCount() + 1);
+                            } else {
+                                GeoContentPlacement placement = new GeoContentPlacement();
+                                placement.setTargetQuestion(nz(targetQuestion));
+                                placement.setTitle(nz(title));
+                                placement.setSource(Constants.CONTENT_SOURCE_IMPORT);
+                                placement.setPlacementProgress(Constants.CONTENT_AGG_NONE);
+                                placement.setRemark(remark);
+                                applyUsersAndTopic(placement, publisher, owner, topic);
+                                placementMapper.insert(placement);
+                                placementTaskSyncService.ensureTasksForPlacement(placement);
+                                existingId = placement.getId();
+                                result.setInsertCount(result.getInsertCount() + 1);
+                            }
+                            placementKeyCache.put(key, existingId);
                         }
-                        placementKeyCache.put(key, existingId);
+                        currentPlacementId = existingId;
+                        lastItemId = null;
+                        itemSort = 0;
+                        citeSort = 0;
+                        dedupeCites = new HashSet<>();
+                        result.setTotalCount(result.getTotalCount() + 1);
+                    } catch (BusinessException e) {
+                        currentPlacementId = null;
+                        lastItemId = null;
+                        result.setTotalCount(result.getTotalCount() + 1);
+                        result.setFailureCount(result.getFailureCount() + 1);
+                        result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(r + 1, "话题", e.getMessage()));
+                        continue;
                     }
-                    currentPlacementId = existingId;
-                    lastItemId = null;
-                    itemSort = 0;
-                    citeSort = 0;
-                    dedupeCites = new HashSet<>();
-                    result.setTotalCount(result.getTotalCount() + 1);
                 }
 
                 if (currentPlacementId == null) {
@@ -931,6 +940,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         if (topicId != null) {
             topic = topicService.getById(topicId);
         } else if (StringUtils.hasText(topicName)) {
+            // 名称已存在则只关联；不存在则建档后再关联
             topic = topicService.getOrCreate(topicName.trim(), null);
         }
         if (topic == null) {
