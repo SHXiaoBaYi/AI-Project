@@ -914,10 +914,15 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                                              GeoBoardQueryDTO query, List<YearAgg> live) {
         Map<String, YearAgg> merged = mergeYearlyWithSnapshots(compareRange, query, live);
         GeoYearlyBoardVO board = new GeoYearlyBoardVO();
+        List<String> platforms = resolveYearlyPlatforms(query, merged.values());
+        board.setPlatforms(platforms);
         Set<String> persistedKeys = new HashSet<>();
         List<YearAgg> displayRows = new ArrayList<>();
         for (YearAgg row : merged.values()) {
             if (row.periodEnd().isBefore(displayRange[0]) || row.periodStart().isAfter(displayRange[1])) {
+                continue;
+            }
+            if (!StringUtils.hasText(row.platform()) || "-".equals(row.platform())) {
                 continue;
             }
             displayRows.add(row);
@@ -945,7 +950,81 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         sortChart(board.getAchieveChart());
         board.setPersistedPeriodCount(persistedKeys.size());
         board.setCompareSummary(buildYearCompareSummary(displayRows, merged));
+        board.setOverallAchieveRates(buildOverallAchieveRates(displayRange, query, displayRows, platforms));
         return board;
+    }
+
+    private List<String> resolveYearlyPlatforms(GeoBoardQueryDTO query, Collection<YearAgg> rows) {
+        LinkedHashSet<String> ordered = new LinkedHashSet<>();
+        if (query.getPlatforms() != null) {
+            query.getPlatforms().stream().filter(StringUtils::hasText).forEach(ordered::add);
+        }
+        for (String name : listPlatforms()) {
+            ordered.add(name);
+        }
+        for (YearAgg row : rows) {
+            if (StringUtils.hasText(row.platform()) && !"-".equals(row.platform())) {
+                ordered.add(row.platform());
+            }
+        }
+        return new ArrayList<>(ordered);
+    }
+
+    /**
+     * 对齐样例表「全年目标达成率」：各平台 SUM(达成率) / 话题行总数（含未填行，未填视为 0）。
+     */
+    private List<GeoYearlyBoardVO.PlatformOverallVO> buildOverallAchieveRates(
+            LocalDate[] displayRange, GeoBoardQueryDTO query, List<YearAgg> displayRows, List<String> platforms) {
+        int totalSlots = countYearlyTopicSlots(displayRange, query);
+        if (totalSlots <= 0) {
+            Set<String> keys = new LinkedHashSet<>();
+            for (YearAgg row : displayRows) {
+                keys.add(row.periodLabel() + "\0" + row.groupName());
+            }
+            totalSlots = Math.max(keys.size(), 1);
+        }
+        Map<String, Double> sumAchieve = new LinkedHashMap<>();
+        Map<String, Integer> filled = new LinkedHashMap<>();
+        for (String platform : platforms) {
+            sumAchieve.put(platform, 0d);
+            filled.put(platform, 0);
+        }
+        for (YearAgg row : displayRows) {
+            if (!sumAchieve.containsKey(row.platform())) {
+                continue;
+            }
+            sumAchieve.merge(row.platform(), row.achieveRate(), Double::sum);
+            filled.merge(row.platform(), 1, Integer::sum);
+        }
+        List<GeoYearlyBoardVO.PlatformOverallVO> list = new ArrayList<>();
+        int denom = totalSlots;
+        for (String platform : platforms) {
+            int fill = filled.getOrDefault(platform, 0);
+            if (fill <= 0) {
+                continue;
+            }
+            GeoYearlyBoardVO.PlatformOverallVO vo = new GeoYearlyBoardVO.PlatformOverallVO();
+            vo.setPlatform(platform);
+            vo.setAchieveRate(round(sumAchieve.getOrDefault(platform, 0d) / denom));
+            vo.setFilledCount(fill);
+            vo.setTotalCount(denom);
+            list.add(vo);
+        }
+        return list;
+    }
+
+    private int countYearlyTopicSlots(LocalDate[] displayRange, GeoBoardQueryDTO query) {
+        List<GeoYearTarget> targets = targetMapper.selectList(new LambdaQueryWrapper<GeoYearTarget>()
+                .eq(query.getTopicId() != null, GeoYearTarget::getTopicId, query.getTopicId())
+                .orderByAsc(GeoYearTarget::getSortOrder));
+        int count = 0;
+        for (GeoYearTarget target : targets) {
+            if (!overlaps(target, displayRange[0], displayRange[1])) {
+                continue;
+            }
+            count++;
+        }
+        return count;
     }
 
     private void fillOwnerYearlySlice(GeoYearlyBoardVO board, LocalDate[] displayRange, List<YearAgg> liveOwner) {
@@ -1350,7 +1429,10 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         }
         LocalDate today = LocalDate.now();
         for (GeoBoardPeriodStat snap : listSnapshots(GeoPeriodType.YEAR, range[0], range[1], query)) {
-            if (snap.getPeriodEnd() == null || !snap.getPeriodEnd().isBefore(today)) {
+            boolean unfinished = snap.getPeriodEnd() == null || !snap.getPeriodEnd().isBefore(today);
+            // 样例/手工落库的年度指标（含实际达成、达成率）即使周期未结束也优先展示
+            boolean hasYearMetrics = snap.getActualRate() != null && snap.getAchieveRate() != null;
+            if (unfinished && !hasYearMetrics) {
                 continue;
             }
             YearAgg fromSnap = YearAgg.fromSnapshot(snap);

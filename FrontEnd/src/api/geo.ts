@@ -264,6 +264,10 @@ export function persistGeoYearlyBoardApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoPersistResult>('/geo/yearly/persist', data);
 }
 
+export function seedGeoYearlySampleApi() {
+  return request.post<unknown, string>('/geo/yearly/seed-sample');
+}
+
 export function getGeoYearTargetsApi() {
   return request.get<unknown, GeoYearTarget[]>('/geo/yearly/targets');
 }

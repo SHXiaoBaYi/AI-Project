@@ -382,7 +382,16 @@ export interface GeoYearlyRow {
   fromSnapshot?: boolean;
 }
 
+export interface GeoYearlyPlatformOverall {
+  platform: string;
+  achieveRate: number;
+  filledCount?: number;
+  totalCount?: number;
+}
+
 export interface GeoYearlyBoard {
+  platforms?: string[];
+  overallAchieveRates?: GeoYearlyPlatformOverall[];
   actualChart: GeoChartPoint[];
   achieveChart: GeoChartPoint[];
   rows: GeoYearlyRow[];

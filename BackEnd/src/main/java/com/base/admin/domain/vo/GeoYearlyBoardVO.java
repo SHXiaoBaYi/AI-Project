@@ -8,8 +8,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Data
-@Schema(description = "GEO全年目标看板（落库优先，未落库则实时聚合）")
+@Schema(description = "GEO全年目标看板（落库优先，未结束周期可含样例快照）")
 public class GeoYearlyBoardVO {
+
+    @Schema(description = "AI 平台列（动态，用于矩阵表头）")
+    private List<String> platforms = new ArrayList<>();
+
+    @Schema(description = "全年整体目标达成率（各大指标卡片，按平台）")
+    private List<PlatformOverallVO> overallAchieveRates = new ArrayList<>();
 
     @Schema(description = "实际达成折线（横轴=时段/话题，系列=平台）")
     private List<GeoChartPointVO> actualChart = new ArrayList<>();
@@ -17,7 +23,7 @@ public class GeoYearlyBoardVO {
     @Schema(description = "达成率柱状（横轴=时段/话题，系列=平台）")
     private List<GeoChartPointVO> achieveChart = new ArrayList<>();
 
-    @Schema(description = "达成明细")
+    @Schema(description = "达成明细（长表，前端可透视成矩阵）")
     private List<GeoYearlyRowVO> rows = new ArrayList<>();
 
     @Schema(description = "查询范围内已落库的周期数", example = "2")
@@ -39,9 +45,25 @@ public class GeoYearlyBoardVO {
     private GeoBoardCompareSummaryVO ownerCompareSummary;
 
     @Data
+    @Schema(description = "平台全年整体达成率")
+    public static class PlatformOverallVO {
+        @Schema(description = "平台", example = "豆包")
+        private String platform;
+
+        @Schema(description = "全年目标达成率%", example = "23.83")
+        private double achieveRate;
+
+        @Schema(description = "有实际数据的话题行数", example = "5")
+        private int filledCount;
+
+        @Schema(description = "参与分母的话题行数（含未填）", example = "15")
+        private int totalCount;
+    }
+
+    @Data
     @Schema(description = "全年达成一行")
     public static class GeoYearlyRowVO {
-        @Schema(description = "时间段", example = "2026")
+        @Schema(description = "时间段", example = "全年")
         private String periodLabel;
 
         @Schema(description = "话题（话题维度）")

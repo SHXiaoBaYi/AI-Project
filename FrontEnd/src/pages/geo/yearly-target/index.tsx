@@ -1,18 +1,10 @@
-import { memo, useEffect, useState, lazy, Suspense } from 'react';
-import {
-  ProFormDatePicker,
-  ProFormDateRangePicker,
-  ProFormDigit,
-  ProFormSelect,
-  ProFormText,
-  QueryFilter,
-} from '@ant-design/pro-components';
-import { App, Button, Card, Popconfirm, Table, Tag } from 'antd';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { ProFormDatePicker, ProFormDigit, ProFormSelect, ProFormText, QueryFilter } from '@ant-design/pro-components';
+import { App, Button, Card, Col, Popconfirm, Row, Statistic, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import BaseModalForm from '@/components/BaseModalForm';
 import PermissionButton from '@/components/Buttons/PermissionButton';
-import { GeoBoardDimensionTabs } from '@/components/geo/GeoBoardDimensionTabs';
-import { GeoCompareSummaryCards, buildCompareSummaryFromRows } from '@/components/geo/GeoTrendBoard';
 import {
   deleteGeoYearTargetApi,
   getGeoPlatformsApi,
@@ -20,150 +12,76 @@ import {
   getGeoYearlyBoardApi,
   getGeoYearTargetsApi,
   saveGeoYearTargetApi,
+  seedGeoYearlySampleApi,
 } from '@/api/geo';
 import type { GeoTopic, GeoYearTarget, GeoYearlyBoard, GeoYearlyRow } from '@/types/geo';
-import { demoRangeByGrain } from '@/constants/demoData';
-import { GEO_TERM_TYPES } from '@/constants/geo';
+import { GEO_LABEL } from '@/constants/geoLabels';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
-import { toDayjs } from '@/utils/geoBoardQuery';
 
-const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
-const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
+const currentYear = dayjs().year();
+const defaultYear = dayjs(`${currentYear}-01-01`);
 
-const defaultYears = demoRangeByGrain('year');
+type MatrixCell = { actualRate?: number; achieveRate?: number };
+type MatrixRow = {
+  key: string;
+  periodLabel: string;
+  topicName: string;
+  targetRate?: number;
+  byPlatform: Record<string, MatrixCell>;
+};
 
-function YearlyBoardSlice({
-  rows,
-  actualChart,
-  achieveChart,
-  compareSummary,
-  groupTitle,
-  persistedPeriodCount,
-  onConfigureTarget,
-}: {
-  rows: GeoYearlyRow[];
-  actualChart: GeoYearlyBoard['actualChart'];
-  achieveChart: GeoYearlyBoard['achieveChart'];
-  compareSummary?: GeoYearlyBoard['compareSummary'];
-  groupTitle: string;
-  persistedPeriodCount?: number;
-  onConfigureTarget?: () => void;
-}) {
-  return (
-    <>
-      <GeoCompareSummaryCards
-        title={`年报同比 / 环比看板（${groupTitle}）`}
-        alwaysShow
-        summary={
-          compareSummary ??
-          buildCompareSummaryFromRows(
-            (rows ?? []).map((r) => ({
-              axisLabel: r.periodLabel,
-              sampleCount: r.sampleCount,
-              mentionRate: r.actualRate,
-              firstMentionRate: r.achieveRate,
-              recommendCount: r.sampleCount,
-              mentionRateMom: r.actualRateMom,
-              mentionRateYoy: r.actualRateYoy,
-              firstMentionRateMom: r.achieveRateMom,
-              firstMentionRateYoy: r.achieveRateYoy,
-              topicName: r.ownerName || r.topicName,
-            })),
-            '环比/同比=上一年度同期',
-          )
-        }
-      />
-      <Card title='实际达成%（折线，系列=平台）'>
-        <Suspense fallback={<div className='h-[280px]' />}>
-          <Line
-            data={actualChart}
-            xField='axis'
-            yField='value'
-            colorField='series'
-            height={280}
-          />
-        </Suspense>
-      </Card>
-      <Card title='目标达成率%（柱状，系列=平台）'>
-        <Suspense fallback={<div className='h-[260px]' />}>
-          <Column
-            data={achieveChart}
-            xField='axis'
-            yField='value'
-            colorField='series'
-            height={260}
-          />
-        </Suspense>
-      </Card>
-      <Card
-        title={`达成明细（${groupTitle}，已落库周期 ${persistedPeriodCount ?? 0}）`}
-        extra={
-          onConfigureTarget ? (
-            <PermissionButton
-              perm='geo:yearly:target'
-              onClick={onConfigureTarget}
-            >
-              配置目标
-            </PermissionButton>
-          ) : null
-        }
-      >
-        <div className='mb-3 text-sm text-neutral-600'>
-          年报数据由定时任务自动落库，页面仅支持查看；目标配置仍可维护。
-        </div>
-        <Table
-          rowKey={(r) => `${r.periodLabel}-${r.ownerName || r.topicName}-${r.platform}`}
-          dataSource={rows}
-          size='small'
-          pagination={{
-            pageSize: 20,
-            hideOnSinglePage: true,
-            showSizeChanger: false,
-            showTotal: (total) => `共 ${total} 条`,
-          }}
-          scroll={{ x: 'max-content', y: 300 }}
-          columns={[
-            { title: '时间', dataIndex: 'periodLabel' },
-            {
-              title: groupTitle,
-              render: (_, r) => (groupTitle === '负责人' ? r.ownerName || r.topicName || '-' : r.topicName),
-            },
-            { title: '平台', dataIndex: 'platform' },
-            { title: '目标%', dataIndex: 'targetRate' },
-            { title: '实际达成%', dataIndex: 'actualRate' },
-            {
-              title: '实际环比',
-              dataIndex: 'actualRateMom',
-              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
-            },
-            {
-              title: '实际同比',
-              dataIndex: 'actualRateYoy',
-              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
-            },
-            { title: '达成率%', dataIndex: 'achieveRate' },
-            {
-              title: '达成环比',
-              dataIndex: 'achieveRateMom',
-              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
-            },
-            {
-              title: '达成同比',
-              dataIndex: 'achieveRateYoy',
-              render: (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v}pp`),
-            },
-            { title: '样本', dataIndex: 'sampleCount' },
-            {
-              title: '来源',
-              dataIndex: 'fromSnapshot',
-              width: 90,
-              render: (v: boolean | undefined) => (v ? <Tag color='success'>已落库</Tag> : <Tag>实时</Tag>),
-            },
-          ]}
-        />
-      </Card>
-    </>
-  );
+function pct(v?: number | null) {
+  if (v == null || Number.isNaN(v)) return '-';
+  return `${Number(v).toFixed(2)}%`;
+}
+
+function buildMatrix(
+  rows: GeoYearlyRow[],
+  targets: GeoYearTarget[],
+  topics: GeoTopic[],
+  platforms: string[],
+): MatrixRow[] {
+  const topicName = (id?: number) => topics.find((t) => t.id === id)?.topicName || String(id ?? '');
+  const map = new Map<string, MatrixRow>();
+
+  const ensure = (periodLabel: string, name: string, targetRate?: number) => {
+    const key = `${periodLabel}::${name}`;
+    let row = map.get(key);
+    if (!row) {
+      row = { key, periodLabel, topicName: name, targetRate, byPlatform: {} };
+      map.set(key, row);
+    } else if (targetRate != null && row.targetRate == null) {
+      row.targetRate = targetRate;
+    }
+    return row;
+  };
+
+  for (const t of targets) {
+    ensure(t.periodLabel, topicName(t.topicId), Number(t.targetRate));
+  }
+  for (const r of rows) {
+    if (!r.platform || r.platform === '-') continue;
+    const row = ensure(r.periodLabel, r.topicName || '-', r.targetRate != null ? Number(r.targetRate) : undefined);
+    row.byPlatform[r.platform] = {
+      actualRate: r.actualRate,
+      achieveRate: r.achieveRate,
+    };
+    if (!platforms.includes(r.platform)) {
+      platforms.push(r.platform);
+    }
+  }
+
+  const periodOrder = new Map<string, number>();
+  targets.forEach((t, i) => {
+    if (!periodOrder.has(t.periodLabel)) periodOrder.set(t.periodLabel, i);
+  });
+
+  return [...map.values()].sort((a, b) => {
+    const pa = periodOrder.get(a.periodLabel) ?? 999;
+    const pb = periodOrder.get(b.periodLabel) ?? 999;
+    if (pa !== pb) return pa - pb;
+    return a.topicName.localeCompare(b.topicName, 'zh');
+  });
 }
 
 const YearlyPage = memo(function YearlyPage() {
@@ -173,28 +91,22 @@ const YearlyPage = memo(function YearlyPage() {
   const [board, setBoard] = useState<GeoYearlyBoard>({ actualChart: [], achieveChart: [], rows: [] });
   const [targets, setTargets] = useState<GeoYearTarget[]>([]);
   const [targetOpen, setTargetOpen] = useState(false);
+  const [editing, setEditing] = useState<GeoYearTarget | null>(null);
+  const [year, setYear] = useState(currentYear);
+  const [seeding, setSeeding] = useState(false);
 
-  const loadBoard = async (values?: Record<string, any>) => {
-    const start = toDayjs(values?.yearRange?.[0]) ?? defaultYears[0];
-    const end = toDayjs(values?.yearRange?.[1]) ?? defaultYears[1];
+  const loadBoard = async (y = year) => {
     const data = await getGeoYearlyBoardApi({
-      startDate: start.startOf('year').format('YYYY-MM-DD'),
-      endDate: end.endOf('year').format('YYYY-MM-DD'),
-      topicId: values?.topicId,
-      keyword: values?.keyword?.trim() || undefined,
-      termType: values?.termType || undefined,
-      platforms: values?.platforms?.length ? values.platforms : undefined,
+      startDate: `${y}-01-01`,
+      endDate: `${y}-12-31`,
     });
     setBoard({
+      platforms: data?.platforms ?? [],
+      overallAchieveRates: data?.overallAchieveRates ?? [],
       actualChart: data?.actualChart ?? [],
       achieveChart: data?.achieveChart ?? [],
       rows: data?.rows ?? [],
       persistedPeriodCount: data?.persistedPeriodCount ?? 0,
-      compareSummary: data?.compareSummary,
-      ownerActualChart: data?.ownerActualChart ?? [],
-      ownerAchieveChart: data?.ownerAchieveChart ?? [],
-      ownerRows: data?.ownerRows ?? [],
-      ownerCompareSummary: data?.ownerCompareSummary,
     });
   };
 
@@ -203,134 +115,302 @@ const YearlyPage = memo(function YearlyPage() {
   useEffect(() => {
     getGeoTopicOptionsApi().then(setTopics);
     getGeoPlatformsApi().then(setPlatforms);
-    void loadBoard({ yearRange: defaultYears });
+    void loadBoard(currentYear);
     loadTargets();
   }, []);
 
+  const columnPlatforms = useMemo(() => {
+    const list = [...(board.platforms?.length ? board.platforms : platforms)];
+    for (const r of board.rows ?? []) {
+      if (r.platform && r.platform !== '-' && !list.includes(r.platform)) list.push(r.platform);
+    }
+    return list;
+  }, [board.platforms, board.rows, platforms]);
+
+  const matrixRows = useMemo(
+    () => buildMatrix(board.rows ?? [], targets, topics, [...columnPlatforms]),
+    [board.rows, targets, topics, columnPlatforms],
+  );
+
+  const overallCards = board.overallAchieveRates ?? [];
+
+  const matrixColumns: ColumnsType<MatrixRow> = useMemo(() => {
+    const cols: ColumnsType<MatrixRow> = [
+      {
+        title: '时间',
+        dataIndex: 'periodLabel',
+        width: 120,
+        fixed: 'left',
+        onCell: (row, index) => {
+          const i = index ?? 0;
+          if (i > 0 && matrixRows[i - 1]?.periodLabel === row.periodLabel) {
+            return { rowSpan: 0 };
+          }
+          let span = 1;
+          for (let j = i + 1; j < matrixRows.length; j++) {
+            if (matrixRows[j].periodLabel !== row.periodLabel) break;
+            span++;
+          }
+          return { rowSpan: span };
+        },
+      },
+      {
+        title: '目标场景/人群/话题',
+        dataIndex: 'topicName',
+        width: 220,
+        fixed: 'left',
+      },
+      {
+        title: '目标',
+        dataIndex: 'targetRate',
+        width: 88,
+        render: (v) => pct(v),
+      },
+    ];
+
+    cols.push({
+      title: '实际达成',
+      children: columnPlatforms.map((p) => ({
+        title: p,
+        key: `actual-${p}`,
+        width: 96,
+        align: 'right' as const,
+        render: (_: unknown, row: MatrixRow) => pct(row.byPlatform[p]?.actualRate),
+      })),
+    });
+
+    cols.push({
+      title: '达成率',
+      children: columnPlatforms.map((p) => ({
+        title: p,
+        key: `achieve-${p}`,
+        width: 96,
+        align: 'right' as const,
+        render: (_: unknown, row: MatrixRow) => {
+          const v = row.byPlatform[p]?.achieveRate;
+          if (v == null) return '-';
+          const ok = v >= 100;
+          return <span className={ok ? 'text-emerald-600' : 'text-amber-700'}>{pct(v)}</span>;
+        },
+      })),
+    });
+
+    return cols;
+  }, [columnPlatforms, matrixRows]);
+
+  const openCreate = () => {
+    setEditing(null);
+    setTargetOpen(true);
+  };
+
+  const openEdit = (row: GeoYearTarget) => {
+    setEditing(row);
+    setTargetOpen(true);
+  };
+
   return (
     <div className='flex flex-col gap-4'>
-      <Card>
+      <Card size='small'>
         <QueryFilter
           {...BUTTERFLY_SEARCH}
-          initialValues={{ yearRange: defaultYears }}
+          initialValues={{ year: defaultYear }}
           onFinish={async (v) => {
-            await loadBoard(v);
+            const y = v?.year ? dayjs(v.year).year() : currentYear;
+            setYear(y);
+            await loadBoard(y);
             return true;
           }}
           onReset={() => {
-            void loadBoard({ yearRange: defaultYears });
+            setYear(currentYear);
+            void loadBoard(currentYear);
+          }}
+          submitter={{
+            render: (_, dom) => (
+              <div className='flex flex-wrap items-center gap-2'>
+                {dom}
+                <PermissionButton
+                  perm='geo:yearly:target'
+                  loading={seeding}
+                  onClick={async () => {
+                    setSeeding(true);
+                    try {
+                      const msg = await seedGeoYearlySampleApi();
+                      message.success(typeof msg === 'string' ? msg : '样例已洗入');
+                      await Promise.all([loadTargets(), loadBoard(year)]);
+                      const opts = await getGeoTopicOptionsApi();
+                      setTopics(opts);
+                    } finally {
+                      setSeeding(false);
+                    }
+                  }}
+                >
+                  洗入样例数据
+                </PermissionButton>
+              </div>
+            ),
           }}
         >
-          <ProFormDateRangePicker
-            name='yearRange'
-            label='年份范围'
-            fieldProps={{ picker: 'year', format: 'YYYY', placeholder: ['开始年', '结束年'] }}
-          />
-          <ProFormSelect
-            name='termType'
-            label='话题类型'
-            allowClear
-            options={[...GEO_TERM_TYPES]}
-          />
-          <ProFormSelect
-            name='topicId'
-            label='话题'
-            allowClear
-            showSearch
-            optionFilterProp='label'
-            options={topics.map((t) => ({ label: t.topicName, value: t.id }))}
-          />
-          <ProFormText
-            name='keyword'
-            label='关键字'
-          />
-          <ProFormSelect
-            name='platforms'
-            label='平台'
-            allowClear
-            options={platforms.map((p) => ({ label: p, value: p }))}
-            fieldProps={{ mode: 'multiple', maxTagCount: 'responsive' }}
+          <ProFormDatePicker
+            name='year'
+            label='年份'
+            fieldProps={{ picker: 'year', format: 'YYYY', allowClear: false }}
           />
         </QueryFilter>
       </Card>
-      <GeoBoardDimensionTabs
-        topic={
-          <YearlyBoardSlice
-            groupTitle='话题'
-            rows={board.rows ?? []}
-            actualChart={board.actualChart}
-            achieveChart={board.achieveChart}
-            compareSummary={board.compareSummary}
-            persistedPeriodCount={board.persistedPeriodCount}
-            onConfigureTarget={() => setTargetOpen(true)}
-          />
+
+      <Row gutter={[16, 16]}>
+        {overallCards.length === 0 ? (
+          <Col span={24}>
+            <Card>
+              <div className='text-sm text-neutral-500'>
+                暂无全年整体达成率。请点击上方「洗入样例数据」，将 Excel 中的目标与各平台实际达成写入系统。
+              </div>
+            </Card>
+          </Col>
+        ) : (
+          overallCards.map((item) => (
+            <Col
+              key={item.platform}
+              xs={24}
+              sm={12}
+              lg={overallCards.length <= 2 ? 12 : 8}
+            >
+              <Card className='h-full bg-gradient-to-br from-slate-50 to-white'>
+                <Statistic
+                  title={`全年目标达成率 · ${item.platform}`}
+                  value={Number(item.achieveRate ?? 0)}
+                  precision={2}
+                  suffix='%'
+                  valueStyle={{ fontSize: 36, fontWeight: 600, color: '#0f766e' }}
+                />
+                <div className='mt-2 text-xs text-neutral-500'>
+                  口径：各话题达成率合计 / 话题行总数
+                  {item.filledCount != null && item.totalCount != null
+                    ? `（已填 ${item.filledCount} / 共 ${item.totalCount}）`
+                    : ''}
+                </div>
+              </Card>
+            </Col>
+          ))
+        )}
+      </Row>
+
+      <Card
+        title={`${GEO_LABEL.yearlyTarget}达成情况`}
+        extra={
+          <PermissionButton
+            perm='geo:yearly:target'
+            type='primary'
+            onClick={openCreate}
+          >
+            新增目标
+          </PermissionButton>
         }
-        owner={
-          <YearlyBoardSlice
-            groupTitle='负责人'
-            rows={(board.ownerRows ?? []).map((r) => ({
-              ...r,
-              ownerName: r.ownerName || r.topicName,
-            }))}
-            actualChart={board.ownerActualChart ?? []}
-            achieveChart={board.ownerAchieveChart ?? []}
-            compareSummary={board.ownerCompareSummary}
-            persistedPeriodCount={board.persistedPeriodCount}
-          />
-        }
-      />
-      <Card title='目标配置'>
+      >
+        <div className='mb-3 text-sm text-neutral-600'>
+          平台列取自系统 AI 平台主数据（不限于样例中的豆包/DS）；目标为默认可改配置，实际达成已洗入样例值。
+        </div>
+        <Table
+          size='small'
+          rowKey='key'
+          dataSource={matrixRows}
+          columns={matrixColumns}
+          pagination={false}
+          scroll={{ x: 'max-content', y: 480 }}
+          bordered
+        />
+      </Card>
+
+      <Card title='目标配置（可改）'>
         <Table
           rowKey='id'
+          size='small'
           dataSource={targets}
           pagination={false}
           scroll={{ x: 'max-content' }}
           columns={[
             {
               title: '操作',
-              width: 80,
+              width: 140,
               fixed: 'left',
               render: (_, r) => (
-                <Popconfirm
-                  title='确定删除该目标？'
-                  onConfirm={async () => {
-                    await deleteGeoYearTargetApi(r.id);
-                    message.success('已删除');
-                    loadTargets();
-                    void loadBoard({ yearRange: defaultYears });
-                  }}
-                >
-                  <Button
+                <div className='flex gap-1'>
+                  <PermissionButton
+                    perm='geo:yearly:target'
                     type='link'
                     size='small'
-                    danger
+                    onClick={() => openEdit(r)}
                   >
-                    删除
-                  </Button>
-                </Popconfirm>
+                    编辑
+                  </PermissionButton>
+                  <Popconfirm
+                    title='确定删除该目标？'
+                    onConfirm={async () => {
+                      await deleteGeoYearTargetApi(r.id);
+                      message.success('已删除');
+                      loadTargets();
+                      void loadBoard(year);
+                    }}
+                  >
+                    <Button
+                      type='link'
+                      size='small'
+                      danger
+                    >
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </div>
               ),
             },
             { title: '时间段', dataIndex: 'periodLabel' },
-            { title: '话题', dataIndex: 'topicId', render: (id) => topics.find((t) => t.id === id)?.topicName || id },
+            {
+              title: '话题',
+              dataIndex: 'topicId',
+              render: (id) => topics.find((t) => t.id === id)?.topicName || id,
+            },
             { title: '开始', dataIndex: 'periodStart' },
             { title: '结束', dataIndex: 'periodEnd' },
-            { title: '目标%', dataIndex: 'targetRate' },
+            {
+              title: '目标%',
+              dataIndex: 'targetRate',
+              render: (v) => pct(Number(v)),
+            },
+            {
+              title: '状态',
+              width: 90,
+              render: () => <Tag color='processing'>默认可改</Tag>,
+            },
           ]}
         />
       </Card>
+
       <BaseModalForm
-        title='新增目标'
+        title={editing ? '编辑目标' : '新增目标'}
         open={targetOpen}
-        onOpenChange={setTargetOpen}
+        onOpenChange={(open) => {
+          setTargetOpen(open);
+          if (!open) setEditing(null);
+        }}
+        initialValues={
+          editing
+            ? {
+                ...editing,
+                periodStart: editing.periodStart ? dayjs(editing.periodStart) : undefined,
+                periodEnd: editing.periodEnd ? dayjs(editing.periodEnd) : undefined,
+              }
+            : { targetRate: 80, periodLabel: '全年' }
+        }
         onFinish={async (values) => {
           await saveGeoYearTargetApi({
+            id: editing?.id,
             ...values,
             periodStart: values.periodStart ? dayjs(values.periodStart).format('YYYY-MM-DD') : undefined,
             periodEnd: values.periodEnd ? dayjs(values.periodEnd).format('YYYY-MM-DD') : undefined,
           });
           message.success('已保存');
           loadTargets();
-          void loadBoard({ yearRange: defaultYears });
+          void loadBoard(year);
           return true;
         }}
       >
@@ -353,14 +433,16 @@ const YearlyPage = memo(function YearlyPage() {
           label='话题'
           rules={[{ required: true }]}
           options={topics.map((t) => ({ label: t.topicName, value: t.id }))}
+          showSearch
+          optionFilterProp='label'
         />
         <ProFormDigit
           name='targetRate'
           label='目标%'
           min={0}
           max={100}
+          fieldProps={{ precision: 2 }}
           rules={[{ required: true }]}
-          initialValue={80}
         />
       </BaseModalForm>
     </div>
