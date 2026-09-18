@@ -16,7 +16,9 @@ import type {
   GeoPlatformAccountDTO,
   GeoTopic,
   GeoTopicPlatformCharts,
+  GeoPersistResult,
   GeoYearTarget,
+  GeoYearlyBoard,
   GeoContentPlacementCite,
   GeoContentPlacementCiteDTO,
   GeoContentPlacementDetail,
@@ -183,6 +185,14 @@ export function getGeoDailyBoardApi(data: GeoBoardQuery) {
 
 export function getGeoTopicPlatformChartsApi(data: GeoBoardQuery) {
   return request.post<unknown, GeoTopicPlatformCharts>('/geo/day/topic-platform-charts', data);
+}
+
+export function getGeoYearlyBoardApi(data: GeoBoardQuery) {
+  return request.post<unknown, GeoYearlyBoard>('/geo/yearly/board', data);
+}
+
+export function persistGeoYearlyBoardApi(data: GeoBoardQuery) {
+  return request.post<unknown, GeoPersistResult>('/geo/yearly/persist', data);
 }
 
 export function getGeoYearTargetsApi() {
