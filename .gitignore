@@ -29,3 +29,6 @@ deploy/application-prod.yml
 node_modules/
 .DS_Store
 uploads/
+
+# 超过 GitHub 单文件 100MB 限制，只保留在本地
+GEO/GEO优化监测9.18.xlsx
