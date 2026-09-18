@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Card, DatePicker, Radio, Space } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { TaskTofuBoard } from '@/components/board/TaskTofuBoard';
-import { DEMO_DATA_PIVOT, demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
+import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
 
 function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
   if (grain === 'week') return [start.startOf('week'), end.endOf('week')];
@@ -14,11 +14,11 @@ function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs
 /** 数据看板 · 员工收录：六个发布/收录豆腐块 */
 export default function TaskBoardPage() {
   const [grain, setGrain] = useState<DemoBoardGrain>('week');
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('week', DEMO_DATA_PIVOT));
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('week'));
 
   const onGrainChange = (g: DemoBoardGrain) => {
     setGrain(g);
-    setRange(demoRangeByGrain(g, DEMO_DATA_PIVOT));
+    setRange(demoRangeByGrain(g));
   };
 
   const pickerProps =

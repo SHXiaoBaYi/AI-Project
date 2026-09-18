@@ -90,9 +90,9 @@ geo:
     # 每月 1 日 02:25 固化内容投放月报
     content-monthly-cron: "0 25 2 1 * ?"
 
-# 演示数据：2014/2015 全年 GEO+任务（is_demo=1）；约 1 万条日监测/年且每天有数
+# 演示数据已清空。保持 false，避免启动时再把测试数据刷回去。
 demo:
-  seed: true
+  seed: false
   # true=启动时清空旧演示数据后重刷；日常保持 false
   reseed: false
   # true=仅按现有日监测重建周/月/年快照并对齐校验；刷完改回 false

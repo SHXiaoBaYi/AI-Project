@@ -26,7 +26,6 @@ import {
 import { getGeoOwnerOptionsApi } from '@/api/geo';
 import type { GeoOwnerOption } from '@/types/geo';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
-import { DEMO_CREATE_TIME_RANGE } from '@/constants/demoData';
 
 type Props = {
   mineOnly?: boolean;
@@ -363,7 +362,6 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       valueType: 'dateRange',
       hideInTable: true,
       hideInForm: true,
-      initialValue: DEMO_CREATE_TIME_RANGE,
       search: {
         transform: (value) => ({
           createTimeStart: value?.[0],

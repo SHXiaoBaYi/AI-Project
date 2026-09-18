@@ -283,7 +283,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       hideInTable: true,
       valueType: 'textarea',
     },
-    createTimeRangeColumn<GeoContentPlacementListItem>({ defaultDemoRange: true }),
+    createTimeRangeColumn<GeoContentPlacementListItem>(),
     createTimeDisplayColumn<GeoContentPlacementListItem>(),
     {
       title: '操作',

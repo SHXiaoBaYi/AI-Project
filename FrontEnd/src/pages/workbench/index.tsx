@@ -20,7 +20,7 @@ import { GEO_LABEL } from '@/constants/geoLabels';
 import { getGeoContentPlacementListApi, getGeoDailyBoardApi } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoDailyBoard } from '@/types/geo';
 import { AGG_COLOR } from '@/components/geo/content-placement/constants';
-import { DEMO_DATA_END, DEMO_DATA_START } from '@/constants/demoData';
+import { demoRangeByGrain } from '@/constants/demoData';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 
@@ -176,9 +176,10 @@ export default function Workbench() {
   useEffect(() => {
     if (!showExpose) return;
     setExposeLoading(true);
+    const [start, end] = demoRangeByGrain('day');
     void getGeoDailyBoardApi({
-      startDate: DEMO_DATA_START,
-      endDate: DEMO_DATA_END,
+      startDate: start.format('YYYY-MM-DD'),
+      endDate: end.format('YYYY-MM-DD'),
     })
       .then(setExposeBoard)
       .catch(() => setExposeBoard(null))

@@ -279,10 +279,10 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
 
     private static LocalDate[] defaultRange(String grain, LocalDate asOf) {
         return switch (grain) {
-            case "day" -> new LocalDate[]{asOf, asOf};
-            case "month" -> new LocalDate[]{asOf.withDayOfMonth(1), asOf.withDayOfMonth(asOf.lengthOfMonth())};
-            case "year" -> new LocalDate[]{asOf.withDayOfYear(1), asOf.withDayOfYear(asOf.lengthOfYear())};
-            default -> new LocalDate[]{asOf.with(ISO.dayOfWeek(), 1), asOf.with(ISO.dayOfWeek(), 7)};
+            case "day" -> new LocalDate[]{asOf.minusMonths(1), asOf};
+            case "month" -> new LocalDate[]{asOf.minusMonths(3).withDayOfMonth(1), asOf.withDayOfMonth(asOf.lengthOfMonth())};
+            case "year" -> new LocalDate[]{asOf.minusYears(1).withDayOfYear(1), asOf.withDayOfYear(asOf.lengthOfYear())};
+            default -> new LocalDate[]{asOf.minusWeeks(3).with(ISO.dayOfWeek(), 1), asOf.with(ISO.dayOfWeek(), 7)};
         };
     }
 

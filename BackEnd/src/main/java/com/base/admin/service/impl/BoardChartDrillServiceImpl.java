@@ -738,10 +738,10 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
 
     private static LocalDate defaultStart(LocalDate end, String grain) {
         return switch (grain) {
-            case "day" -> end;
-            case "month" -> end.withDayOfMonth(1);
-            case "year" -> end.withDayOfYear(1);
-            default -> end.minusDays(6);
+            case "day" -> end.minusMonths(1);
+            case "month" -> end.minusMonths(3).withDayOfMonth(1);
+            case "year" -> end.minusYears(1).withDayOfYear(1);
+            default -> end.minusWeeks(3).with(java.time.DayOfWeek.MONDAY);
         };
     }
 

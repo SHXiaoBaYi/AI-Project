@@ -3,7 +3,7 @@ import { Card, DatePicker, Radio, Space } from 'antd';
 import type { Dayjs } from 'dayjs';
 import ChartDrillBoard from '@/components/board/ChartDrillBoard';
 import { GeoTopicPlatformTofuBoard } from '@/components/geo/GeoTopicPlatformTofuBoard';
-import { DEMO_DATA_PIVOT, demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
+import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
 
 function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
   if (grain === 'week') return [start.startOf('week'), end.endOf('week')];
@@ -15,11 +15,11 @@ function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs
 /** 数据看板 · GEO：统一日期筛选驱动三个豆腐块 + 话题下钻看板 */
 export default function GeoBoardPage() {
   const [grain, setGrain] = useState<DemoBoardGrain>('week');
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('week', DEMO_DATA_PIVOT));
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('week'));
 
   const onGrainChange = (g: DemoBoardGrain) => {
     setGrain(g);
-    setRange(demoRangeByGrain(g, DEMO_DATA_PIVOT));
+    setRange(demoRangeByGrain(g));
   };
 
   const pickerProps =

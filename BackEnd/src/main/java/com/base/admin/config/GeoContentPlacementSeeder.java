@@ -3,6 +3,7 @@ package com.base.admin.config;
 import com.base.admin.service.GeoContentPlacementService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
@@ -17,11 +18,18 @@ public class GeoContentPlacementSeeder implements ApplicationRunner {
 
     private final GeoContentPlacementService contentPlacementService;
 
+    @Value("${geo.content.seed:false}")
+    private boolean seedEnabled;
+
     @Override
     public void run(ApplicationArguments args) {
         try {
-            String summary = contentPlacementService.seedIfEmpty();
-            log.info("GEO 内容投放样例: {}", summary);
+            if (!seedEnabled) {
+                log.info("内容投放样例刷入已关闭（geo.content.seed=false）");
+            } else {
+                String summary = contentPlacementService.seedIfEmpty();
+                log.info("GEO 内容投放样例: {}", summary);
+            }
             int topicFixed = contentPlacementService.backfillTopicRelations();
             if (topicFixed > 0) {
                 log.info("GEO 内容投放话题关联补齐 {} 条", topicFixed);

@@ -5,23 +5,20 @@ import { endOfIsoWeek, startOfIsoWeek } from '@/utils/geoBoardQuery';
 export const DEMO_DATA_START = '2014-01-01';
 export const DEMO_DATA_END = '2015-12-31';
 
-/** 看板默认锚点：演示数据末尾，保证日/周/月窗口落在有数区间内 */
-export const DEMO_DATA_PIVOT = dayjs(DEMO_DATA_END);
-
 export type DemoBoardGrain = 'day' | 'week' | 'month' | 'year';
 
-/** 按粒度生成落在演示数据上的默认日期范围 */
-export function demoRangeByGrain(grain: DemoBoardGrain, pivot: Dayjs = DEMO_DATA_PIVOT): [Dayjs, Dayjs] {
+/** 指标筛选默认范围：按日近 1 个月，按周近 4 周，按月近 4 个月，按年近 2 年 */
+export function demoRangeByGrain(grain: DemoBoardGrain, pivot: Dayjs = dayjs()): [Dayjs, Dayjs] {
   if (grain === 'day') {
-    return [pivot.subtract(29, 'day').startOf('day'), pivot.endOf('day')];
+    return [pivot.subtract(1, 'month').startOf('day'), pivot.endOf('day')];
   }
   if (grain === 'week') {
     return [startOfIsoWeek(pivot.subtract(3, 'week')), endOfIsoWeek(pivot)];
   }
   if (grain === 'month') {
-    return [pivot.subtract(5, 'month').startOf('month'), pivot.endOf('month')];
+    return [pivot.subtract(3, 'month').startOf('month'), pivot.endOf('month')];
   }
-  return [dayjs(DEMO_DATA_START).startOf('year'), dayjs(DEMO_DATA_END).endOf('year')];
+  return [pivot.subtract(1, 'year').startOf('year'), pivot.endOf('year')];
 }
 
 /** 列表「创建时间」默认筛到演示年（需配合演示数据 create_time 回填） */

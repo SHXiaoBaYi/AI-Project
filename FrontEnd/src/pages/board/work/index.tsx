@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Card, DatePicker, Radio, Select, Space } from 'antd';
 import type { Dayjs } from 'dayjs';
-import dayjs from 'dayjs';
 import { TaskOpsBoard } from '@/components/board/TaskOpsBoard';
 import { getGeoOwnerOptionsApi } from '@/api/geo';
 import { getTaskTypeOptionsApi } from '@/api/task';
-import type { DemoBoardGrain } from '@/constants/demoData';
+import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
 
 function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
   if (grain === 'week') return [start.startOf('week'), end.endOf('week')];
@@ -14,13 +13,8 @@ function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs
   return [start.startOf('day'), end.endOf('day')];
 }
 
-/** 日/周/月/年默认落在「今日 / 本周 / 本月 / 本年」 */
 function defaultRange(grain: DemoBoardGrain): [Dayjs, Dayjs] {
-  const pivot = dayjs();
-  if (grain === 'day') return [pivot.startOf('day'), pivot.endOf('day')];
-  if (grain === 'week') return [pivot.startOf('week'), pivot.endOf('week')];
-  if (grain === 'month') return [pivot.startOf('month'), pivot.endOf('month')];
-  return [pivot.startOf('year'), pivot.endOf('year')];
+  return demoRangeByGrain(grain);
 }
 
 /** 数据看板 · 任务：到期/完成指标 + 完成率下钻 */

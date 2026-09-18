@@ -110,7 +110,7 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
       hideInForm: true,
       render: (v) => v ?? 0,
     },
-    createTimeRangeColumn<GeoContentPlacementListItem>({ defaultDemoRange: true }),
+    createTimeRangeColumn<GeoContentPlacementListItem>(),
     createTimeDisplayColumn<GeoContentPlacementListItem>(),
     {
       title: '附件',

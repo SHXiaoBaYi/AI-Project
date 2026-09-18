@@ -24,12 +24,9 @@ import { formatDateTime, toDateTimeParam } from '@/utils/datetime';
 import EditDailyModal from './components/EditDailyModal';
 import AddDailyDrawer from './components/AddDailyDrawer';
 import { GEO_TERM_TYPES } from '@/constants/geo';
-import { DEMO_DATA_END, DEMO_DATA_START } from '@/constants/demoData';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
-import dayjs from 'dayjs';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
-const DEMO_INSPECT_RANGE = [dayjs(DEMO_DATA_START), dayjs(DEMO_DATA_END)];
 
 const DailyPage = memo(function DailyPage() {
   const { message } = App.useApp();
@@ -75,7 +72,6 @@ const DailyPage = memo(function DailyPage() {
       dataIndex: 'inspectDate',
       valueType: 'dateRange',
       width: 120,
-      initialValue: DEMO_INSPECT_RANGE,
       render: (_, r) => r.inspectDate,
     },
     {

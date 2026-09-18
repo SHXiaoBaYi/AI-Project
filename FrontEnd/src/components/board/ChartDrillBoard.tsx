@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Space, Statistic, Tag, message } from 'antd';
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowUpOutlined } from '@ant-design/icons';
-import dayjs, { type Dayjs } from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import { boardChartDrillApi, type BoardChartDrill, type BoardChartStackItem } from '@/api/board';
 import {
   BoardChartLegend,
@@ -12,7 +12,7 @@ import {
 } from '@/components/geo/BoardChartLegend';
 import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
-import { DEMO_DATA_PIVOT, demoRangeByGrain } from '@/constants/demoData';
+import { demoRangeByGrain } from '@/constants/demoData';
 
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
@@ -98,8 +98,8 @@ const dateAxisProps = {
   labelAutoRotate: false,
 };
 
-function rangeByGrain(grain: BoardGrain, pivot: Dayjs = DEMO_DATA_PIVOT): [Dayjs, Dayjs] {
-  return demoRangeByGrain(grain, pivot);
+function rangeByGrain(grain: BoardGrain): [Dayjs, Dayjs] {
+  return demoRangeByGrain(grain);
 }
 
 function normalizeRange(grain: BoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
