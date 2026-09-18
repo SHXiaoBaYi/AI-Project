@@ -3,6 +3,13 @@ import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Space, Statistic
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { boardChartDrillApi, type BoardChartDrill, type BoardChartStackItem } from '@/api/board';
+import {
+  BoardChartLegend,
+  boardColorScale,
+  filterBoardSeries,
+  uniqueBoardSeries,
+  useHiddenBoardSeries,
+} from '@/components/geo/BoardChartLegend';
 import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import { DEMO_DATA_PIVOT, demoRangeByGrain } from '@/constants/demoData';
@@ -170,6 +177,10 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
         drillable: p.drillable !== false && !!data?.chartDrillable,
       }));
   }, [data]);
+
+  const lineSeries = useMemo(() => uniqueBoardSeries(timeSeriesData), [timeSeriesData]);
+  const { hidden: lineHidden, toggle: toggleLineSeries } = useHiddenBoardSeries(lineSeries);
+  const lineChartData = useMemo(() => filterBoardSeries(timeSeriesData, lineHidden), [timeSeriesData, lineHidden]);
 
   const onSeriesDrill = useCallback(
     (payload?: { seriesKey?: string; series?: string; key?: string; drillable?: boolean }) => {
@@ -377,14 +388,20 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
           {data?.axisField ? ` · 当前按${axisFieldLabel(data.axisField)}` : ''}）
         </div>
         <Suspense fallback={<ChartFallback height={300} />}>
+          <BoardChartLegend
+            series={lineSeries}
+            hidden={lineHidden}
+            onToggle={toggleLineSeries}
+          />
           <Line
             key={`line-${chartRenderKey}`}
-            data={timeSeriesData}
+            data={lineChartData}
             xField='axis'
             yField='value'
             colorField='series'
             height={300}
-            legend={{ position: 'top' }}
+            legend={false}
+            scale={{ color: boardColorScale(lineSeries) }}
             axis={{ x: dateAxisProps }}
             onReady={bindChartDrill}
           />
@@ -405,7 +422,7 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
               height={380}
               group
               stack={false}
-              legend={{ position: 'top' }}
+              legend={false}
               axis={{ x: dateAxisProps }}
               {...boardColumnChartProps}
               onReady={bindChartDrill}
