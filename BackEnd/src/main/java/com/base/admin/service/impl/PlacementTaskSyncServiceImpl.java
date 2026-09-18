@@ -150,16 +150,15 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         }
     }
 
+    /** 表格已填写发布人（含未对上系统用户的姓名）则不再生成待分配任务 */
     private boolean isPublisherMissing(GeoContentPlacement p) {
-        return p.getPublisherUserId() == null
-                || !StringUtils.hasText(p.getPublisherName())
-                || Constants.CONTENT_UNASSIGNED.equals(p.getPublisherName().trim());
+        String name = p.getPublisherName() == null ? "" : p.getPublisherName().trim();
+        return !StringUtils.hasText(name) || Constants.CONTENT_UNASSIGNED.equals(name);
     }
 
     private boolean isWriterMissing(GeoContentPlacement p) {
-        return p.getOwnerUserId() == null
-                || !StringUtils.hasText(p.getOwnerName())
-                || Constants.CONTENT_UNASSIGNED.equals(p.getOwnerName().trim());
+        String name = p.getOwnerName() == null ? "" : p.getOwnerName().trim();
+        return !StringUtils.hasText(name) || Constants.CONTENT_UNASSIGNED.equals(name);
     }
 
     private boolean taskExists(Long placementId, String taskType) {
