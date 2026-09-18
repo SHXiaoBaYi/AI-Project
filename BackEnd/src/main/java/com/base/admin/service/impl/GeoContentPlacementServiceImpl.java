@@ -53,6 +53,7 @@ import com.base.admin.service.PlacementTaskSyncService;
 import com.base.admin.service.SysAiProviderService;
 import com.base.admin.util.ExcelCellUtils;
 import com.base.admin.util.GeoExcelTemplateWriter;
+import com.base.admin.util.GeoImportProgress;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -87,6 +88,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -95,6 +97,7 @@ import java.util.stream.Collectors;
 public class GeoContentPlacementServiceImpl implements GeoContentPlacementService {
 
     private static final int CITE_START_COL = 10;
+    private final ReentrantLock importLock = new ReentrantLock();
 
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentPlacementItemMapper itemMapper;
@@ -644,6 +647,17 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     @Override
     @Transactional
     public GeoImportResultVO importExcel(InputStream in) {
+        if (!importLock.tryLock()) {
+            throw new BusinessException("已有内容投放导入正在进行，请等待完成后再试，不要重复点击");
+        }
+        try {
+            return doImportExcel(in);
+        } finally {
+            importLock.unlock();
+        }
+    }
+
+    private GeoImportResultVO doImportExcel(InputStream in) {
         GeoImportResultVO result = new GeoImportResultVO();
         try (Workbook workbook = WorkbookFactory.create(in)) {
             Sheet sheet = workbook.getSheetAt(0);
@@ -655,8 +669,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             int citeSort = 0;
             Set<String> dedupeCites = new HashSet<>();
             Map<String, Long> placementKeyCache = new LinkedHashMap<>();
+            int totalRows = Math.max(sheet.getLastRowNum() - 1, 1);
+            int doneRows = 0;
 
             for (int r = 2; r <= sheet.getLastRowNum(); r++) {
+                doneRows++;
+                GeoImportProgress.report(doneRows, totalRows);
                 // 序号必须用原始单元格，合并展开会把续行误判成新内容组
                 String seq = ExcelCellUtils.rawStr(sheet, r, 0);
                 String publisher = ExcelCellUtils.str(sheet, r, 1);
@@ -793,7 +811,11 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 syncPlacementDerived(placementId);
             }
         } catch (Exception e) {
-            throw new BusinessException("导入内容投放失败: " + e.getMessage());
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            if (msg.contains("Lock wait timeout")) {
+                throw new BusinessException("导入被其他操作占用，请稍后再试，不要重复点击");
+            }
+            throw new BusinessException("导入内容投放失败: " + msg);
         }
         return result;
     }

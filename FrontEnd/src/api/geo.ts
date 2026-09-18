@@ -163,6 +163,69 @@ export function importGeoDailyApi(file: File) {
   });
 }
 
+export type GeoImportJob = {
+  jobId: string;
+  status: 'RUNNING' | 'SUCCESS' | 'FAILED';
+  total: number;
+  processed: number;
+  percent: number;
+  message?: string;
+  result?: GeoImportResult;
+};
+
+function startImportJob(url: string, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post<unknown, GeoImportJob>(url, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  });
+}
+
+export function startGeoDailyImportApi(file: File) {
+  return startImportJob('/geo/daily/import/start', file);
+}
+
+export function getGeoDailyImportProgressApi(jobId: string) {
+  return request.get<unknown, GeoImportJob>(`/geo/daily/import/progress/${jobId}`);
+}
+
+export function startGeoContentPlacementImportApi(file: File) {
+  return startImportJob('/geo/content-placement/import/start', file);
+}
+
+export function getGeoContentPlacementImportProgressApi(jobId: string) {
+  return request.get<unknown, GeoImportJob>(`/geo/content-placement/import/progress/${jobId}`);
+}
+
+export async function waitGeoImportJob(
+  start: () => Promise<GeoImportJob>,
+  progress: (jobId: string) => Promise<GeoImportJob>,
+  onProgress: (job: GeoImportJob) => void,
+): Promise<GeoImportResult> {
+  const started = await start();
+  onProgress(started);
+  let job = started;
+  while (job.status === 'RUNNING') {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    job = await progress(started.jobId);
+    onProgress(job);
+  }
+  if (job.status === 'FAILED') {
+    throw geoImportError(job.message || '导入失败');
+  }
+  if (!job.result) {
+    throw geoImportError('导入完成但没有返回结果');
+  }
+  return job.result;
+}
+
+function geoImportError(message: string) {
+  const err = new Error(message) as Error & { geoImport: boolean };
+  err.geoImport = true;
+  return err;
+}
+
 export function downloadGeoDailyTemplateApi() {
   return downloadBlob(withBase('/api/geo/daily/import/template'), '日监测数据导入模板.xlsx');
 }
@@ -299,6 +362,7 @@ export function importGeoContentPlacementApi(file: File) {
   formData.append('file', file);
   return request.post<unknown, GeoImportResult>('/geo/content-placement/import', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
   });
 }
 

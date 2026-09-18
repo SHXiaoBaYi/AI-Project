@@ -18,8 +18,10 @@ import {
   getGeoContentPlacementListApi,
   getGeoOwnerOptionsApi,
   getGeoTopicOptionsApi,
-  importGeoContentPlacementApi,
   downloadGeoContentPlacementTemplateApi,
+  waitGeoImportJob,
+  startGeoContentPlacementImportApi,
+  getGeoContentPlacementImportProgressApi,
   updateGeoContentPlacementApi,
 } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoOwnerOption, GeoTopic } from '@/types/geo';
@@ -39,6 +41,9 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importPercent, setImportPercent] = useState(0);
+  const [importText, setImportText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
   const [topics, setTopics] = useState<GeoTopic[]>([]);
@@ -481,26 +486,55 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
           </p>
           <p>请上传「内容投放」格式的 Excel</p>
         </Upload.Dragger>
+        {importing ? (
+          <div className='mt-4'>
+            <Progress
+              percent={importPercent}
+              status='active'
+            />
+            <div className='text-sm text-neutral-500'>{importText || '正在导入'}</div>
+          </div>
+        ) : null}
         <div className='mt-4 flex justify-end'>
           <Button
             type='primary'
-            disabled={!file}
+            loading={importing}
+            disabled={!file || importing}
             onClick={async () => {
-              if (!file) return;
-              const res = await importGeoContentPlacementApi(file);
-              const head = `导入完成：新增 ${res.insertCount}，更新 ${res.updateCount}，失败 ${res.failureCount}`;
-              const detail = (res.errors ?? [])
-                .slice(0, 3)
-                .map((e) => `第${e.rowIndex}行：${e.message}`)
-                .join('；');
-              if (res.failureCount > 0) {
-                message.warning(detail ? `${head}。${detail}` : head);
-              } else {
-                message.success(head);
+              if (!file || importing) return;
+              setImporting(true);
+              setImportPercent(0);
+              setImportText('正在上传');
+              try {
+                const res = await waitGeoImportJob(
+                  () => startGeoContentPlacementImportApi(file),
+                  getGeoContentPlacementImportProgressApi,
+                  (job) => {
+                    setImportPercent(job.percent ?? 0);
+                    setImportText(job.message || '正在导入');
+                  },
+                );
+                const head = `导入完成：新增 ${res.insertCount}，更新 ${res.updateCount}，失败 ${res.failureCount}`;
+                const detail = (res.errors ?? [])
+                  .slice(0, 3)
+                  .map((e) => `第${e.rowIndex}行：${e.message}`)
+                  .join('；');
+                if (res.failureCount > 0) {
+                  message.warning(detail ? `${head}。${detail}` : head);
+                } else {
+                  message.success(head);
+                }
+                setImportOpen(false);
+                setFile(null);
+                actionRef.current?.reload();
+              } catch (e) {
+                const err = e as { geoImport?: boolean };
+                if (err.geoImport) {
+                  message.error(e instanceof Error ? e.message : '导入失败');
+                }
+              } finally {
+                setImporting(false);
               }
-              setImportOpen(false);
-              setFile(null);
-              actionRef.current?.reload();
             }}
           >
             开始导入

@@ -92,7 +92,11 @@ service.interceptors.response.use(
       return Promise.reject(error);
     }
     if (!handleAuthError(httpStatus)) {
-      const msg = HTTP_STATUS_MESSAGES[httpStatus] || error.message || '网络错误，请联系管理员';
+      const raw = error.message || '';
+      const msg =
+        error.code === 'ECONNABORTED' || /timeout/i.test(raw)
+          ? '请求超时，请稍后再试，不要重复点击'
+          : HTTP_STATUS_MESSAGES[httpStatus] || raw || '网络错误，请联系管理员';
       message.error(msg);
     }
     return Promise.reject(error);

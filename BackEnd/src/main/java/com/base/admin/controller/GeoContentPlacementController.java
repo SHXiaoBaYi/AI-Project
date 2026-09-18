@@ -14,11 +14,13 @@ import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
 import com.base.admin.domain.vo.GeoContentPlacementItemVO;
 import com.base.admin.domain.vo.GeoContentPlacementListVO;
+import com.base.admin.domain.vo.GeoImportJobVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.common.Constants;
 import com.base.admin.domain.entity.GeoPlatform;
 import com.base.admin.service.GeoContentPlacementService;
+import com.base.admin.service.GeoImportJobService;
 import com.base.admin.service.GeoPlatformService;
 import com.base.admin.util.GeoExcelTemplateWriter;
 import io.swagger.v3.oas.annotations.Operation;
@@ -51,6 +53,7 @@ public class GeoContentPlacementController {
 
     private final GeoContentPlacementService contentPlacementService;
     private final GeoPlatformService platformService;
+    private final GeoImportJobService importJobService;
 
     @Operation(summary = "分页查询内容投放（按内容聚合）")
     @PostMapping("/list")
@@ -204,5 +207,20 @@ public class GeoContentPlacementController {
     @Log(title = "GEO内容投放", businessType = 1)
     public Result<GeoImportResultVO> importExcel(@RequestParam("file") MultipartFile file) throws Exception {
         return Result.ok(contentPlacementService.importExcel(file.getInputStream()));
+    }
+
+    @Operation(summary = "开始导入内容投放（异步，配合进度查询）")
+    @PostMapping("/import/start")
+    @RequiresPermission("geo:content:import")
+    @Log(title = "GEO内容投放", businessType = 1)
+    public Result<GeoImportJobVO> startImport(@RequestParam("file") MultipartFile file) throws IOException {
+        return Result.ok(importJobService.startPlacement(file.getBytes()));
+    }
+
+    @Operation(summary = "查询内容投放导入进度")
+    @GetMapping("/import/progress/{jobId}")
+    @RequiresPermission("geo:content:import")
+    public Result<GeoImportJobVO> importProgress(@PathVariable String jobId) {
+        return Result.ok(importJobService.get(jobId));
     }
 }

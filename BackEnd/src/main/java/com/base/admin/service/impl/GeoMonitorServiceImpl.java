@@ -46,6 +46,7 @@ import com.base.admin.service.GeoPlatformService;
 import com.base.admin.service.GeoTopicService;
 import com.base.admin.util.ExcelCellUtils;
 import com.base.admin.util.GeoExcelTemplateWriter;
+import com.base.admin.util.GeoImportProgress;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -429,14 +430,20 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 lastCol = Math.max(lastCol, sheet.getRow(2).getLastCellNum());
             }
             List<DateGroup> groups = parseDateGroups(sheet, lastCol);
+            int slots = 0;
+            for (DateGroup group : groups) {
+                slots += group.platforms.size();
+            }
+            int rowUnits = Math.max(slots, 1);
+            int totalUnits = Math.max(Math.max(lastRow - 2, 0) * rowUnits, 1);
+            int doneUnits = 0;
             String lastTopic = "";
             String lastWeek = "";
             for (int r = 3; r <= lastRow; r++) {
                 String keyword = ExcelCellUtils.str(sheet, r, 3);
-                if (!StringUtils.hasText(keyword)) {
-                    continue;
-                }
-                if (keyword.contains(GeoExcelTemplateWriter.SAMPLE_MARK)) {
+                if (!StringUtils.hasText(keyword) || keyword.contains(GeoExcelTemplateWriter.SAMPLE_MARK)) {
+                    doneUnits += rowUnits;
+                    GeoImportProgress.report(doneUnits, totalUnits);
                     continue;
                 }
                 String week = ExcelCellUtils.str(sheet, r, 1);
@@ -451,6 +458,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                     result.setTotalCount(result.getTotalCount() + 1);
                     result.setFailureCount(result.getFailureCount() + 1);
                     result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(r + 1, "话题", "话题不能为空"));
+                    doneUnits += rowUnits;
+                    GeoImportProgress.report(doneUnits, totalUnits);
                     continue;
                 }
                 // 名称已存在则只关联；不存在则建档后再关联
@@ -488,6 +497,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                             result.getErrors().add(new GeoImportResultVO.GeoImportErrorVO(
                                     r + 1, group.platforms.get(i), e.getMessage()));
                         }
+                        doneUnits++;
+                        GeoImportProgress.report(doneUnits, totalUnits);
                     }
                 }
             }

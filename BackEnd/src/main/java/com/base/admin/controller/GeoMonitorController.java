@@ -15,6 +15,7 @@ import com.base.admin.domain.vo.GeoDailyBoardVO;
 import com.base.admin.domain.vo.GeoDailyBulkSaveResultVO;
 import com.base.admin.domain.vo.GeoDailyGroupVO;
 import com.base.admin.domain.vo.GeoDailyVO;
+import com.base.admin.domain.vo.GeoImportJobVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoLatestDateVO;
 import com.base.admin.domain.vo.GeoMonthlyBoardVO;
@@ -24,6 +25,7 @@ import com.base.admin.domain.vo.GeoTopicPlatformChartsVO;
 import com.base.admin.domain.vo.GeoWeeklyBoardVO;
 import com.base.admin.domain.vo.GeoYearlyBoardVO;
 import com.base.admin.service.FileStorageService;
+import com.base.admin.service.GeoImportJobService;
 import com.base.admin.service.GeoMonitorService;
 import com.base.admin.util.GeoExcelTemplateWriter;
 import io.swagger.v3.oas.annotations.Operation;
@@ -58,6 +60,7 @@ public class GeoMonitorController {
 
     private final GeoMonitorService monitorService;
     private final FileStorageService fileStorageService;
+    private final GeoImportJobService importJobService;
 
     @Operation(summary = "日监测分页")
     @PostMapping("/daily/list")
@@ -156,6 +159,21 @@ public class GeoMonitorController {
     @Log(title = "GEO日监测导入", businessType = 1)
     public Result<GeoImportResultVO> importDaily(@RequestParam("file") MultipartFile file) {
         return Result.ok(monitorService.importDaily(file));
+    }
+
+    @Operation(summary = "开始导入日监测（异步，配合进度查询）")
+    @PostMapping("/daily/import/start")
+    @RequiresPermission("geo:daily:import")
+    @Log(title = "GEO日监测导入", businessType = 1)
+    public Result<GeoImportJobVO> startDailyImport(@RequestParam("file") MultipartFile file) throws IOException {
+        return Result.ok(importJobService.startDaily(file.getBytes()));
+    }
+
+    @Operation(summary = "查询日监测导入进度")
+    @GetMapping("/daily/import/progress/{jobId}")
+    @RequiresPermission("geo:daily:import")
+    public Result<GeoImportJobVO> dailyImportProgress(@PathVariable String jobId) {
+        return Result.ok(importJobService.get(jobId));
     }
 
     @Operation(summary = "上传监测截图")
