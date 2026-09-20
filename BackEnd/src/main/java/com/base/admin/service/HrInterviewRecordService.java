@@ -169,6 +169,17 @@ public class HrInterviewRecordService {
         }
     }
 
+    public void deleteBatch(java.util.List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的面试记录");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                delete(id);
+            }
+        }
+    }
+
     private boolean openNextRoundTask(Long requisitionId, Long applicationId, Integer roundNo) {
         Integer maxRound = jdbc.query("SELECT MAX(round_no) FROM hr_requisition_round WHERE requisition_id = ? AND is_active = 1",
                 rs -> rs.next() ? (rs.getObject(1) == null ? null : rs.getInt(1)) : null, requisitionId);

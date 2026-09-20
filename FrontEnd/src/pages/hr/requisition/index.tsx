@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App } from 'antd';
+import { App, Modal } from 'antd';
 import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
@@ -9,6 +9,7 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import {
   changeHrRequisitionStatusApi,
   deleteHrRequisitionApi,
+  deleteHrRequisitionBatchApi,
   getHrDepartmentsApi,
   getHrRequisitionsApi,
   getHrUsersApi,
@@ -153,6 +154,8 @@ function mapRow(raw: Record<string, unknown>): Req {
 const RequisitionPage = memo(function RequisitionPage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Req | null>(null);
   const [depts, setDepts] = useState<{ value: number; label: string }[]>([]);
@@ -409,9 +412,50 @@ const RequisitionPage = memo(function RequisitionPage() {
           const pageSize = params.pageSize || 10;
           const current = params.current || 1;
           const start = (current - 1) * pageSize;
-          return { data: mapped.slice(start, start + pageSize), success: true, total: mapped.length };
+          const pageRows = mapped.slice(start, start + pageSize);
+          currentPageKeysRef.current = new Set(pageRows.map((row) => row.id));
+          return { data: pageRows, success: true, total: mapped.length };
+        }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys) => {
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
         }}
         toolBarRender={() => [
+          <PermissionButton
+            key='del'
+            color='danger'
+            variant='filled'
+            perm='hr:requisition:delete'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要删除的招聘需求');
+                return;
+              }
+              Modal.confirm({
+                title: '批量删除招聘需求',
+                content: `确定要删除选中的 ${selectedRowKeys.length} 条招聘需求吗？此操作不可撤销。`,
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true },
+                onOk: async () => {
+                  await deleteHrRequisitionBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 条招聘需求`);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量删除
+          </PermissionButton>,
           <PermissionButton
             key='add'
             type='primary'

@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Form, Select } from 'antd';
+import { App, Form, Modal, Select } from 'antd';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import BaseProTable from '@/components/BaseProTable';
@@ -11,6 +11,7 @@ import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import {
   createHrInviteApi,
   deleteHrInviteApi,
+  deleteHrInviteBatchApi,
   getHrApplicationsApi,
   getHrRequisitionsApi,
   getHrUsersApi,
@@ -123,6 +124,8 @@ const InvitePage = memo(function InvitePage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
   const actionRef = useRef<ActionType>(null);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InviteRow | null>(null);
   const [candidates, setCandidates] = useState<{ value: number; label: string }[]>([]);
@@ -336,9 +339,50 @@ const InvitePage = memo(function InvitePage() {
           const pageSize = params.pageSize || 10;
           const current = params.current || 1;
           const start = (current - 1) * pageSize;
-          return { data: filtered.slice(start, start + pageSize), success: true, total: filtered.length };
+          const pageRows = filtered.slice(start, start + pageSize);
+          currentPageKeysRef.current = new Set(pageRows.map((row) => row.id));
+          return { data: pageRows, success: true, total: filtered.length };
+        }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys) => {
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
         }}
         toolBarRender={() => [
+          <PermissionButton
+            key='del'
+            color='danger'
+            variant='filled'
+            perm='hr:invite:delete'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要删除的面试邀约');
+                return;
+              }
+              Modal.confirm({
+                title: '批量删除面试邀约',
+                content: `确定要删除选中的 ${selectedRowKeys.length} 条邀约吗？此操作不可撤销。`,
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true },
+                onOk: async () => {
+                  await deleteHrInviteBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 条邀约`);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量删除
+          </PermissionButton>,
           <PermissionButton
             key='add'
             type='primary'

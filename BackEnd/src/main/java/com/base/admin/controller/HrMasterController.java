@@ -101,11 +101,20 @@ public class HrMasterController {
     }
 
     @Operation(summary = "删除招聘需求")
-    @DeleteMapping("/requisition/{id}")
+    @DeleteMapping("/requisition/{id:\\d+}")
     @RequiresPermission("hr:requisition:delete")
     @Log(title = "招聘需求", businessType = 3)
     public Result<Void> deleteRequisition(@PathVariable Long id) {
         masterService.deleteRequisition(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除招聘需求")
+    @DeleteMapping("/requisition/batch")
+    @RequiresPermission("hr:requisition:delete")
+    @Log(title = "招聘需求-批量删除", businessType = 3)
+    public Result<Void> deleteRequisitionBatch(@RequestBody List<Long> ids) {
+        masterService.deleteRequisitionBatch(ids);
         return Result.ok();
     }
 
@@ -180,11 +189,20 @@ public class HrMasterController {
     }
 
     @Operation(summary = "删除候选人")
-    @DeleteMapping("/application/{id}")
+    @DeleteMapping("/application/{id:\\d+}")
     @RequiresPermission("hr:application:delete")
     @Log(title = "候选人", businessType = 3)
     public Result<Void> deleteApplication(@PathVariable Long id) {
         masterService.deleteApplication(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除候选人")
+    @DeleteMapping("/application/batch")
+    @RequiresPermission("hr:application:delete")
+    @Log(title = "候选人-批量删除", businessType = 3)
+    public Result<Void> deleteApplicationBatch(@RequestBody List<Long> ids) {
+        masterService.deleteApplicationBatch(ids);
         return Result.ok();
     }
 
@@ -339,11 +357,20 @@ public class HrMasterController {
     }
 
     @Operation(summary = "删除邀约")
-    @DeleteMapping("/invite/{id}")
+    @DeleteMapping("/invite/{id:\\d+}")
     @RequiresPermission("hr:invite:delete")
     @Log(title = "面试邀约", businessType = 3)
     public Result<Void> deleteInvite(@PathVariable Long id) {
         inviteService.remove(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除邀约")
+    @DeleteMapping("/invite/batch")
+    @RequiresPermission("hr:invite:delete")
+    @Log(title = "面试邀约-批量删除", businessType = 3)
+    public Result<Void> deleteInviteBatch(@RequestBody List<Long> ids) {
+        inviteService.removeBatch(ids);
         return Result.ok();
     }
 
@@ -379,11 +406,20 @@ public class HrMasterController {
     }
 
     @Operation(summary = "删除面试记录")
-    @DeleteMapping("/interview-record/{id}")
+    @DeleteMapping("/interview-record/{id:\\d+}")
     @RequiresPermission("hr:record:delete")
     @Log(title = "面试记录", businessType = 3)
     public Result<Void> deleteRecord(@PathVariable Long id) {
         recordService.delete(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除面试记录")
+    @DeleteMapping("/interview-record/batch")
+    @RequiresPermission("hr:record:delete")
+    @Log(title = "面试记录-批量删除", businessType = 3)
+    public Result<Void> deleteRecordBatch(@RequestBody List<Long> ids) {
+        recordService.deleteBatch(ids);
         return Result.ok();
     }
 }

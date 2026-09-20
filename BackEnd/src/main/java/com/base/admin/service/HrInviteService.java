@@ -247,6 +247,18 @@ public class HrInviteService {
     }
 
     @Transactional
+    public void removeBatch(java.util.List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的面试邀约");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                remove(id);
+            }
+        }
+    }
+
+    @Transactional
     public Long forward(Long id, Long interviewerUserId) {
         Map<String, Object> invite = loadInvite(id);
         HrInviteCreateDTO dto = copyInvite(invite, interviewerUserId);

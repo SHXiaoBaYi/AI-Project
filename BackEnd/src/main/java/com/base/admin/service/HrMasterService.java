@@ -156,6 +156,17 @@ public class HrMasterService {
         }
     }
 
+    public void deleteRequisitionBatch(java.util.List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的招聘需求");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                deleteRequisition(id);
+            }
+        }
+    }
+
     private void replaceOwners(Long requisitionId, List<Long> ownerUserIds) {
         jdbc.update("UPDATE hr_requisition_owner SET is_active = 0 WHERE requisition_id = ? AND user_id IS NOT NULL", requisitionId);
         if (ownerUserIds == null) {
@@ -372,6 +383,17 @@ public class HrMasterService {
         int updated = jdbc.update("UPDATE hr_application SET is_active = 0 WHERE id = ? AND is_active = 1", id);
         if (updated == 0) {
             throw new BusinessException("候选人不存在");
+        }
+    }
+
+    public void deleteApplicationBatch(java.util.List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的候选人");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                deleteApplication(id);
+            }
         }
     }
 

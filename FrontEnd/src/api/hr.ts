@@ -132,6 +132,10 @@ export function deleteHrApplicationApi(id: number) {
   return request.delete(`/hr/application/${id}`);
 }
 
+export function deleteHrApplicationBatchApi(ids: number[]) {
+  return request.delete('/hr/application/batch', { data: ids });
+}
+
 export function getHrStagesApi() {
   return request.get<unknown, { stageCode?: string; stage_code?: string; stageName?: string; stage_name?: string }[]>(
     '/hr/stage/options',
@@ -173,6 +177,10 @@ export function changeHrRequisitionStatusApi(id: number, status: string) {
 
 export function deleteHrRequisitionApi(id: number) {
   return request.delete(`/hr/requisition/${id}`);
+}
+
+export function deleteHrRequisitionBatchApi(ids: number[]) {
+  return request.delete('/hr/requisition/batch', { data: ids });
 }
 
 export function getHrChannelsApi() {
@@ -257,6 +265,10 @@ export function deleteHrInviteApi(id: number) {
   return request.delete(`/hr/invite/${id}`);
 }
 
+export function deleteHrInviteBatchApi(ids: number[]) {
+  return request.delete('/hr/invite/batch', { data: ids });
+}
+
 export function forwardHrInviteApi(id: number, interviewerUserId: number) {
   return request.post<unknown, number>(`/hr/invite/${id}/forward`, { interviewerUserId });
 }
@@ -275,6 +287,10 @@ export function saveHrInterviewRecordApi(data: Record<string, unknown>) {
 
 export function deleteHrInterviewRecordApi(id: number) {
   return request.delete(`/hr/interview-record/${id}`);
+}
+
+export function deleteHrInterviewRecordBatchApi(ids: number[]) {
+  return request.delete('/hr/interview-record/batch', { data: ids });
 }
 
 export function listMyHrInvitesApi() {
