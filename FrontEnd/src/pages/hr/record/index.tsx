@@ -81,11 +81,12 @@ function InterviewerSelect({
 
   useEffect(() => {
     if (applicationId == null || roundNo == null) return;
+    if (plans.size === 0 || appReq.size === 0) return;
     const key = `${applicationId}-${roundNo}`;
     if (seen.current === key) return;
-    const first = seen.current === null;
+    const opening = seen.current === null;
     seen.current = key;
-    if (first && value?.length) return;
+    if (opening && value?.length) return;
     const reqId = appReq.get(Number(applicationId));
     const fromProcess = reqId == null ? [] : (plans.get(reqId)?.get(Number(roundNo)) ?? []);
     const sameInvite =
@@ -278,8 +279,9 @@ const RecordPage = memo(function RecordPage() {
         hideInTable: true,
         hideInSearch: true,
         hideInForm: false,
+        colProps: { span: 24 },
         formItemProps: { rules: [{ required: true, message: '请选择面试官' }] },
-        renderFormItem: () => (
+        formItemRender: () => (
           <InterviewerSelect
             users={users}
             appReq={appReq}
