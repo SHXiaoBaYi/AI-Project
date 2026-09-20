@@ -395,6 +395,8 @@ export function getGeoContentPlacementArticleListApi(
     topicId?: number;
     targetQuestion?: string;
     publishStatus?: string;
+    cited?: number;
+    citeSort?: 'asc' | 'desc';
   },
 ) {
   return request.post<unknown, PageResult<GeoContentPlacementArticle>>('/geo/content-placement/articles/list', data);

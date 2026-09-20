@@ -24,4 +24,10 @@ public class GeoContentPlacementArticleQueryDTO extends PageQuery {
 
     @Schema(description = "投放状态（投放成功/审核未通过/未投放）", example = "投放成功")
     private String publishStatus;
+
+    @Schema(description = "引用筛选：1有引用 0无引用", example = "1", nullable = true)
+    private Integer cited;
+
+    @Schema(description = "引用条数排序：asc / desc", example = "desc", nullable = true)
+    private String citeSort;
 }

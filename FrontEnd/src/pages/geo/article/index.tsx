@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, DatePicker, Form, Input, Modal, Select, Tag } from 'antd';
+import { App, Button, DatePicker, Form, Input, Modal, Select, Table, Tag } from 'antd';
 import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm/index';
@@ -9,24 +9,34 @@ import ActionButtons from '@/components/Buttons/ActionButtons';
 import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
 import { STATUS_COLOR } from '@/components/geo/content-placement/constants';
 import {
+  createGeoContentPlacementCiteApi,
   createGeoContentPlacementItemApi,
+  deleteGeoContentPlacementCiteApi,
   deleteGeoContentPlacementItemApi,
   deleteGeoContentPlacementItemBatchApi,
   getGeoContentPlacementArticleListApi,
+  getGeoContentPlacementCitesApi,
   getGeoOwnerOptionsApi,
   getGeoPlatformOptionsApi,
   getGeoTargetQuestionsApi,
   getGeoTopicOptionsApi,
+  updateGeoContentPlacementCiteApi,
   updateGeoContentPlacementItemApi,
 } from '@/api/geo';
 import type {
   GeoContentPlacementArticle,
+  GeoContentPlacementCite,
   GeoOwnerOption,
   GeoPlatform,
   GeoTargetQuestionOption,
   GeoTopic,
 } from '@/types/geo';
-import { GEO_CONTENT_FORMS, GEO_CONTENT_PUBLISH_STATUS, GEO_PLATFORM_TYPE_CONTENT } from '@/constants/geo';
+import {
+  GEO_CONTENT_FORMS,
+  GEO_CONTENT_PUBLISH_STATUS,
+  GEO_PLATFORM_TYPE_AI,
+  GEO_PLATFORM_TYPE_CONTENT,
+} from '@/constants/geo';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 const ArticlePage = memo(function ArticlePage() {
@@ -40,20 +50,57 @@ const ArticlePage = memo(function ArticlePage() {
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
   const [topics, setTopics] = useState<GeoTopic[]>([]);
   const [platforms, setPlatforms] = useState<GeoPlatform[]>([]);
+  const [aiPlatforms, setAiPlatforms] = useState<GeoPlatform[]>([]);
   const [questionOptions, setQuestionOptions] = useState<GeoTargetQuestionOption[]>([]);
   const [formTopicId, setFormTopicId] = useState<number | undefined>();
+  const [citeArticle, setCiteArticle] = useState<GeoContentPlacementArticle | null>(null);
+  const [cites, setCites] = useState<GeoContentPlacementCite[]>([]);
+  const [citeLoading, setCiteLoading] = useState(false);
+  const [citeForm] = Form.useForm();
+  const [citeFormOpen, setCiteFormOpen] = useState(false);
+  const [editingCite, setEditingCite] = useState<GeoContentPlacementCite | null>(null);
+
+  const reloadCites = async (article: GeoContentPlacementArticle) => {
+    setCiteLoading(true);
+    try {
+      setCites((await getGeoContentPlacementCitesApi(article.placementId, article.id)) ?? []);
+    } finally {
+      setCiteLoading(false);
+    }
+  };
 
   useEffect(() => {
     void Promise.all([
       getGeoOwnerOptionsApi(),
       getGeoTopicOptionsApi(),
       getGeoPlatformOptionsApi(GEO_PLATFORM_TYPE_CONTENT),
-    ]).then(([ownerOpts, topicOpts, plats]) => {
+      getGeoPlatformOptionsApi(GEO_PLATFORM_TYPE_AI),
+    ]).then(([ownerOpts, topicOpts, plats, ai]) => {
       setOwners(ownerOpts ?? []);
       setTopics(topicOpts ?? []);
       setPlatforms(plats ?? []);
+      setAiPlatforms(ai ?? []);
     });
   }, []);
+
+  useEffect(() => {
+    if (!citeFormOpen) return;
+    if (editingCite) {
+      citeForm.setFieldsValue({
+        askQuestion: editingCite.askQuestion,
+        aiPlatform: editingCite.aiPlatform,
+        citeUrl: editingCite.citeUrl,
+        remark: editingCite.remark,
+      });
+      return;
+    }
+    citeForm.setFieldsValue({
+      askQuestion: citeArticle?.targetQuestion,
+      aiPlatform: undefined,
+      citeUrl: undefined,
+      remark: undefined,
+    });
+  }, [citeArticle, citeForm, citeFormOpen, editingCite]);
 
   useEffect(() => {
     if (!formTopicId) {
@@ -139,6 +186,33 @@ const ArticlePage = memo(function ArticlePage() {
             },
           ]}
         />
+      ),
+    },
+    {
+      title: '引用情况',
+      dataIndex: 'cited',
+      width: 140,
+      fixed: 'left',
+      sorter: true,
+      valueType: 'select',
+      fieldProps: {
+        allowClear: true,
+        options: [
+          { label: '有引用', value: 1 },
+          { label: '无引用', value: 0 },
+        ],
+      },
+      render: (_, record) => (
+        <Button
+          type='link'
+          className='px-0'
+          onClick={() => {
+            setCiteArticle(record);
+            void reloadCites(record);
+          }}
+        >
+          {record.citeCount ? `${record.citeCount} 条` : '记录'}
+        </Button>
       ),
     },
     {
@@ -250,7 +324,10 @@ const ArticlePage = memo(function ArticlePage() {
         columns={columns}
         headerTitle='文章列表（按平台发布明细）'
         scroll={{ x: 1600 }}
-        request={async (params) => {
+        request={async (params, sort) => {
+          const citedRaw = params.cited;
+          const cited = citedRaw === 1 || citedRaw === '1' ? 1 : citedRaw === 0 || citedRaw === '0' ? 0 : undefined;
+          const order = sort?.cited;
           const res = await getGeoContentPlacementArticleListApi({
             pageNum: params.current,
             pageSize: params.pageSize,
@@ -261,6 +338,8 @@ const ArticlePage = memo(function ArticlePage() {
             publishStatus: params.publishStatus,
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
+            cited,
+            citeSort: order === 'ascend' ? 'asc' : order === 'descend' ? 'desc' : undefined,
           });
           currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
           return { data: res.rows, success: true, total: res.total };
@@ -447,6 +526,167 @@ const ArticlePage = memo(function ArticlePage() {
             name='remark'
             label='备注'
             className='col-span-2'
+          >
+            <Input.TextArea
+              rows={3}
+              allowClear
+            />
+          </Form.Item>
+        </div>
+      </BaseModalForm>
+
+      <Modal
+        title={`${citeArticle?.title || citeArticle?.platformName || '文章'} · 引用情况`}
+        open={!!citeArticle}
+        onCancel={() => {
+          setCiteArticle(null);
+          setCites([]);
+          actionRef.current?.reload();
+        }}
+        footer={null}
+        width={860}
+        destroyOnHidden
+      >
+        <div className='mb-3 flex items-center justify-between gap-3 text-sm text-neutral-500'>
+          <span>
+            {citeArticle?.topicName || '-'} · {citeArticle?.targetQuestion || '-'} · {citeArticle?.platformName || '-'}
+          </span>
+          <PermissionButton
+            type='primary'
+            perm='geo:article:edit'
+            onClick={() => {
+              setEditingCite(null);
+              setCiteFormOpen(true);
+            }}
+          >
+            新增引用
+          </PermissionButton>
+        </div>
+        <Table<GeoContentPlacementCite>
+          rowKey='id'
+          size='small'
+          loading={citeLoading}
+          dataSource={cites}
+          pagination={false}
+          scroll={{ x: 720 }}
+          columns={[
+            {
+              title: '操作',
+              width: 120,
+              fixed: 'left',
+              render: (_, row) => (
+                <ActionButtons
+                  items={[
+                    {
+                      key: 'edit',
+                      label: '编辑',
+                      perm: 'geo:article:edit',
+                      onClick: () => {
+                        setEditingCite(row);
+                        setCiteFormOpen(true);
+                      },
+                    },
+                    {
+                      key: 'delete',
+                      label: '删除',
+                      perm: 'geo:article:edit',
+                      confirmTitle: '确定删除这条引用？',
+                      onClick: async () => {
+                        await deleteGeoContentPlacementCiteApi(row.id);
+                        message.success('已删除');
+                        if (citeArticle) await reloadCites(citeArticle);
+                      },
+                    },
+                  ]}
+                />
+              ),
+            },
+            { title: '提问问题', dataIndex: 'askQuestion', ellipsis: true },
+            { title: 'AI平台', dataIndex: 'aiPlatform', width: 100 },
+            {
+              title: '引用链接',
+              dataIndex: 'citeUrl',
+              ellipsis: true,
+              render: (value?: string) => (
+                <ExternalLinkText
+                  href={value}
+                  drawerTitle='引用链接'
+                />
+              ),
+            },
+            { title: '备注', dataIndex: 'remark', ellipsis: true, width: 140 },
+          ]}
+        />
+      </Modal>
+
+      <BaseModalForm
+        title={editingCite ? '编辑引用' : '新增引用'}
+        open={citeFormOpen}
+        form={citeForm}
+        width={640}
+        onOpenChange={(next) => {
+          setCiteFormOpen(next);
+          if (!next) setEditingCite(null);
+        }}
+        modalProps={{ destroyOnHidden: true, styles: { body: { padding: '24px' } } }}
+        onFinish={async (values) => {
+          if (!citeArticle) return false;
+          const formValues = values as GeoContentPlacementCite;
+          const payload = {
+            placementId: citeArticle.placementId,
+            itemId: citeArticle.id,
+            askQuestion: formValues.askQuestion,
+            aiPlatform: formValues.aiPlatform,
+            citeUrl: formValues.citeUrl,
+            remark: formValues.remark,
+          };
+          if (editingCite) {
+            await updateGeoContentPlacementCiteApi({ ...payload, id: editingCite.id });
+            message.success('已更新');
+          } else {
+            await createGeoContentPlacementCiteApi(payload);
+            message.success('已记录');
+          }
+          await reloadCites(citeArticle);
+          return true;
+        }}
+      >
+        <div className='grid grid-cols-1 gap-y-1'>
+          <Form.Item
+            name='askQuestion'
+            label='提问问题'
+            rules={[{ required: true, message: '请输入提问问题' }]}
+          >
+            <Input
+              allowClear
+              placeholder='提问问题'
+            />
+          </Form.Item>
+          <Form.Item
+            name='aiPlatform'
+            label='AI平台'
+            rules={[{ required: true, message: '请选择AI平台' }]}
+          >
+            <Select
+              options={aiPlatforms.map((p) => ({ label: p.platformName, value: p.platformName }))}
+              showSearch
+              optionFilterProp='label'
+              placeholder='请选择AI平台'
+            />
+          </Form.Item>
+          <Form.Item
+            name='citeUrl'
+            label='引用链接'
+            rules={[{ required: true, message: '请填写引用链接' }]}
+          >
+            <Input
+              allowClear
+              placeholder='https://...'
+            />
+          </Form.Item>
+          <Form.Item
+            name='remark'
+            label='备注'
           >
             <Input.TextArea
               rows={3}

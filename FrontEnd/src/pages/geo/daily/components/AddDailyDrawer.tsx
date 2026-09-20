@@ -1,10 +1,24 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Button, DatePicker, Drawer, Input, InputNumber, Modal, Select, Space, Table, Tabs, Upload } from 'antd';
+import {
+  App,
+  AutoComplete,
+  Button,
+  DatePicker,
+  Drawer,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tabs,
+  Upload,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { InputProps } from 'antd';
 import { useSelector } from 'react-redux';
 import dayjs, { type Dayjs } from 'dayjs';
-import { saveGeoDailyBulkApi, uploadGeoScreenshotApi } from '@/api/geo';
+import { saveGeoDailyBulkApi, uploadGeoScreenshotApi, getGeoTargetQuestionsApi } from '@/api/geo';
 import type { GeoDailyBulkSaveResult, GeoOwnerOption, GeoTopic } from '@/types/geo';
 import type { RootState } from '@/store';
 import GeoScreenshot from '@/components/geo/GeoScreenshot';
@@ -257,6 +271,7 @@ type TopicRow = {
   rowKey: string;
   topicId?: number;
   keyword?: string;
+  questionOptions?: { label: string; value: string }[];
   termType?: string;
   ownerUserId?: number;
   platforms: PlatformRow[];
@@ -336,6 +351,22 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
 
   const topicOptions = useMemo(() => topics.map((t) => ({ label: t.topicName, value: t.id })), [topics]);
   const ownerOptions = useMemo(() => owners.map((u) => ({ label: u.displayName, value: u.userId })), [owners]);
+  const questionCache = useRef(new Map<number, { label: string; value: string }[]>());
+
+  const loadTargetQuestions = useCallback(async (topicId: number) => {
+    const cached = questionCache.current.get(topicId);
+    if (cached) return cached;
+    const list = (await getGeoTargetQuestionsApi(topicId)) ?? [];
+    const seen = new Set<string>();
+    const options = list.flatMap((item) => {
+      const text = item.targetQuestion?.trim();
+      if (!text || seen.has(text)) return [];
+      seen.add(text);
+      return [{ label: text, value: text }];
+    });
+    questionCache.current.set(topicId, options);
+    return options;
+  }, []);
 
   const updateTopic = useCallback((tabKey: string, rowKey: string, patch: Partial<TopicRow>) => {
     setTabs((prev) =>
@@ -585,7 +616,16 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           placeholder='选择话题'
           value={v}
           options={topicOptions}
-          onChange={(val) => updateTopic(tabKey, row.rowKey, { topicId: val })}
+          onChange={(val: number) => {
+            updateTopic(tabKey, row.rowKey, { topicId: val, keyword: '', questionOptions: [] });
+            void loadTargetQuestions(val).then((options) => {
+              updateTopic(tabKey, row.rowKey, {
+                topicId: val,
+                questionOptions: options,
+                keyword: options.length === 1 ? options[0].value : '',
+              });
+            });
+          }}
         />
       ),
     },
@@ -594,10 +634,14 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       dataIndex: 'keyword',
       width: 300,
       render: (v, row) => (
-        <ImeSafeInput
+        <AutoComplete
+          className='w-full'
           variant='borderless'
-          placeholder='关键字 / 提问'
+          placeholder={row.topicId ? '选择该话题的目标问题' : '请先选择话题'}
           value={v}
+          options={row.questionOptions}
+          disabled={!row.topicId}
+          filterOption={(input, option) => String(option?.label ?? '').includes(input)}
           onChange={(val) => updateTopic(tabKey, row.rowKey, { keyword: val })}
         />
       ),

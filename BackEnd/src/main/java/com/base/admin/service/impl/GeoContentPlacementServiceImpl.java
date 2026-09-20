@@ -209,9 +209,20 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 : null;
         LambdaQueryWrapper<GeoContentPlacementItem> iw = new LambdaQueryWrapper<GeoContentPlacementItem>()
                 .in(placementIds != null, GeoContentPlacementItem::getPlacementId, placementIds)
-                .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter)
-                .orderByDesc(GeoContentPlacementItem::getId);
+                .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter);
+        if (query.getCited() != null && query.getCited() == 1) {
+            iw.apply(citeExistsSql());
+        } else if (query.getCited() != null && query.getCited() == 0) {
+            iw.apply("NOT " + citeExistsSql());
+        }
         com.base.admin.util.QueryWrappers.applyCreateTimeRange(iw, query, GeoContentPlacementItem::getCreateTime);
+        String citeSort = query.getCiteSort() == null ? "" : query.getCiteSort().trim().toLowerCase();
+        if ("asc".equals(citeSort) || "desc".equals(citeSort)) {
+            iw.last("ORDER BY (SELECT COUNT(1) FROM geo_content_placement_cite c WHERE c.item_id = geo_content_placement_item.id AND c.is_active = 1) "
+                    + citeSort.toUpperCase() + ", geo_content_placement_item.id DESC");
+        } else {
+            iw.orderByDesc(GeoContentPlacementItem::getId);
+        }
 
         int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
         int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 10 : query.getPageSize();
@@ -230,12 +241,29 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                     .collect(Collectors.toMap(GeoContentPlacement::getId, p -> p, (a, b) -> a));
         }
 
+        Map<Long, Integer> citeCountByItem = new HashMap<>();
+        List<Long> itemIds = items.stream().map(GeoContentPlacementItem::getId).filter(Objects::nonNull).toList();
+        if (!itemIds.isEmpty()) {
+            citeMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementCite>()
+                            .in(GeoContentPlacementCite::getItemId, itemIds)
+                            .select(GeoContentPlacementCite::getId, GeoContentPlacementCite::getItemId))
+                    .forEach(cite -> {
+                        if (cite.getItemId() != null) {
+                            citeCountByItem.merge(cite.getItemId(), 1, Integer::sum);
+                        }
+                    });
+        }
+
         List<GeoContentPlacementArticleListVO> rows = new ArrayList<>();
         for (GeoContentPlacementItem item : items) {
             GeoContentPlacement placement = placementMap.get(item.getPlacementId());
-            rows.add(toArticleListVo(item, placement));
+            rows.add(toArticleListVo(item, placement, citeCountByItem.getOrDefault(item.getId(), 0)));
         }
         return new PageResult<>(page.getTotal(), rows);
+    }
+
+    private static String citeExistsSql() {
+        return "EXISTS (SELECT 1 FROM geo_content_placement_cite c WHERE c.item_id = geo_content_placement_item.id AND c.is_active = 1)";
     }
 
     @Override
@@ -1305,7 +1333,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
     }
 
-    private GeoContentPlacementArticleListVO toArticleListVo(GeoContentPlacementItem item, GeoContentPlacement placement) {
+    private GeoContentPlacementArticleListVO toArticleListVo(
+            GeoContentPlacementItem item, GeoContentPlacement placement, int citeCount) {
         GeoContentPlacementArticleListVO vo = new GeoContentPlacementArticleListVO();
         vo.setId(item.getId());
         vo.setPlacementId(item.getPlacementId());
@@ -1316,6 +1345,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setPublishUrl(item.getPublishUrl());
         vo.setPublishTime(item.getPublishTime());
         vo.setRemark(item.getRemark());
+        vo.setCiteCount(citeCount);
         vo.setCreateTime(item.getCreateTime());
         if (placement != null) {
             vo.setPublisherUserId(placement.getPublisherUserId());

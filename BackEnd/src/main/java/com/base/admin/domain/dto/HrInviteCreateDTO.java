@@ -1,5 +1,6 @@
 package com.base.admin.domain.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -29,6 +30,7 @@ public class HrInviteCreateDTO {
     private java.util.List<Long> interviewerUserIds;
 
     @NotNull
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     @Schema(description = "开始时间")
     private LocalDateTime interviewAt;
 

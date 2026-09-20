@@ -1,5 +1,6 @@
 package com.base.admin.domain.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -41,6 +42,7 @@ public class HrInterviewRecordDTO {
     @Schema(description = "评语")
     private String comment;
 
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     @Schema(description = "面试时间")
     private LocalDateTime interviewedAt;
 }

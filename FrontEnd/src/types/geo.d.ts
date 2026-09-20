@@ -471,6 +471,7 @@ export interface GeoContentPlacementArticle {
   publishUrl?: string;
   publishTime?: string;
   remark?: string;
+  citeCount?: number;
   createTime?: string;
 }
 
