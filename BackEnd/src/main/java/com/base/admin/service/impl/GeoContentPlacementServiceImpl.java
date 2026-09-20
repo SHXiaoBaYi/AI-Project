@@ -6,6 +6,7 @@ import com.base.admin.common.Constants;
 import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.GeoContentArticleBoardQueryDTO;
 import com.base.admin.domain.dto.GeoContentArticleDetailQueryDTO;
+import com.base.admin.domain.dto.GeoContentPlacementArticleQueryDTO;
 import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
@@ -25,10 +26,12 @@ import com.base.admin.domain.vo.GeoChartPointVO;
 import com.base.admin.domain.vo.GeoContentArticleBoardVO;
 import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.domain.vo.GeoContentCiteAggRowVO;
+import com.base.admin.domain.vo.GeoContentPlacementArticleListVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
 import com.base.admin.domain.vo.GeoContentPlacementItemVO;
 import com.base.admin.domain.vo.GeoContentPlacementListVO;
+import com.base.admin.domain.vo.GeoTargetQuestionOptionVO;
 import com.base.admin.domain.vo.GeoContentPublishAggRowVO;
 import com.base.admin.domain.vo.GeoContentPublisherCiteRowVO;
 import com.base.admin.domain.vo.GeoContentPublisherWeekBoardVO;
@@ -170,12 +173,90 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             List<GeoContentPlacementItem> items = itemsByPlacement.getOrDefault(entity.getId(), List.of());
             GeoContentPlacementListVO vo = toListVo(entity, items, citeCountMap.getOrDefault(entity.getId(), 0L).intValue());
             vo.setProofFileCount(proofCountMap.getOrDefault(entity.getId(), 0));
+            applyPendingIfNeeded(vo);
             if (entity.getSourcePlacementId() != null) {
                 vo.setSourceTargetQuestion(sourceQuestionMap.get(entity.getSourcePlacementId()));
             }
             rows.add(vo);
         }
         return new PageResult<>(page.getTotal(), rows);
+    }
+
+    @Override
+    public PageResult<GeoContentPlacementArticleListVO> listArticles(GeoContentPlacementArticleQueryDTO query) {
+        boolean needPlacementFilter = query.getPublisherUserId() != null
+                || query.getOwnerUserId() != null
+                || query.getTopicId() != null
+                || StringUtils.hasText(query.getTargetQuestion());
+        List<Long> placementIds = null;
+        Map<Long, GeoContentPlacement> placementMap = Map.of();
+        if (needPlacementFilter) {
+            LambdaQueryWrapper<GeoContentPlacement> pw = new LambdaQueryWrapper<GeoContentPlacement>()
+                    .eq(query.getPublisherUserId() != null, GeoContentPlacement::getPublisherUserId, query.getPublisherUserId())
+                    .eq(query.getOwnerUserId() != null, GeoContentPlacement::getOwnerUserId, query.getOwnerUserId())
+                    .eq(query.getTopicId() != null, GeoContentPlacement::getTopicId, query.getTopicId())
+                    .like(StringUtils.hasText(query.getTargetQuestion()), GeoContentPlacement::getTargetQuestion, query.getTargetQuestion())
+                    .select(GeoContentPlacement::getId);
+            List<GeoContentPlacement> placements = placementMapper.selectList(pw);
+            if (placements.isEmpty()) {
+                return new PageResult<>(0, List.of());
+            }
+            placementIds = placements.stream().map(GeoContentPlacement::getId).toList();
+        }
+
+        String statusFilter = StringUtils.hasText(query.getPublishStatus())
+                ? normalizePublishStatus(query.getPublishStatus())
+                : null;
+        LambdaQueryWrapper<GeoContentPlacementItem> iw = new LambdaQueryWrapper<GeoContentPlacementItem>()
+                .in(placementIds != null, GeoContentPlacementItem::getPlacementId, placementIds)
+                .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter)
+                .orderByDesc(GeoContentPlacementItem::getId);
+        com.base.admin.util.QueryWrappers.applyCreateTimeRange(iw, query, GeoContentPlacementItem::getCreateTime);
+
+        int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
+        int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 10 : query.getPageSize();
+        Page<GeoContentPlacementItem> page = itemMapper.selectPage(new Page<>(pageNum, pageSize), iw);
+        List<GeoContentPlacementItem> items = page.getRecords();
+        if (items.isEmpty()) {
+            return new PageResult<>(page.getTotal(), List.of());
+        }
+
+        Set<Long> loadPlacementIds = items.stream()
+                .map(GeoContentPlacementItem::getPlacementId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (!loadPlacementIds.isEmpty()) {
+            placementMap = placementMapper.selectBatchIds(loadPlacementIds).stream()
+                    .collect(Collectors.toMap(GeoContentPlacement::getId, p -> p, (a, b) -> a));
+        }
+
+        List<GeoContentPlacementArticleListVO> rows = new ArrayList<>();
+        for (GeoContentPlacementItem item : items) {
+            GeoContentPlacement placement = placementMap.get(item.getPlacementId());
+            rows.add(toArticleListVo(item, placement));
+        }
+        return new PageResult<>(page.getTotal(), rows);
+    }
+
+    @Override
+    public List<GeoTargetQuestionOptionVO> listTargetQuestions(Long topicId) {
+        if (topicId == null) {
+            return List.of();
+        }
+        return placementMapper.selectList(new LambdaQueryWrapper<GeoContentPlacement>()
+                        .eq(GeoContentPlacement::getTopicId, topicId)
+                        .isNotNull(GeoContentPlacement::getTargetQuestion)
+                        .ne(GeoContentPlacement::getTargetQuestion, "")
+                        .orderByDesc(GeoContentPlacement::getId)
+                        .select(GeoContentPlacement::getId, GeoContentPlacement::getTargetQuestion))
+                .stream()
+                .map(p -> {
+                    GeoTargetQuestionOptionVO vo = new GeoTargetQuestionOptionVO();
+                    vo.setPlacementId(p.getId());
+                    vo.setTargetQuestion(p.getTargetQuestion());
+                    return vo;
+                })
+                .toList();
     }
 
     @Override
@@ -376,6 +457,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     public Long create(GeoContentPlacementDTO dto) {
         GeoContentPlacement placement = new GeoContentPlacement();
         fillPlacement(placement, dto);
+        assertTopicQuestionUnique(placement.getTopicId(), placement.getTargetQuestion(), null);
         placement.setTitle("");
         placement.setSource(Constants.CONTENT_SOURCE_MANUAL);
         placement.setSourcePlacementId(null);
@@ -393,6 +475,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         GeoContentPlacement placement = requirePlacement(dto.getId());
         fillPlacement(placement, dto);
+        assertTopicQuestionUnique(placement.getTopicId(), placement.getTargetQuestion(), dto.getId());
         placementMapper.updateById(placement);
         placementTaskSyncService.ensureTasksForPlacement(placement);
     }
@@ -410,7 +493,61 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
 
     @Override
     @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的内容投放");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                delete(id);
+            }
+        }
+    }
+
+    @Override
+    @Transactional
     public List<GeoContentPlacementListVO> generateSimilar(Long placementId, String provider) {
+        List<GeoContentPlacementListVO> created = doGenerateSimilar(placementId, provider);
+        if (created.isEmpty()) {
+            throw new BusinessException("生成的相似问题均已存在，未新增");
+        }
+        return created;
+    }
+
+    @Override
+    @Transactional(noRollbackFor = BusinessException.class)
+    public List<GeoContentPlacementListVO> generateSimilarBatch(List<Long> placementIds, String provider) {
+        if (placementIds == null || placementIds.isEmpty()) {
+            throw new BusinessException("请选择要生成的内容投放");
+        }
+        List<GeoContentPlacementListVO> all = new ArrayList<>();
+        int failures = 0;
+        for (Long id : placementIds) {
+            if (id == null) {
+                continue;
+            }
+            try {
+                List<GeoContentPlacementListVO> created = doGenerateSimilar(id, provider);
+                if (created.isEmpty()) {
+                    failures++;
+                } else {
+                    all.addAll(created);
+                }
+            } catch (BusinessException e) {
+                failures++;
+                log.warn("批量生成相似问题跳过 id={}: {}", id, e.getMessage());
+            }
+        }
+        if (all.isEmpty()) {
+            throw new BusinessException(failures > 0
+                    ? "批量生成未新增任何记录（可能均已存在或缺少目标问题）"
+                    : "请选择要生成的内容投放");
+        }
+        return all;
+    }
+
+    /** 生成相似问题；全部重复时返回空列表（不抛业务异常，便于批量跳过） */
+    private List<GeoContentPlacementListVO> doGenerateSimilar(Long placementId, String provider) {
         GeoContentPlacement source = requirePlacement(placementId);
         if (!StringUtils.hasText(source.getTargetQuestion())) {
             throw new BusinessException("当前记录缺少目标问题，无法生成相似问题");
@@ -422,19 +559,26 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         List<GeoContentPlacementListVO> created = new ArrayList<>();
         for (String question : questions) {
+            String trimmed = question == null ? "" : question.trim();
+            if (!StringUtils.hasText(trimmed)) {
+                continue;
+            }
+            Long topicId = source.getTopicId();
+            if (topicId != null && existsTopicQuestion(topicId, trimmed, null)) {
+                continue;
+            }
             GeoContentPlacement row = new GeoContentPlacement();
             row.setPublisherUserId(null);
             row.setPublisherName(Constants.CONTENT_UNASSIGNED);
             row.setOwnerUserId(null);
             row.setOwnerName(Constants.CONTENT_UNASSIGNED);
-            // 话题跟随源记录；仅有名称时自动建档关联
             if (source.getTopicId() != null || StringUtils.hasText(source.getTopicName())) {
                 applyTopic(row, source.getTopicId(), source.getTopicName());
             } else {
                 row.setTopicId(null);
                 row.setTopicName("");
             }
-            row.setTargetQuestion(question);
+            row.setTargetQuestion(trimmed);
             row.setTitle("");
             row.setSource(Constants.CONTENT_SOURCE_AI);
             row.setSourcePlacementId(source.getId());
@@ -582,8 +726,16 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         if (!item.getPlacementId().equals(dto.getPlacementId())) {
             throw new BusinessException("发布详情与内容投放不匹配");
         }
+        String oldUrl = nz(item.getPublishUrl());
         fillItem(item, dto);
         itemMapper.updateById(item);
+        String newUrl = nz(item.getPublishUrl());
+        if (!Objects.equals(oldUrl, newUrl)) {
+            GeoContentPlacementCite patch = new GeoContentPlacementCite();
+            patch.setCiteUrl(newUrl);
+            citeMapper.update(patch, new LambdaQueryWrapper<GeoContentPlacementCite>()
+                    .eq(GeoContentPlacementCite::getItemId, item.getId()));
+        }
         syncPlacementDerived(item.getPlacementId());
     }
 
@@ -901,8 +1053,28 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         applyUser(placement, true, dto.getPublisherUserId());
         applyUser(placement, false, dto.getOwnerUserId());
         applyTopic(placement, dto.getTopicId(), dto.getTopicName());
-        placement.setTargetQuestion(nz(dto.getTargetQuestion()));
+        placement.setTargetQuestion(nz(dto.getTargetQuestion()).trim());
         placement.setRemark(dto.getRemark());
+    }
+
+    private void assertTopicQuestionUnique(Long topicId, String targetQuestion, Long excludeId) {
+        String question = targetQuestion == null ? "" : targetQuestion.trim();
+        if (topicId == null || !StringUtils.hasText(question)) {
+            return;
+        }
+        if (existsTopicQuestion(topicId, question, excludeId)) {
+            throw new BusinessException("同一话题下目标问题已存在");
+        }
+    }
+
+    private boolean existsTopicQuestion(Long topicId, String targetQuestion, Long excludeId) {
+        LambdaQueryWrapper<GeoContentPlacement> wrapper = new LambdaQueryWrapper<GeoContentPlacement>()
+                .eq(GeoContentPlacement::getTopicId, topicId)
+                .eq(GeoContentPlacement::getTargetQuestion, targetQuestion.trim());
+        if (excludeId != null) {
+            wrapper.ne(GeoContentPlacement::getId, excludeId);
+        }
+        return placementMapper.selectCount(wrapper) > 0;
     }
 
     private void applyUsersAndTopic(GeoContentPlacement placement, String publisher, String owner, String topicName) {
@@ -1109,6 +1281,41 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 : aggregateStatus(items.stream().map(GeoContentPlacementItem::getPublishStatus).toList());
         vo.setAggregateStatus(progress);
         vo.setPublishProgress(publishProgress(items.size(), success));
+        vo.setCreateTime(entity.getCreateTime());
+        return vo;
+    }
+
+    private static void applyPendingIfNeeded(GeoContentPlacementListVO vo) {
+        int proof = vo.getProofFileCount() == null ? 0 : vo.getProofFileCount();
+        if (proof > 0 && Constants.CONTENT_AGG_NONE.equals(vo.getAggregateStatus())) {
+            vo.setAggregateStatus(Constants.CONTENT_AGG_PENDING);
+        }
+    }
+
+    private GeoContentPlacementArticleListVO toArticleListVo(GeoContentPlacementItem item, GeoContentPlacement placement) {
+        GeoContentPlacementArticleListVO vo = new GeoContentPlacementArticleListVO();
+        vo.setId(item.getId());
+        vo.setPlacementId(item.getPlacementId());
+        vo.setTitle(item.getTitle());
+        vo.setPlatformName(item.getPlatformName());
+        vo.setContentForm(normalizeContentForm(item.getContentForm(), item.getPlatformName()));
+        vo.setPublishStatus(item.getPublishStatus());
+        vo.setPublishUrl(item.getPublishUrl());
+        vo.setPublishTime(item.getPublishTime());
+        vo.setRemark(item.getRemark());
+        vo.setCreateTime(item.getCreateTime());
+        if (placement != null) {
+            vo.setPublisherUserId(placement.getPublisherUserId());
+            vo.setPublisherName(placement.getPublisherName());
+            vo.setOwnerUserId(placement.getOwnerUserId());
+            vo.setOwnerName(placement.getOwnerName());
+            vo.setTopicId(placement.getTopicId());
+            vo.setTopicName(placement.getTopicName());
+            vo.setTargetQuestion(placement.getTargetQuestion());
+            if (!StringUtils.hasText(vo.getTitle())) {
+                vo.setTitle(placement.getTitle());
+            }
+        }
         return vo;
     }
 
@@ -1380,6 +1587,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             case "投放完成", "全部投放成功" -> Constants.CONTENT_AGG_DONE;
             case "部分投放", "部分投放成功" -> Constants.CONTENT_AGG_PARTIAL;
             case "未投放", "全部未投放" -> Constants.CONTENT_AGG_NONE;
+            case "待投放" -> Constants.CONTENT_AGG_NONE;
             default -> value;
         };
     }

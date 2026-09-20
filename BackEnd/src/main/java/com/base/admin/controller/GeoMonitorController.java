@@ -97,11 +97,20 @@ public class GeoMonitorController {
     }
 
     @Operation(summary = "删除日监测（软删除，不计入看板）")
-    @DeleteMapping("/daily/{id}")
+    @DeleteMapping("/daily/{id:\\d+}")
     @RequiresPermission("geo:daily:delete")
     @Log(title = "GEO日监测", businessType = 3)
     public Result<Void> deleteDaily(@PathVariable Long id) {
         monitorService.deleteDaily(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除日监测")
+    @DeleteMapping("/daily/batch")
+    @RequiresPermission("geo:daily:delete")
+    @Log(title = "GEO日监测-批量删除", businessType = 3)
+    public Result<Void> deleteDailyBatch(@RequestBody List<Long> ids) {
+        monitorService.deleteDailyBatch(ids);
         return Result.ok();
     }
 

@@ -87,19 +87,35 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         }
     }
 
-    /** @return [publisherCreated, writerCreated] */
+    /** @return [publisherCreated, writerCreated] — 含待分配任务与执行任务 */
     private int[] ensureTasksInternal(GeoContentPlacement p, Long fallbackUserId) {
         int publisherCreated = 0;
         int writerCreated = 0;
-        if (isPublisherMissing(p) && !taskExists(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER)) {
-            createTask(p, Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER, "发布人",
-                    pickOwner(p.getOwnerUserId(), fallbackUserId));
-            publisherCreated++;
+        // 同一话题下待分配任务统一负责人，避免交叉用发布人/撰写人导致负责人不一致
+        Long assignOwnerId = fallbackUserId;
+
+        if (isPublisherMissing(p)) {
+            if (!taskExists(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER)) {
+                createAssignTask(p, Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER, "发布人", assignOwnerId);
+                publisherCreated++;
+            }
+        } else {
+            cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER);
+            if (p.getPublisherUserId() != null && ensureExecTask(p, "文章发布", p.getPublisherUserId())) {
+                publisherCreated++;
+            }
         }
-        if (isWriterMissing(p) && !taskExists(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_WRITER)) {
-            createTask(p, Constants.TASK_TYPE_GEO_ASSIGN_WRITER, "撰写人",
-                    pickOwner(p.getPublisherUserId(), fallbackUserId));
-            writerCreated++;
+
+        if (isWriterMissing(p)) {
+            if (!taskExists(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_WRITER)) {
+                createAssignTask(p, Constants.TASK_TYPE_GEO_ASSIGN_WRITER, "撰写人", assignOwnerId);
+                writerCreated++;
+            }
+        } else {
+            cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_WRITER);
+            if (p.getOwnerUserId() != null && ensureExecTask(p, "文章撰写", p.getOwnerUserId())) {
+                writerCreated++;
+            }
         }
         return new int[]{publisherCreated, writerCreated};
     }
@@ -165,11 +181,57 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         Long count = taskMapper.selectCount(new LambdaQueryWrapper<SysTask>()
                 .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
                 .eq(SysTask::getBizId, placementId)
-                .eq(SysTask::getTaskType, taskType));
+                .eq(SysTask::getTaskType, taskType)
+                .ne(SysTask::getStatus, "已取消"));
         return count != null && count > 0;
     }
 
-    private void createTask(GeoContentPlacement p, String taskType, String roleLabel, Long ownerUserId) {
+    /** 已补齐人时，关掉仍挂着的待分配任务，避免和执行任务并存 */
+    private void cancelOpenAssignTasks(Long placementId, String taskType) {
+        List<SysTask> open = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, placementId)
+                .eq(SysTask::getTaskType, taskType)
+                .in(SysTask::getStatus, List.of("待分配", "未开始", "进行中")));
+        for (SysTask task : open) {
+            task.setStatus("已取消");
+            taskMapper.updateById(task);
+        }
+    }
+
+    /** 已指定发布人/撰写人时，补齐对应执行任务（未开始，执行人=该用户） */
+    private boolean ensureExecTask(GeoContentPlacement p, String taskType, Long assigneeUserId) {
+        if (assigneeUserId == null || taskExists(p.getId(), taskType)) {
+            return false;
+        }
+        String question = StringUtils.hasText(p.getTargetQuestion()) ? p.getTargetQuestion().trim() : ("投放#" + p.getId());
+        String title = "【" + taskType + "】" + abbreviate(question, 80);
+        String content = "话题：" + nzDash(p.getTopicName()) + "\n目标问题：" + question
+                + (StringUtils.hasText(p.getTitle()) ? "\n标题：" + p.getTitle().trim() : "");
+
+        SysTaskType typeCfg = taskTypeService.getByTypeName(taskType);
+        String bizType = typeCfg != null && StringUtils.hasText(typeCfg.getBizType())
+                ? typeCfg.getBizType().trim()
+                : Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT;
+
+        SysTaskDTO dto = new SysTaskDTO();
+        dto.setTitle(title);
+        dto.setContent(content);
+        dto.setTaskType(taskType);
+        dto.setPriority(2);
+        dto.setStatus("未开始");
+        dto.setProgress(0);
+        dto.setOwnerUserId(assigneeUserId);
+        dto.setAssigneeUserIds(List.of(assigneeUserId));
+        dto.setBizType(bizType);
+        dto.setBizId(p.getId());
+        dto.setBizTitle(abbreviate(question, 180));
+        dto.setRemark("由投放管理指定" + ("文章发布".equals(taskType) ? "发布人" : "撰写人") + "后自动生成");
+        taskService.create(dto);
+        return true;
+    }
+
+    private void createAssignTask(GeoContentPlacement p, String taskType, String roleLabel, Long ownerUserId) {
         String question = StringUtils.hasText(p.getTargetQuestion()) ? p.getTargetQuestion().trim() : ("投放#" + p.getId());
         String title = "【待分配" + roleLabel + "】" + abbreviate(question, 80);
         String content = "话题：" + nzDash(p.getTopicName()) + "\n目标问题：" + question
@@ -195,10 +257,6 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         dto.setBizTitle(abbreviate(question, 180));
         dto.setRemark("由投放管理待分配字段自动生成");
         taskService.create(dto);
-    }
-
-    private Long pickOwner(Long preferred, Long fallback) {
-        return preferred != null ? preferred : fallback;
     }
 
     private Long resolveFallbackUserId() {

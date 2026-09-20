@@ -6,7 +6,13 @@ import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PlatformAccountPanel from '@/components/geo/PlatformAccountPanel';
-import { createGeoPlatformApi, deleteGeoPlatformApi, getGeoPlatformListApi, updateGeoPlatformApi } from '@/api/geo';
+import {
+  createGeoPlatformApi,
+  deleteGeoPlatformApi,
+  deleteGeoPlatformBatchApi,
+  getGeoPlatformListApi,
+  updateGeoPlatformApi,
+} from '@/api/geo';
 import type { GeoPlatform } from '@/types/geo';
 import { GEO_PLATFORM_TYPE_DEFAULT, GEO_PLATFORM_TYPES } from '@/constants/geo';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
@@ -14,6 +20,8 @@ import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/tab
 const PlatformPage = memo(function PlatformPage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<GeoPlatform | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -100,6 +108,7 @@ const PlatformPage = memo(function PlatformPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='平台管理'
+        scroll={{ x: 1000 }}
         request={async (params) => {
           const res = await getGeoPlatformListApi({
             pageNum: params.current,
@@ -109,9 +118,52 @@ const PlatformPage = memo(function PlatformPage() {
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
           });
+          currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
           return { data: res.rows, success: true, total: res.total };
         }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys, _rows, { type }) => {
+            if (type === 'none') {
+              return setSelectedRowKeys([]);
+            }
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
+        }}
         toolBarRender={() => [
+          <PermissionButton
+            key='del'
+            color='danger'
+            variant='filled'
+            perm='geo:platform:delete'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要删除的平台');
+                return;
+              }
+              Modal.confirm({
+                title: '批量删除平台',
+                content: `确定要删除选中的 ${selectedRowKeys.length} 个平台吗？此操作不可撤销。`,
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true },
+                onOk: async () => {
+                  await deleteGeoPlatformBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 个平台`);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量删除
+          </PermissionButton>,
           <PermissionButton
             key='add'
             type='primary'

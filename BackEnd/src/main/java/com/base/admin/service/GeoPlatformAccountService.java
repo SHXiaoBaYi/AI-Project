@@ -5,6 +5,8 @@ import com.base.admin.domain.dto.GeoPlatformAccountDTO;
 import com.base.admin.domain.dto.GeoPlatformAccountQueryDTO;
 import com.base.admin.domain.vo.GeoPlatformAccountListVO;
 
+import java.util.List;
+
 public interface GeoPlatformAccountService {
 
     PageResult<GeoPlatformAccountListVO> list(GeoPlatformAccountQueryDTO query);
@@ -16,4 +18,6 @@ public interface GeoPlatformAccountService {
     void update(GeoPlatformAccountDTO dto);
 
     void delete(Long id);
+
+    void deleteBatch(List<Long> ids);
 }

@@ -451,6 +451,32 @@ export interface GeoContentPlacementListItem {
   citeCount?: number;
   proofFileCount?: number;
   remark?: string;
+  createTime?: string;
+}
+
+export interface GeoContentPlacementArticle {
+  id: number;
+  placementId: number;
+  publisherUserId?: number;
+  publisherName?: string;
+  ownerUserId?: number;
+  ownerName?: string;
+  topicId?: number;
+  topicName?: string;
+  targetQuestion?: string;
+  title?: string;
+  platformName?: string;
+  contentForm?: string;
+  publishStatus?: string;
+  publishUrl?: string;
+  publishTime?: string;
+  remark?: string;
+  createTime?: string;
+}
+
+export interface GeoTargetQuestionOption {
+  placementId: number;
+  targetQuestion?: string;
 }
 
 export interface GeoContentPlacementItem {

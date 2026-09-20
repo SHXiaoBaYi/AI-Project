@@ -1,7 +1,10 @@
 package com.base.admin.domain.vo;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 @Data
 @Schema(description = "内容投放列表行")
@@ -46,7 +49,7 @@ public class GeoContentPlacementListVO {
     @Schema(description = "AI生成所用模型", example = "DeepSeek（deepseek-chat）", nullable = true)
     private String sourceAiModel;
 
-    @Schema(description = "投放进度（投放完成/部分投放/未投放）", example = "部分投放")
+    @Schema(description = "投放进度（投放完成/部分投放/待投放/未投放）", example = "部分投放")
     private String aggregateStatus;
 
     @Schema(description = "投放进度百分比（无发布详情时为空）", example = "50", nullable = true)
@@ -66,4 +69,8 @@ public class GeoContentPlacementListVO {
 
     @Schema(description = "备注")
     private String remark;
+
+    @Schema(description = "创建时间", example = "2026-09-15 10:00:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime createTime;
 }

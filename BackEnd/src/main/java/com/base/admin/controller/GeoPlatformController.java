@@ -67,11 +67,20 @@ public class GeoPlatformController {
     }
 
     @Operation(summary = "删除平台")
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/{id:\\d+}")
     @RequiresPermission("geo:platform:delete")
     @Log(title = "GEO平台", businessType = 3)
     public Result<Void> delete(@PathVariable Long id) {
         platformService.delete(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除平台")
+    @DeleteMapping("/batch")
+    @RequiresPermission("geo:platform:delete")
+    @Log(title = "GEO平台-批量删除", businessType = 3)
+    public Result<Void> deleteBatch(@RequestBody List<Long> ids) {
+        platformService.deleteBatch(ids);
         return Result.ok();
     }
 }

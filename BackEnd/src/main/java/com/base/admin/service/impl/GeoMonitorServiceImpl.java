@@ -147,6 +147,19 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
 
     @Override
     @Transactional
+    public void deleteDailyBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的日监测记录");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                deleteDaily(id);
+            }
+        }
+    }
+
+    @Override
+    @Transactional
     public void saveDailyBatch(GeoDailyBatchDTO dto) {
         int saved = 0;
         for (GeoDailyPlatformItemDTO item : dto.getItems()) {
@@ -208,7 +221,6 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             String termType = normalizeTermType(group.getTermType());
             String ownerName = StringUtils.hasText(group.getOwnerName()) ? group.getOwnerName().trim() : null;
             String topicName = topicNames.getOrDefault(group.getTopicId(), "");
-            boolean datePeriodLocked = isInspectDatePeriodLocked(group.getInspectDate());
             if (group.getItems() == null || group.getItems().isEmpty()) {
                 throw new BusinessException("话题「" + topicName + "」请至少填写一个平台");
             }
@@ -248,17 +260,6 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 if (existing != null && Integer.valueOf(1).equals(existing.getBoardLocked())) {
                     conflicts.add(buildConflict(existing, topicName,
                             "该记录已被周/月/年统计，不可覆盖"));
-                    continue;
-                }
-                if (existing == null && datePeriodLocked) {
-                    GeoDailyBulkConflictVO conflict = new GeoDailyBulkConflictVO();
-                    conflict.setInspectDate(group.getInspectDate());
-                    conflict.setPlatform(platform);
-                    conflict.setKeyword(keyword);
-                    conflict.setTopicId(group.getTopicId());
-                    conflict.setTopicName(topicName);
-                    conflict.setReason("巡查日期 " + group.getInspectDate() + " 已被周/月/年统计，不可新增");
-                    conflicts.add(conflict);
                     continue;
                 }
                 if (existing == null) {
@@ -320,17 +321,6 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         conflict.setTopicName(topicName);
         conflict.setReason(reason);
         return conflict;
-    }
-
-    private boolean isInspectDatePeriodLocked(LocalDate inspectDate) {
-        if (inspectDate == null) {
-            return false;
-        }
-        Long locked = periodStatMapper.selectCount(new LambdaQueryWrapper<GeoBoardPeriodStat>()
-                .le(GeoBoardPeriodStat::getPeriodStart, inspectDate)
-                .ge(GeoBoardPeriodStat::getPeriodEnd, inspectDate)
-                .last("LIMIT 1"));
-        return locked != null && locked > 0;
     }
 
     /**
@@ -1656,16 +1646,6 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private void assertDailyMutable(LocalDate inspectDate, GeoMonitorDaily entity) {
         if (entity != null && Integer.valueOf(1).equals(entity.getBoardLocked())) {
             throw new BusinessException("该日监测数据已被周/月/年统计，不可编辑或删除");
-        }
-        if (inspectDate == null) {
-            return;
-        }
-        Long locked = periodStatMapper.selectCount(new LambdaQueryWrapper<GeoBoardPeriodStat>()
-                .le(GeoBoardPeriodStat::getPeriodStart, inspectDate)
-                .ge(GeoBoardPeriodStat::getPeriodEnd, inspectDate)
-                .last("LIMIT 1"));
-        if (locked != null && locked > 0) {
-            throw new BusinessException("巡查日期 " + inspectDate + " 已被周/月/年统计，不可新增或修改日监测数据");
         }
     }
 

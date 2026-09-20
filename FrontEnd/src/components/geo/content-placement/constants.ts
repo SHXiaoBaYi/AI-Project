@@ -1,6 +1,7 @@
 export const AGG_COLOR: Record<string, string> = {
   投放完成: 'success',
   部分投放: 'warning',
+  待投放: 'error',
   未投放: 'default',
 };
 

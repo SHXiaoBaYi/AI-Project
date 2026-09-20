@@ -64,11 +64,20 @@ public class GeoTopicController {
     }
 
     @Operation(summary = "删除话题")
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/{id:\\d+}")
     @RequiresPermission("geo:topic:delete")
     @Log(title = "GEO话题", businessType = 3)
     public Result<Void> delete(@PathVariable Long id) {
         topicService.delete(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除话题")
+    @DeleteMapping("/batch")
+    @RequiresPermission("geo:topic:delete")
+    @Log(title = "GEO话题-批量删除", businessType = 3)
+    public Result<Void> deleteBatch(@RequestBody List<Long> ids) {
+        topicService.deleteBatch(ids);
         return Result.ok();
     }
 }

@@ -216,7 +216,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       hideInTable: true,
       hideInForm: true,
       valueType: 'select',
-      initialValue: mineOnly ? ['未开始'] : ['待分配'],
+      initialValue: mineOnly ? ['未开始', '进行中'] : ['待分配'],
       fieldProps: {
         mode: 'multiple',
         options: statusOptions,

@@ -192,6 +192,12 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                     || row.item.getPublishTime() == null) {
                 continue;
             }
+            if (row.item.getPublishTime().isBefore(start) || row.item.getPublishTime().isAfter(end)) {
+                if (deltaMode == null) {
+                    continue;
+                }
+                // mom/yoy 需要扩展区间内的基期数据，基期过滤在后面做
+            }
             if (!matchFilters(row, q, false)) {
                 continue;
             }
@@ -486,16 +492,30 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             }
             Map<Long, ItemRow> itemMap = items.stream()
                     .collect(Collectors.toMap(r -> r.item.getId(), r -> r, (a, b) -> a));
+            Map<Long, List<ItemRow>> itemsByPlacement = items.stream()
+                    .collect(Collectors.groupingBy(r -> r.placement.getId()));
             for (GeoContentPlacementCite cite : citeMapper.selectList(cw)) {
-                ItemRow itemRow = cite.getItemId() == null ? null : itemMap.get(cite.getItemId());
-                if (itemRow == null) {
+                if (cite.getItemId() != null) {
+                    ItemRow itemRow = itemMap.get(cite.getItemId());
+                    if (itemRow == null || !Constants.CONTENT_PUBLISH_SUCCESS.equals(itemRow.item.getPublishStatus())) {
+                        continue;
+                    }
+                    cites.add(new CiteRow(itemRow.placement, itemRow.item, cite));
+                    citeCountByItem.merge(itemRow.item.getId(), 1, Integer::sum);
                     continue;
                 }
-                if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(itemRow.item.getPublishStatus())) {
+                // 仅挂在投放上的引用：落到该投放在统计期内、已投放成功的各平台文章上
+                if (cite.getPlacementId() == null) {
                     continue;
                 }
-                cites.add(new CiteRow(itemRow.placement, itemRow.item, cite));
-                citeCountByItem.merge(itemRow.item.getId(), 1, Integer::sum);
+                List<ItemRow> placementItems = itemsByPlacement.getOrDefault(cite.getPlacementId(), List.of());
+                for (ItemRow itemRow : placementItems) {
+                    if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(itemRow.item.getPublishStatus())) {
+                        continue;
+                    }
+                    cites.add(new CiteRow(itemRow.placement, itemRow.item, cite));
+                    citeCountByItem.merge(itemRow.item.getId(), 1, Integer::sum);
+                }
             }
         }
         return new Dataset(items, cites, citeCountByItem, topicNames);

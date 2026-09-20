@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Tag } from 'antd';
+import { App, Modal, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -8,6 +8,7 @@ import ActionButtons from '@/components/Buttons/ActionButtons';
 import {
   createGeoPlatformAccountApi,
   deleteGeoPlatformAccountApi,
+  deleteGeoPlatformAccountBatchApi,
   getGeoOwnerOptionsApi,
   getGeoPlatformAccountListApi,
   getGeoPlatformOptionsApi,
@@ -37,6 +38,8 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
 }: Props) {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<GeoPlatformAccount | null>(null);
   const [platforms, setPlatforms] = useState<GeoPlatform[]>([]);
@@ -282,7 +285,7 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
         columns={columns}
         headerTitle={fixedPlatformId ? `${fixedPlatformName || '平台'} · 账号` : '平台账号管理'}
         search={embedded ? { defaultCollapsed: true } : undefined}
-        scroll={embedded ? { y: 420 } : undefined}
+        scroll={embedded ? { x: 1400, y: 420 } : { x: 1400 }}
         request={async (params) => {
           const res = await getGeoPlatformAccountListApi({
             pageNum: params.current,
@@ -299,9 +302,52 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
           });
+          currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
           return { data: res.rows, success: true, total: res.total };
         }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys, _rows, { type }) => {
+            if (type === 'none') {
+              return setSelectedRowKeys([]);
+            }
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
+        }}
         toolBarRender={() => [
+          <PermissionButton
+            key='del'
+            color='danger'
+            variant='filled'
+            perm='geo:platformAccount:delete'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要删除的账号');
+                return;
+              }
+              Modal.confirm({
+                title: '批量删除平台账号',
+                content: `确定要删除选中的 ${selectedRowKeys.length} 个账号吗？此操作不可撤销。`,
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true },
+                onOk: async () => {
+                  await deleteGeoPlatformAccountBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 个账号`);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量删除
+          </PermissionButton>,
           <PermissionButton
             key='add'
             type='primary'

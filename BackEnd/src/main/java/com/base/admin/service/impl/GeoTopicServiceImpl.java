@@ -13,6 +13,7 @@ import com.base.admin.mapper.GeoTopicMapper;
 import com.base.admin.service.GeoTopicService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -84,6 +85,19 @@ public class GeoTopicServiceImpl implements GeoTopicService {
             throw new BusinessException("该话题已被日监测数据引用，无法删除");
         }
         topicMapper.deleteById(id);
+    }
+
+    @Override
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的话题");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                delete(id);
+            }
+        }
     }
 
     @Override

@@ -1,17 +1,25 @@
 import { memo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App } from 'antd';
+import { App, Modal } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
-import { createGeoTopicApi, deleteGeoTopicApi, getGeoTopicListApi, updateGeoTopicApi } from '@/api/geo';
+import {
+  createGeoTopicApi,
+  deleteGeoTopicApi,
+  deleteGeoTopicBatchApi,
+  getGeoTopicListApi,
+  updateGeoTopicApi,
+} from '@/api/geo';
 import type { GeoTopic } from '@/types/geo';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 const TopicPage = memo(function TopicPage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<GeoTopic | null>(null);
 
@@ -65,6 +73,7 @@ const TopicPage = memo(function TopicPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='话题管理'
+        scroll={{ x: 800 }}
         request={async (params) => {
           const res = await getGeoTopicListApi({
             pageNum: params.current,
@@ -73,9 +82,52 @@ const TopicPage = memo(function TopicPage() {
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
           });
+          currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
           return { data: res.rows, success: true, total: res.total };
         }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys, _rows, { type }) => {
+            if (type === 'none') {
+              return setSelectedRowKeys([]);
+            }
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
+        }}
         toolBarRender={() => [
+          <PermissionButton
+            key='del'
+            color='danger'
+            variant='filled'
+            perm='geo:topic:delete'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要删除的话题');
+                return;
+              }
+              Modal.confirm({
+                title: '批量删除话题',
+                content: `确定要删除选中的 ${selectedRowKeys.length} 个话题吗？此操作不可撤销。`,
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true },
+                onOk: async () => {
+                  await deleteGeoTopicBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 个话题`);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量删除
+          </PermissionButton>,
           <PermissionButton
             key='add'
             type='primary'

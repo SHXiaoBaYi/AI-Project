@@ -112,12 +112,11 @@ public class SysTaskServiceImpl implements SysTaskService {
         }
 
         if (finalMineUserId != null) {
-            // 我的任务：仅看「分给我执行」的任务，且排除待分配类
-            if (assigneeTaskIds == null || assigneeTaskIds.isEmpty()) {
-                return new PageResult<>(0, List.of());
-            }
-            wrapper.in(SysTask::getId, assigneeTaskIds)
-                    .in(SysTask::getStatus, MINE_STATUSES);
+            // 我的任务：仅看「分给我执行」的任务，且排除待分配类（用 EXISTS，避免 IN 列表过大查不到）
+            wrapper.apply(
+                    "EXISTS (SELECT 1 FROM sys_task_assignee a WHERE a.task_id = sys_task.id AND a.user_id = {0} AND a.is_active = 1)",
+                    finalMineUserId);
+            wrapper.in(SysTask::getStatus, MINE_STATUSES);
         } else if (query.getAssigneeUserId() != null) {
             if (assigneeTaskIds == null || assigneeTaskIds.isEmpty()) {
                 return new PageResult<>(0, List.of());

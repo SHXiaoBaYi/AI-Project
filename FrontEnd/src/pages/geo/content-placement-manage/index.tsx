@@ -13,7 +13,9 @@ import { AGG_COLOR, SOURCE_COLOR } from '@/components/geo/content-placement/cons
 import {
   createGeoContentPlacementApi,
   deleteGeoContentPlacementApi,
+  deleteGeoContentPlacementBatchApi,
   generateSimilarGeoContentPlacementApi,
+  generateSimilarGeoContentPlacementBatchApi,
   getGeoAiProvidersApi,
   getGeoContentPlacementListApi,
   getGeoOwnerOptionsApi,
@@ -40,6 +42,8 @@ type AiProviderOption = {
 const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importPercent, setImportPercent] = useState(0);
@@ -56,8 +60,10 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sourceRecord, setSourceRecord] = useState<GeoContentPlacementListItem | null>(null);
   const [generatingId, setGeneratingId] = useState<number | null>(null);
+  const [batchGenerating, setBatchGenerating] = useState(false);
   const [aiProviders, setAiProviders] = useState<AiProviderOption[]>([]);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [batchGenerateOpen, setBatchGenerateOpen] = useState(false);
   const [generateRecord, setGenerateRecord] = useState<GeoContentPlacementListItem | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>('local');
 
@@ -120,6 +126,50 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
     } finally {
       setGeneratingId(null);
     }
+  };
+
+  const handleBatchGenerateSimilar = async () => {
+    if (selectedRowKeys.length === 0) return;
+    setBatchGenerating(true);
+    try {
+      const rows = await generateSimilarGeoContentPlacementBatchApi(selectedRowKeys as number[], selectedProvider);
+      const providerLabel = aiProviders.find((p) => p.provider === selectedProvider)?.label || selectedProvider;
+      message.success(`已用「${providerLabel}」批量生成 ${rows.length} 条相似问题`);
+      setBatchGenerateOpen(false);
+      setSelectedRowKeys([]);
+      currentPageKeysRef.current = new Set();
+      actionRef.current?.reload();
+    } finally {
+      setBatchGenerating(false);
+    }
+  };
+
+  const renderAggTag = (record: GeoContentPlacementListItem, status: string) => {
+    if (status === '待投放') {
+      return (
+        <Tag
+          className='w-fit cursor-pointer !border-transparent !bg-red-600 !text-white'
+          onClick={() => {
+            setCurrentPlacement(record);
+            setDrawerOpen(true);
+          }}
+        >
+          {status}
+        </Tag>
+      );
+    }
+    return (
+      <Tag
+        color={AGG_COLOR[status] || 'default'}
+        className='w-fit cursor-pointer'
+        onClick={() => {
+          setCurrentPlacement(record);
+          setDrawerOpen(true);
+        }}
+      >
+        {status}
+      </Tag>
+    );
   };
 
   const columns: ProColumnType<GeoContentPlacementListItem>[] = [
@@ -212,31 +262,11 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       render: (_, record) => {
         const status = record.aggregateStatus || '未投放';
         if (record.publishProgress == null || !record.platformCount) {
-          return (
-            <Tag
-              color={AGG_COLOR[status] || 'default'}
-              className='cursor-pointer'
-              onClick={() => {
-                setCurrentPlacement(record);
-                setDrawerOpen(true);
-              }}
-            >
-              {status}
-            </Tag>
-          );
+          return renderAggTag(record, status);
         }
         return (
           <div className='flex min-w-[140px] flex-col gap-1'>
-            <Tag
-              color={AGG_COLOR[status] || 'default'}
-              className='w-fit cursor-pointer'
-              onClick={() => {
-                setCurrentPlacement(record);
-                setDrawerOpen(true);
-              }}
-            >
-              {status}
-            </Tag>
+            {renderAggTag(record, status)}
             <Progress
               percent={record.publishProgress}
               size='small'
@@ -343,6 +373,8 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='投放管理'
+        scroll={{ x: 1400 }}
+        rowClassName={(record) => (record.aggregateStatus === '待投放' ? 'bg-red-50' : '')}
         request={async (params) => {
           const res = await getGeoContentPlacementListApi({
             pageNum: params.current,
@@ -356,9 +388,65 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
           });
+          currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
           return { data: res.rows, success: true, total: res.total };
         }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys, _rows, { type }) => {
+            if (type === 'none') {
+              return setSelectedRowKeys([]);
+            }
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
+        }}
         toolBarRender={() => [
+          <PermissionButton
+            key='batchGenerate'
+            perm='geo:content:generate'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要生成相似问题的记录');
+                return;
+              }
+              setBatchGenerateOpen(true);
+            }}
+          >
+            批量生成相似问题
+          </PermissionButton>,
+          <PermissionButton
+            key='del'
+            color='danger'
+            variant='filled'
+            perm='geo:content:delete'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要删除的记录');
+                return;
+              }
+              Modal.confirm({
+                title: '批量删除内容投放',
+                content: `确定要删除选中的 ${selectedRowKeys.length} 条目标问题吗？此操作不可撤销。`,
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true },
+                onOk: async () => {
+                  await deleteGeoContentPlacementBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 条`);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量删除
+          </PermissionButton>,
           <PermissionButton
             key='add'
             type='primary'
@@ -447,6 +535,31 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
           {aiProviders.find((p) => p.provider === selectedProvider)?.hint ||
             '未在「系统管理 → AI模型配置」中填写 Key 时，仅可使用本地模板启发式生成。'}
         </div>
+      </Modal>
+
+      <Modal
+        title='批量生成相似问题'
+        open={batchGenerateOpen}
+        onCancel={() => {
+          if (batchGenerating) return;
+          setBatchGenerateOpen(false);
+        }}
+        onOk={() => void handleBatchGenerateSimilar()}
+        okText={batchGenerating ? '生成中...' : '开始生成'}
+        confirmLoading={batchGenerating}
+        destroyOnHidden
+      >
+        <div className='mb-3 text-sm text-neutral-600'>已选 {selectedRowKeys.length} 条记录</div>
+        <div className='mb-1 text-sm text-neutral-700'>选择生成模型</div>
+        <Select
+          className='w-full'
+          value={selectedProvider}
+          onChange={setSelectedProvider}
+          options={aiProviders.map((p) => ({
+            value: p.provider,
+            label: `${p.label}（${p.model}）`,
+          }))}
+        />
       </Modal>
 
       <BaseModalForm

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Progress, Tag, Upload } from 'antd';
+import { App, Button, Modal, Progress, Tag, Upload } from 'antd';
 import { InboxOutlined, DownloadOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
@@ -10,6 +10,7 @@ import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
 import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import {
   deleteGeoDailyApi,
+  deleteGeoDailyBatchApi,
   getGeoDailyListApi,
   getGeoOwnerOptionsApi,
   getGeoPlatformsApi,
@@ -31,6 +32,8 @@ const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].ma
 const DailyPage = memo(function DailyPage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [topics, setTopics] = useState<GeoTopic[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
@@ -265,6 +268,7 @@ const DailyPage = memo(function DailyPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='日监测数据'
+        scroll={{ x: 1800 }}
         request={async (params) => {
           const range = params.inspectDate as string[] | undefined;
           const res = await getGeoDailyListApi({
@@ -290,9 +294,53 @@ const DailyPage = memo(function DailyPage() {
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
           });
+          currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
           return { data: res.rows, success: true, total: res.total };
         }}
+        rowSelection={{
+          selectedRowKeys,
+          getCheckboxProps: (record) => ({ disabled: record.boardLocked === 1 }),
+          onChange: (keys, _rows, { type }) => {
+            if (type === 'none') {
+              return setSelectedRowKeys([]);
+            }
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
+        }}
         toolBarRender={() => [
+          <PermissionButton
+            key='del'
+            color='danger'
+            variant='filled'
+            perm='geo:daily:delete'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要删除的记录');
+                return;
+              }
+              Modal.confirm({
+                title: '批量删除日监测',
+                content: `确定要删除选中的 ${selectedRowKeys.length} 条记录吗？删除后不再计入看板统计。`,
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true },
+                onOk: async () => {
+                  await deleteGeoDailyBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 条`);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量删除
+          </PermissionButton>,
           <PermissionButton
             key='import'
             perm='geo:daily:import'

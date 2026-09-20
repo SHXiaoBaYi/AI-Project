@@ -36,6 +36,8 @@ public interface GeoMonitorService {
 
     void deleteDaily(Long id);
 
+    void deleteDailyBatch(List<Long> ids);
+
     void saveDailyBatch(GeoDailyBatchDTO dto);
 
     GeoDailyBulkSaveResultVO saveDailyBulk(GeoDailyBulkSaveDTO dto);

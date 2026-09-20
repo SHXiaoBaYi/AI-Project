@@ -57,6 +57,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureArticleBoardMenu(connection);
             ensureDailyUniqueKeyWithTermType(connection);
             ensureGeoMenuRestructure(connection);
+            ensurePublishedArticleMenu(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -670,6 +671,64 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                 log.info("已按平台回填视频形态 {} 条", updated);
             }
         }
+    }
+
+    /**
+     * 发布文章列表：挂在「内容投放」目录下，不改动菜单 129（数据看板 article-board）。
+     */
+    private void ensurePublishedArticleMenu(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (134, '发布文章', 132, 2, 'geo/article', '', 'C', 'geo:article:list', 'FileTextOutlined', 0, 0,
+                     '已发布文章明细：按话题/目标问题维护平台投放', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      parent_id = VALUES(parent_id),
+                      sort_order = VALUES(sort_order),
+                      path = VALUES(path),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      visible = 0,
+                      status = 0,
+                      remark = VALUES(remark),
+                      is_active = 1
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (135, '发布文章新增', 134, 1, '', '', 'F', 'geo:article:add', '#', 0, 0, '', 1),
+                    (136, '发布文章修改', 134, 2, '', '', 'F', 'geo:article:edit', '#', 0, 0, '', 1),
+                    (137, '发布文章删除', 134, 3, '', '', 'F', 'geo:article:delete', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE
+                      parent_id = VALUES(parent_id),
+                      perms = VALUES(perms),
+                      is_active = 1
+                    """);
+            // 投放管理 / 我的投放 顺延，数据看板 129 保持 sort_order=1、path=geo/article-board
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 1,
+                      path = 'geo/article-board', perms = 'geo:article:list', is_active = 1
+                    WHERE menu_id = 129
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 3, menu_name = '投放管理',
+                      path = 'geo/content-placement-manage', is_active = 1
+                    WHERE menu_id = 122
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 4,
+                      path = 'geo/content-placement-work', is_active = 1
+                    WHERE menu_id = 128
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (134, 135, 136, 137)
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+        }
+        log.info("已同步发布文章菜单（未改动 129 article-board）");
     }
 
     private boolean tableExists(Connection connection, String table) throws Exception {

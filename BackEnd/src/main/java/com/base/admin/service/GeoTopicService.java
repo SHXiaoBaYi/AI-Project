@@ -21,5 +21,7 @@ public interface GeoTopicService {
 
     void delete(Long id);
 
+    void deleteBatch(List<Long> ids);
+
     GeoTopic getOrCreate(String topicName, String optimizeWeek);
 }

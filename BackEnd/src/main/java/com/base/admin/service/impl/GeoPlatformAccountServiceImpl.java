@@ -16,6 +16,7 @@ import com.base.admin.service.GeoPlatformAccountService;
 import com.base.admin.service.GeoPlatformService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -93,6 +94,19 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
     public void delete(Long id) {
         require(id);
         accountMapper.deleteById(id);
+    }
+
+    @Override
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的平台账号");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                delete(id);
+            }
+        }
     }
 
     private void fillCommon(GeoPlatformAccount row, GeoPlatformAccountDTO dto, GeoPlatform platform) {

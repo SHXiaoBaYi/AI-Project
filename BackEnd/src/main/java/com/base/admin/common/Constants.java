@@ -42,6 +42,8 @@ public class Constants {
     public static final String CONTENT_AGG_PARTIAL = "部分投放";
     /** 内容投放聚合进度：未投放 */
     public static final String CONTENT_AGG_NONE = "未投放";
+    /** 内容投放聚合进度：待投放（有附件但尚未投放） */
+    public static final String CONTENT_AGG_PENDING = "待投放";
 
     /** @deprecated 兼容旧文案 */
     public static final String CONTENT_AGG_ALL_SUCCESS = CONTENT_AGG_DONE;

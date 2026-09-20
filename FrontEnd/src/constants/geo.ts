@@ -17,6 +17,7 @@ export const GEO_PLATFORM_TYPE_DEFAULT = 'AI平台';
 export const GEO_CONTENT_AGG_STATUS = [
   { label: '投放完成', value: '投放完成' },
   { label: '部分投放', value: '部分投放' },
+  { label: '待投放', value: '待投放' },
   { label: '未投放', value: '未投放' },
 ] as const;
 

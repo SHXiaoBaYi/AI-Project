@@ -14,6 +14,7 @@ import com.base.admin.mapper.GeoPlatformMapper;
 import com.base.admin.service.GeoPlatformService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -105,6 +106,19 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
             throw new BusinessException("该平台已被日监测数据引用，无法删除");
         }
         platformMapper.deleteById(id);
+    }
+
+    @Override
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要删除的平台");
+        }
+        for (Long id : ids) {
+            if (id != null) {
+                delete(id);
+            }
+        }
     }
 
     @Override

@@ -23,6 +23,8 @@ public interface GeoPlatformService {
 
     void delete(Long id);
 
+    void deleteBatch(List<Long> ids);
+
     /** 按 AI平台 类型 getOrCreate（日监测/导入默认） */
     GeoPlatform getOrCreate(String platformName);
 

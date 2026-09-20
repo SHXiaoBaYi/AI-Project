@@ -28,7 +28,9 @@ import type {
   GeoContentPlacementItem,
   GeoContentPlacementItemDTO,
   GeoContentPlacementListItem,
+  GeoContentPlacementArticle,
   GeoContentPlacementProofFile,
+  GeoTargetQuestionOption,
 } from '@/types/geo';
 
 export function getGeoTopicListApi(data: PageQuery & { topicName?: string }) {
@@ -51,6 +53,10 @@ export function deleteGeoTopicApi(id: number) {
   return request.delete(`/geo/topic/${id}`);
 }
 
+export function deleteGeoTopicBatchApi(ids: number[]) {
+  return request.delete('/geo/topic/batch', { data: ids });
+}
+
 export function getGeoPlatformListApi(data: PageQuery & { platformName?: string; platformType?: string }) {
   return request.post<unknown, PageResult<GeoPlatform>>('/geo/platform/list', data);
 }
@@ -71,6 +77,10 @@ export function updateGeoPlatformApi(data: Partial<GeoPlatform>) {
 
 export function deleteGeoPlatformApi(id: number) {
   return request.delete(`/geo/platform/${id}`);
+}
+
+export function deleteGeoPlatformBatchApi(ids: number[]) {
+  return request.delete('/geo/platform/batch', { data: ids });
 }
 
 export function getGeoPlatformAccountListApi(
@@ -99,6 +109,10 @@ export function updateGeoPlatformAccountApi(data: GeoPlatformAccountDTO) {
 
 export function deleteGeoPlatformAccountApi(id: number) {
   return request.delete(`/geo/platform-account/${id}`);
+}
+
+export function deleteGeoPlatformAccountBatchApi(ids: number[]) {
+  return request.delete('/geo/platform-account/batch', { data: ids });
 }
 
 export function getGeoDailyListApi(
@@ -152,6 +166,10 @@ export function getGeoLatestInspectDateApi() {
 
 export function deleteGeoDailyApi(id: number) {
   return request.delete(`/geo/daily/${id}`);
+}
+
+export function deleteGeoDailyBatchApi(ids: number[]) {
+  return request.delete('/geo/daily/batch', { data: ids });
 }
 
 export function importGeoDailyApi(file: File) {
@@ -317,6 +335,10 @@ export function deleteGeoContentPlacementApi(id: number) {
   return request.delete(`/geo/content-placement/${id}`);
 }
 
+export function deleteGeoContentPlacementBatchApi(ids: number[]) {
+  return request.delete('/geo/content-placement/batch', { data: ids });
+}
+
 export function createGeoContentPlacementApi(data: GeoContentPlacementDTO) {
   return request.post<unknown, number>('/geo/content-placement', data);
 }
@@ -352,6 +374,31 @@ export function deleteGeoContentPlacementCiteApi(citeId: number) {
 export function generateSimilarGeoContentPlacementApi(id: number, provider?: string) {
   return request.post<unknown, GeoContentPlacementListItem[]>(`/geo/content-placement/${id}/generate-similar`, {
     provider: provider || undefined,
+  });
+}
+
+export function generateSimilarGeoContentPlacementBatchApi(ids: number[], provider?: string) {
+  return request.post<unknown, GeoContentPlacementListItem[]>('/geo/content-placement/generate-similar/batch', {
+    ids,
+    provider: provider || undefined,
+  });
+}
+
+export function getGeoContentPlacementArticleListApi(
+  data: PageQuery & {
+    publisherUserId?: number;
+    ownerUserId?: number;
+    topicId?: number;
+    targetQuestion?: string;
+    publishStatus?: string;
+  },
+) {
+  return request.post<unknown, PageResult<GeoContentPlacementArticle>>('/geo/content-placement/articles/list', data);
+}
+
+export function getGeoTargetQuestionsApi(topicId: number) {
+  return request.get<unknown, GeoTargetQuestionOption[]>('/geo/content-placement/target-questions', {
+    params: { topicId },
   });
 }
 

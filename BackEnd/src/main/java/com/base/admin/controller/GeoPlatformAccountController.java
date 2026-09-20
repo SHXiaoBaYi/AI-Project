@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @Tag(name = "GEO平台账号", description = "平台侧运营账号管理")
 @RestController
 @RequestMapping("/geo/platform-account")
@@ -62,11 +64,20 @@ public class GeoPlatformAccountController {
     }
 
     @Operation(summary = "删除平台账号")
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/{id:\\d+}")
     @RequiresPermission("geo:platformAccount:delete")
     @Log(title = "GEO平台账号", businessType = 3)
     public Result<Void> delete(@PathVariable Long id) {
         accountService.delete(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除平台账号")
+    @DeleteMapping("/batch")
+    @RequiresPermission("geo:platformAccount:delete")
+    @Log(title = "GEO平台账号-批量删除", businessType = 3)
+    public Result<Void> deleteBatch(@RequestBody List<Long> ids) {
+        accountService.deleteBatch(ids);
         return Result.ok();
     }
 }
