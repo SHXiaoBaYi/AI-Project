@@ -1,8 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import type { ActionType, ProColumnType, ProFormInstance } from '@ant-design/pro-components';
-import { App, Tag } from 'antd';
+import type { ActionType, ProColumnType } from '@ant-design/pro-components';
+import { App, DatePicker, Form, Input, Modal, Select, Tag } from 'antd';
+import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
-import TableModal from '@/components/TableModal';
+import BaseModalForm from '@/components/BaseModalForm/index';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
@@ -10,6 +11,7 @@ import { STATUS_COLOR } from '@/components/geo/content-placement/constants';
 import {
   createGeoContentPlacementItemApi,
   deleteGeoContentPlacementItemApi,
+  deleteGeoContentPlacementItemBatchApi,
   getGeoContentPlacementArticleListApi,
   getGeoOwnerOptionsApi,
   getGeoPlatformOptionsApi,
@@ -30,7 +32,9 @@ import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/tab
 const ArticlePage = memo(function ArticlePage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
-  const formRef = useRef<ProFormInstance>(undefined);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<GeoContentPlacementArticle | null>(null);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
@@ -59,6 +63,37 @@ const ArticlePage = memo(function ArticlePage() {
     void getGeoTargetQuestionsApi(formTopicId).then((list) => setQuestionOptions(list ?? []));
   }, [formTopicId]);
 
+  useEffect(() => {
+    if (!open) return;
+    if (editing) {
+      setFormTopicId(editing.topicId);
+      form.setFieldsValue({
+        topicId: editing.topicId,
+        placementId: editing.placementId,
+        title: editing.title,
+        platformName: editing.platformName,
+        contentForm: editing.contentForm || '图文',
+        publishStatus: editing.publishStatus || '未投放',
+        publishUrl: editing.publishUrl,
+        publishTime: editing.publishTime ? dayjs(editing.publishTime) : undefined,
+        remark: editing.remark,
+      });
+    } else {
+      setFormTopicId(undefined);
+      form.setFieldsValue({
+        topicId: undefined,
+        placementId: undefined,
+        title: undefined,
+        platformName: undefined,
+        contentForm: '图文',
+        publishStatus: '未投放',
+        publishUrl: undefined,
+        publishTime: undefined,
+        remark: undefined,
+      });
+    }
+  }, [editing, form, open]);
+
   const userOptions = useMemo(() => owners.map((u) => ({ label: u.displayName, value: u.userId })), [owners]);
   const topicOptions = useMemo(() => topics.map((t) => ({ label: t.topicName, value: t.id })), [topics]);
   const platformOptions = useMemo(
@@ -76,6 +111,37 @@ const ArticlePage = memo(function ArticlePage() {
 
   const columns: ProColumnType<GeoContentPlacementArticle>[] = [
     {
+      title: '操作',
+      valueType: 'option',
+      width: 140,
+      render: (_, record) => (
+        <ActionButtons
+          items={[
+            {
+              key: 'edit',
+              label: '编辑',
+              perm: 'geo:article:edit',
+              onClick: () => {
+                setEditing(record);
+                setOpen(true);
+              },
+            },
+            {
+              key: 'delete',
+              label: '删除',
+              perm: 'geo:article:delete',
+              confirmTitle: '确定删除该发布文章？',
+              onClick: async () => {
+                await deleteGeoContentPlacementItemApi(record.id);
+                message.success('已删除');
+                actionRef.current?.reload();
+              },
+            },
+          ]}
+        />
+      ),
+    },
+    {
       title: '发布人',
       dataIndex: 'publisherUserId',
       width: 120,
@@ -86,7 +152,6 @@ const ArticlePage = memo(function ArticlePage() {
         allowClear: true,
         options: userOptions,
       },
-      hideInForm: true,
       render: (_, r) => r.publisherName || '-',
     },
     {
@@ -100,7 +165,6 @@ const ArticlePage = memo(function ArticlePage() {
         allowClear: true,
         options: userOptions,
       },
-      hideInForm: true,
       render: (_, r) => r.ownerName || '-',
     },
     {
@@ -111,39 +175,16 @@ const ArticlePage = memo(function ArticlePage() {
       fieldProps: {
         showSearch: true,
         optionFilterProp: 'label',
+        allowClear: true,
         options: topicOptions,
-        onChange: (v: number) => {
-          setFormTopicId(v);
-          formRef.current?.setFieldsValue({ placementId: undefined });
-        },
       },
-      formItemProps: { rules: [{ required: true, message: '请选择话题' }] },
       render: (_, r) => r.topicName || '-',
-    },
-    {
-      title: '目标问题',
-      dataIndex: 'placementId',
-      width: 240,
-      ellipsis: true,
-      valueType: 'select',
-      hideInSearch: true,
-      fieldProps: {
-        showSearch: true,
-        optionFilterProp: 'label',
-        options: targetQuestionFieldOptions,
-        placeholder: formTopicId ? '请选择目标问题' : '请先选择话题',
-        disabled: !formTopicId && !editing,
-      },
-      formItemProps: { rules: [{ required: true, message: '请选择目标问题' }] },
-      render: (_, r) => r.targetQuestion || '-',
     },
     {
       title: '目标问题',
       dataIndex: 'targetQuestion',
       width: 240,
       ellipsis: true,
-      hideInTable: true,
-      hideInForm: true,
     },
     {
       title: '标题',
@@ -151,28 +192,18 @@ const ArticlePage = memo(function ArticlePage() {
       width: 200,
       ellipsis: true,
       search: false,
-      formItemProps: { rules: [{ required: true, message: '请输入标题' }] },
     },
     {
       title: '发布平台',
       dataIndex: 'platformName',
       width: 120,
-      valueType: 'select',
       search: false,
-      fieldProps: {
-        showSearch: true,
-        optionFilterProp: 'label',
-        options: platformOptions,
-      },
-      formItemProps: { rules: [{ required: true, message: '请选择发布平台' }] },
     },
     {
       title: '内容形态',
       dataIndex: 'contentForm',
       width: 100,
-      valueType: 'select',
       search: false,
-      fieldProps: { options: [...GEO_CONTENT_FORMS] },
       render: (_, r) => r.contentForm || '图文',
     },
     {
@@ -182,7 +213,6 @@ const ArticlePage = memo(function ArticlePage() {
       valueType: 'select',
       valueEnum: Object.fromEntries(GEO_CONTENT_PUBLISH_STATUS.map((s) => [s.value, { text: s.label }])),
       fieldProps: { options: [...GEO_CONTENT_PUBLISH_STATUS], allowClear: true },
-      formItemProps: { rules: [{ required: true, message: '请选择投放状态' }] },
       render: (_, r) => {
         const status = r.publishStatus || '未投放';
         return <Tag color={STATUS_COLOR[status] || 'default'}>{status}</Tag>;
@@ -208,48 +238,8 @@ const ArticlePage = memo(function ArticlePage() {
       valueType: 'date',
       search: false,
     },
-    {
-      title: '备注',
-      dataIndex: 'remark',
-      search: false,
-      hideInTable: true,
-      valueType: 'textarea',
-    },
     createTimeRangeColumn<GeoContentPlacementArticle>(),
     createTimeDisplayColumn<GeoContentPlacementArticle>(),
-    {
-      title: '操作',
-      valueType: 'option',
-      width: 140,
-      hideInForm: true,
-      render: (_, record) => (
-        <ActionButtons
-          items={[
-            {
-              key: 'edit',
-              label: '编辑',
-              perm: 'geo:article:edit',
-              onClick: () => {
-                setEditing(record);
-                setFormTopicId(record.topicId);
-                setOpen(true);
-              },
-            },
-            {
-              key: 'delete',
-              label: '删除',
-              perm: 'geo:article:delete',
-              confirmTitle: '确定删除该发布文章？',
-              onClick: async () => {
-                await deleteGeoContentPlacementItemApi(record.id);
-                message.success('已删除');
-                actionRef.current?.reload();
-              },
-            },
-          ]}
-        />
-      ),
-    },
   ];
 
   return (
@@ -258,7 +248,7 @@ const ArticlePage = memo(function ArticlePage() {
         rowKey='id'
         actionRef={actionRef}
         columns={columns}
-        headerTitle='发布文章'
+        headerTitle='文章列表（按平台发布明细）'
         scroll={{ x: 1600 }}
         request={async (params) => {
           const res = await getGeoContentPlacementArticleListApi({
@@ -272,17 +262,58 @@ const ArticlePage = memo(function ArticlePage() {
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
           });
+          currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
           return { data: res.rows, success: true, total: res.total };
         }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys, _rows, { type }) => {
+            if (type === 'none') {
+              return setSelectedRowKeys([]);
+            }
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
+        }}
         toolBarRender={() => [
+          <PermissionButton
+            key='del'
+            color='danger'
+            variant='filled'
+            perm='geo:article:delete'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要删除的文章');
+                return;
+              }
+              Modal.confirm({
+                title: '批量删除文章',
+                content: `确定要删除选中的 ${selectedRowKeys.length} 篇文章吗？此操作不可撤销。`,
+                okText: '确定删除',
+                cancelText: '取消',
+                okButtonProps: { danger: true },
+                onOk: async () => {
+                  await deleteGeoContentPlacementItemBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 条`);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量删除
+          </PermissionButton>,
           <PermissionButton
             key='add'
             type='primary'
             perm='geo:article:add'
             onClick={() => {
               setEditing(null);
-              setFormTopicId(undefined);
-              setQuestionOptions([]);
               setOpen(true);
             }}
           >
@@ -291,38 +322,16 @@ const ArticlePage = memo(function ArticlePage() {
         ]}
       />
 
-      <TableModal
-        readonly={false}
+      <BaseModalForm
         title={editing ? '编辑发布文章' : '新增发布文章'}
-        columns={columns as any}
         open={open}
-        formRef={formRef}
-        onOpenChange={(v) => {
-          setOpen(v);
-          if (!v) {
-            setEditing(null);
-            setFormTopicId(undefined);
-          }
+        form={form}
+        width={720}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setEditing(null);
         }}
-        modalProps={{ width: 720 }}
-        initialValues={
-          editing
-            ? {
-                topicId: editing.topicId,
-                placementId: editing.placementId,
-                title: editing.title,
-                platformName: editing.platformName,
-                contentForm: editing.contentForm || '图文',
-                publishStatus: editing.publishStatus || '未投放',
-                publishUrl: editing.publishUrl,
-                publishTime: editing.publishTime,
-                remark: editing.remark,
-              }
-            : {
-                contentForm: '图文',
-                publishStatus: '未投放',
-              }
-        }
+        modalProps={{ destroyOnHidden: true, styles: { body: { padding: '24px' } } }}
         onFinish={async (values) => {
           const placementId = values.placementId as number;
           if (!placementId) {
@@ -331,13 +340,15 @@ const ArticlePage = memo(function ArticlePage() {
           }
           const payload = {
             placementId,
-            title: values.title,
-            platformName: values.platformName,
-            contentForm: values.contentForm || '图文',
-            publishStatus: values.publishStatus,
-            publishUrl: values.publishUrl,
-            publishTime: values.publishTime,
-            remark: values.remark,
+            title: values.title as string,
+            platformName: values.platformName as string,
+            contentForm: (values.contentForm as string) || '图文',
+            publishStatus: values.publishStatus as string,
+            publishUrl: values.publishUrl as string | undefined,
+            publishTime: values.publishTime
+              ? dayjs(values.publishTime as string | dayjs.Dayjs).format('YYYY-MM-DD')
+              : undefined,
+            remark: values.remark as string | undefined,
           };
           if (editing) {
             await updateGeoContentPlacementItemApi({ ...payload, id: editing.id });
@@ -349,7 +360,101 @@ const ArticlePage = memo(function ArticlePage() {
           actionRef.current?.reload();
           return true;
         }}
-      />
+      >
+        <div className='grid grid-cols-2 gap-x-8 gap-y-1'>
+          <Form.Item
+            name='topicId'
+            label='话题'
+            rules={[{ required: true, message: '请选择话题' }]}
+          >
+            <Select
+              options={topicOptions}
+              showSearch
+              optionFilterProp='label'
+              placeholder='请选择话题'
+              onChange={(v: number) => {
+                setFormTopicId(v);
+                form.setFieldsValue({ placementId: undefined });
+              }}
+            />
+          </Form.Item>
+          <Form.Item
+            name='placementId'
+            label='目标问题'
+            rules={[{ required: true, message: '请选择目标问题' }]}
+          >
+            <Select
+              options={targetQuestionFieldOptions}
+              showSearch
+              optionFilterProp='label'
+              placeholder={formTopicId ? '请选择目标问题' : '请先选择话题'}
+              disabled={!formTopicId && !editing}
+            />
+          </Form.Item>
+          <Form.Item
+            name='title'
+            label='标题'
+            rules={[{ required: true, message: '请输入标题' }]}
+            className='col-span-2'
+          >
+            <Input
+              allowClear
+              placeholder='文章标题'
+            />
+          </Form.Item>
+          <Form.Item
+            name='platformName'
+            label='发布平台'
+            rules={[{ required: true, message: '请选择发布平台' }]}
+          >
+            <Select
+              options={platformOptions}
+              showSearch
+              optionFilterProp='label'
+              placeholder='请选择发布平台'
+            />
+          </Form.Item>
+          <Form.Item
+            name='contentForm'
+            label='内容形态'
+          >
+            <Select options={[...GEO_CONTENT_FORMS]} />
+          </Form.Item>
+          <Form.Item
+            name='publishStatus'
+            label='投放状态'
+            rules={[{ required: true, message: '请选择投放状态' }]}
+          >
+            <Select options={[...GEO_CONTENT_PUBLISH_STATUS]} />
+          </Form.Item>
+          <Form.Item
+            name='publishTime'
+            label='发布时间'
+          >
+            <DatePicker className='w-full' />
+          </Form.Item>
+          <Form.Item
+            name='publishUrl'
+            label='投放链接'
+            className='col-span-2'
+          >
+            <Input
+              allowClear
+              placeholder='https://...'
+            />
+          </Form.Item>
+          <Form.Item
+            name='remark'
+            label='备注'
+            className='col-span-2'
+          >
+            <Input.TextArea
+              rows={3}
+              allowClear
+            />
+          </Form.Item>
+        </div>
+      </BaseModalForm>
     </>
   );
 });

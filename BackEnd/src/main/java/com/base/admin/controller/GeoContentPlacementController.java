@@ -199,6 +199,15 @@ public class GeoContentPlacementController {
         return Result.ok();
     }
 
+    @Operation(summary = "批量删除发布文章")
+    @DeleteMapping("/items/batch")
+    @RequiresPermission({"geo:content:edit", "geo:content:work", "geo:article:delete"})
+    @Log(title = "GEO内容投放-发布文章批量删除", businessType = 3)
+    public Result<Void> deleteItems(@RequestBody List<Long> itemIds) {
+        contentPlacementService.deleteItems(itemIds);
+        return Result.ok();
+    }
+
     @Operation(summary = "新增AI引用")
     @PostMapping("/cites")
     @RequiresPermission({"geo:content:edit", "geo:content:work"})

@@ -359,6 +359,10 @@ export function deleteGeoContentPlacementItemApi(itemId: number) {
   return request.delete(`/geo/content-placement/items/${itemId}`);
 }
 
+export function deleteGeoContentPlacementItemBatchApi(itemIds: number[]) {
+  return request.delete('/geo/content-placement/items/batch', { data: itemIds });
+}
+
 export function createGeoContentPlacementCiteApi(data: GeoContentPlacementCiteDTO) {
   return request.post<unknown, number>('/geo/content-placement/cites', data);
 }

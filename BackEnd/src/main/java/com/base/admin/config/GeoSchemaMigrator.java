@@ -595,19 +595,11 @@ public class GeoSchemaMigrator implements ApplicationRunner {
 
             statement.executeUpdate("UPDATE sys_menu SET visible = 1, is_active = 0, parent_id = 131 WHERE menu_id IN (103, 118)");
 
+            // 旧 article-board 占位（无页面）：不再挂到内容投放；真正入口是菜单 170 文章列表
             statement.executeUpdate("""
-                    UPDATE sys_menu SET parent_id = 132, sort_order = 1,
-                      path = 'geo/article-board', perms = 'geo:article:list', icon = 'FundOutlined', is_active = 1
-                    WHERE menu_id = 129
-                    """);
-            // 修复：菜单管理曾把父级 path 拼到绝对叶子 path 上
-            statement.executeUpdate("""
-                    UPDATE sys_menu SET path = 'geo/article-board'
-                    WHERE menu_id = 129 AND path <> 'geo/article-board' AND path LIKE '%article-board%'
-                    """);
-            statement.executeUpdate("""
-                    UPDATE sys_menu SET menu_name = '数据看板',
-                      remark = '发布收录聚合与发布人周看板'
+                    UPDATE sys_menu SET is_active = 0, visible = 1, parent_id = 132, sort_order = 99,
+                      path = 'geo/article-board',
+                      remark = '已停用：请使用「内容投放 → 文章列表」'
                     WHERE menu_id = 129
                     """);
             statement.executeUpdate("""
@@ -674,22 +666,49 @@ public class GeoSchemaMigrator implements ApplicationRunner {
     }
 
     /**
-     * 发布文章列表：挂在「内容投放」目录下，不改动菜单 129（数据看板 article-board）。
+     * 文章列表（按平台发布明细）：挂在「内容投放」下。
+     * 注意：134–136 已被「平台账号」按钮占用，不可复用；使用 170–173。
      */
     private void ensurePublishedArticleMenu(Connection connection) throws Exception {
         try (Statement statement = connection.createStatement()) {
+            // 若此前误把 134–136 改成文章菜单，先恢复平台账号按钮
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET menu_name = '平台账号新增', parent_id = 133, sort_order = 1,
+                      path = '', component = '', menu_type = 'F', perms = 'geo:platformAccount:add',
+                      icon = '#', visible = 0, status = 0, is_active = 1
+                    WHERE menu_id = 134 AND (path = 'geo/article' OR perms = 'geo:article:list' OR menu_type = 'C')
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET menu_name = '平台账号修改', parent_id = 133, sort_order = 2,
+                      path = '', component = '', menu_type = 'F', perms = 'geo:platformAccount:edit',
+                      icon = '#', visible = 0, status = 0, is_active = 1
+                    WHERE menu_id = 135 AND (perms LIKE 'geo:article:%' OR parent_id = 134 OR parent_id = 170)
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET menu_name = '平台账号删除', parent_id = 133, sort_order = 3,
+                      path = '', component = '', menu_type = 'F', perms = 'geo:platformAccount:delete',
+                      icon = '#', visible = 0, status = 0, is_active = 1
+                    WHERE menu_id = 136 AND (perms LIKE 'geo:article:%' OR parent_id = 134 OR parent_id = 170)
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET is_active = 0
+                    WHERE menu_id = 137 AND perms = 'geo:article:delete'
+                    """);
+
             statement.execute("""
                     INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
-                    (134, '发布文章', 132, 2, 'geo/article', '', 'C', 'geo:article:list', 'FileTextOutlined', 0, 0,
-                     '已发布文章明细：按话题/目标问题维护平台投放', 1)
+                    (170, '文章列表', 132, 1, 'geo/article', '', 'C', 'geo:article:list', 'FileTextOutlined', 0, 0,
+                     '按发布人/撰写人/话题/目标问题检索各平台发布文章，可改状态与链接', 1)
                     ON DUPLICATE KEY UPDATE
-                      menu_name = VALUES(menu_name),
-                      parent_id = VALUES(parent_id),
-                      sort_order = VALUES(sort_order),
-                      path = VALUES(path),
-                      perms = VALUES(perms),
-                      icon = VALUES(icon),
+                      menu_name = '文章列表',
+                      parent_id = 132,
+                      sort_order = 1,
+                      path = 'geo/article',
+                      component = '',
+                      menu_type = 'C',
+                      perms = 'geo:article:list',
+                      icon = 'FileTextOutlined',
                       visible = 0,
                       status = 0,
                       remark = VALUES(remark),
@@ -698,37 +717,48 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             statement.execute("""
                     INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
-                    (135, '发布文章新增', 134, 1, '', '', 'F', 'geo:article:add', '#', 0, 0, '', 1),
-                    (136, '发布文章修改', 134, 2, '', '', 'F', 'geo:article:edit', '#', 0, 0, '', 1),
-                    (137, '发布文章删除', 134, 3, '', '', 'F', 'geo:article:delete', '#', 0, 0, '', 1)
+                    (171, '文章新增', 170, 1, '', '', 'F', 'geo:article:add', '#', 0, 0, '', 1),
+                    (172, '文章修改', 170, 2, '', '', 'F', 'geo:article:edit', '#', 0, 0, '', 1),
+                    (173, '文章删除', 170, 3, '', '', 'F', 'geo:article:delete', '#', 0, 0, '', 1)
                     ON DUPLICATE KEY UPDATE
-                      parent_id = VALUES(parent_id),
+                      menu_name = VALUES(menu_name),
+                      parent_id = 170,
+                      menu_type = 'F',
                       perms = VALUES(perms),
                       is_active = 1
                     """);
-            // 投放管理 / 我的投放 顺延，数据看板 129 保持 sort_order=1、path=geo/article-board
+            // 无对应页面的 article-board 占位入口：停用
             statement.executeUpdate("""
-                    UPDATE sys_menu SET parent_id = 132, sort_order = 1,
-                      path = 'geo/article-board', perms = 'geo:article:list', is_active = 1
-                    WHERE menu_id = 129
+                    UPDATE sys_menu SET is_active = 0, visible = 1,
+                      remark = '已停用：请使用「内容投放 → 文章列表」'
+                    WHERE menu_id = 129 AND path LIKE '%article-board%'
                     """);
             statement.executeUpdate("""
-                    UPDATE sys_menu SET parent_id = 132, sort_order = 3, menu_name = '投放管理',
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 2, menu_name = '投放管理',
                       path = 'geo/content-placement-manage', is_active = 1
                     WHERE menu_id = 122
                     """);
             statement.executeUpdate("""
-                    UPDATE sys_menu SET parent_id = 132, sort_order = 4,
+                    UPDATE sys_menu SET parent_id = 132, sort_order = 3,
                       path = 'geo/content-placement-work', is_active = 1
                     WHERE menu_id = 128
                     """);
             statement.execute("""
                     INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (134, 135, 136, 137)
+                    SELECT rm.role_id, m.menu_id, 1
+                    FROM sys_role_menu rm
+                    CROSS JOIN sys_menu m
+                    WHERE rm.menu_id = 122 AND rm.is_active = 1
+                      AND m.menu_id IN (170, 171, 172, 173)
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (170, 171, 172, 173)
                     ON DUPLICATE KEY UPDATE is_active = 1
                     """);
         }
-        log.info("已同步发布文章菜单（未改动 129 article-board）");
+        log.info("已同步文章列表菜单 menu_id=170 path=geo/article");
     }
 
     private boolean tableExists(Connection connection, String table) throws Exception {

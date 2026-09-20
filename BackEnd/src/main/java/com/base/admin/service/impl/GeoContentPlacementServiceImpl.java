@@ -752,6 +752,19 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
 
     @Override
     @Transactional
+    public void deleteItems(List<Long> itemIds) {
+        if (itemIds == null || itemIds.isEmpty()) {
+            throw new BusinessException("请选择要删除的文章");
+        }
+        for (Long itemId : itemIds) {
+            if (itemId != null) {
+                deleteItem(itemId);
+            }
+        }
+    }
+
+    @Override
+    @Transactional
     public Long createCite(GeoContentPlacementCiteDTO dto) {
         requirePlacement(dto.getPlacementId());
         if (dto.getItemId() != null) {

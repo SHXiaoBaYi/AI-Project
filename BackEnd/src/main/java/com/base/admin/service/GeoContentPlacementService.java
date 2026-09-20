@@ -63,6 +63,8 @@ public interface GeoContentPlacementService {
 
     void deleteItem(Long itemId);
 
+    void deleteItems(List<Long> itemIds);
+
     Long createCite(GeoContentPlacementCiteDTO dto);
 
     void updateCite(GeoContentPlacementCiteDTO dto);
