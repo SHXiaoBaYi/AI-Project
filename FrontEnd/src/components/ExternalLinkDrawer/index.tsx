@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { Drawer, Tooltip, Typography } from 'antd';
+import { Button, Drawer, Tooltip, Typography } from 'antd';
 import { canOpenExternalInApp, resolveExternalUrl } from '@/utils/externalUrl';
 
 type ExternalLinkContextValue = {
@@ -32,15 +32,31 @@ export function ExternalLinkProvider({ children }: { children: ReactNode }) {
         onClose={() => setUrl(undefined)}
         destroyOnHidden
         zIndex={2100}
-        styles={{ body: { height: 'calc(100vh - 55px)', padding: 0 } }}
+        styles={{ body: { height: 'calc(100vh - 55px)', padding: 0, overflow: 'hidden' } }}
+        extra={
+          <Button
+            type='link'
+            disabled={!url}
+            onClick={() => {
+              if (url) window.open(url, '_blank', 'noopener,noreferrer');
+            }}
+          >
+            新窗口打开
+          </Button>
+        }
       >
         {url ? (
-          <iframe
-            title={title}
-            src={url}
-            className='h-full w-full border-0'
-            sandbox='allow-scripts allow-same-origin allow-popups allow-forms'
-          />
+          <div className='flex h-full flex-col'>
+            <p className='m-0 shrink-0 border-b border-black/6 px-4 py-2 text-xs text-black/45'>
+              抖音、头条、知乎等站点禁止被嵌入。若下方空白，请点右上角「新窗口打开」。
+            </p>
+            <iframe
+              title={title}
+              src={url}
+              className='min-h-0 w-full flex-1 border-0'
+              sandbox='allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox'
+            />
+          </div>
         ) : null}
       </Drawer>
     </ExternalLinkContext.Provider>
