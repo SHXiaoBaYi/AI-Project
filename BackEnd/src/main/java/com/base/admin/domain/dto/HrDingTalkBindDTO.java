@@ -9,15 +9,6 @@ import lombok.Data;
 public class HrDingTalkBindDTO {
 
     @NotNull
-    @Schema(description = "系统用户")
+    @Schema(description = "系统用户。钉钉身份按该用户手机号从钉钉查询，不能手工指定", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long userId;
-
-    @Schema(description = "钉钉里登记的手机号，不填则用系统用户手机号")
-    private String phone;
-
-    @Schema(description = "企业内 userid，手机号匹配失败时手工填写")
-    private String dingtalkUserId;
-
-    @Schema(description = "unionId，和企业 userid 一起手工填写")
-    private String unionId;
 }

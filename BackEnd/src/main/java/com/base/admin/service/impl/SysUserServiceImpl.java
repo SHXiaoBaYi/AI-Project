@@ -3,6 +3,7 @@ package com.base.admin.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.PageResult;
+import com.base.admin.domain.dto.HrDingTalkBindDTO;
 import com.base.admin.domain.dto.UserDTO;
 import com.base.admin.domain.dto.UserExcelRowDTO;
 import com.base.admin.domain.dto.UserExportRowDTO;
@@ -19,6 +20,7 @@ import com.base.admin.listener.UserExcelListener;
 import com.base.admin.mapper.SysRoleMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.mapper.SysUserRoleMapper;
+import com.base.admin.service.HrMasterService;
 import com.base.admin.service.SysUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -44,6 +46,7 @@ public class SysUserServiceImpl implements SysUserService {
     private final SysRoleMapper roleMapper;
     private final PasswordEncoder passwordEncoder;
     private final JdbcTemplate jdbc;
+    private final HrMasterService hrMasterService;
 
     @Override
     public PageResult<UserVO> list(UserPageQueryDTO query) {
@@ -128,13 +131,28 @@ public class SysUserServiceImpl implements SysUserService {
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
+        String oldPhone = user.getPhone() == null ? "" : user.getPhone().trim();
+        String newPhone = dto.getPhone() == null ? "" : dto.getPhone().trim();
         user.setNickname(dto.getNickname());
         user.setEmail(dto.getEmail());
-        user.setPhone(dto.getPhone());
+        user.setPhone(newPhone.isEmpty() ? null : newPhone);
         user.setGender(dto.getGender());
         user.setStatus(dto.getStatus());
         user.setRemark(dto.getRemark());
         userMapper.updateById(user);
+
+        if (!oldPhone.equals(newPhone)) {
+            Integer bound = jdbc.queryForObject(
+                    "SELECT COUNT(1) FROM hr_user_dingtalk WHERE user_id = ? AND is_active = 1",
+                    Integer.class, user.getUserId());
+            if (bound != null && bound > 0) {
+                if (newPhone.isEmpty()) {
+                    hrMasterService.unbindDingTalk(user.getUserId());
+                } else {
+                    hrMasterService.bindDingTalk(bindDto(user.getUserId()));
+                }
+            }
+        }
 
         if (dto.getRoleIds() != null) {
             saveUserRoles(user.getUserId(), dto.getRoleIds());
@@ -250,6 +268,12 @@ public class SysUserServiceImpl implements SysUserService {
 
     private static String toStatusText(Integer status) {
         return status == null ? "" : STATUS_MAP.getOrDefault(status, "");
+    }
+
+    private static HrDingTalkBindDTO bindDto(Long userId) {
+        HrDingTalkBindDTO dto = new HrDingTalkBindDTO();
+        dto.setUserId(userId);
+        return dto;
     }
 
     private void saveUserRoles(Long userId, List<Long> roleIds) {

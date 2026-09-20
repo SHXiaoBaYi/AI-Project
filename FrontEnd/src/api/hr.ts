@@ -309,8 +309,14 @@ export function listMyHrInvitesApi() {
   return request.post<unknown, Record<string, unknown>[]>('/hr/invite/mine', {});
 }
 
-export function bindHrDingTalkApi(data: { userId: number; phone?: string; dingtalkUserId?: string; unionId?: string }) {
-  return request.post('/hr/dingtalk/bind', data);
+export function previewHrDingTalkApi(userId: number) {
+  return request.get<unknown, { phone: string; dingtalkUserId: string; unionId: string }>(
+    `/hr/dingtalk/preview/${userId}`,
+  );
+}
+
+export function bindHrDingTalkApi(userId: number) {
+  return request.post('/hr/dingtalk/bind', { userId });
 }
 
 export function unbindHrDingTalkApi(userId: number) {

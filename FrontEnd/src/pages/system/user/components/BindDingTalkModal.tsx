@@ -1,6 +1,6 @@
-import { App } from 'antd';
-import TableModal from '@/components/TableModal';
-import { bindHrDingTalkApi } from '@/api/hr';
+import { useEffect, useState } from 'react';
+import { App, Form, Input, Modal } from 'antd';
+import { bindHrDingTalkApi, previewHrDingTalkApi } from '@/api/hr';
 import type { UserVO } from '@/types/user';
 
 export default function BindDingTalkModal({
@@ -15,43 +15,90 @@ export default function BindDingTalkModal({
   onSuccess: () => void;
 }) {
   const { message } = App.useApp();
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [phone, setPhone] = useState('');
+  const [dingtalkUserId, setDingtalkUserId] = useState('');
+  const [unionId, setUnionId] = useState('');
+
+  useEffect(() => {
+    if (!open || !user) return;
+    setPhone(user.phone || '');
+    setDingtalkUserId('');
+    setUnionId('');
+    setError('');
+    if (!user.phone) {
+      setError('请先在用户资料里填写手机号');
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    previewHrDingTalkApi(user.userId)
+      .then((identity) => {
+        if (cancelled) return;
+        setPhone(identity.phone);
+        setDingtalkUserId(identity.dingtalkUserId);
+        setUnionId(identity.unionId);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err?.message || '获取钉钉身份失败');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, user]);
+
   return (
-    <TableModal
-      readonly={false}
+    <Modal
       title={user ? `绑定钉钉：${user.nickname || user.username}` : '绑定钉钉'}
       open={open}
-      onOpenChange={onOpenChange}
-      initialValues={{
-        phone: user?.phone,
-        dingtalkUserId: user?.dingtalkUserId,
-        unionId: user?.dingtalkUnionId,
+      confirmLoading={saving}
+      okButtonProps={{ disabled: loading || !dingtalkUserId || !unionId }}
+      onCancel={() => onOpenChange(false)}
+      onOk={async () => {
+        if (!user) return;
+        setSaving(true);
+        try {
+          await bindHrDingTalkApi(user.userId);
+          message.success('已绑定');
+          onOpenChange(false);
+          onSuccess();
+        } finally {
+          setSaving(false);
+        }
       }}
-      columns={[
-        {
-          title: '手机号',
-          dataIndex: 'phone',
-          formItemProps: { extra: '和钉钉通讯录里的手机号一致时，可以自动匹配企业身份' },
-        },
-        {
-          title: '企业用户ID',
-          dataIndex: 'dingtalkUserId',
-          formItemProps: { extra: '手机号匹配失败时，和企业 unionId 一起手工填写。不是对外的钉钉号' },
-        },
-        { title: 'unionId', dataIndex: 'unionId' },
-      ]}
-      onFinish={async (values) => {
-        if (!user) return false;
-        const form = values as { phone?: string; dingtalkUserId?: string; unionId?: string };
-        await bindHrDingTalkApi({
-          userId: user.userId,
-          phone: form.phone,
-          dingtalkUserId: form.dingtalkUserId,
-          unionId: form.unionId,
-        });
-        message.success('已绑定');
-        onSuccess();
-        return true;
-      }}
-    />
+    >
+      <p className='mb-3 text-sm text-neutral-500'>
+        按系统用户手机号从钉钉获取，不能手改。手机号变更后会自动重新绑定。
+      </p>
+      <Form layout='vertical'>
+        <Form.Item
+          label='手机号'
+          extra={error || '使用用户资料中的手机号'}
+          validateStatus={error ? 'error' : undefined}
+        >
+          <Input
+            value={phone}
+            disabled
+          />
+        </Form.Item>
+        <Form.Item label='企业用户ID'>
+          <Input
+            value={loading ? '正在从钉钉获取…' : dingtalkUserId}
+            disabled
+          />
+        </Form.Item>
+        <Form.Item label='unionId'>
+          <Input
+            value={loading ? '正在从钉钉获取…' : unionId}
+            disabled
+          />
+        </Form.Item>
+      </Form>
+    </Modal>
   );
 }

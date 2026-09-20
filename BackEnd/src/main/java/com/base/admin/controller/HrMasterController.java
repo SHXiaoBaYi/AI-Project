@@ -6,6 +6,7 @@ import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.HrSchoolQueryDTO;
 import com.base.admin.domain.vo.HrApplicationImportResultVO;
+import com.base.admin.domain.vo.HrDingTalkIdentityVO;
 import com.base.admin.domain.vo.HrSchoolVO;
 import com.base.admin.service.HrApplicationImportService;
 import com.base.admin.domain.dto.HrBoardQueryDTO;
@@ -332,7 +333,14 @@ public class HrMasterController {
         return Result.ok(masterService.schools(query));
     }
 
-    @Operation(summary = "按手机号或手工身份绑定钉钉")
+    @Operation(summary = "按系统用户手机号预览钉钉身份")
+    @GetMapping("/dingtalk/preview/{userId}")
+    @RequiresPermission({"system:user:edit", "hr:dingtalk:edit"})
+    public Result<HrDingTalkIdentityVO> previewDingTalk(@PathVariable Long userId) {
+        return Result.ok(masterService.previewDingTalk(userId));
+    }
+
+    @Operation(summary = "按系统用户手机号绑定钉钉")
     @PostMapping("/dingtalk/bind")
     @RequiresPermission({"system:user:edit", "hr:dingtalk:edit"})
     @Log(title = "钉钉绑定", businessType = 2)

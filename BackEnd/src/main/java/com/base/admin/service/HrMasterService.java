@@ -9,6 +9,7 @@ import com.base.admin.domain.dto.HrDingTalkBindDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.domain.dto.HrSchoolQueryDTO;
+import com.base.admin.domain.vo.HrDingTalkIdentityVO;
 import com.base.admin.domain.vo.HrSchoolVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
@@ -714,46 +715,48 @@ public class HrMasterService {
         return new PageResult<>(total == null ? 0 : total, rows);
     }
 
+    public HrDingTalkIdentityVO previewDingTalk(Long userId) {
+        String phone = requireUserPhone(userId);
+        DingTalkCalendarClient.DingIdentity identity = resolveDingIdentity(phone);
+        HrDingTalkIdentityVO vo = new HrDingTalkIdentityVO();
+        vo.setPhone(phone);
+        vo.setDingtalkUserId(identity.userId());
+        vo.setUnionId(identity.unionId());
+        return vo;
+    }
+
     @Transactional
     public void bindDingTalk(HrDingTalkBindDTO dto) {
-        String manualUser = dto.getDingtalkUserId() == null ? "" : dto.getDingtalkUserId().trim();
-        String manualUnion = dto.getUnionId() == null ? "" : dto.getUnionId().trim();
-        String dingUserId;
-        String unionId;
-        if (!manualUser.isEmpty() || !manualUnion.isEmpty()) {
-            if (manualUser.isEmpty() || manualUnion.isEmpty()) {
-                throw new BusinessException("手工绑定时，企业用户ID和 unionId 都要填");
-            }
-            dingUserId = manualUser;
-            unionId = manualUnion;
-        } else {
-            String phone = dto.getPhone();
-            if (phone == null || phone.isBlank()) {
-                phone = jdbc.query("SELECT phone FROM sys_user WHERE user_id = ? AND is_active = 1",
-                        rs -> rs.next() ? rs.getString(1) : null, dto.getUserId());
-            }
-            if (phone == null || phone.isBlank()) {
-                throw new BusinessException("这个用户没有手机号，请先填写手机号，或手工填写企业用户ID和 unionId");
-            }
-            if (!dingTalk.configured()) {
-                throw new BusinessException("钉钉应用还没配置，不能按手机号匹配。请手工填写企业用户ID和 unionId");
-            }
-            DingTalkCalendarClient.DingIdentity identity = dingTalk.resolveByMobile(phone.trim());
-            if (identity == null) {
-                throw new BusinessException("没有按这个手机号匹配到企业钉钉身份。请确认手机号和钉钉里一致，或手工填写企业用户ID和 unionId");
-            }
-            dingUserId = identity.userId();
-            unionId = identity.unionId();
-        }
+        HrDingTalkIdentityVO identity = previewDingTalk(dto.getUserId());
         jdbc.update("""
                 INSERT INTO hr_user_dingtalk (user_id, dingtalk_user_id, dingtalk_union_id, create_by, is_active)
                 VALUES (?, ?, ?, ?, 1)
                 ON DUPLICATE KEY UPDATE dingtalk_user_id = VALUES(dingtalk_user_id), dingtalk_union_id = VALUES(dingtalk_union_id), is_active = 1
-                """, dto.getUserId(), dingUserId, unionId, SecurityUtils.getCurrentUsername());
+                """, dto.getUserId(), identity.getDingtalkUserId(), identity.getUnionId(), SecurityUtils.getCurrentUsername());
     }
 
     public void unbindDingTalk(Long userId) {
         jdbc.update("UPDATE hr_user_dingtalk SET is_active = 0 WHERE user_id = ?", userId);
+    }
+
+    private String requireUserPhone(Long userId) {
+        String phone = jdbc.query("SELECT phone FROM sys_user WHERE user_id = ? AND is_active = 1",
+                rs -> rs.next() ? rs.getString(1) : null, userId);
+        if (phone == null || phone.isBlank()) {
+            throw new BusinessException("请先在用户资料里填写手机号，再绑定钉钉");
+        }
+        return phone.trim();
+    }
+
+    private DingTalkCalendarClient.DingIdentity resolveDingIdentity(String phone) {
+        if (!dingTalk.configured()) {
+            throw new BusinessException("钉钉应用还没配置，不能按手机号获取钉钉身份");
+        }
+        DingTalkCalendarClient.DingIdentity identity = dingTalk.resolveByMobile(phone);
+        if (identity == null) {
+            throw new BusinessException("没有按手机号「" + phone + "」匹配到企业钉钉身份，请确认与钉钉通讯录一致");
+        }
+        return identity;
     }
 
     public List<Map<String, Object>> channels() {

@@ -295,7 +295,7 @@ const UserManage = memo(function UserManage() {
         headerTitle='用户列表'
         actionRef={actionRef}
         rowKey='userId'
-        scroll={{ x: 600 }}
+        scroll={{ x: 1680 }}
         request={async (params) => {
           const { rows: data, total } = await getUserListApi(tools.handleSearchParams(params));
           currentPageKeysRef.current = new Set(data.map((u) => u.userId));
