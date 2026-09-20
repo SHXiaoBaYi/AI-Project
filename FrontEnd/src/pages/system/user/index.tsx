@@ -24,6 +24,8 @@ import tools from '@/utils/tools';
 import validate from '@/utils/validate';
 import type { UserVO } from '@/types/user';
 import ImportUserModal from './components/ImportUserModal';
+import BindDingTalkModal from './components/BindDingTalkModal';
+import { unbindHrDingTalkApi } from '@/api/hr';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
 const UserManage = memo(function UserManage() {
@@ -40,6 +42,8 @@ const UserManage = memo(function UserManage() {
   const [allRoles, setAllRoles] = useState<{ key: string; title: string }[]>([]);
   const [formModalKey, setFormModalKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
+  const [bindUser, setBindUser] = useState<UserVO | null>(null);
+  const [bindOpen, setBindOpen] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   /** 当前页所有行的 key，用于跨页选择时正确合并 */
   const currentPageKeysRef = useRef<Set<number>>(new Set());
@@ -89,6 +93,32 @@ const UserManage = memo(function UserManage() {
         : []),
       { title: '昵称', dataIndex: 'nickname', width: 100, ellipsis: true },
       { title: '手机号', dataIndex: 'phone', width: 140, formItemProps: { rules: validate.phone } },
+      {
+        title: '钉钉',
+        dataIndex: 'dingtalkBound',
+        width: 90,
+        search: false,
+        hideInForm: true,
+        render: (_, record) => (record.dingtalkBound === 1 ? <Tag color='green'>已绑定</Tag> : <Tag>未绑定</Tag>),
+      },
+      {
+        title: '企业用户ID',
+        dataIndex: 'dingtalkUserId',
+        width: 140,
+        search: false,
+        hideInForm: true,
+        ellipsis: true,
+        render: (_, record) => record.dingtalkUserId || '—',
+      },
+      {
+        title: 'unionId',
+        dataIndex: 'dingtalkUnionId',
+        width: 180,
+        search: false,
+        hideInForm: true,
+        ellipsis: true,
+        render: (_, record) => record.dingtalkUnionId || '—',
+      },
       { title: '邮箱', dataIndex: 'email', width: 200, ellipsis: true, formItemProps: { rules: validate.email } },
       {
         title: '角色',
@@ -159,6 +189,20 @@ const UserManage = memo(function UserManage() {
         },
         formItemProps: { rules: [{ required: true, message: '请选择状态' }] },
       },
+      {
+        title: '是否绑定钉钉',
+        dataIndex: 'dingtalkBound',
+        hideInTable: true,
+        hideInForm: true,
+        valueType: 'select',
+        fieldProps: {
+          allowClear: true,
+          options: [
+            { label: '已绑定', value: 1 },
+            { label: '未绑定', value: 0 },
+          ],
+        },
+      },
       createTimeRangeColumn<UserVO>(),
       createTimeDisplayColumn<UserVO>({ width: 160 }),
       {
@@ -195,6 +239,27 @@ const UserManage = memo(function UserManage() {
                   setAssignRoleUserId(record.userId);
                   setInitialRoleIds(record.roles?.map((r) => r.roleId));
                   setAssignRoleOpen(true);
+                },
+              },
+              {
+                key: 'dingtalk',
+                perm: 'system:user:edit',
+                label: '绑定钉钉',
+                onClick: () => {
+                  setBindUser(record);
+                  setBindOpen(true);
+                },
+              },
+              {
+                key: 'unbindDing',
+                perm: 'system:user:edit',
+                label: '解除钉钉',
+                disabled: record.dingtalkBound !== 1,
+                confirmTitle: '解除后，这个用户的面试邀约不能自动建钉钉日程',
+                onClick: async () => {
+                  await unbindHrDingTalkApi(record.userId);
+                  message.success('已解除');
+                  actionRef.current?.reload();
                 },
               },
               {
@@ -432,6 +497,12 @@ const UserManage = memo(function UserManage() {
       <ImportUserModal
         open={importOpen}
         onOpenChange={setImportOpen}
+        onSuccess={() => actionRef.current?.reload()}
+      />
+      <BindDingTalkModal
+        user={bindUser}
+        open={bindOpen}
+        onOpenChange={setBindOpen}
         onSuccess={() => actionRef.current?.reload()}
       />
     </>

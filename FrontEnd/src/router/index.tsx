@@ -42,6 +42,12 @@ function withSuspense(Component: LazyExoticComponent<any>) {
   );
 }
 
+function isForeignAbsolutePath(menuPath: string | undefined, parentFullPath: string) {
+  const clean = (menuPath || '').replace(/^\//, '');
+  if (!parentFullPath || !clean.includes('/')) return false;
+  return clean !== parentFullPath && !clean.startsWith(parentFullPath + '/');
+}
+
 function buildDynamicRoutes(menus: MenuTree[], parentPath = ''): any[] {
   if (!menus || !Array.isArray(menus)) return [];
   const routes: any[] = [];
@@ -58,17 +64,27 @@ function buildDynamicRoutes(menus: MenuTree[], parentPath = ''): any[] {
     const isDir = menu.menuType === 'M' || (!hasComponent && hasChildren);
 
     if (isDir && hasChildren) {
+      // 叶子 path 含 / 且不属于当前父级（如 hr/board 被拖到「数据看板」下）时，
+      // 侧栏仍打开 /hr/board，路由必须挂在原父级，不能嵌进新目录。
+      const foreign = (menu.children || []).filter((child) => isForeignAbsolutePath(child.path, fullPath));
+      const own = (menu.children || []).filter((child) => !isForeignAbsolutePath(child.path, fullPath));
+      if (foreign.length) {
+        routes.push(...buildDynamicRoutes(foreign, parentPath));
+      }
+      if (!own.length) {
+        continue;
+      }
       // 中间分组目录（如 geo/config）：扁平挂到当前父级，不改变叶子 URL（仍为 /geo/topic）
       // 顶层业务目录（geo / system）：保留一层 layout 路由
       const isGroupingOnly = clean.includes('/') || (!!parentPath && !clean.startsWith(parentPath));
       if (isGroupingOnly) {
-        routes.push(...buildDynamicRoutes(menu.children, parentPath));
+        routes.push(...buildDynamicRoutes(own, parentPath));
         continue;
       }
       routes.push({
         path: relativePath,
         errorElement: <RouteErrorPage />,
-        children: buildDynamicRoutes(menu.children, fullPath),
+        children: buildDynamicRoutes(own, fullPath),
       });
       continue;
     }

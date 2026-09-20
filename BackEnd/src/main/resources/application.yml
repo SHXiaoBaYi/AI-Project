@@ -90,6 +90,11 @@ geo:
     # 每月 1 日 02:25 固化内容投放月报
     content-monthly-cron: "0 25 2 1 * ?"
 
+dingtalk:
+  enabled: ${DINGTALK_ENABLED:false}
+  client-id: ${DINGTALK_CLIENT_ID:}
+  client-secret: ${DINGTALK_CLIENT_SECRET:}
+
 # 演示数据已清空。保持 false，避免启动时再把测试数据刷回去。
 demo:
   seed: false

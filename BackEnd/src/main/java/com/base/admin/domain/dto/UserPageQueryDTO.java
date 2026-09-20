@@ -29,4 +29,7 @@ public class UserPageQueryDTO extends PageQuery {
 
     @Schema(description = "状态（0=正常 1=停用）", example = "0")
     private Integer status;
+
+    @Schema(description = "是否绑定钉钉（1已绑定 0未绑定）")
+    private Integer dingtalkBound;
 }

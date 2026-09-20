@@ -92,4 +92,52 @@ public class FileStorageService {
             throw new BusinessException("附件保存失败: " + e.getMessage());
         }
     }
+
+    private static final Set<String> RESUME_EXT = Set.of(".pdf", ".doc", ".docx");
+
+    /** 候选人简历，返回绝对路径，便于简历下载直接打开 */
+    public Path saveHrResume(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("请选择简历文件");
+        }
+        String original = file.getOriginalFilename() == null ? "resume" : file.getOriginalFilename();
+        String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')).toLowerCase(Locale.ROOT) : "";
+        if (!RESUME_EXT.contains(ext)) {
+            throw new BusinessException("简历仅支持 pdf/doc/docx");
+        }
+        try {
+            Path dir = Path.of(uploadDir, "hr", "resume").toAbsolutePath().normalize();
+            Files.createDirectories(dir);
+            String name = UUID.randomUUID().toString().replace("-", "") + ext;
+            Path dest = dir.resolve(name);
+            try (var in = file.getInputStream()) {
+                Files.copy(in, dest);
+            }
+            return dest;
+        } catch (IOException e) {
+            throw new BusinessException("简历保存失败: " + e.getMessage());
+        }
+    }
+
+    public Path resolveUploadPath(String storagePath) {
+        if (storagePath == null || storagePath.isBlank()) {
+            return null;
+        }
+        String stored = storagePath.trim();
+        Path path;
+        if (stored.startsWith("/uploads/") || stored.startsWith("uploads/")) {
+            String relative = stored.startsWith("/") ? stored.substring("/uploads/".length()) : stored.substring("uploads/".length());
+            path = Path.of(uploadDir).resolve(relative).toAbsolutePath().normalize();
+        } else {
+            path = Path.of(stored).normalize();
+        }
+        Path uploadRoot = Path.of(uploadDir).toAbsolutePath().normalize();
+        if (path.startsWith(uploadRoot) && Files.isRegularFile(path)) {
+            return path;
+        }
+        if (Files.isRegularFile(path)) {
+            return path;
+        }
+        return null;
+    }
 }

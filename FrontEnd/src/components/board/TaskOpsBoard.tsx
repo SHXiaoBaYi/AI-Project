@@ -299,6 +299,24 @@ export function TaskOpsBoard({
     const isOnTime = drill?.metric === 'onTimeRate';
     return [
       {
+        title: '操作',
+        key: 'act',
+        width: 88,
+        fixed: 'left',
+        render: (_, r) => (
+          <Button
+            type='link'
+            className='!px-0'
+            onClick={(e) => {
+              e.stopPropagation();
+              openPersonTasks(r);
+            }}
+          >
+            看明细
+          </Button>
+        ),
+      },
+      {
         title: '员工',
         dataIndex: 'userName',
         render: (v, r) => (
@@ -333,23 +351,6 @@ export function TaskOpsBoard({
             { title: '超时', dataIndex: 'lateCount', width: 72 },
           ]
         : [{ title: '未完成', dataIndex: 'openCount', width: 88 }]),
-      {
-        title: '操作',
-        key: 'act',
-        width: 88,
-        render: (_, r) => (
-          <Button
-            type='link'
-            className='!px-0'
-            onClick={(e) => {
-              e.stopPropagation();
-              openPersonTasks(r);
-            }}
-          >
-            看明细
-          </Button>
-        ),
-      },
     ] as ColumnsType<BoardTaskOpsPersonRate>;
   })();
 
@@ -564,6 +565,7 @@ export function TaskOpsBoard({
             loading={drillLoading}
             columns={personColumns}
             dataSource={personRows}
+            scroll={{ x: 'max-content' }}
             pagination={pagination}
             onRow={(r) => ({
               onClick: () => openPersonTasks(r),

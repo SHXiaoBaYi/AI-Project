@@ -21,6 +21,7 @@ import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.mapper.SysUserRoleMapper;
 import com.base.admin.service.SysUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +30,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -41,6 +43,7 @@ public class SysUserServiceImpl implements SysUserService {
     private final SysUserRoleMapper userRoleMapper;
     private final SysRoleMapper roleMapper;
     private final PasswordEncoder passwordEncoder;
+    private final JdbcTemplate jdbc;
 
     @Override
     public PageResult<UserVO> list(UserPageQueryDTO query) {
@@ -64,9 +67,24 @@ public class SysUserServiceImpl implements SysUserService {
             wrapper.in(SysUser::getUserId, userIds);
         }
 
+        if (query.getDingtalkBound() != null) {
+            List<Long> boundIds = jdbc.query(
+                    "SELECT user_id FROM hr_user_dingtalk WHERE is_active = 1",
+                    (rs, row) -> rs.getLong(1));
+            if (Integer.valueOf(1).equals(query.getDingtalkBound())) {
+                if (boundIds.isEmpty()) {
+                    return new PageResult<>(0L, List.of());
+                }
+                wrapper.in(SysUser::getUserId, boundIds);
+            } else if (!boundIds.isEmpty()) {
+                wrapper.notIn(SysUser::getUserId, boundIds);
+            }
+        }
+
         Page<SysUser> page = userMapper.selectPage(
                 new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         List<UserVO> rows = page.getRecords().stream().map(this::toUserVO).collect(Collectors.toList());
+        fillDingTalk(rows);
         return new PageResult<>(page.getTotal(), rows);
     }
 
@@ -76,7 +94,9 @@ public class SysUserServiceImpl implements SysUserService {
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
-        return toUserVO(user);
+        UserVO vo = toUserVO(user);
+        fillDingTalk(List.of(vo));
+        return vo;
     }
 
     @Override
@@ -266,5 +286,27 @@ public class SysUserServiceImpl implements SysUserService {
             }).collect(Collectors.toList()));
         }
         return vo;
+    }
+
+    private void fillDingTalk(List<UserVO> rows) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        String marks = rows.stream().map(row -> "?").collect(Collectors.joining(","));
+        Object[] args = rows.stream().map(UserVO::getUserId).toArray();
+        Map<Long, UserVO> byId = new HashMap<>();
+        rows.forEach(row -> {
+            row.setDingtalkBound(0);
+            byId.put(row.getUserId(), row);
+        });
+        jdbc.query("SELECT user_id, dingtalk_user_id, dingtalk_union_id FROM hr_user_dingtalk WHERE is_active = 1 AND user_id IN ("
+                + marks + ")", rs -> {
+            UserVO vo = byId.get(rs.getLong("user_id"));
+            if (vo != null) {
+                vo.setDingtalkBound(1);
+                vo.setDingtalkUserId(rs.getString("dingtalk_user_id"));
+                vo.setDingtalkUnionId(rs.getString("dingtalk_union_id"));
+            }
+        }, args);
     }
 }

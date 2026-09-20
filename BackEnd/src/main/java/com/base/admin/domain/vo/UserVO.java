@@ -41,4 +41,13 @@ public class UserVO {
 
     @Schema(description = "关联角色列表")
     private List<RoleSimpleVO> roles;
+
+    @Schema(description = "是否已绑定钉钉，1是 0否")
+    private Integer dingtalkBound;
+
+    @Schema(description = "企业内钉钉 userid")
+    private String dingtalkUserId;
+
+    @Schema(description = "钉钉 unionId")
+    private String dingtalkUnionId;
 }

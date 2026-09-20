@@ -21,6 +21,7 @@
     "axios": "^1.17.0",
     "classnames": "^2.5.1",
     "dayjs": "^1.11.21",
+    "docx-preview": "^0.4.0",
     "lodash-es": "^4.18.1",
     "prettier": "^3.8.4",
     "prettier-plugin-tailwindcss": "^0.8.0",

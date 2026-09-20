@@ -18,6 +18,9 @@ export interface UserVO {
   remark: string;
   createTime: string;
   roles: { roleId: number; roleName: string }[];
+  dingtalkBound?: number;
+  dingtalkUserId?: string;
+  dingtalkUnionId?: string;
 }
 
 export interface UserDTO {

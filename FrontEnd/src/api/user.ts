@@ -11,6 +11,7 @@ export function getUserListApi(
     email?: string;
     roleIds?: number[];
     status?: number;
+    dingtalkBound?: number;
   },
 ) {
   return request.post<unknown, PageResult<UserVO>>('/system/user/list', data);

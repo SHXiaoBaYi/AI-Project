@@ -1,0 +1,14 @@
+---
+description: 表格操作列必须固定在最左侧，不得改回右侧
+globs: FrontEnd/**/*.{tsx,ts}
+alwaysApply: true
+---
+
+# 表格操作列
+
+系统内所有数据表格的「操作」列固定为**第一列**，并 `fixed: 'left'`。这是定数，不要改到右侧，也不要插到其他列后面。
+
+- 使用 `BaseProTable` 时，列定义里的操作列（`valueType: 'option'`、标题「操作」、`key` 为 `option`/`action`）会被自动移到第一列并左固定。不要在业务页再改这个位置。
+- 直接使用 antd `Table` 时，操作列写在 `columns` 数组第一项，并设置 `fixed: 'left'`。表格需要 `scroll.x`，否则左固定不生效。
+- 多个操作按钮放在这一列里，不要再拆出右侧操作列。
+---
