@@ -25,6 +25,9 @@ public class GeoContentPlacementCiteVO {
     @Schema(description = "引用链接")
     private String citeUrl;
 
+    @Schema(description = "引用截图")
+    private String screenshotUrl;
+
     @Schema(description = "备注")
     private String remark;
 }

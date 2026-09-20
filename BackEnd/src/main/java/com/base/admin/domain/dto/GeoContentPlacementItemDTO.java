@@ -6,7 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @Schema(description = "内容投放-发布详情新增/修改")
@@ -37,9 +37,10 @@ public class GeoContentPlacementItemDTO {
     @Schema(description = "投放链接")
     private String publishUrl;
 
-    @Schema(description = "发布时间", example = "2026-09-03")
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate publishTime;
+    @NotNull(message = "发布时间不能为空")
+    @Schema(description = "发布时间", requiredMode = Schema.RequiredMode.REQUIRED, example = "2026-09-03 14:30:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime publishTime;
 
     @Schema(description = "排序", example = "0")
     private Integer sortOrder;

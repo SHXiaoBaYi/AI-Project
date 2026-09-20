@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.WeekFields;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -36,6 +37,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
+
+    private static final DateTimeFormatter PUBLISH_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentPlacementItemMapper itemMapper;
@@ -109,7 +112,9 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             vo.setPublishPlatform(row.item.getPlatformName());
             vo.setContentForm(row.item.getContentForm());
             vo.setPublishStatus(row.item.getPublishStatus());
-            vo.setPublishTime(row.item.getPublishTime() == null ? null : row.item.getPublishTime().toString());
+            vo.setPublishTime(row.item.getPublishTime() == null
+                    ? null
+                    : row.item.getPublishTime().format(PUBLISH_TIME));
             vo.setPublishUrl(row.item.getPublishUrl());
             vo.setCiteCount(data.citeCountByItem.getOrDefault(row.item.getId(), 0));
             rows.add(vo);
@@ -128,8 +133,8 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                 continue;
             }
             if (row.item.getPublishTime() == null
-                    || row.item.getPublishTime().isBefore(start)
-                    || row.item.getPublishTime().isAfter(end)) {
+                    || row.item.getPublishTime().toLocalDate().isBefore(start)
+                    || row.item.getPublishTime().toLocalDate().isAfter(end)) {
                 continue;
             }
             if (!matchFilters(row, q, false)) {
@@ -139,7 +144,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             if (ref == null) {
                 continue;
             }
-            String axis = timeBucket(row.item.getPublishTime(), grain);
+            String axis = timeBucket(row.item.getPublishTime().toLocalDate(), grain);
             String cell = axis + "\0" + ref.key;
             bag.merge(cell, 1, Integer::sum);
             labels.put(ref.key, ref.label);
@@ -153,8 +158,8 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         Map<String, String> labels = new LinkedHashMap<>();
         for (CiteRow row : data.cites) {
             if (row.item.getPublishTime() == null
-                    || row.item.getPublishTime().isBefore(start)
-                    || row.item.getPublishTime().isAfter(end)) {
+                    || row.item.getPublishTime().toLocalDate().isBefore(start)
+                    || row.item.getPublishTime().toLocalDate().isAfter(end)) {
                 continue;
             }
             if (!matchFilters(row.asItem(), q, false)) {
@@ -167,7 +172,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             if (ref == null) {
                 continue;
             }
-            String axis = timeBucket(row.item.getPublishTime(), grain);
+            String axis = timeBucket(row.item.getPublishTime().toLocalDate(), grain);
             String cell = axis + "\0" + ref.key;
             bag.merge(cell, 1, Integer::sum);
             labels.put(ref.key, ref.label);
@@ -192,7 +197,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                     || row.item.getPublishTime() == null) {
                 continue;
             }
-            if (row.item.getPublishTime().isBefore(start) || row.item.getPublishTime().isAfter(end)) {
+            if (row.item.getPublishTime().toLocalDate().isBefore(start) || row.item.getPublishTime().toLocalDate().isAfter(end)) {
                 if (deltaMode == null) {
                     continue;
                 }
@@ -212,7 +217,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                     // 无引用也计入分母：用占位系列会扭曲，跳过无引用的到各 AI 系列
                     continue;
                 }
-                String axis = timeBucket(row.item.getPublishTime(), grain);
+                String axis = timeBucket(row.item.getPublishTime().toLocalDate(), grain);
                 for (String ai : aiOfItem) {
                     if (StringUtils.hasText(q.getAiPlatform()) && !q.getAiPlatform().equals(ai)) {
                         continue;
@@ -229,7 +234,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             if (ref == null) {
                 continue;
             }
-            String axis = timeBucket(row.item.getPublishTime(), grain);
+            String axis = timeBucket(row.item.getPublishTime().toLocalDate(), grain);
             String cell = axis + "\0" + ref.key;
             success.computeIfAbsent(cell, k -> new HashSet<>()).add(row.item.getId());
             if (citedItemIds.contains(row.item.getId())) {
@@ -249,7 +254,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                 if (!matchFilters(row, q, false)) {
                     continue;
                 }
-                String axis = timeBucket(row.item.getPublishTime(), grain);
+                String axis = timeBucket(row.item.getPublishTime().toLocalDate(), grain);
                 successByAxis.computeIfAbsent(axis, k -> new HashSet<>()).add(row.item.getId());
             }
             Map<String, Set<Long>> citedByCell = new HashMap<>();
@@ -267,7 +272,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                 if (StringUtils.hasText(q.getAiPlatform()) && !q.getAiPlatform().equals(ai)) {
                     continue;
                 }
-                String axis = timeBucket(row.item.getPublishTime(), grain);
+                String axis = timeBucket(row.item.getPublishTime().toLocalDate(), grain);
                 String cell = axis + "\0" + ai;
                 citedByCell.computeIfAbsent(cell, k -> new HashSet<>()).add(row.item.getId());
                 labels.put(ai, ai);
@@ -465,8 +470,8 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
 
         LambdaQueryWrapper<GeoContentPlacementItem> iw = new LambdaQueryWrapper<GeoContentPlacementItem>()
                 .in(GeoContentPlacementItem::getPlacementId, placementMap.keySet())
-                .ge(GeoContentPlacementItem::getPublishTime, start)
-                .le(GeoContentPlacementItem::getPublishTime, end);
+                .ge(GeoContentPlacementItem::getPublishTime, start.atStartOfDay())
+                .lt(GeoContentPlacementItem::getPublishTime, end.plusDays(1).atStartOfDay());
         if (StringUtils.hasText(q.getContentPlatform())) {
             iw.eq(GeoContentPlacementItem::getPlatformName, q.getContentPlatform().trim());
         }

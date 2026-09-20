@@ -189,7 +189,7 @@ public class GeoMonitorController {
 
     @Operation(summary = "上传监测截图")
     @PostMapping("/daily/screenshot")
-    @RequiresPermission("geo:daily:list")
+    @RequiresPermission({"geo:daily:list", "geo:article:edit", "geo:content:edit", "geo:content:work"})
     public Result<Map<String, String>> uploadScreenshot(@RequestParam("file") MultipartFile file) {
         String url = fileStorageService.saveGeoImage(file);
         return Result.ok(Map.of("url", url));

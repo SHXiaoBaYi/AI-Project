@@ -358,7 +358,7 @@ public class DemoYearDataService {
                 item.setPublishUrl("https://demo.example.com/" + year + "/" + placement.getId() + "/" + s);
                 // 按题号铺到全年不同周，避免内容周/月报扎堆或空窗
                 int dayOffset = Math.min(364, (index * 7 + s * 3) % 365);
-                item.setPublishTime(LocalDate.of(year, 1, 1).plusDays(dayOffset));
+                item.setPublishTime(LocalDate.of(year, 1, 1).plusDays(dayOffset).atStartOfDay());
             }
             item.setSortOrder(s);
             item.setRemark(Constants.DEMO_MARKER);

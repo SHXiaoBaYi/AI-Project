@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @Schema(description = "内容投放-发布人周看板明细行")
@@ -40,7 +40,7 @@ public class GeoContentPublisherWeekDetailVO {
     @Schema(description = "投放链接")
     private String publishUrl;
 
-    @Schema(description = "发布时间", example = "2026-09-10")
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate publishTime;
+    @Schema(description = "发布时间", example = "2026-09-10 14:30:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime publishTime;
 }

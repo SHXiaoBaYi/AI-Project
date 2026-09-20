@@ -971,7 +971,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                     ParsedPublish parsed = parsePublish(linkOrStatus);
                     item.setPublishStatus(parsed.status());
                     item.setPublishUrl(parsed.url());
-                    item.setPublishTime(parseFlexibleDate(publishTimeRaw));
+                    item.setPublishTime(atStartOfDay(parseFlexibleDate(publishTimeRaw)));
                     item.setSortOrder(itemSort++);
                     item.setRemark("");
                     itemMapper.insert(item);
@@ -1220,11 +1220,15 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     }
 
     private void fillCite(GeoContentPlacementCite cite, GeoContentPlacementCiteDTO dto) {
+        if (!StringUtils.hasText(dto.getCiteUrl()) && !StringUtils.hasText(dto.getScreenshotUrl())) {
+            throw new BusinessException("请填写引用链接或上传截图");
+        }
         cite.setPlacementId(dto.getPlacementId());
         cite.setItemId(dto.getItemId());
         cite.setAskQuestion(nz(dto.getAskQuestion()));
         cite.setAiPlatform(nz(dto.getAiPlatform()));
         cite.setCiteUrl(nz(dto.getCiteUrl()));
+        cite.setScreenshotUrl(dto.getScreenshotUrl());
         cite.setSortOrder(dto.getSortOrder());
         cite.setRemark(dto.getRemark());
     }
@@ -1441,6 +1445,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setAskQuestion(cite.getAskQuestion());
         vo.setAiPlatform(cite.getAiPlatform());
         vo.setCiteUrl(cite.getCiteUrl());
+        vo.setScreenshotUrl(cite.getScreenshotUrl());
         vo.setRemark(cite.getRemark());
         return vo;
     }
@@ -1477,8 +1482,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             String form = normalizeContentForm(item.getContentForm(), item.getPlatformName());
             String status = item.getPublishStatus();
             boolean inWeek = item.getPublishTime() != null
-                    && !item.getPublishTime().isBefore(weekStart)
-                    && !item.getPublishTime().isAfter(weekEnd);
+                    && !item.getPublishTime().toLocalDate().isBefore(weekStart)
+                    && !item.getPublishTime().toLocalDate().isAfter(weekEnd);
             boolean article = Constants.CONTENT_FORM_ARTICLE.equals(form);
             boolean video = Constants.CONTENT_FORM_VIDEO.equals(form);
 
@@ -1524,8 +1529,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         String form = normalizeContentForm(item.getContentForm(), item.getPlatformName());
         String status = item.getPublishStatus();
         boolean inWeek = item.getPublishTime() != null
-                && !item.getPublishTime().isBefore(start)
-                && !item.getPublishTime().isAfter(end);
+                && !item.getPublishTime().toLocalDate().isBefore(start)
+                && !item.getPublishTime().toLocalDate().isAfter(end);
         boolean article = Constants.CONTENT_FORM_ARTICLE.equals(form);
         boolean video = Constants.CONTENT_FORM_VIDEO.equals(form);
         return switch (metric) {
@@ -1649,6 +1654,18 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         // 部分行把标题写进链接列，仍视为已投放但无有效 URL
         return new ParsedPublish(Constants.CONTENT_PUBLISH_SUCCESS, text);
+    }
+
+    private static LocalDateTime atStartOfDay(LocalDate date) {
+        return date == null ? null : date.atStartOfDay();
+    }
+
+    private static String publishDayLabel(LocalDateTime time) {
+        return time == null ? "-" : time.toLocalDate().toString();
+    }
+
+    private static String formatPublishTime(LocalDateTime time) {
+        return time == null ? null : time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 
     private static LocalDate parseFlexibleDate(String raw) {
@@ -1796,8 +1813,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
 
         List<GeoContentPlacementItem> items = itemMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementItem>()
                 .in(GeoContentPlacementItem::getPlacementId, placementMap.keySet())
-                .ge(GeoContentPlacementItem::getPublishTime, start)
-                .le(GeoContentPlacementItem::getPublishTime, end)
+                .ge(GeoContentPlacementItem::getPublishTime, start.atStartOfDay())
+                .lt(GeoContentPlacementItem::getPublishTime, end.plusDays(1).atStartOfDay())
                 .in(!publishPlatforms.isEmpty(), GeoContentPlacementItem::getPlatformName, publishPlatforms));
         List<ItemJoin> joins = new ArrayList<>();
         for (GeoContentPlacementItem item : items) {
@@ -1849,8 +1866,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                     continue;
                 }
                 if (item.getPublishTime() == null
-                        || item.getPublishTime().isBefore(start)
-                        || item.getPublishTime().isAfter(end)) {
+                        || item.getPublishTime().toLocalDate().isBefore(start)
+                        || item.getPublishTime().toLocalDate().isAfter(end)) {
                     continue;
                 }
                 citeJoins.add(new CiteJoin(placement, item, cite));
@@ -1866,7 +1883,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus())) {
                 continue;
             }
-            String date = j.item.getPublishTime() == null ? "-" : j.item.getPublishTime().toString();
+            String date = publishDayLabel(j.item.getPublishTime());
             String key = date + "\0" + nz(j.placement.getTopicName()) + "\0"
                     + nz(j.placement.getPublisherName()) + "\0" + nz(j.item.getPlatformName()) + "\0" + j.form;
             GeoContentPublishAggRowVO row = map.computeIfAbsent(key, k -> {
@@ -1893,7 +1910,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus())) {
                 continue;
             }
-            String date = j.item.getPublishTime() == null ? "-" : j.item.getPublishTime().toString();
+            String date = publishDayLabel(j.item.getPublishTime());
             String key = date + "\0" + nz(j.placement.getTopicName()) + "\0"
                     + nz(j.placement.getPublisherName()) + "\0" + nz(j.item.getPlatformName()) + "\0*";
             bag.computeIfAbsent(key, k -> new int[2]);
@@ -1905,7 +1922,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             }
         }
         for (CiteJoin c : data.cites) {
-            String date = c.item.getPublishTime() == null ? "-" : c.item.getPublishTime().toString();
+            String date = publishDayLabel(c.item.getPublishTime());
             String key = date + "\0" + nz(c.placement.getTopicName()) + "\0"
                     + nz(c.placement.getPublisherName()) + "\0" + nz(c.item.getPlatformName())
                     + "\0" + nz(c.cite.getAiPlatform());
@@ -1920,14 +1937,14 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus())) {
                 continue;
             }
-            String date = j.item.getPublishTime() == null ? "-" : j.item.getPublishTime().toString();
+            String date = publishDayLabel(j.item.getPublishTime());
             String base = date + "\0" + nz(j.placement.getTopicName()) + "\0"
                     + nz(j.placement.getPublisherName()) + "\0" + nz(j.item.getPlatformName());
             successByBase.computeIfAbsent(base, k -> new HashSet<>()).add(j.item.getId());
         }
         Map<String, Set<Long>> citedByAi = new HashMap<>();
         for (CiteJoin c : data.cites) {
-            String date = c.item.getPublishTime() == null ? "-" : c.item.getPublishTime().toString();
+            String date = publishDayLabel(c.item.getPublishTime());
             String key = date + "\0" + nz(c.placement.getTopicName()) + "\0"
                     + nz(c.placement.getPublisherName()) + "\0" + nz(c.item.getPlatformName())
                     + "\0" + nz(c.cite.getAiPlatform());
@@ -2114,7 +2131,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setPublishPlatform(j.item.getPlatformName());
         vo.setContentForm(j.form);
         vo.setPublishStatus(j.item.getPublishStatus());
-        vo.setPublishTime(j.item.getPublishTime() == null ? null : j.item.getPublishTime().toString());
+        vo.setPublishTime(formatPublishTime(j.item.getPublishTime()));
         vo.setPublishUrl(j.item.getPublishUrl());
         vo.setCiteCount(citeCount);
         return vo;
@@ -2230,7 +2247,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(j.item.getPublishStatus()) || j.item.getPublishTime() == null) {
                 continue;
             }
-            LocalDate d = j.item.getPublishTime();
+            LocalDate d = j.item.getPublishTime().toLocalDate();
             if (d.isBefore(start) || d.isAfter(end)) {
                 continue;
             }
@@ -2266,7 +2283,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             if (c.item.getPublishTime() == null) {
                 continue;
             }
-            LocalDate d = c.item.getPublishTime();
+            LocalDate d = c.item.getPublishTime().toLocalDate();
             LocalDate[] bounds = "WEEK".equals(periodType) ? weekBounds(d) : monthBounds(d);
             if (!bounds[1].isBefore(today)) {
                 continue;

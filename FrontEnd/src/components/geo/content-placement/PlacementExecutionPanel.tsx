@@ -1,9 +1,12 @@
 import { memo, useEffect, useState } from 'react';
 import type { ProColumnType } from '@ant-design/pro-components';
 import { App, Button, Drawer, Modal, Space, Table, Tag } from 'antd';
+import dayjs from 'dayjs';
 import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
+import GeoScreenshot from '@/components/geo/GeoScreenshot';
+import { CiteScreenshotUpload } from '@/components/geo/CiteScreenshotUpload';
 import {
   createGeoContentPlacementCiteApi,
   createGeoContentPlacementItemApi,
@@ -153,7 +156,13 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
       formItemProps: { rules: [{ required: true, message: '请选择状态' }] },
     },
     { title: '投放链接', dataIndex: 'publishUrl' },
-    { title: '发布时间', dataIndex: 'publishTime', valueType: 'date' },
+    {
+      title: '发布时间',
+      dataIndex: 'publishTime',
+      valueType: 'dateTime',
+      fieldProps: { format: 'YYYY-MM-DD HH:mm:ss' },
+      formItemProps: { rules: [{ required: true, message: '请选择发布时间' }] },
+    },
     { title: '备注', dataIndex: 'remark', valueType: 'textarea' },
   ];
 
@@ -173,7 +182,44 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
       },
       formItemProps: { rules: [{ required: true, message: '请选择AI平台' }] },
     },
-    { title: '引用链接', dataIndex: 'citeUrl' },
+    {
+      title: '引用链接',
+      dataIndex: 'citeUrl',
+      dependencies: ['screenshotUrl'],
+      formItemProps: {
+        extra: '与截图二选一，至少填一项',
+        rules: [
+          ({ getFieldValue }: { getFieldValue: (name: string) => unknown }) => ({
+            validator(_: unknown, value: unknown) {
+              if (String(value ?? '').trim() || String(getFieldValue('screenshotUrl') ?? '').trim()) {
+                return Promise.resolve();
+              }
+              return Promise.reject(new Error('请填写引用链接或上传截图'));
+            },
+          }),
+        ],
+      },
+    },
+    {
+      title: '截图',
+      dataIndex: 'screenshotUrl',
+      colProps: { span: 24 },
+      dependencies: ['citeUrl'],
+      formItemProps: {
+        extra: '与引用链接二选一，至少填一项',
+        rules: [
+          ({ getFieldValue }: { getFieldValue: (name: string) => unknown }) => ({
+            validator(_: unknown, value: unknown) {
+              if (String(value ?? '').trim() || String(getFieldValue('citeUrl') ?? '').trim()) {
+                return Promise.resolve();
+              }
+              return Promise.reject(new Error('请填写引用链接或上传截图'));
+            },
+          }),
+        ],
+      },
+      formItemRender: () => <CiteScreenshotUpload />,
+    },
     { title: '备注', dataIndex: 'remark', valueType: 'textarea' },
   ];
 
@@ -181,7 +227,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
     <>
       <Drawer
         title={placement?.targetQuestion || '发布详情'}
-        width={960}
+        width='70%'
         open={open}
         onClose={onClose}
         destroyOnClose
@@ -329,7 +375,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
             {
               title: '发布时间',
               dataIndex: 'publishTime',
-              width: 110,
+              width: 170,
               render: (v?: string) => v || '-',
             },
             {
@@ -377,7 +423,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
             contentForm: values.contentForm || '图文',
             publishStatus: values.publishStatus,
             publishUrl: values.publishUrl,
-            publishTime: values.publishTime,
+            publishTime: values.publishTime ? dayjs(values.publishTime).format('YYYY-MM-DD HH:mm:ss') : undefined,
             remark: values.remark,
           };
           if (editingItem) {
@@ -477,6 +523,17 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
                 />
               ),
             },
+            {
+              title: '截图',
+              dataIndex: 'screenshotUrl',
+              width: 80,
+              render: (v?: string) => (
+                <GeoScreenshot
+                  src={v}
+                  trigger='link'
+                />
+              ),
+            },
           ]}
         />
       </Modal>
@@ -496,6 +553,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
             askQuestion: values.askQuestion,
             aiPlatform: values.aiPlatform,
             citeUrl: values.citeUrl,
+            screenshotUrl: values.screenshotUrl,
             remark: values.remark,
           };
           if (editingCite) {

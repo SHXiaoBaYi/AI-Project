@@ -58,6 +58,8 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureDailyUniqueKeyWithTermType(connection);
             ensureGeoMenuRestructure(connection);
             ensurePublishedArticleMenu(connection);
+            ensureCiteScreenshotColumn(connection);
+            ensureItemPublishTimeDateTime(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -761,6 +763,43 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         log.info("已同步文章列表菜单 menu_id=170 path=geo/article");
     }
 
+    private void ensureCiteScreenshotColumn(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement_cite")) {
+            return;
+        }
+        if (columnExists(connection, "geo_content_placement_cite", "screenshot_url")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    ALTER TABLE geo_content_placement_cite
+                      ADD COLUMN screenshot_url VARCHAR(512) NULL COMMENT '引用截图'
+                      AFTER cite_url
+                    """);
+        }
+        log.info("已为 geo_content_placement_cite 增加 screenshot_url");
+    }
+
+    private void ensureItemPublishTimeDateTime(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement_item")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_content_placement_item", "publish_time")) {
+            return;
+        }
+        String type = columnDataType(connection, "geo_content_placement_item", "publish_time");
+        if (type != null && "datetime".equalsIgnoreCase(type)) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    ALTER TABLE geo_content_placement_item
+                      MODIFY COLUMN publish_time DATETIME NULL COMMENT '发布时间'
+                    """);
+        }
+        log.info("已将 geo_content_placement_item.publish_time 调整为 DATETIME");
+    }
+
     private boolean tableExists(Connection connection, String table) throws Exception {
         try (Statement statement = connection.createStatement();
              ResultSet rs = statement.executeQuery("""
@@ -783,6 +822,19 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                        AND INDEX_NAME = '%s'
                      """.formatted(table, indexName))) {
             return rs.next() && rs.getInt("cnt") > 0;
+        }
+    }
+
+    private String columnDataType(Connection connection, String table, String column) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("""
+                     SELECT DATA_TYPE
+                     FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = '%s'
+                       AND COLUMN_NAME = '%s'
+                     """.formatted(table, column))) {
+            return rs.next() ? rs.getString(1) : null;
         }
     }
 

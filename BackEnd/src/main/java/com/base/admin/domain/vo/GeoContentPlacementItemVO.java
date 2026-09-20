@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @Schema(description = "内容投放-平台发布明细")
@@ -31,9 +31,9 @@ public class GeoContentPlacementItemVO {
     @Schema(description = "投放链接")
     private String publishUrl;
 
-    @Schema(description = "发布时间", example = "2026-09-03")
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate publishTime;
+    @Schema(description = "发布时间", example = "2026-09-03 14:30:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime publishTime;
 
     @Schema(description = "该平台关联引用条数", example = "2")
     private Integer citeCount;

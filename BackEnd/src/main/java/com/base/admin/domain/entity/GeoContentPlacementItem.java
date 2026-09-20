@@ -9,7 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -39,9 +39,9 @@ public class GeoContentPlacementItem extends BaseEntity {
     @Schema(description = "投放链接")
     private String publishUrl;
 
-    @Schema(description = "发布时间", example = "2026-09-03")
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate publishTime;
+    @Schema(description = "发布时间", example = "2026-09-03 14:30:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime publishTime;
 
     @Schema(description = "排序", example = "0")
     private Integer sortOrder;

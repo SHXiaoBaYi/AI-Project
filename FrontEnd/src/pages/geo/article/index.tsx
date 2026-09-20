@@ -7,6 +7,8 @@ import BaseModalForm from '@/components/BaseModalForm/index';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
+import GeoScreenshot from '@/components/geo/GeoScreenshot';
+import { CiteScreenshotUpload } from '@/components/geo/CiteScreenshotUpload';
 import { STATUS_COLOR } from '@/components/geo/content-placement/constants';
 import {
   createGeoContentPlacementCiteApi,
@@ -90,6 +92,7 @@ const ArticlePage = memo(function ArticlePage() {
         askQuestion: editingCite.askQuestion,
         aiPlatform: editingCite.aiPlatform,
         citeUrl: editingCite.citeUrl,
+        screenshotUrl: editingCite.screenshotUrl,
         remark: editingCite.remark,
       });
       return;
@@ -98,6 +101,7 @@ const ArticlePage = memo(function ArticlePage() {
       askQuestion: citeArticle?.targetQuestion,
       aiPlatform: undefined,
       citeUrl: undefined,
+      screenshotUrl: undefined,
       remark: undefined,
     });
   }, [citeArticle, citeForm, citeFormOpen, editingCite]);
@@ -308,8 +312,7 @@ const ArticlePage = memo(function ArticlePage() {
     {
       title: '发布时间',
       dataIndex: 'publishTime',
-      width: 120,
-      valueType: 'date',
+      width: 170,
       search: false,
     },
     createTimeRangeColumn<GeoContentPlacementArticle>(),
@@ -424,9 +427,7 @@ const ArticlePage = memo(function ArticlePage() {
             contentForm: (values.contentForm as string) || '图文',
             publishStatus: values.publishStatus as string,
             publishUrl: values.publishUrl as string | undefined,
-            publishTime: values.publishTime
-              ? dayjs(values.publishTime as string | dayjs.Dayjs).format('YYYY-MM-DD')
-              : undefined,
+            publishTime: dayjs(values.publishTime as string | dayjs.Dayjs).format('YYYY-MM-DD HH:mm:ss'),
             remark: values.remark as string | undefined,
           };
           if (editing) {
@@ -509,8 +510,13 @@ const ArticlePage = memo(function ArticlePage() {
           <Form.Item
             name='publishTime'
             label='发布时间'
+            rules={[{ required: true, message: '请选择发布时间' }]}
           >
-            <DatePicker className='w-full' />
+            <DatePicker
+              className='w-full'
+              showTime
+              format='YYYY-MM-DD HH:mm:ss'
+            />
           </Form.Item>
           <Form.Item
             name='publishUrl'
@@ -614,6 +620,17 @@ const ArticlePage = memo(function ArticlePage() {
                 />
               ),
             },
+            {
+              title: '截图',
+              dataIndex: 'screenshotUrl',
+              width: 80,
+              render: (value?: string) => (
+                <GeoScreenshot
+                  src={value}
+                  trigger='link'
+                />
+              ),
+            },
             { title: '备注', dataIndex: 'remark', ellipsis: true, width: 140 },
           ]}
         />
@@ -635,9 +652,10 @@ const ArticlePage = memo(function ArticlePage() {
           const payload = {
             placementId: citeArticle.placementId,
             itemId: citeArticle.id,
-            askQuestion: formValues.askQuestion,
-            aiPlatform: formValues.aiPlatform,
+            askQuestion: formValues.askQuestion ?? '',
+            aiPlatform: formValues.aiPlatform ?? '',
             citeUrl: formValues.citeUrl,
+            screenshotUrl: formValues.screenshotUrl,
             remark: formValues.remark,
           };
           if (editingCite) {
@@ -677,12 +695,41 @@ const ArticlePage = memo(function ArticlePage() {
           <Form.Item
             name='citeUrl'
             label='引用链接'
-            rules={[{ required: true, message: '请填写引用链接' }]}
+            dependencies={['screenshotUrl']}
+            extra='与截图二选一，至少填一项'
+            rules={[
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (String(value ?? '').trim() || String(getFieldValue('screenshotUrl') ?? '').trim()) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('请填写引用链接或上传截图'));
+                },
+              }),
+            ]}
           >
             <Input
               allowClear
               placeholder='https://...'
             />
+          </Form.Item>
+          <Form.Item
+            name='screenshotUrl'
+            label='截图'
+            dependencies={['citeUrl']}
+            extra='与引用链接二选一，至少填一项'
+            rules={[
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (String(value ?? '').trim() || String(getFieldValue('citeUrl') ?? '').trim()) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('请填写引用链接或上传截图'));
+                },
+              }),
+            ]}
+          >
+            <CiteScreenshotUpload />
           </Form.Item>
           <Form.Item
             name='remark'

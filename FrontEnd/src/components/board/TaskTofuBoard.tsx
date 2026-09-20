@@ -337,7 +337,7 @@ function IndependentTaskTofuCard({
   ];
 
   const detailColumns: ColumnsType<BoardTaskPublishDetail> = [
-    { title: '发布时间', dataIndex: 'publishTime', width: 110 },
+    { title: '发布时间', dataIndex: 'publishTime', width: 170 },
     { title: '话题', dataIndex: 'topicName', width: 100 },
     { title: '目标问题', dataIndex: 'targetQuestion', ellipsis: true },
     { title: '标题', dataIndex: 'title', ellipsis: true },

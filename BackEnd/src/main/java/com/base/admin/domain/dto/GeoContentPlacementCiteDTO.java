@@ -27,8 +27,11 @@ public class GeoContentPlacementCiteDTO {
     @Schema(description = "AI平台名称", requiredMode = Schema.RequiredMode.REQUIRED, example = "豆包")
     private String aiPlatform;
 
-    @Schema(description = "引用链接")
+    @Schema(description = "引用链接，与截图至少填一项")
     private String citeUrl;
+
+    @Schema(description = "引用截图，与引用链接至少填一项")
+    private String screenshotUrl;
 
     @Schema(description = "排序", example = "0")
     private Integer sortOrder;

@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS geo_content_placement_item (
   content_form     VARCHAR(16)   NOT NULL DEFAULT '图文'  COMMENT '内容形态：图文/视频',
   publish_status   VARCHAR(32)   NOT NULL DEFAULT '未投放' COMMENT '投放状态：投放成功/审核未通过/未投放',
   publish_url      VARCHAR(1000) DEFAULT ''              COMMENT '投放链接',
-  publish_time     DATE          DEFAULT NULL            COMMENT '发布时间',
+  publish_time     DATETIME      DEFAULT NULL            COMMENT '发布时间',
   sort_order       INT           NOT NULL DEFAULT 0      COMMENT '排序',
   remark           VARCHAR(500)  DEFAULT ''              COMMENT '备注',
   create_by        VARCHAR(50)   DEFAULT ''              COMMENT '创建者',

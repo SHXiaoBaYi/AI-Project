@@ -500,6 +500,7 @@ export interface GeoContentPlacementCite {
   askQuestion?: string;
   aiPlatform?: string;
   citeUrl?: string;
+  screenshotUrl?: string;
   remark?: string;
 }
 
@@ -683,6 +684,7 @@ export interface GeoContentPlacementCiteDTO {
   askQuestion: string;
   aiPlatform: string;
   citeUrl?: string;
+  screenshotUrl?: string;
   sortOrder?: number;
   remark?: string;
 }

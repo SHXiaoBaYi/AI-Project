@@ -33,6 +33,9 @@ public class GeoContentPlacementCite extends BaseEntity {
     @Schema(description = "引用链接")
     private String citeUrl;
 
+    @Schema(description = "引用截图")
+    private String screenshotUrl;
+
     @Schema(description = "排序", example = "0")
     private Integer sortOrder;
 
