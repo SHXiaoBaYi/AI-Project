@@ -12,6 +12,7 @@ import {
   deleteHrRequisitionBatchApi,
   getHrDepartmentsApi,
   getHrRequisitionsApi,
+  getHrTargetOptionsApi,
   getHrUsersApi,
   saveHrRequisitionApi,
 } from '@/api/hr';
@@ -33,13 +34,6 @@ const PRIORITY = [
 const LOCATIONS = [
   { label: '上海', value: 'SH' },
   { label: '新疆', value: 'XJ' },
-];
-
-const TARGETS = [
-  { label: '紧急-尽快', value: '紧急-尽快' },
-  { label: '尽快', value: '尽快' },
-  { label: '7月-尽快', value: '7月-尽快' },
-  { label: '常规节奏持续招聘', value: '常规节奏持续招聘' },
 ];
 
 const ROUND_COUNT = [
@@ -161,6 +155,7 @@ const RequisitionPage = memo(function RequisitionPage() {
   const [depts, setDepts] = useState<{ value: number; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [interviewers, setInterviewers] = useState<{ value: number; label: string }[]>([]);
+  const [targets, setTargets] = useState<{ value: string; label: string }[]>([]);
 
   useEffect(() => {
     getHrDepartmentsApi().then((tree) => setDepts(flattenDepts(tree as unknown as Dept[])));
@@ -171,6 +166,7 @@ const RequisitionPage = memo(function RequisitionPage() {
       }));
     getHrUsersApi('owner').then((list) => setUsers(toOptions(list as Record<string, unknown>[])));
     getHrUsersApi('interviewer').then((list) => setInterviewers(toOptions(list as Record<string, unknown>[])));
+    getHrTargetOptionsApi().then((rows) => setTargets(rows.map((row) => ({ value: row.name, label: row.name }))));
   }, []);
 
   const columns: ProColumnType<Req>[] = useMemo(
@@ -240,7 +236,7 @@ const RequisitionPage = memo(function RequisitionPage() {
         dataIndex: 'targetText',
         valueType: 'select',
         width: 160,
-        fieldProps: { options: TARGETS, allowClear: true },
+        fieldProps: { options: targets, allowClear: true, showSearch: true, optionFilterProp: 'label' },
         formItemProps: { rules: [{ required: true, message: '请选择目标到岗' }] },
       },
       {
@@ -388,7 +384,7 @@ const RequisitionPage = memo(function RequisitionPage() {
         ),
       },
     ],
-    [depts, interviewers, message, users],
+    [depts, interviewers, message, targets, users],
   );
 
   return (

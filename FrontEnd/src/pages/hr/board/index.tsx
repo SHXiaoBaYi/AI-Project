@@ -15,6 +15,7 @@ import {
   getHrDepartmentsApi,
   getHrDrillApi,
   getHrMetricsApi,
+  getHrTargetOptionsApi,
   getHrUsersApi,
   saveHrViewApi,
   type HrBoard,
@@ -36,13 +37,6 @@ const PRIORITY = [
   { value: 1, label: '紧急' },
   { value: 2, label: '优先' },
   { value: 3, label: '常规' },
-];
-
-const TARGETS = [
-  { value: '紧急-尽快', label: '紧急-尽快' },
-  { value: '尽快', label: '尽快' },
-  { value: '7月-尽快', label: '7月-尽快' },
-  { value: '常规节奏持续招聘', label: '常规节奏持续招聘' },
 ];
 
 function pct(value?: number | null) {
@@ -124,6 +118,7 @@ export default function HrBoardPage() {
   const [channels, setChannels] = useState<{ value: string; label: string }[]>([]);
   const [depts, setDepts] = useState<{ value: number; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
+  const [targets, setTargets] = useState<{ value: string; label: string }[]>([]);
   const [drillOpen, setDrillOpen] = useState(false);
   const [drillTitle, setDrillTitle] = useState('');
   const [drillRows, setDrillRows] = useState<HrDrillRow[]>([]);
@@ -208,6 +203,9 @@ export default function HrBoardPage() {
           }),
         ),
       )
+      .catch(() => undefined);
+    getHrTargetOptionsApi()
+      .then((rows) => setTargets(rows.map((row) => ({ value: row.name, label: row.name }))))
       .catch(() => undefined);
   }, []);
 
@@ -302,7 +300,7 @@ export default function HrBoardPage() {
           <ProFormSelect
             name='targetText'
             label='目标到岗'
-            options={TARGETS}
+            options={targets}
           />
           <ProFormSelect
             name='channelCode'

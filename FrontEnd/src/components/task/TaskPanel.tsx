@@ -819,7 +819,9 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             <div>{completing.title}</div>
             {completing.bizTitle ? <div className='mt-1'>关联：{completing.bizTitle}</div> : null}
             {completing.requireProof ? (
-              <div className='mt-1 text-amber-600'>该类型需上传完成证明，附件将关联业务并带入后续子任务</div>
+              <div className='mt-1 text-amber-600'>
+                该类型需上传完成资料，可一次上传多份。附件将关联业务并带入后续子任务
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -839,7 +841,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
           </Form.Item>
           {completing?.requireProof ? (
             <Form.Item
-              label='完成证明（必填）'
+              label='完成资料（必填，可多份）'
               required
             >
               <Upload

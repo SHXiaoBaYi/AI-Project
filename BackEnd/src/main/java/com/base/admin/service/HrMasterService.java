@@ -7,6 +7,7 @@ import com.base.admin.domain.dto.HrDepartmentDTO;
 import com.base.admin.domain.dto.HrApplicationDTO;
 import com.base.admin.domain.dto.HrDingTalkBindDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
+import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.domain.dto.HrSchoolQueryDTO;
 import com.base.admin.domain.vo.HrSchoolVO;
 import com.base.admin.exception.BusinessException;
@@ -24,13 +25,10 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class HrMasterService {
-
-    private static final Set<String> TARGETS = Set.of("紧急-尽快", "尽快", "7月-尽快", "常规节奏持续招聘");
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -107,9 +105,14 @@ public class HrMasterService {
     @Transactional
     public void saveRequisition(HrRequisitionDTO dto) {
         int headcount = dto.getHeadcount() == null || dto.getHeadcount() < 1 ? 1 : dto.getHeadcount();
-        String target = dto.getTargetText() == null || dto.getTargetText().isBlank() ? "尽快" : dto.getTargetText().trim();
-        if (!TARGETS.contains(target)) {
-            throw new BusinessException("目标到岗只能是现有取值：紧急-尽快、尽快、7月-尽快、常规节奏持续招聘");
+        String target = dto.getTargetText() == null ? "" : dto.getTargetText().trim();
+        if (target.isEmpty()) {
+            throw new BusinessException("请选择目标到岗");
+        }
+        Integer targetOk = jdbc.queryForObject(
+                "SELECT COUNT(1) FROM hr_target_option WHERE name = ? AND is_active = 1", Integer.class, target);
+        if (targetOk == null || targetOk == 0) {
+            throw new BusinessException("目标到岗不在基础配置中，请先在「目标到岗」里维护");
         }
         if (dto.getPriority() != null && (dto.getPriority() < 1 || dto.getPriority() > 3)) {
             throw new BusinessException("优先级只能是紧急、优先或常规");
@@ -395,6 +398,52 @@ public class HrMasterService {
                 deleteApplication(id);
             }
         }
+    }
+
+    public List<Map<String, Object>> targetOptions() {
+        return jdbc.queryForList("""
+                SELECT id, name, sort_no FROM hr_target_option WHERE is_active = 1 ORDER BY sort_no, id
+                """);
+    }
+
+    @Transactional
+    public void saveTarget(HrTargetOptionDTO dto) {
+        String name = dto.getName().trim();
+        int sort = dto.getSortNo() == null ? 0 : dto.getSortNo();
+        Integer dup = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_target_option WHERE name = ? AND is_active = 1 AND id <> ?
+                """, Integer.class, name, dto.getId() == null ? 0L : dto.getId());
+        if (dup != null && dup > 0) {
+            throw new BusinessException("目标到岗已存在");
+        }
+        if (dto.getId() == null) {
+            jdbc.update("""
+                    INSERT INTO hr_target_option (name, sort_no, create_by, is_active) VALUES (?, ?, ?, 1)
+                    """, name, sort, SecurityUtils.getCurrentUsername());
+            return;
+        }
+        int updated = jdbc.update("""
+                UPDATE hr_target_option SET name = ?, sort_no = ?, update_by = ? WHERE id = ? AND is_active = 1
+                """, name, sort, SecurityUtils.getCurrentUsername(), dto.getId());
+        if (updated == 0) {
+            throw new BusinessException("目标到岗不存在");
+        }
+    }
+
+    @Transactional
+    public void deleteTarget(Long id) {
+        String name = jdbc.query("SELECT name FROM hr_target_option WHERE id = ? AND is_active = 1",
+                rs -> rs.next() ? rs.getString(1) : null, id);
+        if (name == null) {
+            throw new BusinessException("目标到岗不存在");
+        }
+        Integer used = jdbc.queryForObject(
+                "SELECT COUNT(1) FROM hr_requisition WHERE is_active = 1 AND TRIM(target_text) = ?", Integer.class, name);
+        if (used != null && used > 0) {
+            throw new BusinessException("已有招聘需求使用该目标到岗，不能删除");
+        }
+        jdbc.update("UPDATE hr_target_option SET is_active = 0, update_by = ? WHERE id = ?",
+                SecurityUtils.getCurrentUsername(), id);
     }
 
     public List<Map<String, Object>> stages() {

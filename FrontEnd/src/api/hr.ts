@@ -160,6 +160,18 @@ export function saveHrDepartmentApi(data: {
   return data.id ? request.put('/hr/department', data) : request.post('/hr/department', data);
 }
 
+export function getHrTargetOptionsApi() {
+  return request.get<unknown, { id: number; name: string; sort_no?: number; sortNo?: number }[]>('/hr/target/options');
+}
+
+export function saveHrTargetApi(data: { id?: number; name: string; sortNo?: number }) {
+  return data.id ? request.put('/hr/target', data) : request.post('/hr/target', data);
+}
+
+export function deleteHrTargetApi(id: number) {
+  return request.delete(`/hr/target/${id}`);
+}
+
 export function getHrUsersApi(scope?: 'owner' | 'interviewer') {
   return request.get<unknown, { userId: number; username: string; nickname: string; dingtalkBound: number }[]>(
     '/hr/user/options',

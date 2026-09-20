@@ -21,6 +21,7 @@ import com.base.admin.domain.dto.HrInviteCreateDTO;
 import com.base.admin.domain.dto.HrInviteTransferDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrRequisitionStatusDTO;
+import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.service.HrInterviewRecordService;
 import com.base.admin.service.HrInviteService;
 import com.base.admin.service.HrMasterService;
@@ -273,6 +274,41 @@ public class HrMasterController {
     @RequiresPermission({"hr:invite:add", "hr:dept:edit", "hr:board:view", "hr:requisition:list"})
     public Result<List<Map<String, Object>>> users(@RequestParam(required = false) String scope) {
         return Result.ok(masterService.users(scope));
+    }
+
+    @Operation(summary = "目标到岗选项")
+    @GetMapping("/target/options")
+    @RequiresPermission({"hr:target:list", "hr:requisition:list", "hr:board:view"})
+    public Result<List<Map<String, Object>>> targetOptions() {
+        return Result.ok(masterService.targetOptions());
+    }
+
+    @Operation(summary = "新增目标到岗")
+    @PostMapping("/target")
+    @RequiresPermission("hr:target:edit")
+    @Log(title = "目标到岗", businessType = 1)
+    public Result<Void> createTarget(@Valid @RequestBody HrTargetOptionDTO dto) {
+        dto.setId(null);
+        masterService.saveTarget(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "修改目标到岗")
+    @PutMapping("/target")
+    @RequiresPermission("hr:target:edit")
+    @Log(title = "目标到岗", businessType = 2)
+    public Result<Void> updateTarget(@Valid @RequestBody HrTargetOptionDTO dto) {
+        masterService.saveTarget(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "删除目标到岗")
+    @DeleteMapping("/target/{id}")
+    @RequiresPermission("hr:target:edit")
+    @Log(title = "目标到岗", businessType = 3)
+    public Result<Void> deleteTarget(@PathVariable Long id) {
+        masterService.deleteTarget(id);
+        return Result.ok();
     }
 
     @Operation(summary = "阶段")

@@ -27,6 +27,7 @@ import com.base.admin.mapper.SysTaskAssigneeMapper;
 import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
+import com.base.admin.service.HrHirePipelineService;
 import com.base.admin.service.SysTaskService;
 import com.base.admin.service.SysTaskTypeService;
 import com.base.admin.service.taskbiz.TaskBizFieldWriteDispatcher;
@@ -65,6 +66,7 @@ public class SysTaskServiceImpl implements SysTaskService {
     private final GeoContentPlacementMapper placementMapper;
     private final SysTaskTypeService taskTypeService;
     private final TaskBizFieldWriteDispatcher bizFieldWriteDispatcher;
+    private final ObjectProvider<HrHirePipelineService> hirePipeline;
     /** 避免自调用导致 @Transactional 失效（批量分配需逐条独立提交并回写业务） */
     private final ObjectProvider<SysTaskService> selfProvider;
 
@@ -332,6 +334,10 @@ public class SysTaskServiceImpl implements SysTaskService {
                     .eq(SysTaskAssignee::getTaskId, id)
                     .eq(SysTaskAssignee::getUserId, uid)
                     .set(SysTaskAssignee::getDone, 1));
+        }
+        HrHirePipelineService pipeline = hirePipeline.getIfAvailable();
+        if (pipeline != null) {
+            pipeline.afterTaskCompleted(task);
         }
     }
 

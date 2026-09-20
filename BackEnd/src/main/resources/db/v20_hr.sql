@@ -437,8 +437,14 @@ INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_
 ('FIRST_FAIL', '一面未通过', 70, 0, 1, 1, 1),
 ('SECOND_ROUND', '复试', 80, 1, 1, 0, 1),
 ('FINAL', '终面通过', 90, 1, 0, 0, 1),
-('OFFER_SENT', '发放Offer', 100, 1, 0, 0, 1),
-('OFFER_ACCEPTED', 'Offer接受', 110, 1, 0, 0, 1),
+('SALARY', '薪资沟通中', 91, 1, 1, 0, 1),
+('BG_COLLECT', '背调资料收集中', 92, 1, 1, 0, 1),
+('BG_CHECK', '背调中', 93, 1, 1, 0, 1),
+('MEDICAL', '体检中', 94, 1, 1, 0, 1),
+('OFFER_PENDING', '待发offer', 95, 1, 1, 0, 1),
+('PENDING_ONBOARD', '待入职', 96, 1, 1, 0, 1),
+('OFFER_SENT', '发放Offer', 100, 0, 0, 0, 1),
+('OFFER_ACCEPTED', 'Offer接受', 110, 0, 0, 0, 1),
 ('CANDIDATE_REJECT', '候选人拒绝', 120, 0, 1, 1, 1),
 ('ONBOARDED', '入职', 130, 1, 1, 1, 1)
 ON DUPLICATE KEY UPDATE stage_name = VALUES(stage_name), sort_no = VALUES(sort_no),
@@ -543,3 +549,23 @@ AND NOT EXISTS (
   SELECT 1 FROM hr_interview_record rec
   WHERE rec.application_id = ir.application_id AND rec.round_no = ir.round_no AND rec.interviewer_user_id = ir.interviewer_user_id
 );
+
+CREATE TABLE IF NOT EXISTS hr_target_option (
+  id           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+  name         VARCHAR(64)  NOT NULL                COMMENT '目标到岗',
+  sort_no      INT          NOT NULL DEFAULT 0      COMMENT '排序',
+  create_by    VARCHAR(50)  DEFAULT ''              COMMENT '创建者',
+  create_time  DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_by    VARCHAR(50)  DEFAULT ''              COMMENT '更新者',
+  update_time  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  is_active    TINYINT      NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_hr_target_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='目标到岗选项';
+
+INSERT INTO hr_target_option (name, sort_no, create_by, is_active) VALUES
+('紧急-尽快', 1, 'hr-seed', 1),
+('尽快', 2, 'hr-seed', 1),
+('7月-尽快', 3, 'hr-seed', 1),
+('常规节奏持续招聘', 4, 'hr-seed', 1)
+ON DUPLICATE KEY UPDATE is_active = 1;

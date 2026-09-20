@@ -118,6 +118,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
         jdbc.update("UPDATE sys_menu SET is_active = 0 WHERE menu_id IN (228, 229)");
         menu(218, "基础数据", 200, 6, "hr/base", "", "M", "", "DatabaseOutlined", "招聘字典");
         menu(219, "院校信息", 218, 1, "hr/school", "hr/school/index", "C", "hr:school:list", "ReadOutlined", "国内院校与QS");
+        menu(230, "目标到岗", 218, 2, "hr/target", "hr/target/index", "C", "hr:target:list", "FlagOutlined", "招聘需求可选的目标到岗");
+        menu(231, "目标到岗编辑", 230, 1, "", "", "F", "hr:target:edit", "#", "");
         menu(205, "发起邀约", 203, 1, "", "", "F", "hr:invite:add", "#", "");
         menu(206, "取消邀约", 203, 2, "", "", "F", "hr:invite:cancel", "#", "");
         menu(207, "看板导出", 201, 1, "", "", "F", "hr:board:export", "#", "");
@@ -143,8 +145,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231);
         grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225);
         grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221);
         grant(plain, 200, 201, 209);
@@ -205,7 +207,28 @@ public class HrSchemaMigrator implements ApplicationRunner {
                     SET require_proof = 0, biz_type = '', assign_field = '', spawn_task_type = ''
                     WHERE type_name = '待创建面试日程'
                     """);
+            seedProofTaskType(40, "薪资沟通", "终面通过后下发，完成时必须上传资料，可多份");
+            seedProofTaskType(41, "背调资料收集", "终面通过后下发，完成时必须上传资料，可多份");
+            seedProofTaskType(42, "背调", "终面通过后下发，完成时必须上传资料，可多份");
+            seedProofTaskType(43, "体检", "终面通过后下发，完成时必须上传资料，可多份");
+            seedProofTaskType(44, "待发offer", "终面通过后下发，完成时必须上传资料，可多份");
+            seedProofTaskType(45, "待入职", "终面通过后下发，完成时必须上传资料，可多份");
+            seedProofTaskType(46, "办理候选人入职", "入职前任务全部完成后生成，完成时必须上传资料，可多份");
         }
+    }
+
+    private void seedProofTaskType(int sort, String name, String remark) {
+        jdbc.update("""
+                INSERT INTO sys_task_type (type_name, sort_order, remark, require_proof, biz_type, assign_field, spawn_task_type, is_active)
+                SELECT ?, ?, ?, 1, '', '', '', 1
+                FROM DUAL
+                WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = ?)
+                """, name, sort, remark, name);
+        jdbc.update("""
+                UPDATE sys_task_type
+                SET require_proof = 1, sort_order = ?, remark = ?, biz_type = '', assign_field = '', spawn_task_type = '', is_active = 1
+                WHERE type_name = ?
+                """, sort, remark, name);
     }
 
     private void seedAliases() {

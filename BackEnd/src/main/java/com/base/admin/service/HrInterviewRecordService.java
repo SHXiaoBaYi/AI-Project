@@ -24,6 +24,7 @@ public class HrInterviewRecordService {
 
     private final JdbcTemplate jdbc;
     private final SysTaskService taskService;
+    private final HrHirePipelineService hirePipeline;
 
     public List<Map<String, Object>> list(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
@@ -74,7 +75,7 @@ public class HrInterviewRecordService {
             }
             ids = java.util.List.of(dto.getInterviewerUserId());
         }
-        boolean tasked = false;
+        String outcome = "NONE";
         for (int i = 0; i < ids.size(); i++) {
             Integer userOk = jdbc.queryForObject(
                     "SELECT COUNT(1) FROM sys_user WHERE user_id = ? AND is_active = 1 AND status = 0",
@@ -94,14 +95,22 @@ public class HrInterviewRecordService {
             one.setConclusion(dto.getConclusion());
             one.setComment(dto.getComment());
             one.setInterviewedAt(dto.getInterviewedAt());
-            tasked = saveOne(one) || tasked;
+            String saved = saveOne(one);
+            if ("HIRE".equals(saved)) {
+                outcome = "HIRE";
+            } else if ("NEXT".equals(saved) && !"HIRE".equals(outcome)) {
+                outcome = "NEXT";
+            }
         }
-        if (ids.size() == 1) {
-            return tasked ? nextRoundMessage() : "已保存";
+        String prefix = ids.size() == 1 ? "" : "已为 " + ids.size() + " 名面试官保存面试记录。";
+        if ("HIRE".equals(outcome)) {
+            return prefix + "终面已通过，已给招聘需求负责人创建薪资沟通、背调资料收集、背调、体检、待发offer、待入职任务。"
+                    + "每项都要上传完成资料，可上传多份。全部完成后才会生成「办理候选人入职」任务。";
         }
-        return tasked
-                ? "已为 " + ids.size() + " 名面试官保存面试记录。" + nextRoundMessage()
-                : "已为 " + ids.size() + " 名面试官保存面试记录";
+        if ("NEXT".equals(outcome)) {
+            return (prefix.isEmpty() ? "" : prefix) + nextRoundMessage();
+        }
+        return prefix.isEmpty() ? "已保存" : prefix.substring(0, prefix.length() - 1);
     }
 
     private static String nextRoundMessage() {
@@ -126,7 +135,7 @@ public class HrInterviewRecordService {
                 """, rs -> rs.next() ? rs.getLong(1) : null, applicationId, roundNo, interviewerUserId);
     }
 
-    private boolean saveOne(HrInterviewRecordDTO dto) {
+    private String saveOne(HrInterviewRecordDTO dto) {
         String conclusion = dto.getConclusion() == null ? "" : dto.getConclusion().trim().toUpperCase();
         if (!CONCLUSIONS.contains(conclusion)) {
             throw new BusinessException("面试结论只能是通过、未通过或待定");
@@ -159,7 +168,17 @@ public class HrInterviewRecordService {
                 throw new BusinessException("面试记录不存在");
             }
         }
-        return "PASS".equals(conclusion) && openNextRoundTask(requisitionId, dto.getApplicationId(), dto.getRoundNo());
+        if (!"PASS".equals(conclusion)) {
+            return "NONE";
+        }
+        if (openNextRoundTask(requisitionId, dto.getApplicationId(), dto.getRoundNo())) {
+            return "NEXT";
+        }
+        if (hirePipeline.isFinalRound(requisitionId, dto.getRoundNo())) {
+            hirePipeline.openAfterFinal(requisitionId, dto.getApplicationId());
+            return "HIRE";
+        }
+        return "NONE";
     }
 
     public void delete(Long id) {
