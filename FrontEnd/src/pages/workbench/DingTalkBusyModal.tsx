@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { App, DatePicker, Input, Modal, Select, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
   getDingTalkBusyUsersApi,
@@ -14,6 +15,20 @@ const STATUS_COLOR: Record<string, string> = {
   BUSY: 'error',
   TENTATIVE: 'warning',
 };
+
+type TimelineRow = {
+  key: string;
+  label: string;
+  byUser: Record<number, DingTalkBusySlot | undefined>;
+};
+
+function slotLabel(start: string, end: string) {
+  const from = dayjs(start);
+  const to = dayjs(end);
+  if (!from.isValid() || !to.isValid()) return `${start}–${end}`;
+  if (from.isSame(to, 'day')) return `${from.format('MM-DD HH:mm')}–${to.format('HH:mm')}`;
+  return `${from.format('MM-DD HH:mm')}–${to.format('MM-DD HH:mm')}`;
+}
 
 type Props = {
   open: boolean;
@@ -60,6 +75,38 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
       .filter((user): user is DingTalkBusyUser => user != null);
   }, [keyword, result]);
 
+  const timeline = useMemo(() => {
+    const rows = new Map<string, TimelineRow>();
+    for (const user of filtered) {
+      for (const slot of user.slots ?? []) {
+        const key = `${slot.start}|${slot.end}`;
+        const row = rows.get(key) ?? { key, label: slotLabel(slot.start, slot.end), byUser: {} };
+        row.byUser[user.userId] = slot;
+        rows.set(key, row);
+      }
+    }
+    return [...rows.values()].sort((a, b) => a.key.localeCompare(b.key));
+  }, [filtered]);
+
+  const columns = useMemo<ColumnsType<TimelineRow>>(() => {
+    const people: ColumnsType<TimelineRow> = filtered.map((user) => ({
+      title: (
+        <div className='flex min-w-24 flex-col gap-1'>
+          <span>{user.nickname || user.username}</span>
+          {user.error ? <Tag color='error'>{user.error}</Tag> : null}
+        </div>
+      ),
+      key: String(user.userId),
+      width: 140,
+      render: (_, row) => {
+        const slot = row.byUser[user.userId];
+        if (!slot) return <span className='text-neutral-300'>—</span>;
+        return <Tag color={STATUS_COLOR[slot.status] || 'default'}>{slot.statusLabel}</Tag>;
+      },
+    }));
+    return [{ title: '时间', dataIndex: 'label', width: 168, fixed: 'left' }, ...people];
+  }, [filtered]);
+
   const handleQuery = async () => {
     if (userIds.length === 0) {
       message.warning('请选择用户');
@@ -99,7 +146,8 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
       }}
     >
       <div className='mb-3 text-sm text-neutral-500'>
-        从系统用户里选择。已绑定钉钉的才能查出闲忙；未绑定的会标出来，需要先在用户管理里绑定。一次最多 20 人。
+        从系统用户里选择。已绑定钉钉的才能查出闲忙；未绑定的会标出来，需要先在用户管理里绑定。一次最多 20
+        人。结果按半小时一段对齐展示，一段里只要有忙就整段算忙。
       </div>
       <div className='mb-3 grid gap-3 md:grid-cols-2'>
         <Select
@@ -127,7 +175,7 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
           notFoundContent={loadingUsers ? '加载中' : '没有系统用户'}
         />
         <DatePicker.RangePicker
-          showTime
+          showTime={{ minuteStep: 30, format: 'HH:mm' }}
           className='w-full'
           format='YYYY-MM-DD HH:mm'
           value={range}
@@ -147,37 +195,31 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
           />
           {filtered.length === 0 ? (
             <div className='py-8 text-center text-sm text-neutral-400'>没有匹配的记录</div>
-          ) : (
-            <div className='flex max-h-[420px] flex-col gap-4 overflow-auto'>
+          ) : timeline.length === 0 ? (
+            <div className='flex flex-col gap-2'>
               {filtered.map((user) => (
-                <div key={user.userId}>
-                  <div className='mb-2 flex flex-wrap items-center gap-2'>
-                    <span className='text-sm font-medium text-neutral-800'>{user.nickname || user.username}</span>
-                    {user.username ? <span className='text-xs text-neutral-400'>{user.username}</span> : null}
-                    {user.error ? <Tag color='error'>{user.error}</Tag> : null}
-                  </div>
-                  <Table<DingTalkBusySlot>
-                    size='small'
-                    rowKey={(slot) => `${user.userId}-${slot.status}-${slot.start}-${slot.end}`}
-                    pagination={false}
-                    dataSource={user.slots ?? []}
-                    locale={{ emptyText: user.error ? '未取到闲忙' : '该时段没有日程片段' }}
-                    columns={[
-                      { title: '开始', dataIndex: 'start', width: 180 },
-                      { title: '结束', dataIndex: 'end', width: 180 },
-                      {
-                        title: '状态',
-                        dataIndex: 'statusLabel',
-                        width: 100,
-                        render: (label: string, slot) => (
-                          <Tag color={STATUS_COLOR[slot.status] || 'default'}>{label}</Tag>
-                        ),
-                      },
-                    ]}
-                  />
+                <div
+                  key={user.userId}
+                  className='flex flex-wrap items-center gap-2 text-sm'
+                >
+                  <span className='font-medium text-neutral-800'>{user.nickname || user.username}</span>
+                  {user.error ? (
+                    <Tag color='error'>{user.error}</Tag>
+                  ) : (
+                    <span className='text-neutral-400'>没有可展示的时间段</span>
+                  )}
                 </div>
               ))}
             </div>
+          ) : (
+            <Table<TimelineRow>
+              size='small'
+              rowKey='key'
+              pagination={false}
+              scroll={{ x: 168 + filtered.length * 140, y: 420 }}
+              dataSource={timeline}
+              columns={columns}
+            />
           )}
         </>
       ) : null}

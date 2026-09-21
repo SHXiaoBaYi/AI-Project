@@ -13,7 +13,6 @@ import org.springframework.util.StringUtils;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +22,7 @@ import java.util.Map;
 public class DingTalkBusyService {
 
     private static final Duration MAX_RANGE = Duration.ofDays(31);
+    private static final int SLOT_MINUTES = 30;
 
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalk;
@@ -123,43 +123,49 @@ public class DingTalkBusyService {
                 }
             }
         }
-        clipped.sort(Comparator.comparing(DingTalkCalendarClient.BusyItem::start));
         List<DingTalkBusySlotVO> slots = new ArrayList<>();
         LocalDateTime cursor = rangeStart;
-        for (DingTalkCalendarClient.BusyItem item : merge(clipped)) {
-            if (cursor.isBefore(item.start())) {
-                slots.add(slot("FREE", cursor, item.start()));
+        while (cursor.isBefore(rangeEnd)) {
+            LocalDateTime boundary = nextHalfHour(cursor);
+            LocalDateTime slotEnd = boundary.isAfter(rangeEnd) ? rangeEnd : boundary;
+            if (!cursor.isBefore(slotEnd)) {
+                break;
             }
-            if (cursor.isBefore(item.end())) {
-                cursor = item.end();
-            }
+            slots.add(slot(statusOf(cursor, slotEnd, clipped), cursor, slotEnd));
+            cursor = slotEnd;
         }
-        if (cursor.isBefore(rangeEnd)) {
-            slots.add(slot("FREE", cursor, rangeEnd));
-        }
-        for (DingTalkCalendarClient.BusyItem item : clipped) {
-            slots.add(slot(normalizeStatus(item.status()), item.start(), item.end()));
-        }
-        slots.sort(Comparator.comparing(DingTalkBusySlotVO::getStart).thenComparing(DingTalkBusySlotVO::getStatus));
         return slots;
     }
 
-    private static List<DingTalkCalendarClient.BusyItem> merge(List<DingTalkCalendarClient.BusyItem> items) {
-        List<DingTalkCalendarClient.BusyItem> merged = new ArrayList<>();
+    /** 对齐到下一个整点或半点。已经落在整点/半点上时，向后推 30 分钟。 */
+    private static LocalDateTime nextHalfHour(LocalDateTime time) {
+        LocalDateTime truncated = time.withSecond(0).withNano(0);
+        boolean exact = truncated.equals(time) && truncated.getMinute() % SLOT_MINUTES == 0;
+        if (exact) {
+            return truncated.plusMinutes(SLOT_MINUTES);
+        }
+        int minute = truncated.getMinute();
+        int remainder = minute % SLOT_MINUTES;
+        if (remainder == 0) {
+            return truncated.plusMinutes(SLOT_MINUTES);
+        }
+        return truncated.plusMinutes(SLOT_MINUTES - remainder);
+    }
+
+    /** 这一段里只要有忙，整段算忙；否则有暂定算暂定；都没有算闲。 */
+    private static String statusOf(LocalDateTime start, LocalDateTime end, List<DingTalkCalendarClient.BusyItem> items) {
+        boolean tentative = false;
         for (DingTalkCalendarClient.BusyItem item : items) {
-            if (merged.isEmpty()) {
-                merged.add(item);
+            if (!item.start().isBefore(end) || !item.end().isAfter(start)) {
                 continue;
             }
-            DingTalkCalendarClient.BusyItem last = merged.get(merged.size() - 1);
-            if (!item.start().isAfter(last.end())) {
-                LocalDateTime end = item.end().isAfter(last.end()) ? item.end() : last.end();
-                merged.set(merged.size() - 1, new DingTalkCalendarClient.BusyItem(last.status(), last.start(), end));
+            if ("TENTATIVE".equals(normalizeStatus(item.status()))) {
+                tentative = true;
             } else {
-                merged.add(item);
+                return "BUSY";
             }
         }
-        return merged;
+        return tentative ? "TENTATIVE" : "FREE";
     }
 
     private static DingTalkBusySlotVO slot(String status, LocalDateTime start, LocalDateTime end) {

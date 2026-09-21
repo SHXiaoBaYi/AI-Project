@@ -7,7 +7,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@Schema(description = "一段时间的闲忙状态")
+@Schema(description = "半小时一段的闲忙状态；查询范围首尾不足半小时时按实际起止")
 public class DingTalkBusySlotVO {
 
     @Schema(description = "状态：FREE 闲 / BUSY 忙 / TENTATIVE 暂定", example = "BUSY")

@@ -22,6 +22,6 @@ public class DingTalkBusyUserVO {
     @Schema(description = "钉钉返回的错误，为空表示查询成功")
     private String error;
 
-    @Schema(description = "按开始时间排序的闲忙时间段")
+    @Schema(description = "按开始时间排序的闲忙时间段，每段最多 30 分钟")
     private List<DingTalkBusySlotVO> slots = new ArrayList<>();
 }

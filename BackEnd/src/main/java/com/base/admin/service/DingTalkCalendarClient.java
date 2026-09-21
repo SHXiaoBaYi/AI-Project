@@ -104,20 +104,17 @@ public class DingTalkCalendarClient {
 
     public DingIdentity resolveByMobile(String mobile) {
         DingTalkAppService.Credential credential = credential();
-        if (credential == null || !StringUtils.hasText(mobile)) {
+        String normalized = normalizeMobile(mobile);
+        if (credential == null || !StringUtils.hasText(normalized)) {
             return null;
         }
         try {
             String token = legacyToken(credential);
-            ObjectNode body = objectMapper.createObjectNode();
-            body.put("mobile", mobile.trim());
-            // 专属账号场景需显式开启，否则按手机号可能查不到 userid/unionId
-            body.put("support_exclusive_account_search", true);
-            JsonNode byMobile = postJson("https://oapi.dingtalk.com/topapi/v2/user/getbymobile?access_token=" + encode(token), body);
-            assertDingOk(byMobile, "按手机号查询钉钉用户失败");
-            String userId = byMobile.path("result").path("userid").asText("");
+            JsonNode byMobile = getJson("https://oapi.dingtalk.com/user/get_by_mobile?access_token="
+                    + encode(token) + "&mobile=" + encode(normalized));
+            String userId = byMobile.path("userid").asText("");
             if (!StringUtils.hasText(userId)) {
-                return null;
+                throw mobileNotFound(byMobile, normalized);
             }
             ObjectNode get = objectMapper.createObjectNode();
             get.put("userid", userId);
@@ -269,6 +266,41 @@ public class DingTalkCalendarClient {
         return token;
     }
 
+    /** 钉钉通讯录手机号：去掉空格、横线、+86，只留 11 位大陆号码。 */
+    static String normalizeMobile(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        String digits = raw.replaceAll("\\D", "");
+        if (digits.startsWith("86") && digits.length() == 13) {
+            digits = digits.substring(2);
+        }
+        return digits;
+    }
+
+    private BusinessException mobileNotFound(JsonNode json, String mobile) {
+        int code = dingCode(json);
+        String message = json.path("errmsg").asText("");
+        if (code == 60121 || message.contains("找不到该用户") || message.contains("未找到该用户")) {
+            return new BusinessException("钉钉通讯录中找不到手机号「" + mobile
+                    + "」。请确认这是当前企业在职员工的钉钉手机号，企业账号也必须由本组织创建");
+        }
+        if (code != 0) {
+            return new BusinessException("按手机号查询钉钉用户失败" + (StringUtils.hasText(message) ? "：" + message : ""));
+        }
+        return new BusinessException("钉钉没有返回手机号「" + mobile + "」对应的用户");
+    }
+
+    private JsonNode getJson(String url) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return objectMapper.readTree(response.body());
+    }
+
     private JsonNode postJson(String url, ObjectNode body) throws Exception {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -280,8 +312,23 @@ public class DingTalkCalendarClient {
         return objectMapper.readTree(response.body());
     }
 
+    private static int dingCode(JsonNode json) {
+        JsonNode code = json.path("errcode");
+        if (code.isNumber()) {
+            return code.asInt();
+        }
+        if (code.isTextual()) {
+            try {
+                return Integer.parseInt(code.asText("").trim());
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
     private static void assertDingOk(JsonNode json, String fallback) {
-        int code = json.path("errcode").asInt(0);
+        int code = dingCode(json);
         if (code == 0) {
             return;
         }
