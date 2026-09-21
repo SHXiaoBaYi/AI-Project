@@ -36,7 +36,9 @@ public class HrInterviewRecordService {
                 SELECT rec.id, rec.application_id, rec.requisition_id, rec.invite_id, rec.round_no,
                        rec.interviewer_user_id, u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment, rec.interviewed_at,
                        c.display_name, r.job_name, f.file_name, a.current_stage,
-                       CASE WHEN v.id IS NULL THEN 0 ELSE 1 END has_verdict
+                       CASE WHEN v.id IS NULL THEN 0 ELSE 1 END has_verdict,
+                       v.conclusion verdict_conclusion, v.fail_reason verdict_fail_reason, v.comment verdict_comment,
+                       vu.nickname verdict_by
                 FROM hr_interview_record rec
                 JOIN hr_application a ON a.id = rec.application_id
                 JOIN hr_candidate c ON c.id = a.candidate_id
@@ -44,6 +46,7 @@ public class HrInterviewRecordService {
                 LEFT JOIN sys_user u ON u.user_id = rec.interviewer_user_id
                 LEFT JOIN hr_resume_file f ON f.application_id = a.id AND f.is_active = 1
                 LEFT JOIN hr_interview_verdict v ON v.application_id = rec.application_id AND v.round_no = rec.round_no AND v.is_active = 1
+                LEFT JOIN sys_user vu ON vu.user_id = v.decided_by
                 WHERE rec.is_active = 1
                 """);
         List<Object> args = new ArrayList<>();

@@ -15,14 +15,38 @@ public class HrBoardVO {
     @Schema(description = "漏斗")
     private List<FunnelNode> funnel = new ArrayList<>();
 
-    @Schema(description = "周期")
-    private CycleBlock cycle = new CycleBlock();
+    @Schema(description = "招聘周期当前下钻岗位，空表示各岗位")
+    private String cycleJob;
 
-    @Schema(description = "HC完成")
+    @Schema(description = "招聘周期：各岗位平均周期，或下钻后的各阶段周期")
+    private List<ChartPoint> jobCycle = new ArrayList<>();
+
+    @Schema(description = "阶段招聘周期")
+    private List<ChartPoint> stageCycle = new ArrayList<>();
+
+    @Schema(description = "招聘完成情况")
     private HcBlock hc = new HcBlock();
 
-    @Schema(description = "面试")
-    private InterviewBlock interview = new InterviewBlock();
+    @Schema(description = "面试情况统计")
+    private InterviewStats interviewStats = new InterviewStats();
+
+    @Schema(description = "面试官通过率")
+    private List<ChartPoint> interviewerPass = new ArrayList<>();
+
+    @Schema(description = "面试淘汰原因")
+    private List<PieSlice> failReasons = new ArrayList<>();
+
+    @Schema(description = "各需求面试量趋势")
+    private List<ChartPoint> interviewVolume = new ArrayList<>();
+
+    @Data
+    @Schema(description = "饼图切片")
+    public static class PieSlice {
+        private String name;
+        private long value;
+        @Schema(description = "下钻键，通常等于原因名")
+        private String key;
+    }
 
     @Data
     @Schema(description = "漏斗节点")
@@ -32,81 +56,59 @@ public class HrBoardVO {
         private boolean uncollected;
         private long count;
         private Double conversion;
+        @Schema(description = "转化率名称，例如到面率")
+        private String conversionLabel;
         private Double mom;
         private Double yoy;
     }
 
     @Data
-    @Schema(description = "周期")
-    public static class CycleBlock {
-        private Double avgDays;
-        private Double screenToFirstDays;
-        private Double firstToSecondDays;
-        private List<NamedDays> byJob = new ArrayList<>();
-        private List<ChartPoint> trend = new ArrayList<>();
-    }
-
-    @Data
-    @Schema(description = "岗位周期")
-    public static class NamedDays {
-        private String name;
-        private Double days;
-    }
-
-    @Data
-    @Schema(description = "HC")
+    @Schema(description = "招聘完成情况")
     public static class HcBlock {
         private long demand;
         private long arrived;
         private long gap;
         private long closed;
-        private long paused;
+        private long frozen;
         private Double completionRate;
-        private List<DeptBar> byDept = new ArrayList<>();
-        private List<HcRow> rows = new ArrayList<>();
-        private List<ChartPoint> trend = new ArrayList<>();
-    }
-
-    @Data
-    @Schema(description = "部门HC")
-    public static class DeptBar {
-        private String deptName;
-        private long demand;
-        private long arrived;
-        private long gap;
+        private List<ProgressRow> rows = new ArrayList<>();
     }
 
     @Data
     @Schema(description = "岗位进度")
-    public static class HcRow {
+    public static class ProgressRow {
         private Long id;
         private String jobName;
-        private String location;
-        private String status;
-        private Integer priority;
-        private String targetText;
-        private LocalDate receivedDate;
-        private LocalDate onboardDate;
         private int headcount;
+        private String targetText;
+        private LocalDate targetDate;
         private int arrived;
         private int gap;
+        private String progressStatus;
+        private Integer priority;
+        private String priorityLabel;
+        private String status;
+        private LocalDate receivedDate;
+        private LocalDate onboardDate;
         private boolean warning;
+        private String ownerName;
+        private String location;
     }
 
     @Data
-    @Schema(description = "面试统计")
-    public static class InterviewBlock {
-        private List<RoundCount> rounds = new ArrayList<>();
-        private List<NamedDays> interviewers = new ArrayList<>();
-        private List<ChartPoint> trend = new ArrayList<>();
-    }
-
-    @Data
-    @Schema(description = "轮次场次")
-    public static class RoundCount {
-        private int roundNo;
-        private String roundName;
-        private long count;
+    @Schema(description = "面试情况")
+    public static class InterviewStats {
+        private long pendingInvite;
+        private long invited;
+        private long showUp;
+        private long round1;
+        private long retest;
+        private long finalRound;
+        private Double round1PassRate;
+        private Double retestPassRate;
+        private Double finalPassRate;
+        private long noShow;
+        private Double noShowRate;
     }
 
     @Data
@@ -114,7 +116,11 @@ public class HrBoardVO {
     public static class ChartPoint {
         private String axis;
         private String series;
+        @Schema(description = "下钻键，岗位名或面试官用户ID")
+        private String seriesKey;
         private double value;
+        @Schema(description = "能否继续下钻")
+        private boolean drillable;
     }
 
     @Data
@@ -131,5 +137,26 @@ public class HrBoardVO {
         private String interviewer;
         private LocalDateTime interviewAt;
         private String status;
+        private String ownerName;
+        private String priorityLabel;
+        private String funnelStage;
+        private LocalDate reachedAt;
+    }
+
+    @Data
+    @Schema(description = "面试记录下钻")
+    public static class InterviewRecordRow {
+        private Long recordId;
+        private Long applicationId;
+        private String candidateName;
+        private String jobName;
+        private Integer roundNo;
+        private String roundName;
+        private String conclusion;
+        private String failReason;
+        private String comment;
+        private LocalDateTime interviewedAt;
+        private Long interviewerUserId;
+        private String interviewerName;
     }
 }

@@ -42,6 +42,12 @@ public class HrBoardQueryDTO {
     @Schema(description = "岗位名称，模糊匹配")
     private String jobName;
 
+    @Schema(description = "岗位类别，按岗位名称精确匹配")
+    private String jobCategory;
+
+    @Schema(description = "招聘周期下钻的岗位；空表示各岗位平均周期")
+    private String cycleJob;
+
     @Schema(description = "目标到岗说明，模糊匹配")
     private String targetText;
 
@@ -57,8 +63,20 @@ public class HrBoardQueryDTO {
     @Schema(description = "简历提交人用户")
     private Long submitterUserId;
 
-    @Schema(description = "下钻类型 STAGE/HC/ROUND")
+    @Schema(description = "下钻类型 STAGE/HC/INTERVIEW/INTERVIEWER/FAIL_REASON/VOLUME")
     private String drillKind;
+
+    @Schema(description = "HC指标 DEMAND/ARRIVED/GAP/CLOSED/FROZEN/RATE")
+    private String hcMetric;
+
+    @Schema(description = "面试指标 PENDING_INVITE/INVITED/SHOW_UP/ROUND1/RETEST/FINAL/ROUND1_PASS/RETEST_PASS/FINAL_PASS/NO_SHOW")
+    private String interviewMetric;
+
+    @Schema(description = "面试淘汰原因")
+    private String failReason;
+
+    @Schema(description = "面试官通过率/面试量下钻的日期桶")
+    private String axis;
 
     @Schema(description = "面试轮次")
     private Integer roundNo;

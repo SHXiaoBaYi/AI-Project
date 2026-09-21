@@ -111,6 +111,8 @@ public class DingTalkCalendarClient {
             String token = legacyToken(credential);
             ObjectNode body = objectMapper.createObjectNode();
             body.put("mobile", mobile.trim());
+            // 专属账号场景需显式开启，否则按手机号可能查不到 userid/unionId
+            body.put("support_exclusive_account_search", true);
             JsonNode byMobile = postJson("https://oapi.dingtalk.com/topapi/v2/user/getbymobile?access_token=" + encode(token), body);
             assertDingOk(byMobile, "按手机号查询钉钉用户失败");
             String userId = byMobile.path("result").path("userid").asText("");

@@ -13,64 +13,103 @@ export interface HrBoardQuery {
   priority?: number;
   status?: string;
   jobName?: string;
+  jobCategory?: string;
+  cycleJob?: string;
   targetText?: string;
   candidateName?: string;
   stageCode?: string;
   submitterName?: string;
   submitterUserId?: number;
-  drillKind?: 'STAGE' | 'HC' | 'ROUND';
+  drillKind?: 'STAGE' | 'HC' | 'INTERVIEW' | 'INTERVIEWER' | 'FAIL_REASON' | 'VOLUME' | 'PROGRESS';
+  hcMetric?: 'DEMAND' | 'ARRIVED' | 'GAP' | 'CLOSED' | 'FROZEN' | 'RATE';
+  interviewMetric?:
+    | 'PENDING_INVITE'
+    | 'INVITED'
+    | 'SHOW_UP'
+    | 'ROUND1'
+    | 'RETEST'
+    | 'FINAL'
+    | 'ROUND1_PASS'
+    | 'RETEST_PASS'
+    | 'FINAL_PASS'
+    | 'NO_SHOW';
+  failReason?: string;
+  axis?: string;
   roundNo?: number;
+  interviewerUserId?: number;
   grain?: 'day' | 'week' | 'month' | 'year';
 }
 
 export interface HrFunnelNode {
   stageCode: string;
   stageName: string;
-  uncollected: boolean;
+  uncollected?: boolean;
   count: number;
   conversion?: number | null;
+  conversionLabel?: string | null;
   mom?: number | null;
   yoy?: number | null;
 }
 
+export interface HrChartPoint {
+  axis: string;
+  series: string;
+  seriesKey?: string;
+  value: number;
+  drillable?: boolean;
+}
+
+export interface HrProgressRow {
+  id: number;
+  jobName: string;
+  headcount: number;
+  targetText?: string;
+  targetDate?: string | null;
+  arrived: number;
+  gap: number;
+  progressStatus: string;
+  priority?: number | null;
+  priorityLabel?: string;
+  status?: string;
+  receivedDate?: string;
+  onboardDate?: string | null;
+  warning?: boolean;
+  ownerName?: string;
+  location?: string;
+}
+
+export interface HrInterviewStats {
+  pendingInvite: number;
+  invited: number;
+  showUp: number;
+  round1: number;
+  retest: number;
+  finalRound: number;
+  round1PassRate?: number | null;
+  retestPassRate?: number | null;
+  finalPassRate?: number | null;
+  noShow: number;
+  noShowRate?: number | null;
+}
+
 export interface HrBoard {
   funnel: HrFunnelNode[];
-  cycle: {
-    avgDays?: number | null;
-    screenToFirstDays?: number | null;
-    firstToSecondDays?: number | null;
-    byJob: { name: string; days: number }[];
-    trend: { axis: string; series: string; value: number }[];
-  };
+  cycleJob?: string | null;
+  jobCycle: HrChartPoint[];
+  stageCycle: HrChartPoint[];
   hc: {
     demand: number;
     arrived: number;
     gap: number;
     closed: number;
-    paused: number;
+    frozen: number;
     completionRate?: number | null;
-    byDept: { deptName: string; demand: number; arrived: number; gap: number }[];
-    rows: {
-      id: number;
-      jobName: string;
-      location: string;
-      status: string;
-      priority?: number | null;
-      targetText: string;
-      receivedDate: string;
-      onboardDate?: string | null;
-      headcount: number;
-      arrived: number;
-      gap: number;
-      warning: boolean;
-    }[];
-    trend: { axis: string; series: string; value: number }[];
+    rows: HrProgressRow[];
   };
-  interview: {
-    rounds: { roundNo: number; roundName: string; count: number }[];
-    interviewers: { name: string; days: number }[];
-    trend: { axis: string; series: string; value: number }[];
-  };
+  interviewStats: HrInterviewStats;
+  interviewerPass: HrChartPoint[];
+  failReasons: { name: string; value: number; key?: string }[];
+  interviewVolume: HrChartPoint[];
 }
 
 export interface HrDrillRow {
@@ -84,14 +123,44 @@ export interface HrDrillRow {
   submittedAt?: string;
   interviewer?: string;
   interviewAt?: string;
+  ownerName?: string;
+  priorityLabel?: string;
+  funnelStage?: string;
+  reachedAt?: string;
+}
+
+export interface HrInterviewRecordRow {
+  recordId: number;
+  applicationId: number;
+  candidateName: string;
+  jobName?: string;
+  roundNo?: number;
+  roundName?: string;
+  conclusion?: string;
+  failReason?: string;
+  comment?: string;
+  interviewedAt?: string;
+  interviewerUserId?: number;
+  interviewerName?: string;
+}
+
+export interface HrBoardDrill {
+  kind: string;
+  candidates: HrDrillRow[];
+  requisitions: HrProgressRow[];
+  interviews: HrInterviewRecordRow[];
 }
 
 export function getHrBoardApi(data: HrBoardQuery) {
   return request.post<unknown, HrBoard>('/hr/board', data);
 }
 
+export function getHrBoardJobsApi() {
+  return request.get<unknown, string[]>('/hr/board/jobs');
+}
+
 export function getHrDrillApi(data: HrBoardQuery) {
-  return request.post<unknown, HrDrillRow[]>('/hr/board/drill', data);
+  return request.post<unknown, HrBoardDrill>('/hr/board/drill', data);
 }
 
 export function getHrMetricsApi() {
@@ -455,7 +524,7 @@ export async function downloadHrApplicationTemplateApi() {
   window.URL.revokeObjectURL(objectUrl);
 }
 
-export async function downloadHrDrillApi(data: HrBoardQuery) {
+export async function downloadHrDrillApi(data: HrBoardQuery, filename = '招聘明细.xlsx') {
   const token = getToken();
   const res = await fetch(withBase('/api/hr/board/export'), {
     method: 'POST',
@@ -469,7 +538,9 @@ export async function downloadHrDrillApi(data: HrBoardQuery) {
   const objectUrl = window.URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = objectUrl;
-  a.download = '招聘明细.xlsx';
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const matched = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(disposition);
+  a.download = matched ? decodeURIComponent(matched[1]) : filename;
   a.click();
   window.URL.revokeObjectURL(objectUrl);
 }

@@ -63,6 +63,10 @@ interface RecordRow {
   interviewedAt?: string;
   currentStage?: string;
   hasVerdict: boolean;
+  verdictConclusion?: string;
+  verdictFailReason?: string;
+  verdictComment?: string;
+  verdictBy?: string;
   members: RecordMember[];
 }
 
@@ -168,6 +172,10 @@ function mapRow(raw: Record<string, unknown>): RecordRow {
     interviewedAt,
     currentStage: textOf(raw.current_stage),
     hasVerdict: Number(raw.has_verdict) === 1,
+    verdictConclusion: textOf(raw.verdict_conclusion),
+    verdictFailReason: textOf(raw.verdict_fail_reason),
+    verdictComment: textOf(raw.verdict_comment),
+    verdictBy: textOf(raw.verdict_by),
     members: [
       {
         id,
@@ -199,6 +207,10 @@ function groupRecords(rows: RecordRow[]) {
     existing.recordIds.push(row.id);
     existing.members.push({ ...row.members[0] });
     existing.hasVerdict = existing.hasVerdict || row.hasVerdict;
+    existing.verdictConclusion = existing.verdictConclusion || row.verdictConclusion;
+    existing.verdictFailReason = existing.verdictFailReason || row.verdictFailReason;
+    existing.verdictComment = existing.verdictComment || row.verdictComment;
+    existing.verdictBy = existing.verdictBy || row.verdictBy;
     if (!existing.interviewerUserIds.includes(row.interviewerUserId)) {
       existing.interviewerUserIds.push(row.interviewerUserId);
       existing.interviewerName = [existing.interviewerName, row.interviewerName].filter(Boolean).join('、');
@@ -461,6 +473,29 @@ const RecordPage = memo(function RecordPage() {
         valueType: 'textarea',
         search: false,
         ellipsis: true,
+      },
+      {
+        title: '联合评价',
+        dataIndex: 'verdictConclusion',
+        search: false,
+        hideInForm: true,
+        width: 220,
+        render: (_, record) => {
+          if (!record.hasVerdict) return '—';
+          const conclusion = conclusionLabel(record.verdictConclusion);
+          const reason =
+            record.verdictConclusion === 'FAIL' && record.verdictFailReason ? `（${record.verdictFailReason}）` : '';
+          return (
+            <div className='text-sm'>
+              <div>
+                {conclusion}
+                {reason}
+              </div>
+              {record.verdictComment ? <div className='text-neutral-600'>{record.verdictComment}</div> : null}
+              {record.verdictBy ? <div className='text-xs text-neutral-400'>评价人：{record.verdictBy}</div> : null}
+            </div>
+          );
+        },
       },
       {
         title: '面试时间',
