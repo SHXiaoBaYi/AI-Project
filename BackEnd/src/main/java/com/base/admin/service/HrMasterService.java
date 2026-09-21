@@ -769,7 +769,7 @@ public class HrMasterService {
 
     public HrDingTalkIdentityVO previewDingTalk(Long userId) {
         String phone = requireUserPhone(userId);
-        DingTalkCalendarClient.DingIdentity identity = resolveDingIdentity(phone);
+        DingTalkCalendarClient.DingIdentity identity = resolveDingIdentity(userId, phone);
         HrDingTalkIdentityVO vo = new HrDingTalkIdentityVO();
         vo.setPhone(phone);
         vo.setDingtalkUserId(identity.userId());
@@ -800,11 +800,17 @@ public class HrMasterService {
         return phone.trim();
     }
 
-    private DingTalkCalendarClient.DingIdentity resolveDingIdentity(String phone) {
+    private String nicknameOf(Long userId) {
+        String nickname = jdbc.query("SELECT nickname FROM sys_user WHERE user_id = ? AND is_active = 1",
+                rs -> rs.next() ? rs.getString(1) : null, userId);
+        return nickname == null ? "" : nickname.trim();
+    }
+
+    private DingTalkCalendarClient.DingIdentity resolveDingIdentity(Long userId, String phone) {
         if (!dingTalk.configured()) {
             throw new BusinessException("钉钉应用还没配置，不能按手机号获取钉钉身份");
         }
-        DingTalkCalendarClient.DingIdentity identity = dingTalk.resolveByMobile(phone);
+        DingTalkCalendarClient.DingIdentity identity = dingTalk.resolveByMobile(phone, nicknameOf(userId));
         if (identity == null) {
             throw new BusinessException("没有按手机号「" + phone + "」匹配到企业钉钉身份，请确认与钉钉通讯录一致");
         }

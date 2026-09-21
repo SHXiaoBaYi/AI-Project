@@ -8,6 +8,7 @@ import com.base.admin.domain.dto.DingTalkBusyQueryDTO;
 import com.base.admin.domain.vo.DingTalkAppVO;
 import com.base.admin.domain.vo.DingTalkBusyUserOptionVO;
 import com.base.admin.domain.vo.DingTalkBusyUserVO;
+import com.base.admin.domain.vo.DingTalkDirectoryUserVO;
 import com.base.admin.service.DingTalkAppService;
 import com.base.admin.service.DingTalkBusyService;
 import com.base.admin.service.DingTalkCalendarClient;
@@ -57,6 +58,13 @@ public class SysDingTalkController {
         DingTalkAppService.Credential credential = dingTalkAppService.resolveForTest(dto);
         dingTalkCalendarClient.testConnection(credential.clientId(), credential.clientSecret());
         return Result.ok();
+    }
+
+    @Operation(summary = "应用实际读到的钉钉已加入成员")
+    @GetMapping("/directory")
+    @RequiresPermission("system:dingtalk:list")
+    public Result<List<DingTalkDirectoryUserVO>> directory() {
+        return Result.ok(dingTalkCalendarClient.listDirectory());
     }
 
     @Operation(summary = "已绑定钉钉、可查询闲忙的用户")

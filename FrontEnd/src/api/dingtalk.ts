@@ -29,6 +29,22 @@ export function testDingTalkAppApi(data: DingTalkAppDTO) {
   return request.post('/system/dingtalk/test', data);
 }
 
+export type DingTalkDirectoryUser = {
+  name: string;
+  mobile: string;
+  stateCode?: string;
+  telephone?: string;
+  exclusiveAccount?: boolean;
+  hideMobile?: boolean;
+  active?: boolean;
+  userid: string;
+  unionId?: string;
+};
+
+export function getDingTalkDirectoryApi() {
+  return request.get<unknown, DingTalkDirectoryUser[]>('/system/dingtalk/directory');
+}
+
 export type DingTalkBusyUserOption = {
   userId: number;
   username: string;

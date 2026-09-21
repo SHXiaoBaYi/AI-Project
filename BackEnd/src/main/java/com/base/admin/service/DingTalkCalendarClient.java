@@ -1,6 +1,7 @@
 package com.base.admin.service;
 
 import com.base.admin.config.DingTalkProperties;
+import com.base.admin.domain.vo.DingTalkDirectoryUserVO;
 import com.base.admin.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,8 +22,14 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -102,7 +109,7 @@ public class DingTalkCalendarClient {
         return ready();
     }
 
-    public DingIdentity resolveByMobile(String mobile) {
+    public DingIdentity resolveByMobile(String mobile, String nickname) {
         DingTalkAppService.Credential credential = credential();
         String normalized = normalizeMobile(mobile);
         if (credential == null || !StringUtils.hasText(normalized)) {
@@ -110,22 +117,132 @@ public class DingTalkCalendarClient {
         }
         try {
             String token = legacyToken(credential);
-            JsonNode byMobile = getJson("https://oapi.dingtalk.com/user/get_by_mobile?access_token="
-                    + encode(token) + "&mobile=" + encode(normalized));
-            String userId = byMobile.path("userid").asText("");
+            String userId = useridFromLegacyMobile(token, normalized);
             if (!StringUtils.hasText(userId)) {
-                throw mobileNotFound(byMobile, normalized);
+                userId = useridFromV2Mobile(token, normalized);
             }
-            ObjectNode get = objectMapper.createObjectNode();
-            get.put("userid", userId);
-            JsonNode detail = postJson("https://oapi.dingtalk.com/topapi/v2/user/get?access_token=" + encode(token), get);
-            assertDingOk(detail, "查询钉钉用户详情失败");
-            String unionId = detail.path("result").path("unionid").asText("");
-            return StringUtils.hasText(unionId) ? new DingIdentity(userId, unionId) : null;
+            if (StringUtils.hasText(userId)) {
+                return identityOf(token, userId);
+            }
+            List<DingTalkDirectoryUserVO> directory = listDirectory();
+            for (DingTalkDirectoryUserVO row : directory) {
+                if (!normalized.equals(normalizeMobile(row.getMobile()))) {
+                    continue;
+                }
+                if (StringUtils.hasText(row.getUserid()) && StringUtils.hasText(row.getUnionId())) {
+                    return new DingIdentity(row.getUserid(), row.getUnionId());
+                }
+                if (StringUtils.hasText(row.getUserid())) {
+                    return identityOf(token, row.getUserid());
+                }
+            }
+            if (StringUtils.hasText(nickname)) {
+                String expected = nickname.trim();
+                DingTalkDirectoryUserVO named = null;
+                int count = 0;
+                for (DingTalkDirectoryUserVO row : directory) {
+                    if (!expected.equals(row.getName() == null ? "" : row.getName().trim())) {
+                        continue;
+                    }
+                    count++;
+                    named = row;
+                }
+                if (count == 1 && named != null && StringUtils.hasText(named.getMobile())
+                        && !normalized.equals(normalizeMobile(named.getMobile()))) {
+                    throw new BusinessException("用户资料手机号是「" + normalized + "」，钉钉通讯录里「" + expected
+                            + "」的手机号是「" + named.getMobile() + "」。这两个号码不一致");
+                }
+            }
+            throw new BusinessException("系统用户手机号「" + normalized + "」在已读到的钉钉通讯录里没有对应成员");
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
             throw new BusinessException("钉钉查询失败：" + ex.getMessage());
+        }
+    }
+
+    /** 应用权限范围内能读到的已加入成员。同一个人在多个部门只保留一条。 */
+    public List<DingTalkDirectoryUserVO> listDirectory() {
+        DingTalkAppService.Credential credential = credential();
+        if (credential == null) {
+            throw new BusinessException("钉钉未配置。请到「系统管理 → 钉钉应用配置」填写并启用");
+        }
+        try {
+            String token = legacyToken(credential);
+            Map<String, DingTalkDirectoryUserVO> people = new LinkedHashMap<>();
+            ArrayDeque<Long> queue = new ArrayDeque<>();
+            queue.add(1L);
+            Set<Long> seen = new HashSet<>();
+            boolean listed = false;
+            while (!queue.isEmpty() && seen.size() < 300 && people.size() < 5000) {
+                long deptId = queue.removeFirst();
+                if (!seen.add(deptId)) {
+                    continue;
+                }
+                long cursor = 0;
+                for (int page = 0; page < 50; page++) {
+                    ObjectNode body = objectMapper.createObjectNode();
+                    body.put("dept_id", deptId);
+                    body.put("cursor", cursor);
+                    body.put("size", 100);
+                    body.put("contain_access_limit", true);
+                    JsonNode json = postJson("https://oapi.dingtalk.com/topapi/v2/user/list?access_token=" + encode(token), body);
+                    int code = dingCode(json);
+                    if (code != 0) {
+                        if (!listed && seen.size() == 1) {
+                            throw new BusinessException("读取钉钉通讯录失败：" + json.path("errmsg").asText(""));
+                        }
+                        break;
+                    }
+                    listed = true;
+                    JsonNode list = json.path("result").path("list");
+                    if (list.isArray()) {
+                        for (JsonNode user : list) {
+                            String userId = user.path("userid").asText("");
+                            if (!StringUtils.hasText(userId) || people.containsKey(userId)) {
+                                continue;
+                            }
+                            DingTalkDirectoryUserVO row = new DingTalkDirectoryUserVO();
+                            row.setName(user.path("name").asText(""));
+                            row.setMobile(user.path("mobile").asText(""));
+                            row.setStateCode(user.path("state_code").asText(""));
+                            row.setTelephone(user.path("telephone").asText(""));
+                            row.setExclusiveAccount(user.path("exclusive_account").asBoolean(false));
+                            row.setHideMobile(user.path("hide_mobile").asBoolean(false));
+                            row.setActive(user.path("active").asBoolean(false));
+                            row.setUserid(userId);
+                            row.setUnionId(user.path("unionid").asText(""));
+                            people.put(userId, row);
+                        }
+                    }
+                    if (!json.path("result").path("has_more").asBoolean(false)) {
+                        break;
+                    }
+                    long next = json.path("result").path("next_cursor").asLong(-1);
+                    if (next < 0) {
+                        break;
+                    }
+                    cursor = next;
+                }
+                ObjectNode sub = objectMapper.createObjectNode();
+                sub.put("dept_id", deptId);
+                JsonNode subs = postJson("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=" + encode(token), sub);
+                if (dingCode(subs) == 0 && subs.path("result").isArray()) {
+                    for (JsonNode dept : subs.path("result")) {
+                        long child = dept.path("dept_id").asLong(0);
+                        if (child > 0) {
+                            queue.add(child);
+                        }
+                    }
+                }
+            }
+            List<DingTalkDirectoryUserVO> rows = new ArrayList<>(people.values());
+            rows.sort(Comparator.comparing(DingTalkDirectoryUserVO::getName, Comparator.nullsLast(String::compareTo)));
+            return rows;
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new BusinessException("读取钉钉通讯录失败：" + ex.getMessage());
         }
     }
 
@@ -278,17 +395,151 @@ public class DingTalkCalendarClient {
         return digits;
     }
 
-    private BusinessException mobileNotFound(JsonNode json, String mobile) {
-        int code = dingCode(json);
-        String message = json.path("errmsg").asText("");
-        if (code == 60121 || message.contains("找不到该用户") || message.contains("未找到该用户")) {
-            return new BusinessException("钉钉通讯录中找不到手机号「" + mobile
-                    + "」。请确认这是当前企业在职员工的钉钉手机号，企业账号也必须由本组织创建");
+    private String useridFromLegacyMobile(String token, String mobile) throws Exception {
+        JsonNode byMobile = getJson("https://oapi.dingtalk.com/user/get_by_mobile?access_token="
+                + encode(token) + "&mobile=" + encode(mobile));
+        if (dingCode(byMobile) != 0) {
+            return "";
         }
-        if (code != 0) {
-            return new BusinessException("按手机号查询钉钉用户失败" + (StringUtils.hasText(message) ? "：" + message : ""));
+        return byMobile.path("userid").asText("");
+    }
+
+    private String useridFromV2Mobile(String token, String mobile) throws Exception {
+        JsonNode byMobile = postForm(
+                "https://oapi.dingtalk.com/topapi/v2/user/getbymobile?access_token=" + encode(token),
+                "mobile", mobile,
+                "support_exclusive_account_search", "true");
+        if (dingCode(byMobile) != 0) {
+            return "";
         }
-        return new BusinessException("钉钉没有返回手机号「" + mobile + "」对应的用户");
+        JsonNode result = byMobile.path("result");
+        String userId = result.path("userid").asText("");
+        if (StringUtils.hasText(userId)) {
+            return userId;
+        }
+        JsonNode exclusive = result.path("exclusive_account_userid_list");
+        if (exclusive.isArray()) {
+            for (JsonNode item : exclusive) {
+                if (StringUtils.hasText(item.asText(""))) {
+                    return item.asText("");
+                }
+            }
+        }
+        String raw = exclusive.asText("").trim();
+        if (raw.startsWith("[")) {
+            JsonNode parsed = objectMapper.readTree(raw);
+            if (parsed.isArray()) {
+                for (JsonNode item : parsed) {
+                    if (StringUtils.hasText(item.asText(""))) {
+                        return item.asText("");
+                    }
+                }
+            }
+        }
+        return "";
+    }
+
+    private DingIdentity identityOf(String token, String userId) throws Exception {
+        ObjectNode get = objectMapper.createObjectNode();
+        get.put("userid", userId);
+        JsonNode detail = postJson("https://oapi.dingtalk.com/topapi/v2/user/get?access_token=" + encode(token), get);
+        assertDingOk(detail, "查询钉钉用户详情失败");
+        String unionId = detail.path("result").path("unionid").asText("");
+        return StringUtils.hasText(unionId) ? new DingIdentity(userId, unionId) : null;
+    }
+
+    /** 遍历部门成员，用通讯录里的手机号匹配被邀请加入的个人账号。 */
+    private DingIdentity findInvitedMember(String token, String mobile) throws Exception {
+        ArrayDeque<Long> queue = new ArrayDeque<>();
+        queue.add(1L);
+        Set<Long> seen = new HashSet<>();
+        boolean sawMobile = false;
+        int scanned = 0;
+        while (!queue.isEmpty() && scanned < 5000 && seen.size() < 300) {
+            long deptId = queue.removeFirst();
+            if (!seen.add(deptId)) {
+                continue;
+            }
+            long cursor = 0;
+            for (int page = 0; page < 50; page++) {
+                ObjectNode body = objectMapper.createObjectNode();
+                body.put("dept_id", deptId);
+                body.put("cursor", cursor);
+                body.put("size", 100);
+                body.put("contain_access_limit", true);
+                JsonNode json = postJson("https://oapi.dingtalk.com/topapi/v2/user/list?access_token=" + encode(token), body);
+                int code = dingCode(json);
+                if (code != 0) {
+                    if (scanned == 0 && seen.size() == 1) {
+                        throw new BusinessException("读取钉钉通讯录失败：" + json.path("errmsg").asText(""));
+                    }
+                    break;
+                }
+                JsonNode list = json.path("result").path("list");
+                if (list.isArray()) {
+                    for (JsonNode user : list) {
+                        scanned++;
+                        String theirMobile = normalizeMobile(user.path("mobile").asText(""));
+                        if (StringUtils.hasText(theirMobile)) {
+                            sawMobile = true;
+                        }
+                        if (!mobile.equals(theirMobile)) {
+                            continue;
+                        }
+                        String userId = user.path("userid").asText("");
+                        String unionId = user.path("unionid").asText("");
+                        if (StringUtils.hasText(userId) && StringUtils.hasText(unionId)) {
+                            return new DingIdentity(userId, unionId);
+                        }
+                        if (StringUtils.hasText(userId)) {
+                            return identityOf(token, userId);
+                        }
+                    }
+                }
+                if (!json.path("result").path("has_more").asBoolean(false)) {
+                    break;
+                }
+                cursor = json.path("result").path("next_cursor").asLong(-1);
+                if (cursor < 0) {
+                    break;
+                }
+            }
+            ObjectNode sub = objectMapper.createObjectNode();
+            sub.put("dept_id", deptId);
+            JsonNode subs = postJson("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=" + encode(token), sub);
+            if (dingCode(subs) == 0 && subs.path("result").isArray()) {
+                for (JsonNode dept : subs.path("result")) {
+                    long child = dept.path("dept_id").asLong(0);
+                    if (child > 0) {
+                        queue.add(child);
+                    }
+                }
+            }
+        }
+        if (scanned > 0 && !sawMobile) {
+            throw new BusinessException("通讯录成员已读到，但钉钉没有返回手机号。请给应用开通「企业员工手机号信息」权限。自己注册、被企业邀请的成员无法只靠按号码查询接口");
+        }
+        return null;
+    }
+
+    private JsonNode postForm(String url, String... pairs) throws Exception {
+        StringBuilder form = new StringBuilder();
+        for (int i = 0; i < pairs.length; i += 2) {
+            if (!form.isEmpty()) {
+                form.append('&');
+            }
+            form.append(URLEncoder.encode(pairs[i], StandardCharsets.UTF_8));
+            form.append('=');
+            form.append(URLEncoder.encode(pairs[i + 1], StandardCharsets.UTF_8));
+        }
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+                .POST(HttpRequest.BodyPublishers.ofString(form.toString()))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return objectMapper.readTree(response.body());
     }
 
     private JsonNode getJson(String url) throws Exception {
