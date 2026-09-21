@@ -15,4 +15,7 @@ public class DingTalkBusyUserOptionVO {
 
     @Schema(description = "姓名")
     private String nickname;
+
+    @Schema(description = "是否已绑定钉钉 1=已绑定 0=未绑定", example = "1")
+    private Integer dingtalkBound;
 }

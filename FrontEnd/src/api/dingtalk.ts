@@ -33,6 +33,7 @@ export type DingTalkBusyUserOption = {
   userId: number;
   username: string;
   nickname: string;
+  dingtalkBound?: number;
 };
 
 export type DingTalkBusySlot = {

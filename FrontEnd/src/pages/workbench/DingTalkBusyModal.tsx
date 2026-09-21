@@ -99,7 +99,7 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
       }}
     >
       <div className='mb-3 text-sm text-neutral-500'>
-        只列出已绑定钉钉的用户。查询时用各自的 unionId 向钉钉取忙闲，未返回的时段按空闲补齐。一次最多 20 人。
+        从系统用户里选择。已绑定钉钉的才能查出闲忙；未绑定的会标出来，需要先在用户管理里绑定。一次最多 20 人。
       </div>
       <div className='mb-3 grid gap-3 md:grid-cols-2'>
         <Select
@@ -107,7 +107,9 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
           allowClear
           showSearch
           optionFilterProp='label'
-          placeholder='选择用户，最多 20 人'
+          placeholder={
+            loadingUsers ? '正在加载系统用户' : users.length ? '选择系统用户，最多 20 人' : '没有启用的系统用户'
+          }
           loading={loadingUsers}
           value={userIds}
           onChange={(ids) => {
@@ -119,8 +121,10 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
           }}
           options={users.map((user) => ({
             value: user.userId,
-            label: `${user.nickname || user.username}${user.username ? `（${user.username}）` : ''}`,
+            disabled: user.dingtalkBound !== 1,
+            label: `${user.nickname || user.username}${user.username ? `（${user.username}）` : ''}${user.dingtalkBound === 1 ? '' : ' · 未绑定钉钉'}`,
           }))}
+          notFoundContent={loadingUsers ? '加载中' : '没有系统用户'}
         />
         <DatePicker.RangePicker
           showTime
