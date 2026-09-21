@@ -155,7 +155,7 @@ const ApplicationPage = memo(function ApplicationPage() {
               },
               {
                 key: 'edit',
-                label: '修改',
+                label: '编辑',
                 perm: 'hr:application:edit',
                 onClick: () => {
                   setEditing(record);

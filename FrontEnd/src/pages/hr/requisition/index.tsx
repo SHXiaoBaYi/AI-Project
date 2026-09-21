@@ -316,7 +316,7 @@ const RequisitionPage = memo(function RequisitionPage() {
             items={[
               {
                 key: 'edit',
-                label: '修改',
+                label: '编辑',
                 perm: 'hr:requisition:edit',
                 onClick: () => {
                   setEditing(record);
@@ -467,7 +467,7 @@ const RequisitionPage = memo(function RequisitionPage() {
       />
       <TableModal
         readonly={false}
-        title={editing ? '修改招聘需求' : '新增招聘需求'}
+        title={editing ? '编辑招聘需求' : '新增招聘需求'}
         columns={columns as never}
         open={open}
         onOpenChange={setOpen}

@@ -270,7 +270,7 @@ const InvitePage = memo(function InvitePage() {
             items={[
               {
                 key: 'edit',
-                label: '修改',
+                label: '编辑',
                 perm: 'hr:invite:edit',
                 onClick: () => {
                   setEditing(record);
@@ -532,7 +532,7 @@ const InvitePage = memo(function InvitePage() {
       />
       <TableModal
         readonly={false}
-        title={editing ? '修改邀约' : '新增邀约'}
+        title={editing ? '编辑邀约' : '新增邀约'}
         columns={columns as never}
         open={open}
         onOpenChange={setOpen}

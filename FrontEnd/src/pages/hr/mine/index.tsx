@@ -60,7 +60,7 @@ const MinePage = memo(function MinePage() {
       <div className='rounded bg-white p-4'>
         <h2 className='mb-1 text-base font-medium'>我的面试</h2>
         <p className='mb-3 text-sm text-neutral-500'>
-          这里是分配给你、候选人还没进入下一阶段的面试。面试时间到了之后可以填写评价；进入下一阶段之前，可以修改或删除自己的评价。已填写评价的不能再转发或添加面试官。
+          这里是分配给你、候选人还没进入下一阶段的面试。面试时间到了之后可以填写评价；进入下一阶段之前，可以编辑或删除自己的评价。已填写评价的不能再转发或添加面试官。
         </p>
         <Table
           rowKey='id'
@@ -82,7 +82,7 @@ const MinePage = memo(function MinePage() {
                       reviewed
                         ? {
                             key: 'edit-review',
-                            label: '修改评价',
+                            label: '编辑评价',
                             perm: 'hr:interview:mine',
                             onClick: () => {
                               form.setFieldsValue({
@@ -179,11 +179,11 @@ const MinePage = memo(function MinePage() {
       </div>
       <Modal
         title={
-          reviewing ? `${Number(reviewing.reviewed) > 0 ? '修改评价' : '评价'}：${reviewing.display_name}` : '评价'
+          reviewing ? `${Number(reviewing.reviewed) > 0 ? '编辑评价' : '评价'}：${reviewing.display_name}` : '评价'
         }
         open={!!reviewing}
         confirmLoading={saving}
-        okText={reviewing && Number(reviewing.reviewed) > 0 ? '保存修改' : '提交评价'}
+        okText={reviewing && Number(reviewing.reviewed) > 0 ? '保存' : '提交评价'}
         onCancel={() => setReviewing(null)}
         onOk={async () => {
           const values = await form.validateFields();

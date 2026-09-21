@@ -315,7 +315,7 @@ const RecordPage = memo(function RecordPage() {
                 ? [
                     {
                       key: 'edit',
-                      label: '修改',
+                      label: '编辑',
                       perm: 'hr:record:edit',
                       onClick: () => {
                         setEditing(record);
@@ -514,7 +514,7 @@ const RecordPage = memo(function RecordPage() {
       />
       <TableModal
         readonly={false}
-        title={editing ? '修改面试记录' : '生成面试记录'}
+        title={editing ? '编辑面试记录' : '生成面试记录'}
         columns={columns as never}
         open={open}
         onOpenChange={setOpen}

@@ -76,7 +76,7 @@ export default function ApplicationFormModal({
 
   return (
     <BaseModalForm
-      title={editing ? '修改候选人' : '新增候选人'}
+      title={editing ? '编辑候选人' : '新增候选人'}
       open={open}
       form={form}
       width={720}
