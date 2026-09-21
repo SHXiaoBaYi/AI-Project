@@ -38,6 +38,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         seedMenus();
         seedAliases();
         seedTaskType();
+        ensureFailReasonColumn();
         log.info("招聘表结构、角色、用户和菜单已同步");
     }
 
@@ -120,6 +121,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(219, "院校信息", 218, 1, "hr/school", "hr/school/index", "C", "hr:school:list", "ReadOutlined", "国内院校与QS");
         menu(230, "目标到岗", 218, 2, "hr/target", "hr/target/index", "C", "hr:target:list", "FlagOutlined", "招聘需求可选的目标到岗");
         menu(231, "目标到岗编辑", 230, 1, "", "", "F", "hr:target:edit", "#", "");
+        menu(232, "未通过原因", 218, 3, "hr/fail-reason", "hr/fail-reason/index", "C", "hr:fail-reason:list", "TagsOutlined", "面试评价未通过可选原因");
+        menu(233, "未通过原因编辑", 232, 1, "", "", "F", "hr:fail-reason:edit", "#", "");
         menu(205, "发起邀约", 203, 1, "", "", "F", "hr:invite:add", "#", "");
         menu(206, "取消邀约", 203, 2, "", "", "F", "hr:invite:cancel", "#", "");
         menu(207, "看板导出", 201, 1, "", "", "F", "hr:board:export", "#", "");
@@ -145,12 +148,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232);
         grant(plain, 200, 201, 209);
-        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225);
+        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232);
     }
 
     private int menuId(String name, String type) {
@@ -214,6 +217,23 @@ public class HrSchemaMigrator implements ApplicationRunner {
             seedProofTaskType(44, "待发offer", "终面通过后下发，完成时必须上传资料，可多份");
             seedProofTaskType(45, "待入职", "终面通过后下发，完成时必须上传资料，可多份");
             seedProofTaskType(46, "办理候选人入职", "入职前任务全部完成后生成，完成时必须上传资料，可多份");
+        }
+    }
+
+    private void ensureFailReasonColumn() {
+        addColumnIfMissing("hr_interview_record", "fail_reason",
+                "ALTER TABLE hr_interview_record ADD COLUMN fail_reason VARCHAR(64) NULL COMMENT '未通过原因' AFTER conclusion");
+        addColumnIfMissing("hr_interview_verdict", "fail_reason",
+                "ALTER TABLE hr_interview_verdict ADD COLUMN fail_reason VARCHAR(64) NULL COMMENT '未通过原因' AFTER conclusion");
+    }
+
+    private void addColumnIfMissing(String table, String column, String ddl) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+                """, Integer.class, table, column);
+        if (count == null || count == 0) {
+            jdbc.execute(ddl);
         }
     }
 

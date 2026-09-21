@@ -172,6 +172,20 @@ export function deleteHrTargetApi(id: number) {
   return request.delete(`/hr/target/${id}`);
 }
 
+export function getHrFailReasonOptionsApi() {
+  return request.get<unknown, { id: number; name: string; sort_no?: number; sortNo?: number }[]>(
+    '/hr/fail-reason/options',
+  );
+}
+
+export function saveHrFailReasonApi(data: { id?: number; name: string; sortNo?: number }) {
+  return data.id ? request.put('/hr/fail-reason', data) : request.post('/hr/fail-reason', data);
+}
+
+export function deleteHrFailReasonApi(id: number) {
+  return request.delete(`/hr/fail-reason/${id}`);
+}
+
 export function getHrUsersApi(scope?: 'owner' | 'interviewer') {
   return request.get<unknown, { userId: number; username: string; nickname: string; dingtalkBound: number }[]>(
     '/hr/user/options',
@@ -327,6 +341,7 @@ export function saveHrInterviewVerdictApi(data: {
   applicationId: number;
   roundNo: number;
   conclusion: string;
+  failReason?: string;
   comment?: string;
 }) {
   return request.post<unknown, string>('/hr/application/verdict', data);

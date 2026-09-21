@@ -34,7 +34,7 @@ public class HrInterviewRecordService {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
         StringBuilder sql = new StringBuilder("""
                 SELECT rec.id, rec.application_id, rec.requisition_id, rec.invite_id, rec.round_no,
-                       rec.interviewer_user_id, u.nickname interviewer_name, rec.conclusion, rec.comment, rec.interviewed_at,
+                       rec.interviewer_user_id, u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment, rec.interviewed_at,
                        c.display_name, r.job_name, f.file_name, a.current_stage,
                        CASE WHEN v.id IS NULL THEN 0 ELSE 1 END has_verdict
                 FROM hr_interview_record rec
@@ -124,7 +124,7 @@ public class HrInterviewRecordService {
     public List<HrInterviewReviewVO> reviews(Long applicationId) {
         List<HrInterviewReviewVO> rows = new ArrayList<>();
         jdbc.query("""
-                SELECT rec.round_no, u.nickname interviewer_name, rec.conclusion, rec.comment, rec.interviewed_at
+                SELECT rec.round_no, u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment, rec.interviewed_at
                 FROM hr_interview_record rec
                 LEFT JOIN sys_user u ON u.user_id = rec.interviewer_user_id
                 WHERE rec.application_id = ? AND rec.is_active = 1
@@ -136,12 +136,13 @@ public class HrInterviewRecordService {
             vo.setRoundName(ROUND_NAME.getOrDefault(vo.getRoundNo(), vo.getRoundNo() + "面"));
             vo.setInterviewerName(rs.getString("interviewer_name"));
             vo.setConclusion(rs.getString("conclusion"));
+            vo.setFailReason(rs.getString("fail_reason"));
             vo.setComment(rs.getString("comment"));
             vo.setInterviewedAt(rs.getTimestamp("interviewed_at") == null ? null : rs.getTimestamp("interviewed_at").toLocalDateTime());
             rows.add(vo);
         }, applicationId);
         jdbc.query("""
-                SELECT v.round_no, u.nickname interviewer_name, v.conclusion, v.comment, v.update_time
+                SELECT v.round_no, u.nickname interviewer_name, v.conclusion, v.fail_reason, v.comment, v.update_time
                 FROM hr_interview_verdict v
                 LEFT JOIN sys_user u ON u.user_id = v.decided_by
                 WHERE v.application_id = ? AND v.is_active = 1
@@ -153,6 +154,7 @@ public class HrInterviewRecordService {
             vo.setRoundName(ROUND_NAME.getOrDefault(vo.getRoundNo(), vo.getRoundNo() + "面"));
             vo.setInterviewerName(rs.getString("interviewer_name"));
             vo.setConclusion(rs.getString("conclusion"));
+            vo.setFailReason(rs.getString("fail_reason"));
             vo.setComment(rs.getString("comment"));
             vo.setInterviewedAt(rs.getTimestamp("update_time") == null ? null : rs.getTimestamp("update_time").toLocalDateTime());
             rows.add(vo);
@@ -166,6 +168,7 @@ public class HrInterviewRecordService {
         if (!CONCLUSIONS.contains(conclusion)) {
             throw new BusinessException("面试结论只能是通过、未通过或待定");
         }
+        String failReason = resolveFailReason(conclusion, dto.getFailReason());
         String current = jdbc.query("SELECT current_stage FROM hr_application WHERE id = ? AND is_active = 1",
                 rs -> rs.next() ? rs.getString(1) : null, dto.getApplicationId());
         if (current == null) {
@@ -180,11 +183,11 @@ public class HrInterviewRecordService {
             throw new BusinessException("这一轮已经提交过联合评价");
         }
         jdbc.update("""
-                INSERT INTO hr_interview_verdict (application_id, round_no, conclusion, comment, decided_by, create_by, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
-                ON DUPLICATE KEY UPDATE conclusion = VALUES(conclusion), comment = VALUES(comment),
+                INSERT INTO hr_interview_verdict (application_id, round_no, conclusion, fail_reason, comment, decided_by, create_by, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                ON DUPLICATE KEY UPDATE conclusion = VALUES(conclusion), fail_reason = VALUES(fail_reason), comment = VALUES(comment),
                   decided_by = VALUES(decided_by), is_active = 1
-                """, dto.getApplicationId(), dto.getRoundNo(), conclusion, empty(dto.getComment()),
+                """, dto.getApplicationId(), dto.getRoundNo(), conclusion, failReason, empty(dto.getComment()),
                 SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentUsername());
         Long requisitionId = jdbc.query("SELECT requisition_id FROM hr_application WHERE id = ? AND is_active = 1",
                 rs -> rs.next() && rs.getObject(1) != null ? rs.getLong(1) : null, dto.getApplicationId());
@@ -244,6 +247,7 @@ public class HrInterviewRecordService {
         if (!CONCLUSIONS.contains(conclusion)) {
             throw new BusinessException("面试结论只能是通过、未通过或待定");
         }
+        String failReason = resolveFailReason(conclusion, dto.getFailReason());
         assertInterviewEnded(dto.getInviteId());
         Long requisitionId = dto.getRequisitionId();
         if (requisitionId == null) {
@@ -255,24 +259,40 @@ public class HrInterviewRecordService {
         }
         if (dto.getId() == null) {
             jdbc.update("""
-                    INSERT INTO hr_interview_record (application_id, requisition_id, invite_id, round_no, interviewer_user_id, conclusion, comment, interviewed_at, create_by, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    INSERT INTO hr_interview_record (application_id, requisition_id, invite_id, round_no, interviewer_user_id, conclusion, fail_reason, comment, interviewed_at, create_by, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     ON DUPLICATE KEY UPDATE requisition_id = VALUES(requisition_id), invite_id = VALUES(invite_id),
-                      conclusion = VALUES(conclusion), comment = VALUES(comment), interviewed_at = VALUES(interviewed_at), is_active = 1
+                      conclusion = VALUES(conclusion), fail_reason = VALUES(fail_reason), comment = VALUES(comment), interviewed_at = VALUES(interviewed_at), is_active = 1
                     """, dto.getApplicationId(), requisitionId, dto.getInviteId(), dto.getRoundNo(), dto.getInterviewerUserId(),
-                    conclusion, empty(dto.getComment()), dto.getInterviewedAt(), SecurityUtils.getCurrentUsername());
+                    conclusion, failReason, empty(dto.getComment()), dto.getInterviewedAt(), SecurityUtils.getCurrentUsername());
         } else {
             int updated = jdbc.update("""
                     UPDATE hr_interview_record
                     SET application_id = ?, requisition_id = ?, invite_id = ?, round_no = ?, interviewer_user_id = ?,
-                        conclusion = ?, comment = ?, interviewed_at = ?
+                        conclusion = ?, fail_reason = ?, comment = ?, interviewed_at = ?
                     WHERE id = ? AND is_active = 1
                     """, dto.getApplicationId(), requisitionId, dto.getInviteId(), dto.getRoundNo(), dto.getInterviewerUserId(),
-                    conclusion, empty(dto.getComment()), dto.getInterviewedAt(), dto.getId());
+                    conclusion, failReason, empty(dto.getComment()), dto.getInterviewedAt(), dto.getId());
             if (updated == 0) {
                 throw new BusinessException("面试记录不存在");
             }
         }
+    }
+
+    private String resolveFailReason(String conclusion, String raw) {
+        if (!"FAIL".equals(conclusion)) {
+            return null;
+        }
+        String reason = raw == null ? "" : raw.trim();
+        if (reason.isEmpty()) {
+            throw new BusinessException("未通过必须选择原因");
+        }
+        Integer exists = jdbc.queryForObject(
+                "SELECT COUNT(1) FROM hr_fail_reason WHERE name = ? AND is_active = 1", Integer.class, reason);
+        if (exists == null || exists == 0) {
+            throw new BusinessException("未通过原因不在基础配置中，请先在「未通过原因」里维护");
+        }
+        return reason;
     }
 
     public void delete(Long id) {

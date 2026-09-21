@@ -165,7 +165,7 @@ public class HrInviteService {
                 SELECT i.id, i.application_id, i.round_no, i.interviewer_user_id, u.nickname interviewer_name,
                        i.interview_at, i.duration_min, i.location, i.status, i.fail_reason, i.dingtalk_event_id,
                        c.display_name, a.requisition_id, a.current_stage, r.job_name, f.file_name,
-                       mine_rec.id record_id, mine_rec.conclusion my_conclusion, mine_rec.comment my_comment,
+                       mine_rec.id record_id, mine_rec.conclusion my_conclusion, mine_rec.fail_reason my_fail_reason, mine_rec.comment my_comment,
                        CASE WHEN mine_rec.id IS NOT NULL AND mine_rec.conclusion IS NOT NULL AND mine_rec.conclusion <> '' THEN 1 ELSE 0 END reviewed
                 FROM hr_interview_invite i
                 JOIN hr_application a ON a.id = i.application_id

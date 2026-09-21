@@ -25,6 +25,9 @@ public class HrInterviewReviewVO {
     @Schema(description = "结论 PASS/FAIL/PENDING")
     private String conclusion;
 
+    @Schema(description = "未通过原因")
+    private String failReason;
+
     @Schema(description = "评语")
     private String comment;
 

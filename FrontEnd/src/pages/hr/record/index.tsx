@@ -11,6 +11,7 @@ import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import {
   deleteHrInterviewRecordBatchApi,
   getHrApplicationsApi,
+  getHrFailReasonOptionsApi,
   getHrRequisitionsApi,
   getHrUsersApi,
   listHrInterviewRecordsApi,
@@ -37,6 +38,7 @@ interface RecordMember {
   interviewerUserId: number;
   interviewerName?: string;
   conclusion?: string;
+  failReason?: string;
   comment?: string;
   interviewedAt?: string;
 }
@@ -56,6 +58,7 @@ interface RecordRow {
   interviewerName?: string;
   conclusion?: string;
   conclusionsDiffer: boolean;
+  failReason?: string;
   comment?: string;
   interviewedAt?: string;
   currentStage?: string;
@@ -138,6 +141,7 @@ function conclusionLabel(value?: string) {
 
 function mapRow(raw: Record<string, unknown>): RecordRow {
   const conclusion = textOf(raw.conclusion);
+  const failReason = textOf(raw.fail_reason);
   const comment = textOf(raw.comment);
   const interviewerName = textOf(raw.interviewer_name);
   const interviewedAt =
@@ -159,6 +163,7 @@ function mapRow(raw: Record<string, unknown>): RecordRow {
     interviewerName,
     conclusion,
     conclusionsDiffer: false,
+    failReason,
     comment,
     interviewedAt,
     currentStage: textOf(raw.current_stage),
@@ -169,6 +174,7 @@ function mapRow(raw: Record<string, unknown>): RecordRow {
         interviewerUserId,
         interviewerName,
         conclusion,
+        failReason,
         comment,
         interviewedAt,
       },
@@ -206,10 +212,13 @@ function groupRecords(rows: RecordRow[]) {
     const unique = [...new Set(filled)];
     const differ = row.members.length > 1 && filled.length === row.members.length && unique.length > 1;
     const sameComment = row.members.every((member) => member.comment === row.members[0].comment);
+    const failReasons = row.members.map((member) => member.failReason).filter((item): item is string => Boolean(item));
+    const sameFailReason = failReasons.length > 0 && failReasons.every((item) => item === failReasons[0]);
     return {
       ...row,
       conclusionsDiffer: differ,
       conclusion: unique.length === 1 ? unique[0] : undefined,
+      failReason: unique.length === 1 && unique[0] === 'FAIL' && sameFailReason ? failReasons[0] : undefined,
       comment:
         row.members.length === 1 || sameComment
           ? row.members[0].comment
@@ -238,6 +247,7 @@ const RecordPage = memo(function RecordPage() {
   const [verdictForm] = Form.useForm();
   const [candidates, setCandidates] = useState<{ value: number; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
+  const [failReasons, setFailReasons] = useState<{ value: string; label: string }[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
   const [plans, setPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
 
@@ -286,6 +296,9 @@ const RecordPage = memo(function RecordPage() {
           return { value: Number(row.userId ?? row.user_id), label: row.nickname || row.username || '' };
         }),
       ),
+    );
+    getHrFailReasonOptionsApi().then((list) =>
+      setFailReasons((list ?? []).map((item) => ({ value: item.name, label: item.name }))),
     );
   }, []);
 
@@ -413,6 +426,36 @@ const RecordPage = memo(function RecordPage() {
             : conclusionLabel(record.conclusion),
       },
       {
+        title: '未通过原因',
+        dataIndex: 'failReason',
+        valueType: 'select',
+        search: false,
+        fieldProps: { options: failReasons, showSearch: true, optionFilterProp: 'label' },
+        formItemProps: {
+          rules: [
+            ({ getFieldValue }) => ({
+              validator(_: unknown, value: unknown) {
+                if (getFieldValue('conclusion') === 'FAIL' && !String(value ?? '').trim()) {
+                  return Promise.reject(new Error('未通过必须选择原因'));
+                }
+                return Promise.resolve();
+              },
+            }),
+          ],
+        },
+        render: (_, record) => {
+          if (record.conclusionsDiffer) {
+            return (
+              record.members
+                .filter((member) => member.conclusion === 'FAIL')
+                .map((member) => `${member.interviewerName || '面试官'} ${member.failReason || '—'}`)
+                .join('、') || '—'
+            );
+          }
+          return record.conclusion === 'FAIL' ? record.failReason || '—' : '—';
+        },
+      },
+      {
         title: '评语',
         dataIndex: 'comment',
         valueType: 'textarea',
@@ -426,7 +469,7 @@ const RecordPage = memo(function RecordPage() {
         search: false,
       },
     ],
-    [appReq, candidates, fromInvite, message, plans, users, verdictForm],
+    [appReq, candidates, failReasons, fromInvite, message, plans, users, verdictForm],
   );
 
   return (
@@ -525,6 +568,7 @@ const RecordPage = memo(function RecordPage() {
                 roundNo: editing.roundNo,
                 interviewerUserIds: editing.interviewerUserIds,
                 conclusion: editing.conclusion,
+                failReason: editing.failReason,
                 comment: editing.members.every((member) => member.comment === editing.members[0]?.comment)
                   ? editing.members[0]?.comment
                   : undefined,
@@ -537,10 +581,14 @@ const RecordPage = memo(function RecordPage() {
               }
         }
         onFinish={async (values) => {
-          const form = values as RecordRow & { interviewerUserIds?: number[] };
+          const form = values as RecordRow & { interviewerUserIds?: number[]; failReason?: string };
           const ids = form.interviewerUserIds ?? [];
           if (!ids.length) {
             message.warning('请选择面试官');
+            return false;
+          }
+          if (form.conclusion === 'FAIL' && !String(form.failReason ?? '').trim()) {
+            message.warning('未通过必须选择原因');
             return false;
           }
           const interviewedAt = form.interviewedAt
@@ -554,6 +602,7 @@ const RecordPage = memo(function RecordPage() {
             roundNo: form.roundNo,
             interviewerUserIds: ids,
             conclusion: form.conclusion,
+            failReason: form.conclusion === 'FAIL' ? form.failReason : undefined,
             comment: form.comment,
             interviewedAt,
           });
@@ -582,6 +631,7 @@ const RecordPage = memo(function RecordPage() {
               applicationId: verdictTarget.applicationId,
               roundNo: verdictTarget.roundNo,
               conclusion: values.conclusion,
+              failReason: values.conclusion === 'FAIL' ? values.failReason : undefined,
               comment: values.comment,
             });
             message.success(msg || '已更新候选人阶段');
@@ -604,7 +654,33 @@ const RecordPage = memo(function RecordPage() {
             <Select
               options={CONCLUSIONS}
               placeholder='请选择结论'
+              onChange={(value) => {
+                if (value !== 'FAIL') {
+                  verdictForm.setFieldValue('failReason', undefined);
+                }
+              }}
             />
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, next) => prev.conclusion !== next.conclusion}
+          >
+            {() =>
+              verdictForm.getFieldValue('conclusion') === 'FAIL' ? (
+                <Form.Item
+                  name='failReason'
+                  label='未通过原因'
+                  rules={[{ required: true, message: '未通过必须选择原因' }]}
+                >
+                  <Select
+                    options={failReasons}
+                    placeholder={failReasons.length ? '请选择原因' : '请先在基础数据维护未通过原因'}
+                    showSearch
+                    optionFilterProp='label'
+                  />
+                </Form.Item>
+              ) : null
+            }
           </Form.Item>
           <Form.Item
             name='comment'

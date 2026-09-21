@@ -7,6 +7,7 @@ import com.base.admin.domain.dto.HrDepartmentDTO;
 import com.base.admin.domain.dto.HrApplicationDTO;
 import com.base.admin.domain.dto.HrDingTalkBindDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
+import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.domain.dto.HrSchoolQueryDTO;
 import com.base.admin.domain.vo.HrDingTalkIdentityVO;
@@ -444,6 +445,57 @@ public class HrMasterService {
             throw new BusinessException("已有招聘需求使用该目标到岗，不能删除");
         }
         jdbc.update("UPDATE hr_target_option SET is_active = 0, update_by = ? WHERE id = ?",
+                SecurityUtils.getCurrentUsername(), id);
+    }
+
+    public List<Map<String, Object>> failReasonOptions() {
+        return jdbc.queryForList("""
+                SELECT id, name, sort_no FROM hr_fail_reason WHERE is_active = 1 ORDER BY sort_no, id
+                """);
+    }
+
+    @Transactional
+    public void saveFailReason(HrFailReasonDTO dto) {
+        String name = dto.getName().trim();
+        int sort = dto.getSortNo() == null ? 0 : dto.getSortNo();
+        Integer dup = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_fail_reason WHERE name = ? AND is_active = 1 AND id <> ?
+                """, Integer.class, name, dto.getId() == null ? 0L : dto.getId());
+        if (dup != null && dup > 0) {
+            throw new BusinessException("未通过原因已存在");
+        }
+        if (dto.getId() == null) {
+            jdbc.update("""
+                    INSERT INTO hr_fail_reason (name, sort_no, create_by, is_active) VALUES (?, ?, ?, 1)
+                    """, name, sort, SecurityUtils.getCurrentUsername());
+            return;
+        }
+        int updated = jdbc.update("""
+                UPDATE hr_fail_reason SET name = ?, sort_no = ?, update_by = ? WHERE id = ? AND is_active = 1
+                """, name, sort, SecurityUtils.getCurrentUsername(), dto.getId());
+        if (updated == 0) {
+            throw new BusinessException("未通过原因不存在");
+        }
+    }
+
+    @Transactional
+    public void deleteFailReason(Long id) {
+        String name = jdbc.query("SELECT name FROM hr_fail_reason WHERE id = ? AND is_active = 1",
+                rs -> rs.next() ? rs.getString(1) : null, id);
+        if (name == null) {
+            throw new BusinessException("未通过原因不存在");
+        }
+        Integer used = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM (
+                  SELECT 1 FROM hr_interview_record WHERE is_active = 1 AND fail_reason = ?
+                  UNION ALL
+                  SELECT 1 FROM hr_interview_verdict WHERE is_active = 1 AND fail_reason = ?
+                ) t
+                """, Integer.class, name, name);
+        if (used != null && used > 0) {
+            throw new BusinessException("已有面试评价使用该原因，不能删除");
+        }
+        jdbc.update("UPDATE hr_fail_reason SET is_active = 0, update_by = ? WHERE id = ?",
                 SecurityUtils.getCurrentUsername(), id);
     }
 

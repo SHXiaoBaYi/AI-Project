@@ -524,6 +524,7 @@ CREATE TABLE IF NOT EXISTS hr_interview_record (
   round_no             TINYINT      NOT NULL                COMMENT '轮次',
   interviewer_user_id  BIGINT       NOT NULL                COMMENT '面试官',
   conclusion           VARCHAR(16)  NULL                    COMMENT 'PASS/FAIL/PENDING',
+  fail_reason          VARCHAR(64)  NULL                    COMMENT '未通过原因',
   comment              TEXT         NULL                    COMMENT '评语',
   interviewed_at       DATETIME     NULL                    COMMENT '面试时间',
   create_by            VARCHAR(50)  DEFAULT ''              COMMENT '创建者',
@@ -542,6 +543,7 @@ CREATE TABLE IF NOT EXISTS hr_interview_verdict (
   application_id  BIGINT       NOT NULL                COMMENT '候选人投递',
   round_no        TINYINT      NOT NULL                COMMENT '轮次',
   conclusion      VARCHAR(16)  NOT NULL                COMMENT 'PASS/FAIL/PENDING',
+  fail_reason     VARCHAR(64)  NULL                    COMMENT '未通过原因',
   comment         TEXT         NULL                    COMMENT '联合评价',
   decided_by      BIGINT       NULL                    COMMENT '评价人',
   create_by       VARCHAR(50)  DEFAULT ''              COMMENT '创建者',
@@ -600,4 +602,25 @@ INSERT INTO hr_target_option (name, sort_no, create_by, is_active) VALUES
 ('尽快', 2, 'hr-seed', 1),
 ('7月-尽快', 3, 'hr-seed', 1),
 ('常规节奏持续招聘', 4, 'hr-seed', 1)
+ON DUPLICATE KEY UPDATE is_active = 1;
+
+CREATE TABLE IF NOT EXISTS hr_fail_reason (
+  id           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+  name         VARCHAR(64)  NOT NULL                COMMENT '未通过原因',
+  sort_no      INT          NOT NULL DEFAULT 0      COMMENT '排序',
+  create_by    VARCHAR(50)  DEFAULT ''              COMMENT '创建者',
+  create_time  DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_by    VARCHAR(50)  DEFAULT ''              COMMENT '更新者',
+  update_time  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  is_active    TINYINT      NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_hr_fail_reason_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试未通过原因';
+
+INSERT INTO hr_fail_reason (name, sort_no, create_by, is_active) VALUES
+('候选人能力不符', 1, 'hr-seed', 1),
+('薪资谈不拢', 2, 'hr-seed', 1),
+('候选人放弃', 3, 'hr-seed', 1),
+('岗位暂停', 4, 'hr-seed', 1),
+('其他', 5, 'hr-seed', 1)
 ON DUPLICATE KEY UPDATE is_active = 1;

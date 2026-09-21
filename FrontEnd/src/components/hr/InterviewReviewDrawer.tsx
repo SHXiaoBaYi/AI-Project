@@ -58,6 +58,12 @@ export default function InterviewReviewDrawer({
             width: 90,
             render: (value: string) => CONCLUSION_LABEL[value] || value || '—',
           },
+          {
+            title: '未通过原因',
+            dataIndex: 'failReason',
+            width: 140,
+            render: (value: string, row) => (row.conclusion === 'FAIL' ? value || '—' : '—'),
+          },
           { title: '评语', dataIndex: 'comment', render: (value: string) => value || '—' },
           {
             title: '时间',

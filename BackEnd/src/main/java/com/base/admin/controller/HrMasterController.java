@@ -25,6 +25,7 @@ import com.base.admin.domain.dto.HrInviteCreateDTO;
 import com.base.admin.domain.dto.HrInviteTransferDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrRequisitionStatusDTO;
+import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.service.HrInterviewRecordService;
 import com.base.admin.service.HrInviteService;
@@ -312,6 +313,41 @@ public class HrMasterController {
     @Log(title = "目标到岗", businessType = 3)
     public Result<Void> deleteTarget(@PathVariable Long id) {
         masterService.deleteTarget(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "未通过原因选项")
+    @GetMapping("/fail-reason/options")
+    @RequiresPermission({"hr:fail-reason:list", "hr:interview:mine", "hr:record:list", "hr:record:add", "hr:application:list"})
+    public Result<List<Map<String, Object>>> failReasonOptions() {
+        return Result.ok(masterService.failReasonOptions());
+    }
+
+    @Operation(summary = "新增未通过原因")
+    @PostMapping("/fail-reason")
+    @RequiresPermission("hr:fail-reason:edit")
+    @Log(title = "未通过原因", businessType = 1)
+    public Result<Void> createFailReason(@Valid @RequestBody HrFailReasonDTO dto) {
+        dto.setId(null);
+        masterService.saveFailReason(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "修改未通过原因")
+    @PutMapping("/fail-reason")
+    @RequiresPermission("hr:fail-reason:edit")
+    @Log(title = "未通过原因", businessType = 2)
+    public Result<Void> updateFailReason(@Valid @RequestBody HrFailReasonDTO dto) {
+        masterService.saveFailReason(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "删除未通过原因")
+    @DeleteMapping("/fail-reason/{id}")
+    @RequiresPermission("hr:fail-reason:edit")
+    @Log(title = "未通过原因", businessType = 3)
+    public Result<Void> deleteFailReason(@PathVariable Long id) {
+        masterService.deleteFailReason(id);
         return Result.ok();
     }
 

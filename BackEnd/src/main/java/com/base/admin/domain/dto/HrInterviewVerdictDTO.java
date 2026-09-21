@@ -21,6 +21,9 @@ public class HrInterviewVerdictDTO {
     @Schema(description = "结论 PASS通过 FAIL未通过 PENDING待定")
     private String conclusion;
 
+    @Schema(description = "未通过原因，结论为 FAIL 时必填")
+    private String failReason;
+
     @Schema(description = "联合评价说明")
     private String comment;
 }

@@ -6,6 +6,7 @@ import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import {
   addHrInviteInterviewerApi,
   forwardHrInviteApi,
+  getHrFailReasonOptionsApi,
   getHrUsersApi,
   listMyHrInvitesApi,
   saveHrInterviewRecordApi,
@@ -35,6 +36,7 @@ const MinePage = memo(function MinePage() {
   const { message } = App.useApp();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
+  const [failReasons, setFailReasons] = useState<{ value: string; label: string }[]>([]);
   const [reviewing, setReviewing] = useState<Record<string, unknown> | null>(null);
   const [transfer, setTransfer] = useState<{ row: Record<string, unknown>; mode: 'forward' | 'add' } | null>(null);
   const [target, setTarget] = useState<number>();
@@ -52,6 +54,9 @@ const MinePage = memo(function MinePage() {
           return { value: Number(row.userId ?? row.user_id), label: row.nickname };
         }),
       ),
+    );
+    getHrFailReasonOptionsApi().then((list) =>
+      setFailReasons((list ?? []).map((item) => ({ value: item.name, label: item.name }))),
     );
   }, []);
 
@@ -87,6 +92,7 @@ const MinePage = memo(function MinePage() {
                             onClick: () => {
                               form.setFieldsValue({
                                 conclusion: row.my_conclusion,
+                                failReason: row.my_fail_reason || undefined,
                                 comment: row.my_comment || '',
                               });
                               setReviewing(row);
@@ -198,6 +204,7 @@ const MinePage = memo(function MinePage() {
               interviewerUserId: reviewing.interviewer_user_id,
               ...(reviewing.record_id ? { id: reviewing.record_id } : {}),
               conclusion: values.conclusion,
+              failReason: values.conclusion === 'FAIL' ? values.failReason : undefined,
               comment: values.comment,
               interviewedAt: reviewing.interview_at
                 ? String(reviewing.interview_at).replace('T', ' ').slice(0, 19)
@@ -223,7 +230,33 @@ const MinePage = memo(function MinePage() {
             <Select
               options={CONCLUSIONS}
               placeholder='请选择结论'
+              onChange={(value) => {
+                if (value !== 'FAIL') {
+                  form.setFieldValue('failReason', undefined);
+                }
+              }}
             />
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, next) => prev.conclusion !== next.conclusion}
+          >
+            {() =>
+              form.getFieldValue('conclusion') === 'FAIL' ? (
+                <Form.Item
+                  name='failReason'
+                  label='未通过原因'
+                  rules={[{ required: true, message: '未通过必须选择原因' }]}
+                >
+                  <Select
+                    options={failReasons}
+                    placeholder={failReasons.length ? '请选择原因' : '请先在基础数据维护未通过原因'}
+                    showSearch
+                    optionFilterProp='label'
+                  />
+                </Form.Item>
+              ) : null
+            }
           </Form.Item>
           <Form.Item
             name='comment'
