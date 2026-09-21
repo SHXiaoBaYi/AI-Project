@@ -24,6 +24,7 @@ export const GEO_CONTENT_AGG_STATUS = [
 export const GEO_CONTENT_PUBLISH_STATUS = [
   { label: '投放成功', value: '投放成功' },
   { label: '审核未通过', value: '审核未通过' },
+  { label: '待投放', value: '待投放' },
   { label: '未投放', value: '未投放' },
 ] as const;
 

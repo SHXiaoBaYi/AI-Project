@@ -13,6 +13,7 @@ import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
+import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
 import com.base.admin.domain.entity.GeoContentPeriodStat;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoContentPlacementCite;
@@ -40,6 +41,7 @@ import com.base.admin.domain.vo.GeoContentPublisherWeekRowVO;
 import com.base.admin.domain.vo.GeoImportResultVO;
 import com.base.admin.domain.vo.GeoPersistResultVO;
 import com.base.admin.domain.vo.GeoRankItemVO;
+import com.base.admin.domain.vo.GeoSimilarQuestionPreviewVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoContentPeriodStatMapper;
@@ -125,12 +127,18 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 .like(StringUtils.hasText(query.getTargetQuestion()), GeoContentPlacement::getTargetQuestion, query.getTargetQuestion())
                 .like(StringUtils.hasText(query.getTitle()), GeoContentPlacement::getTitle, query.getTitle())
                 .eq(StringUtils.hasText(query.getSource()), GeoContentPlacement::getSource, query.getSource())
-                .eq(StringUtils.hasText(filterAgg), GeoContentPlacement::getPlacementProgress, filterAgg)
                 .and(query.getRelatedUserId() != null, w -> w
                         .eq(GeoContentPlacement::getPublisherUserId, query.getRelatedUserId())
                         .or()
-                        .eq(GeoContentPlacement::getOwnerUserId, query.getRelatedUserId()))
-                .orderByDesc(GeoContentPlacement::getId);
+                        .eq(GeoContentPlacement::getOwnerUserId, query.getRelatedUserId()));
+        if (Constants.CONTENT_AGG_PENDING.equals(filterAgg)) {
+            wrapper.and(w -> w.eq(GeoContentPlacement::getPlacementProgress, Constants.CONTENT_AGG_PENDING)
+                    .or(sub -> sub.eq(GeoContentPlacement::getPlacementProgress, Constants.CONTENT_AGG_NONE)
+                            .inSql(GeoContentPlacement::getId, pendingProofPlacementSql())));
+        } else if (StringUtils.hasText(filterAgg)) {
+            wrapper.eq(GeoContentPlacement::getPlacementProgress, filterAgg);
+        }
+        wrapper.orderByDesc(GeoContentPlacement::getId);
         com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, GeoContentPlacement::getCreateTime);
 
         int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
@@ -209,7 +217,15 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 : null;
         LambdaQueryWrapper<GeoContentPlacementItem> iw = new LambdaQueryWrapper<GeoContentPlacementItem>()
                 .in(placementIds != null, GeoContentPlacementItem::getPlacementId, placementIds)
+                .like(StringUtils.hasText(query.getTitle()), GeoContentPlacementItem::getTitle, query.getTitle())
+                .eq(StringUtils.hasText(query.getPlatformName()), GeoContentPlacementItem::getPlatformName, query.getPlatformName().trim())
                 .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter);
+        if (query.getPublishTimeStart() != null) {
+            iw.ge(GeoContentPlacementItem::getPublishTime, query.getPublishTimeStart().atStartOfDay());
+        }
+        if (query.getPublishTimeEnd() != null) {
+            iw.lt(GeoContentPlacementItem::getPublishTime, query.getPublishTimeEnd().plusDays(1).atStartOfDay());
+        }
         if (query.getCited() != null && query.getCited() == 1) {
             iw.apply(citeExistsSql());
         } else if (query.getCited() != null && query.getCited() == 0) {
@@ -517,6 +533,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         itemMapper.delete(new LambdaQueryWrapper<GeoContentPlacementItem>()
                 .eq(GeoContentPlacementItem::getPlacementId, id));
         placementMapper.deleteById(id);
+        placementTaskSyncService.deleteTasksForPlacement(id);
     }
 
     @Override
@@ -533,34 +550,28 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     }
 
     @Override
-    @Transactional
-    public List<GeoContentPlacementListVO> generateSimilar(Long placementId, String provider) {
-        List<GeoContentPlacementListVO> created = doGenerateSimilar(placementId, provider);
-        if (created.isEmpty()) {
-            throw new BusinessException("生成的相似问题均已存在，未新增");
+    public List<GeoSimilarQuestionPreviewVO> generateSimilar(Long placementId, String provider, Integer count) {
+        List<GeoSimilarQuestionPreviewVO> preview = previewSimilar(placementId, provider, count);
+        if (preview.isEmpty()) {
+            throw new BusinessException("未能生成相似问题，请稍后重试");
         }
-        return created;
+        return preview;
     }
 
     @Override
-    @Transactional(noRollbackFor = BusinessException.class)
-    public List<GeoContentPlacementListVO> generateSimilarBatch(List<Long> placementIds, String provider) {
+    public List<GeoSimilarQuestionPreviewVO> generateSimilarBatch(List<Long> placementIds, String provider, Integer count) {
         if (placementIds == null || placementIds.isEmpty()) {
             throw new BusinessException("请选择要生成的内容投放");
         }
-        List<GeoContentPlacementListVO> all = new ArrayList<>();
+        int size = normalizeGenerateCount(count);
+        List<GeoSimilarQuestionPreviewVO> all = new ArrayList<>();
         int failures = 0;
         for (Long id : placementIds) {
             if (id == null) {
                 continue;
             }
             try {
-                List<GeoContentPlacementListVO> created = doGenerateSimilar(id, provider);
-                if (created.isEmpty()) {
-                    failures++;
-                } else {
-                    all.addAll(created);
-                }
+                all.addAll(previewSimilar(id, provider, size));
             } catch (BusinessException e) {
                 failures++;
                 log.warn("批量生成相似问题跳过 id={}: {}", id, e.getMessage());
@@ -568,56 +579,97 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         if (all.isEmpty()) {
             throw new BusinessException(failures > 0
-                    ? "批量生成未新增任何记录（可能均已存在或缺少目标问题）"
+                    ? "批量生成没有得到相似问题（可能缺少目标问题或模型调用失败）"
                     : "请选择要生成的内容投放");
         }
         return all;
     }
 
-    /** 生成相似问题；全部重复时返回空列表（不抛业务异常，便于批量跳过） */
-    private List<GeoContentPlacementListVO> doGenerateSimilar(Long placementId, String provider) {
+    @Override
+    @Transactional
+    public List<GeoContentPlacementListVO> saveSimilarQuestions(GeoSimilarQuestionCommitDTO dto) {
+        if (dto == null || dto.getItems() == null || dto.getItems().isEmpty()) {
+            throw new BusinessException("请选择要落库的相似问题");
+        }
+        List<GeoContentPlacementListVO> created = new ArrayList<>();
+        for (GeoSimilarQuestionCommitDTO.Item item : dto.getItems()) {
+            if (item == null || item.getSourcePlacementId() == null || !StringUtils.hasText(item.getTargetQuestion())) {
+                continue;
+            }
+            GeoContentPlacement saved = insertSimilarPlacement(item.getSourcePlacementId(), item.getTargetQuestion().trim(), item.getSourceAiModel());
+            if (saved != null) {
+                created.add(toListVo(saved, List.of(), 0));
+            }
+        }
+        if (created.isEmpty()) {
+            throw new BusinessException("所选问题都已存在，未新增");
+        }
+        return created;
+    }
+
+    /** 只生成预览，不写库、不建任务 */
+    private List<GeoSimilarQuestionPreviewVO> previewSimilar(Long placementId, String provider, Integer count) {
         GeoContentPlacement source = requirePlacement(placementId);
         if (!StringUtils.hasText(source.getTargetQuestion())) {
             throw new BusinessException("当前记录缺少目标问题，无法生成相似问题");
         }
-        SimilarQuestionsResult gen = generateSimilarQuestions(source, provider);
-        List<String> questions = gen.questions();
-        if (questions.isEmpty()) {
+        int size = normalizeGenerateCount(count);
+        SimilarQuestionsResult gen = generateSimilarQuestions(source, provider, size);
+        if (gen.questions().isEmpty()) {
             throw new BusinessException("未能生成相似问题，请稍后重试");
         }
-        List<GeoContentPlacementListVO> created = new ArrayList<>();
-        for (String question : questions) {
+        List<GeoSimilarQuestionPreviewVO> rows = new ArrayList<>();
+        for (String question : gen.questions()) {
             String trimmed = question == null ? "" : question.trim();
             if (!StringUtils.hasText(trimmed)) {
                 continue;
             }
-            Long topicId = source.getTopicId();
-            if (topicId != null && existsTopicQuestion(topicId, trimmed, null)) {
-                continue;
-            }
-            GeoContentPlacement row = new GeoContentPlacement();
-            row.setPublisherUserId(null);
-            row.setPublisherName(Constants.CONTENT_UNASSIGNED);
-            row.setOwnerUserId(null);
-            row.setOwnerName(Constants.CONTENT_UNASSIGNED);
-            if (source.getTopicId() != null || StringUtils.hasText(source.getTopicName())) {
-                applyTopic(row, source.getTopicId(), source.getTopicName());
-            } else {
-                row.setTopicId(null);
-                row.setTopicName("");
-            }
-            row.setTargetQuestion(trimmed);
-            row.setTitle("");
-            row.setSource(Constants.CONTENT_SOURCE_AI);
-            row.setSourcePlacementId(source.getId());
-            row.setSourceAiModel(gen.sourceAiModel());
-            row.setPlacementProgress(Constants.CONTENT_AGG_NONE);
-            row.setRemark("由「" + source.getTargetQuestion() + "」生成，待分配发布人/撰写人");
-            placementMapper.insert(row);
-            placementTaskSyncService.ensureTasksForPlacement(row);
-            created.add(toListVo(row, List.of(), 0));
+            GeoSimilarQuestionPreviewVO vo = new GeoSimilarQuestionPreviewVO();
+            vo.setSourcePlacementId(source.getId());
+            vo.setSourceQuestion(source.getTargetQuestion());
+            vo.setTargetQuestion(trimmed);
+            vo.setSourceAiModel(gen.sourceAiModel());
+            vo.setDuplicated(source.getTopicId() != null && existsTopicQuestion(source.getTopicId(), trimmed, null));
+            rows.add(vo);
         }
-        return created;
+        return rows;
+    }
+
+    /** 落库一条相似问题并生成任务；已存在则跳过 */
+    private GeoContentPlacement insertSimilarPlacement(Long placementId, String question, String sourceAiModel) {
+        GeoContentPlacement source = requirePlacement(placementId);
+        if (source.getTopicId() != null && existsTopicQuestion(source.getTopicId(), question, null)) {
+            return null;
+        }
+        GeoContentPlacement row = new GeoContentPlacement();
+        row.setPublisherUserId(null);
+        row.setPublisherName(Constants.CONTENT_UNASSIGNED);
+        row.setOwnerUserId(null);
+        row.setOwnerName(Constants.CONTENT_UNASSIGNED);
+        if (source.getTopicId() != null || StringUtils.hasText(source.getTopicName())) {
+            applyTopic(row, source.getTopicId(), source.getTopicName());
+        } else {
+            row.setTopicId(null);
+            row.setTopicName("");
+        }
+        row.setTargetQuestion(question);
+        row.setTitle("");
+        row.setSource(Constants.CONTENT_SOURCE_AI);
+        row.setSourcePlacementId(source.getId());
+        row.setSourceAiModel(StringUtils.hasText(sourceAiModel) ? sourceAiModel.trim() : "本地模板");
+        row.setPlacementProgress(Constants.CONTENT_AGG_NONE);
+        row.setRemark("由「" + source.getTargetQuestion() + "」生成，待分配发布人/撰写人");
+        placementMapper.insert(row);
+        placementTaskSyncService.ensureTasksForPlacement(row);
+        return row;
+    }
+
+    private static int normalizeGenerateCount(Integer count) {
+        int size = count == null ? 5 : count;
+        if (size < 1 || size > 10) {
+            throw new BusinessException("生成数量须在 1 到 10 之间");
+        }
+        return size;
     }
 
     @Override
@@ -629,7 +681,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private record SimilarQuestionsResult(List<String> questions, String sourceAiModel) {
     }
 
-    private SimilarQuestionsResult generateSimilarQuestions(GeoContentPlacement source, String provider) {
+    private SimilarQuestionsResult generateSimilarQuestions(GeoContentPlacement source, String provider, int count) {
         String topic = nz(source.getTopicName());
         String question = source.getTargetQuestion().trim();
         String p = StringUtils.hasText(provider) ? provider : null;
@@ -639,18 +691,18 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         if (useAi) {
             try {
                 String system = """
-                        你是 GEO 内容投放助手。请围绕给定目标问题，生成 3 到 8 条语义相近但表述不同的「待投放目标问题」。
+                        你是 GEO 内容投放助手。请围绕给定目标问题，生成恰好 %d 条语义相近但表述不同的「待投放目标问题」。
                         要求：
                         1. 只输出 JSON 数组，例如 ["问题1","问题2"]，不要 markdown，不要解释；
                         2. 问题要适合中文内容投放，口语化、可检索；
-                        3. 不要与原问题完全相同，也不要重复。
-                        """;
+                        3. 不要与原问题完全相同，也不要重复；
+                        4. 数组长度必须是 %d。
+                        """.formatted(count, count);
                 String user = "话题：" + (topic.isEmpty() ? "未指定" : topic) + "\n原目标问题：" + question;
                 String content = aiChatService.chat(system, user, p);
                 List<String> parsed = parseQuestionArray(content);
                 if (!parsed.isEmpty()) {
-                    int take = ThreadLocalRandom.current().nextInt(3, 9);
-                    List<String> questions = parsed.stream().filter(q -> !q.equals(question)).distinct().limit(take).toList();
+                    List<String> questions = parsed.stream().filter(q -> !q.equals(question)).distinct().limit(count).toList();
                     return new SimilarQuestionsResult(questions, resolveAiSourceLabel(p));
                 }
             } catch (BusinessException e) {
@@ -667,7 +719,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         } else if (p != null && !"local".equalsIgnoreCase(p.trim()) && !aiChatService.isProviderConfigured(p)) {
             throw new BusinessException("所选模型未配置 API Key，请到「系统管理 → AI模型配置」中填写");
         }
-        return new SimilarQuestionsResult(heuristicSimilarQuestions(topic, question), "本地模板");
+        return new SimilarQuestionsResult(heuristicSimilarQuestions(topic, question, count), "本地模板");
     }
 
     /** 生成来源展示：厂商名（模型名） */
@@ -710,12 +762,11 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
     }
 
-    private List<String> heuristicSimilarQuestions(String topic, String question) {
+    private List<String> heuristicSimilarQuestions(String topic, String question, int count) {
         String base = question.replaceAll("[？?！!。]$", "").trim();
         String topicPrefix = StringUtils.hasText(topic) ? topic : "相关场景";
         List<String> pool = new ArrayList<>(GeoSimilarQuestionTemplates.ALL);
         Collections.shuffle(pool, ThreadLocalRandom.current());
-        int take = ThreadLocalRandom.current().nextInt(3, 9);
         List<String> picked = new ArrayList<>();
         for (String tpl : pool) {
             String q = tpl.replace("{base}", base).replace("{topic}", topicPrefix).trim();
@@ -723,7 +774,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 continue;
             }
             picked.add(q);
-            if (picked.size() >= take) {
+            if (picked.size() >= count) {
                 break;
             }
         }
@@ -741,6 +792,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         itemMapper.insert(item);
         syncPlacementDerived(dto.getPlacementId());
+        placementTaskSyncService.completeArticlePublishTasks(dto.getPlacementId());
         return item.getId();
     }
 
@@ -765,6 +817,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                     .eq(GeoContentPlacementCite::getItemId, item.getId()));
         }
         syncPlacementDerived(item.getPlacementId());
+        placementTaskSyncService.completeArticlePublishTasks(item.getPlacementId());
     }
 
     @Override
@@ -1213,6 +1266,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         item.setPlatformName(nz(dto.getPlatformName()));
         item.setContentForm(normalizeContentForm(dto.getContentForm(), dto.getPlatformName()));
         item.setPublishStatus(normalizePublishStatus(dto.getPublishStatus()));
+        assertPublishUrl(dto.getPublishUrl());
         item.setPublishUrl(nz(dto.getPublishUrl()));
         item.setPublishTime(dto.getPublishTime());
         item.setSortOrder(dto.getSortOrder());
@@ -1270,10 +1324,32 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         String status = nz(raw);
         if (Constants.CONTENT_PUBLISH_SUCCESS.equals(status)
                 || Constants.CONTENT_PUBLISH_REJECTED.equals(status)
+                || Constants.CONTENT_PUBLISH_PENDING.equals(status)
                 || Constants.CONTENT_PUBLISH_NONE.equals(status)) {
             return status;
         }
         return Constants.CONTENT_PUBLISH_NONE;
+    }
+
+    private static void assertPublishUrl(String raw) {
+        String url = nz(raw);
+        if (!StringUtils.hasText(url)) {
+            throw new BusinessException("请填写投放链接");
+        }
+        if (url.chars().anyMatch(Character::isWhitespace) || !url.matches("(?i)https?://\\S+")) {
+            throw new BusinessException("投放链接必须是 http 或 https 链接");
+        }
+    }
+
+    private static String pendingProofPlacementSql() {
+        return """
+                SELECT DISTINCT t.biz_id FROM sys_task t
+                INNER JOIN sys_task_file f ON f.task_id = t.id AND f.is_active = 1
+                WHERE t.biz_type = 'geo_content_placement' AND t.is_active = 1 AND t.biz_id IS NOT NULL
+                UNION
+                SELECT DISTINCT biz_id FROM sys_task_file
+                WHERE biz_type = 'geo_content_placement' AND is_active = 1 AND biz_id IS NOT NULL
+                """;
     }
 
     private void clearChildren(Long placementId) {
@@ -1455,18 +1531,24 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             return Constants.CONTENT_AGG_NONE;
         }
         int success = 0;
+        int pending = 0;
         for (String status : statuses) {
             if (Constants.CONTENT_PUBLISH_SUCCESS.equals(status)) {
                 success++;
+            } else if (Constants.CONTENT_PUBLISH_PENDING.equals(status)) {
+                pending++;
             }
-        }
-        if (success == 0) {
-            return Constants.CONTENT_AGG_NONE;
         }
         if (success == statuses.size()) {
             return Constants.CONTENT_AGG_DONE;
         }
-        return Constants.CONTENT_AGG_PARTIAL;
+        if (success > 0) {
+            return Constants.CONTENT_AGG_PARTIAL;
+        }
+        if (pending > 0) {
+            return Constants.CONTENT_AGG_PENDING;
+        }
+        return Constants.CONTENT_AGG_NONE;
     }
 
     private GeoContentPublisherWeekRowVO buildPublisherWeekRow(
@@ -1635,7 +1717,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             case "投放完成", "全部投放成功" -> Constants.CONTENT_AGG_DONE;
             case "部分投放", "部分投放成功" -> Constants.CONTENT_AGG_PARTIAL;
             case "未投放", "全部未投放" -> Constants.CONTENT_AGG_NONE;
-            case "待投放" -> Constants.CONTENT_AGG_NONE;
+            case "待投放" -> Constants.CONTENT_AGG_PENDING;
             default -> value;
         };
     }

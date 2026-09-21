@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Modal, Progress, Select, Tag, Upload } from 'antd';
+import { App, Button, InputNumber, Modal, Progress, Select, Table, Tag, Upload } from 'antd';
 import { InboxOutlined, DownloadOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm';
@@ -16,6 +16,7 @@ import {
   deleteGeoContentPlacementBatchApi,
   generateSimilarGeoContentPlacementApi,
   generateSimilarGeoContentPlacementBatchApi,
+  saveSimilarGeoContentPlacementApi,
   getGeoAiProvidersApi,
   getGeoContentPlacementListApi,
   getGeoOwnerOptionsApi,
@@ -36,6 +37,15 @@ type AiProviderOption = {
   model: string;
   available: boolean;
   hint?: string;
+};
+
+type SimilarPreview = {
+  key: string;
+  sourcePlacementId: number;
+  sourceQuestion?: string;
+  targetQuestion: string;
+  sourceAiModel?: string;
+  duplicated?: boolean;
 };
 
 /** 管理视角：目标问题生成/分配与投放进度 */
@@ -66,6 +76,11 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const [batchGenerateOpen, setBatchGenerateOpen] = useState(false);
   const [generateRecord, setGenerateRecord] = useState<GeoContentPlacementListItem | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>('local');
+  const [generateCount, setGenerateCount] = useState(5);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewRows, setPreviewRows] = useState<SimilarPreview[]>([]);
+  const [pickedKeys, setPickedKeys] = useState<string[]>([]);
+  const [savingPreview, setSavingPreview] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -113,16 +128,29 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       });
   };
 
+  const openPreview = (rows: SimilarPreview[]) => {
+    setPreviewRows(rows);
+    setPickedKeys(rows.filter((row) => !row.duplicated).map((row) => row.key));
+    setPreviewOpen(true);
+  };
+
   const handleGenerateSimilar = async () => {
     if (!generateRecord) return;
+    const count = Math.min(10, Math.max(1, generateCount || 1));
     setGeneratingId(generateRecord.id);
     try {
-      const rows = await generateSimilarGeoContentPlacementApi(generateRecord.id, selectedProvider);
-      const providerLabel = aiProviders.find((p) => p.provider === selectedProvider)?.label || selectedProvider;
-      message.success(`已用「${providerLabel}」生成 ${rows.length} 条相似问题（待分配）`);
+      const rows = await generateSimilarGeoContentPlacementApi(generateRecord.id, selectedProvider, count);
+      openPreview(
+        (rows ?? []).map((row, index) => ({
+          key: `${row.sourcePlacementId}-${index}`,
+          sourcePlacementId: row.sourcePlacementId,
+          sourceQuestion: row.sourceQuestion,
+          targetQuestion: row.targetQuestion,
+          sourceAiModel: row.sourceAiModel,
+          duplicated: !!row.duplicated,
+        })),
+      );
       setGenerateOpen(false);
-      setGenerateRecord(null);
-      actionRef.current?.reload();
     } finally {
       setGeneratingId(null);
     }
@@ -130,17 +158,55 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
 
   const handleBatchGenerateSimilar = async () => {
     if (selectedRowKeys.length === 0) return;
+    const count = Math.min(10, Math.max(1, generateCount || 1));
     setBatchGenerating(true);
     try {
-      const rows = await generateSimilarGeoContentPlacementBatchApi(selectedRowKeys as number[], selectedProvider);
-      const providerLabel = aiProviders.find((p) => p.provider === selectedProvider)?.label || selectedProvider;
-      message.success(`已用「${providerLabel}」批量生成 ${rows.length} 条相似问题`);
+      const rows = await generateSimilarGeoContentPlacementBatchApi(
+        selectedRowKeys as number[],
+        selectedProvider,
+        count,
+      );
+      openPreview(
+        (rows ?? []).map((row, index) => ({
+          key: `${row.sourcePlacementId}-${index}`,
+          sourcePlacementId: row.sourcePlacementId,
+          sourceQuestion: row.sourceQuestion,
+          targetQuestion: row.targetQuestion,
+          sourceAiModel: row.sourceAiModel,
+          duplicated: !!row.duplicated,
+        })),
+      );
       setBatchGenerateOpen(false);
+    } finally {
+      setBatchGenerating(false);
+    }
+  };
+
+  const handleSavePreview = async () => {
+    const picked = previewRows.filter((row) => pickedKeys.includes(row.key) && !row.duplicated);
+    if (picked.length === 0) {
+      message.warning('请勾选要落库的相似问题');
+      return;
+    }
+    setSavingPreview(true);
+    try {
+      const saved = await saveSimilarGeoContentPlacementApi(
+        picked.map((row) => ({
+          sourcePlacementId: row.sourcePlacementId,
+          targetQuestion: row.targetQuestion,
+          sourceAiModel: row.sourceAiModel,
+        })),
+      );
+      message.success(`已落库 ${saved?.length ?? picked.length} 条，并生成对应任务`);
+      setPreviewOpen(false);
+      setPreviewRows([]);
+      setPickedKeys([]);
+      setGenerateRecord(null);
       setSelectedRowKeys([]);
       currentPageKeysRef.current = new Set();
       actionRef.current?.reload();
     } finally {
-      setBatchGenerating(false);
+      setSavingPreview(false);
     }
   };
 
@@ -521,6 +587,15 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
         destroyOnHidden
       >
         <div className='mb-3 text-sm text-neutral-600'>源问题：{generateRecord?.targetQuestion || '-'}</div>
+        <div className='mb-1 text-sm text-neutral-700'>生成数量</div>
+        <InputNumber
+          className='mb-3 w-full'
+          min={1}
+          max={10}
+          precision={0}
+          value={generateCount}
+          onChange={(value) => setGenerateCount(value ?? 1)}
+        />
         <div className='mb-1 text-sm text-neutral-700'>选择生成模型</div>
         <Select
           className='w-full'
@@ -549,7 +624,16 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
         confirmLoading={batchGenerating}
         destroyOnHidden
       >
-        <div className='mb-3 text-sm text-neutral-600'>已选 {selectedRowKeys.length} 条记录</div>
+        <div className='mb-3 text-sm text-neutral-600'>已选 {selectedRowKeys.length} 条记录，每条按下面的数量生成</div>
+        <div className='mb-1 text-sm text-neutral-700'>每条生成数量</div>
+        <InputNumber
+          className='mb-3 w-full'
+          min={1}
+          max={10}
+          precision={0}
+          value={generateCount}
+          onChange={(value) => setGenerateCount(value ?? 1)}
+        />
         <div className='mb-1 text-sm text-neutral-700'>选择生成模型</div>
         <Select
           className='w-full'
@@ -559,6 +643,60 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
             value: p.provider,
             label: `${p.label}（${p.model}）`,
           }))}
+        />
+      </Modal>
+
+      <Modal
+        title='选择要落库的相似问题'
+        open={previewOpen}
+        width={760}
+        maskClosable={false}
+        okText='落库并生成任务'
+        cancelText='放弃'
+        confirmLoading={savingPreview}
+        onCancel={() => {
+          if (savingPreview) return;
+          setPreviewOpen(false);
+          setPreviewRows([]);
+          setPickedKeys([]);
+        }}
+        onOk={() => void handleSavePreview()}
+      >
+        <p className='mb-3 text-sm text-neutral-500'>
+          还没有写入数据库，也没有生成任务。勾选需要的问题后再落库。已存在的问题不能选择。
+        </p>
+        <Table<SimilarPreview>
+          rowKey='key'
+          size='small'
+          pagination={false}
+          dataSource={previewRows}
+          scroll={{ y: 360 }}
+          rowSelection={{
+            selectedRowKeys: pickedKeys,
+            onChange: (keys) => setPickedKeys(keys as string[]),
+            getCheckboxProps: (row) => ({ disabled: !!row.duplicated }),
+          }}
+          columns={[
+            {
+              title: '相似问题',
+              dataIndex: 'targetQuestion',
+              render: (value: string, row) => (
+                <span>
+                  {value}
+                  {row.duplicated ? (
+                    <Tag
+                      className='ml-2'
+                      color='default'
+                    >
+                      已存在
+                    </Tag>
+                  ) : null}
+                </span>
+              ),
+            },
+            { title: '来源问题', dataIndex: 'sourceQuestion', width: 220, ellipsis: true },
+            { title: '模型', dataIndex: 'sourceAiModel', width: 140, ellipsis: true },
+          ]}
         />
       </Modal>
 

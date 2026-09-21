@@ -32,7 +32,7 @@ import {
   GEO_PLATFORM_TYPE_AI,
   GEO_PLATFORM_TYPE_CONTENT,
 } from '@/constants/geo';
-import { AGG_COLOR, STATUS_COLOR, derivePlacementProgress } from './constants';
+import { AGG_COLOR, STATUS_COLOR, canOpenExternalInApp, derivePlacementProgress } from './constants';
 
 type Props = {
   open: boolean;
@@ -155,7 +155,21 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
       fieldProps: { options: [...GEO_CONTENT_PUBLISH_STATUS] },
       formItemProps: { rules: [{ required: true, message: '请选择状态' }] },
     },
-    { title: '投放链接', dataIndex: 'publishUrl' },
+    {
+      title: '投放链接',
+      dataIndex: 'publishUrl',
+      formItemProps: {
+        rules: [
+          { required: true, message: '请填写投放链接' },
+          {
+            validator: (_: unknown, value: unknown) =>
+              canOpenExternalInApp(String(value ?? ''))
+                ? Promise.resolve()
+                : Promise.reject(new Error('投放链接必须是 http 或 https 链接')),
+          },
+        ],
+      },
+    },
     {
       title: '发布时间',
       dataIndex: 'publishTime',

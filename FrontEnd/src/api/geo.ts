@@ -375,16 +375,44 @@ export function deleteGeoContentPlacementCiteApi(citeId: number) {
   return request.delete(`/geo/content-placement/cites/${citeId}`);
 }
 
-export function generateSimilarGeoContentPlacementApi(id: number, provider?: string) {
-  return request.post<unknown, GeoContentPlacementListItem[]>(`/geo/content-placement/${id}/generate-similar`, {
+export function generateSimilarGeoContentPlacementApi(id: number, provider?: string, count?: number) {
+  return request.post<
+    unknown,
+    {
+      sourcePlacementId: number;
+      sourceQuestion?: string;
+      targetQuestion: string;
+      sourceAiModel?: string;
+      duplicated?: boolean;
+    }[]
+  >(`/geo/content-placement/${id}/generate-similar`, {
     provider: provider || undefined,
+    count,
   });
 }
 
-export function generateSimilarGeoContentPlacementBatchApi(ids: number[], provider?: string) {
-  return request.post<unknown, GeoContentPlacementListItem[]>('/geo/content-placement/generate-similar/batch', {
+export function generateSimilarGeoContentPlacementBatchApi(ids: number[], provider?: string, count?: number) {
+  return request.post<
+    unknown,
+    {
+      sourcePlacementId: number;
+      sourceQuestion?: string;
+      targetQuestion: string;
+      sourceAiModel?: string;
+      duplicated?: boolean;
+    }[]
+  >('/geo/content-placement/generate-similar/batch', {
     ids,
     provider: provider || undefined,
+    count,
+  });
+}
+
+export function saveSimilarGeoContentPlacementApi(
+  items: { sourcePlacementId: number; targetQuestion: string; sourceAiModel?: string }[],
+) {
+  return request.post<unknown, GeoContentPlacementListItem[]>('/geo/content-placement/generate-similar/save', {
+    items,
   });
 }
 
@@ -395,6 +423,10 @@ export function getGeoContentPlacementArticleListApi(
     topicId?: number;
     targetQuestion?: string;
     publishStatus?: string;
+    title?: string;
+    platformName?: string;
+    publishTimeStart?: string;
+    publishTimeEnd?: string;
     cited?: number;
     citeSort?: 'asc' | 'desc';
   },

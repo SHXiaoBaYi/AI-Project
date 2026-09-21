@@ -28,6 +28,7 @@ import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.HrHirePipelineService;
+import com.base.admin.service.PlacementTaskSyncService;
 import com.base.admin.service.SysTaskService;
 import com.base.admin.service.SysTaskTypeService;
 import com.base.admin.service.taskbiz.TaskBizFieldWriteDispatcher;
@@ -67,11 +68,16 @@ public class SysTaskServiceImpl implements SysTaskService {
     private final SysTaskTypeService taskTypeService;
     private final TaskBizFieldWriteDispatcher bizFieldWriteDispatcher;
     private final ObjectProvider<HrHirePipelineService> hirePipeline;
+    private final ObjectProvider<PlacementTaskSyncService> placementTaskSync;
     /** 避免自调用导致 @Transactional 失效（批量分配需逐条独立提交并回写业务） */
     private final ObjectProvider<SysTaskService> selfProvider;
 
     @Override
     public PageResult<SysTaskVO> list(SysTaskQueryDTO query) {
+        PlacementTaskSyncService sync = placementTaskSync.getIfAvailable();
+        if (sync != null) {
+            sync.completeArticlePublishTasks();
+        }
         Long mineUserId = null;
         if (Boolean.TRUE.equals(query.getMineOnly())) {
             mineUserId = SecurityUtils.getCurrentUserId();
@@ -295,6 +301,9 @@ public class SysTaskServiceImpl implements SysTaskService {
         if (!isOwner && !isAssignee) {
             throw new BusinessException("仅负责人或执行人可完成该任务");
         }
+        if ("文章发布".equals(task.getTaskType())) {
+            throw new BusinessException("文章发布任务请到「我的投放」填写发布记录，系统会自动完成");
+        }
         if ("已完成".equals(task.getStatus()) || "已取消".equals(task.getStatus())) {
             throw new BusinessException("任务已结束，无法再次完成");
         }
@@ -369,7 +378,8 @@ public class SysTaskServiceImpl implements SysTaskService {
                 continue;
             }
             SysTaskType typeCfg = taskTypeService.getByTypeName(task.getTaskType());
-            if (typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1)) {
+            if ("文章发布".equals(task.getTaskType())
+                    || (typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1))) {
                 skip++;
                 continue;
             }

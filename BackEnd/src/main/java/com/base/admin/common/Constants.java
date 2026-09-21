@@ -33,6 +33,8 @@ public class Constants {
     public static final String CONTENT_PUBLISH_SUCCESS = "投放成功";
     /** 内容投放状态：审核未通过 */
     public static final String CONTENT_PUBLISH_REJECTED = "审核未通过";
+    /** 内容投放状态：待投放 */
+    public static final String CONTENT_PUBLISH_PENDING = "待投放";
     /** 内容投放状态：未投放 */
     public static final String CONTENT_PUBLISH_NONE = "未投放";
 

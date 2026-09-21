@@ -8,6 +8,7 @@ export const AGG_COLOR: Record<string, string> = {
 export const STATUS_COLOR: Record<string, string> = {
   投放成功: 'success',
   审核未通过: 'error',
+  待投放: 'warning',
   未投放: 'default',
 };
 

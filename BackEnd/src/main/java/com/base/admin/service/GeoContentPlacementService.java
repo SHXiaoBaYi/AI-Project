@@ -6,7 +6,9 @@ import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
+import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
+import com.base.admin.domain.vo.GeoSimilarQuestionPreviewVO;
 import com.base.admin.domain.vo.GeoContentPlacementArticleListVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
@@ -47,11 +49,14 @@ public interface GeoContentPlacementService {
 
     void deleteBatch(List<Long> ids);
 
-    /** 基于指定内容投放，生成相似目标问题（可指定 AI 厂商） */
-    List<GeoContentPlacementListVO> generateSimilar(Long placementId, String provider);
+    /** 预览相似问题，不落库、不生成任务 */
+    List<GeoSimilarQuestionPreviewVO> generateSimilar(Long placementId, String provider, Integer count);
 
-    /** 批量生成相似目标问题 */
-    List<GeoContentPlacementListVO> generateSimilarBatch(List<Long> placementIds, String provider);
+    /** 批量预览相似问题，不落库、不生成任务 */
+    List<GeoSimilarQuestionPreviewVO> generateSimilarBatch(List<Long> placementIds, String provider, Integer count);
+
+    /** 把勾选的相似问题落库，并生成对应任务 */
+    List<GeoContentPlacementListVO> saveSimilarQuestions(GeoSimilarQuestionCommitDTO dto);
 
     /** 生成相似问题可用的 AI 厂商列表 */
     List<GeoAiProviderOptionVO> listAiProviders();

@@ -1,14 +1,21 @@
 package com.base.admin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.base.admin.common.Constants;
 import com.base.admin.domain.dto.SysTaskDTO;
 import com.base.admin.domain.dto.SysTaskTypeDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
+import com.base.admin.domain.entity.GeoContentPlacementItem;
 import com.base.admin.domain.entity.SysTask;
+import com.base.admin.domain.entity.SysTaskAssignee;
+import com.base.admin.domain.entity.SysTaskFile;
 import com.base.admin.domain.entity.SysTaskType;
 import com.base.admin.domain.entity.SysUser;
+import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
+import com.base.admin.mapper.SysTaskAssigneeMapper;
+import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.PlacementTaskSyncService;
@@ -20,7 +27,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -28,7 +37,10 @@ import java.util.List;
 public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
 
     private final GeoContentPlacementMapper placementMapper;
+    private final GeoContentPlacementItemMapper itemMapper;
     private final SysTaskMapper taskMapper;
+    private final SysTaskAssigneeMapper assigneeMapper;
+    private final SysTaskFileMapper taskFileMapper;
     private final SysUserMapper userMapper;
     private final SysTaskService taskService;
     private final SysTaskTypeService taskTypeService;
@@ -65,6 +77,88 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         }
         GeoContentPlacement placement = placementMapper.selectById(placementId);
         return ensureTasksForPlacement(placement);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void completeArticlePublishTasks(Long placementId) {
+        if (placementId == null || !hasPublishRecord(placementId)) {
+            return;
+        }
+        finishOpenPublishTasks(placementId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void completeArticlePublishTasks() {
+        List<SysTask> open = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getTaskType, "文章发布")
+                .in(SysTask::getStatus, List.of("未开始", "进行中"))
+                .isNotNull(SysTask::getBizId));
+        for (Long placementId : open.stream().map(SysTask::getBizId).filter(Objects::nonNull).distinct().toList()) {
+            if (hasPublishRecord(placementId)) {
+                finishOpenPublishTasks(placementId);
+            }
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteTasksForPlacement(Long placementId) {
+        if (placementId == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, placementId));
+        for (SysTask task : tasks) {
+            if (task.getId() == null) {
+                continue;
+            }
+            assigneeMapper.physicalDeleteByTaskId(task.getId());
+            taskFileMapper.delete(new LambdaQueryWrapper<SysTaskFile>()
+                    .eq(SysTaskFile::getTaskId, task.getId()));
+            taskMapper.deleteById(task.getId());
+        }
+    }
+
+    private boolean hasPublishRecord(Long placementId) {
+        List<GeoContentPlacementItem> items = itemMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementItem>()
+                .eq(GeoContentPlacementItem::getPlacementId, placementId)
+                .select(GeoContentPlacementItem::getId, GeoContentPlacementItem::getPublishStatus, GeoContentPlacementItem::getPublishUrl));
+        for (GeoContentPlacementItem item : items) {
+            if (Constants.CONTENT_PUBLISH_SUCCESS.equals(item.getPublishStatus())) {
+                return true;
+            }
+            String url = item.getPublishUrl() == null ? "" : item.getPublishUrl().trim();
+            if (url.matches("(?i)https?://\\S+")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void finishOpenPublishTasks(Long placementId) {
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, placementId)
+                .eq(SysTask::getTaskType, "文章发布")
+                .in(SysTask::getStatus, List.of("未开始", "进行中")));
+        LocalDateTime now = LocalDateTime.now();
+        for (SysTask task : tasks) {
+            task.setStatus("已完成");
+            task.setProgress(100);
+            task.setActualEndTime(now);
+            String note = "投放已有发布记录，系统自动完成";
+            task.setRemark(StringUtils.hasText(task.getRemark()) ? task.getRemark().trim() + "；" + note : note);
+            taskMapper.updateById(task);
+            if (task.getId() != null) {
+                assigneeMapper.update(null, new LambdaUpdateWrapper<SysTaskAssignee>()
+                        .eq(SysTaskAssignee::getTaskId, task.getId())
+                        .set(SysTaskAssignee::getDone, 1));
+            }
+        }
     }
 
     @Override
@@ -127,8 +221,8 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
                 Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_WRITER, "文章撰写", false);
         ensureType("文章撰写", 12, "撰写人执行任务",
                 Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", true);
-        ensureType("文章发布", 13, "发布人执行任务",
-                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", true);
+        ensureType("文章发布", 13, "发布人执行任务，有发布记录后自动完成",
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", false);
     }
 
     private void ensureType(String name, int sort, String remark, String bizType, String assignField,

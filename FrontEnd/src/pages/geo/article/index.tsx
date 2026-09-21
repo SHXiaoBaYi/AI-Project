@@ -9,7 +9,7 @@ import ActionButtons from '@/components/Buttons/ActionButtons';
 import { ExternalLinkText } from '@/components/ExternalLinkDrawer';
 import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import { CiteScreenshotUpload } from '@/components/geo/CiteScreenshotUpload';
-import { STATUS_COLOR } from '@/components/geo/content-placement/constants';
+import { STATUS_COLOR, canOpenExternalInApp } from '@/components/geo/content-placement/constants';
 import {
   createGeoContentPlacementCiteApi,
   createGeoContentPlacementItemApi,
@@ -269,13 +269,18 @@ const ArticlePage = memo(function ArticlePage() {
       dataIndex: 'title',
       width: 200,
       ellipsis: true,
-      search: false,
     },
     {
       title: '发布平台',
       dataIndex: 'platformName',
-      width: 120,
-      search: false,
+      width: 140,
+      valueType: 'select',
+      fieldProps: {
+        options: platformOptions,
+        showSearch: true,
+        optionFilterProp: 'label',
+        allowClear: true,
+      },
     },
     {
       title: '内容形态',
@@ -311,6 +316,18 @@ const ArticlePage = memo(function ArticlePage() {
     },
     {
       title: '发布时间',
+      dataIndex: 'publishTimeRange',
+      valueType: 'dateRange',
+      hideInTable: true,
+      search: {
+        transform: (value: string[]) => ({
+          publishTimeStart: value?.[0],
+          publishTimeEnd: value?.[1],
+        }),
+      },
+    },
+    {
+      title: '发布时间',
       dataIndex: 'publishTime',
       width: 170,
       search: false,
@@ -338,7 +355,11 @@ const ArticlePage = memo(function ArticlePage() {
             ownerUserId: params.ownerUserId,
             topicId: params.topicId,
             targetQuestion: params.targetQuestion,
+            title: params.title,
+            platformName: params.platformName,
             publishStatus: params.publishStatus,
+            publishTimeStart: params.publishTimeStart,
+            publishTimeEnd: params.publishTimeEnd,
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
             cited,
@@ -522,6 +543,15 @@ const ArticlePage = memo(function ArticlePage() {
             name='publishUrl'
             label='投放链接'
             className='col-span-2'
+            rules={[
+              { required: true, message: '请填写投放链接' },
+              {
+                validator: (_, value) =>
+                  canOpenExternalInApp(value)
+                    ? Promise.resolve()
+                    : Promise.reject(new Error('投放链接必须是 http 或 https 链接')),
+              },
+            ]}
           >
             <Input
               allowClear

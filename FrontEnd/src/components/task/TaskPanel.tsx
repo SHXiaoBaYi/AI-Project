@@ -3,6 +3,7 @@ import type { Key } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Button, Form, Input, Modal, Select, Tag, Upload } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
+import { useNavigate } from 'react-router-dom';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -58,6 +59,7 @@ function fileOpenUrl(url?: string) {
 
 const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Props) {
   const { message } = App.useApp();
+  const navigate = useNavigate();
   const actionRef = useRef<ActionType>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SysTask | null>(null);
@@ -125,7 +127,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   };
 
   /** 仅未要求证明附件的任务可批量完成 */
-  const canBatchComplete = (r: SysTask) => !!r.completable && !r.requireProof;
+  const canBatchComplete = (r: SysTask) => !!r.completable && !r.requireProof && r.taskType !== '文章发布';
 
   const openBatchComplete = () => {
     if (!selectedRowKeys.length) {
@@ -263,6 +265,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       title: '负责人',
       dataIndex: 'ownerUserId',
       width: 110,
+      hideInTable: !mineOnly,
       valueType: 'select',
       fieldProps: {
         options: userOptions,
@@ -387,7 +390,13 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             ? {
                 key: 'complete',
                 label: '去完成',
-                onClick: () => openComplete(record),
+                onClick: () => {
+                  if (record.taskType === '文章发布') {
+                    navigate('/geo/content-placement-work');
+                    return;
+                  }
+                  openComplete(record);
+                },
               }
             : null,
           (record.fileCount ?? 0) > 0

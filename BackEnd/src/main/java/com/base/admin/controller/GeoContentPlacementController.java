@@ -11,6 +11,8 @@ import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
 import com.base.admin.domain.dto.GeoGenerateSimilarBatchDTO;
 import com.base.admin.domain.dto.GeoGenerateSimilarDTO;
+import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
+import com.base.admin.domain.vo.GeoSimilarQuestionPreviewVO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
 import com.base.admin.domain.vo.GeoContentPlacementArticleListVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
@@ -153,24 +155,34 @@ public class GeoContentPlacementController {
         return Result.ok(contentPlacementService.listAiProviders());
     }
 
-    @Operation(summary = "生成相似目标问题（AI）")
+    @Operation(summary = "预览相似目标问题，不落库")
     @PostMapping("/{id:\\d+}/generate-similar")
     @RequiresPermission("geo:content:generate")
-    @Log(title = "GEO内容投放-生成相似问题", businessType = 1)
-    public Result<List<GeoContentPlacementListVO>> generateSimilar(
+    @Log(title = "GEO内容投放-生成相似问题", businessType = 0)
+    public Result<List<GeoSimilarQuestionPreviewVO>> generateSimilar(
             @PathVariable Long id,
-            @RequestBody(required = false) GeoGenerateSimilarDTO dto) {
+            @RequestBody(required = false) @Valid GeoGenerateSimilarDTO dto) {
         String provider = dto == null ? null : dto.getProvider();
-        return Result.ok(contentPlacementService.generateSimilar(id, provider));
+        Integer count = dto == null ? null : dto.getCount();
+        return Result.ok(contentPlacementService.generateSimilar(id, provider, count));
     }
 
-    @Operation(summary = "批量生成相似目标问题（AI）")
+    @Operation(summary = "批量预览相似目标问题，不落库")
     @PostMapping("/generate-similar/batch")
     @RequiresPermission("geo:content:generate")
-    @Log(title = "GEO内容投放-批量生成相似问题", businessType = 1)
-    public Result<List<GeoContentPlacementListVO>> generateSimilarBatch(
+    @Log(title = "GEO内容投放-批量生成相似问题", businessType = 0)
+    public Result<List<GeoSimilarQuestionPreviewVO>> generateSimilarBatch(
             @Valid @RequestBody GeoGenerateSimilarBatchDTO dto) {
-        return Result.ok(contentPlacementService.generateSimilarBatch(dto.getIds(), dto.getProvider()));
+        return Result.ok(contentPlacementService.generateSimilarBatch(dto.getIds(), dto.getProvider(), dto.getCount()));
+    }
+
+    @Operation(summary = "勾选相似问题后落库并生成任务")
+    @PostMapping("/generate-similar/save")
+    @RequiresPermission("geo:content:generate")
+    @Log(title = "GEO内容投放-落库相似问题", businessType = 1)
+    public Result<List<GeoContentPlacementListVO>> saveSimilarQuestions(
+            @Valid @RequestBody GeoSimilarQuestionCommitDTO dto) {
+        return Result.ok(contentPlacementService.saveSimilarQuestions(dto));
     }
 
     @Operation(summary = "新增发布详情")

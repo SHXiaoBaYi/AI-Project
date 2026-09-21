@@ -4,6 +4,9 @@ import com.base.admin.common.PageQuery;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.springframework.format.annotation.DateTimeFormat;
+
+import java.time.LocalDate;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -22,8 +25,22 @@ public class GeoContentPlacementArticleQueryDTO extends PageQuery {
     @Schema(description = "目标问题")
     private String targetQuestion;
 
-    @Schema(description = "投放状态（投放成功/审核未通过/未投放）", example = "投放成功")
+    @Schema(description = "标题")
+    private String title;
+
+    @Schema(description = "发布平台（内容发布平台）")
+    private String platformName;
+
+    @Schema(description = "投放状态（投放成功/审核未通过/待投放/未投放）", example = "投放成功")
     private String publishStatus;
+
+    @Schema(description = "发布时间起（含当日）", example = "2026-01-01")
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    private LocalDate publishTimeStart;
+
+    @Schema(description = "发布时间止（含当日）", example = "2026-12-31")
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    private LocalDate publishTimeEnd;
 
     @Schema(description = "引用筛选：1有引用 0无引用", example = "1", nullable = true)
     private Integer cited;
