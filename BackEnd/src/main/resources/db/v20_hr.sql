@@ -446,7 +446,23 @@ INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_
 ('OFFER_SENT', '发放Offer', 100, 0, 0, 0, 1),
 ('OFFER_ACCEPTED', 'Offer接受', 110, 0, 0, 0, 1),
 ('CANDIDATE_REJECT', '候选人拒绝', 120, 0, 1, 1, 1),
-('ONBOARDED', '入职', 130, 1, 1, 1, 1)
+('ONBOARDED', '入职', 130, 1, 1, 1, 1),
+('R1_DISPUTE', '一面待商榷', 55, 0, 1, 0, 1),
+('R2_PENDING', '二面待定', 72, 0, 1, 0, 1),
+('R2_DISPUTE', '二面待商榷', 73, 0, 1, 0, 1),
+('R2_FAIL', '二面未通过', 74, 0, 1, 1, 1),
+('R3_PASS', '三面', 81, 1, 1, 0, 1),
+('R3_PENDING', '三面待定', 82, 0, 1, 0, 1),
+('R3_DISPUTE', '三面待商榷', 83, 0, 1, 0, 1),
+('R3_FAIL', '三面未通过', 84, 0, 1, 1, 1),
+('R4_PASS', '四面', 85, 1, 1, 0, 1),
+('R4_PENDING', '四面待定', 86, 0, 1, 0, 1),
+('R4_DISPUTE', '四面待商榷', 87, 0, 1, 0, 1),
+('R4_FAIL', '四面未通过', 88, 0, 1, 1, 1),
+('R5_PASS', '五面', 89, 1, 1, 0, 1),
+('R5_PENDING', '五面待定', 97, 0, 1, 0, 1),
+('R5_DISPUTE', '五面待商榷', 98, 0, 1, 0, 1),
+('R5_FAIL', '五面未通过', 99, 0, 1, 1, 1)
 ON DUPLICATE KEY UPDATE stage_name = VALUES(stage_name), sort_no = VALUES(sort_no),
   funnel_visible = VALUES(funnel_visible), data_ready = VALUES(data_ready), terminal = VALUES(terminal), is_active = 1;
 
@@ -520,6 +536,22 @@ CREATE TABLE IF NOT EXISTS hr_interview_record (
   KEY idx_hr_record_invite (invite_id),
   KEY idx_hr_record_req (requisition_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试记录';
+
+CREATE TABLE IF NOT EXISTS hr_interview_verdict (
+  id              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+  application_id  BIGINT       NOT NULL                COMMENT '候选人投递',
+  round_no        TINYINT      NOT NULL                COMMENT '轮次',
+  conclusion      VARCHAR(16)  NOT NULL                COMMENT 'PASS/FAIL/PENDING',
+  comment         TEXT         NULL                    COMMENT '联合评价',
+  decided_by      BIGINT       NULL                    COMMENT '评价人',
+  create_by       VARCHAR(50)  DEFAULT ''              COMMENT '创建者',
+  create_time     DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_by       VARCHAR(50)  DEFAULT ''              COMMENT '更新者',
+  update_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  is_active       TINYINT      NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_hr_interview_verdict (application_id, round_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试联合评价';
 
 CREATE TABLE IF NOT EXISTS hr_application_ai (
   id                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',

@@ -7,6 +7,8 @@ import com.base.admin.common.Result;
 import com.base.admin.domain.dto.HrSchoolQueryDTO;
 import com.base.admin.domain.vo.HrApplicationImportResultVO;
 import com.base.admin.domain.vo.HrDingTalkIdentityVO;
+import com.base.admin.domain.vo.HrInterviewReviewVO;
+import com.base.admin.domain.vo.HrInviteSaveVO;
 import com.base.admin.domain.vo.HrSchoolVO;
 import com.base.admin.service.HrApplicationImportService;
 import com.base.admin.domain.dto.HrBoardQueryDTO;
@@ -18,6 +20,7 @@ import com.base.admin.domain.vo.HrApplicationAiVO;
 import com.base.admin.service.HrApplicationAiService;
 import com.base.admin.domain.dto.HrDingTalkBindDTO;
 import com.base.admin.domain.dto.HrInterviewRecordDTO;
+import com.base.admin.domain.dto.HrInterviewVerdictDTO;
 import com.base.admin.domain.dto.HrInviteCreateDTO;
 import com.base.admin.domain.dto.HrInviteTransferDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
@@ -362,7 +365,7 @@ public class HrMasterController {
     @PostMapping("/invite")
     @RequiresPermission("hr:invite:add")
     @Log(title = "面试邀约", businessType = 1)
-    public Result<Long> invite(@Valid @RequestBody HrInviteCreateDTO dto) {
+    public Result<HrInviteSaveVO> invite(@Valid @RequestBody HrInviteCreateDTO dto) {
         return Result.ok(inviteService.create(dto));
     }
 
@@ -395,34 +398,48 @@ public class HrMasterController {
     @PutMapping("/invite/{id}")
     @RequiresPermission("hr:invite:edit")
     @Log(title = "面试邀约", businessType = 2)
-    public Result<Void> updateInvite(@PathVariable Long id, @Valid @RequestBody HrInviteCreateDTO dto) {
-        inviteService.update(id, dto);
+    public Result<HrInviteSaveVO> updateInvite(@PathVariable Long id, @Valid @RequestBody HrInviteCreateDTO dto) {
+        return Result.ok(inviteService.update(id, dto));
+    }
+
+    @Operation(summary = "为未建日程的邀约创建钉钉日程")
+    @PostMapping("/invite/{id:\\d+}/calendar")
+    @RequiresPermission("hr:invite:edit")
+    @Log(title = "面试邀约", businessType = 2)
+    public Result<Void> createInviteCalendar(@PathVariable Long id) {
+        inviteService.createCalendar(id);
         return Result.ok();
+    }
+
+    @Operation(summary = "批量为未建日程的邀约创建钉钉日程")
+    @PostMapping("/invite/calendar/batch")
+    @RequiresPermission("hr:invite:edit")
+    @Log(title = "面试邀约-批量创建钉钉日程", businessType = 2)
+    public Result<HrInviteSaveVO> createInviteCalendarBatch(@RequestBody List<Long> ids) {
+        return Result.ok(inviteService.createCalendarBatch(ids));
     }
 
     @Operation(summary = "删除邀约")
     @DeleteMapping("/invite/{id:\\d+}")
     @RequiresPermission("hr:invite:delete")
     @Log(title = "面试邀约", businessType = 3)
-    public Result<Void> deleteInvite(@PathVariable Long id) {
-        inviteService.remove(id);
-        return Result.ok();
+    public Result<HrInviteSaveVO> deleteInvite(@PathVariable Long id) {
+        return Result.ok(inviteService.remove(id));
     }
 
     @Operation(summary = "批量删除邀约")
     @DeleteMapping("/invite/batch")
     @RequiresPermission("hr:invite:delete")
     @Log(title = "面试邀约-批量删除", businessType = 3)
-    public Result<Void> deleteInviteBatch(@RequestBody List<Long> ids) {
-        inviteService.removeBatch(ids);
-        return Result.ok();
+    public Result<HrInviteSaveVO> deleteInviteBatch(@RequestBody List<Long> ids) {
+        return Result.ok(inviteService.removeBatch(ids));
     }
 
     @Operation(summary = "把日程转给其他面试官")
     @PostMapping("/invite/{id}/forward")
     @RequiresPermission("hr:interview:mine")
     @Log(title = "面试邀约", businessType = 2)
-    public Result<Long> forwardInvite(@PathVariable Long id, @Valid @RequestBody HrInviteTransferDTO dto) {
+    public Result<HrInviteSaveVO> forwardInvite(@PathVariable Long id, @Valid @RequestBody HrInviteTransferDTO dto) {
         return Result.ok(inviteService.forward(id, dto.getInterviewerUserId()));
     }
 
@@ -430,7 +447,7 @@ public class HrMasterController {
     @PostMapping("/invite/{id}/interviewer")
     @RequiresPermission("hr:interview:mine")
     @Log(title = "面试邀约", businessType = 1)
-    public Result<Long> addInviteInterviewer(@PathVariable Long id, @Valid @RequestBody HrInviteTransferDTO dto) {
+    public Result<HrInviteSaveVO> addInviteInterviewer(@PathVariable Long id, @Valid @RequestBody HrInviteTransferDTO dto) {
         return Result.ok(inviteService.addInterviewer(id, dto.getInterviewerUserId()));
     }
 
@@ -447,6 +464,30 @@ public class HrMasterController {
     @Log(title = "面试记录", businessType = 1)
     public Result<String> saveRecord(@Valid @RequestBody HrInterviewRecordDTO dto) {
         return Result.ok(recordService.save(dto));
+    }
+
+    @Operation(summary = "候选人的全部面试评价")
+    @GetMapping("/application/{id:\\d+}/reviews")
+    @RequiresPermission({"hr:application:list", "hr:record:list", "hr:interview:mine"})
+    public Result<List<HrInterviewReviewVO>> reviews(@PathVariable Long id) {
+        return Result.ok(recordService.reviews(id));
+    }
+
+    @Operation(summary = "同一轮次结论不一致时提交联合评价")
+    @PostMapping("/application/verdict")
+    @RequiresPermission({"hr:application:edit", "hr:record:edit"})
+    @Log(title = "面试联合评价", businessType = 1)
+    public Result<String> saveVerdict(@Valid @RequestBody HrInterviewVerdictDTO dto) {
+        return Result.ok(recordService.saveVerdict(dto));
+    }
+
+    @Operation(summary = "删除自己的面试评价")
+    @DeleteMapping("/interview-record/mine/{id:\\d+}")
+    @RequiresPermission("hr:interview:mine")
+    @Log(title = "面试记录", businessType = 3)
+    public Result<Void> deleteOwnRecord(@PathVariable Long id) {
+        recordService.deleteOwn(id);
+        return Result.ok();
     }
 
     @Operation(summary = "删除面试记录")

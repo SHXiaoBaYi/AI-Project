@@ -240,7 +240,7 @@ export function createHrInviteApi(data: {
   durationMin?: number;
   location?: string;
 }) {
-  return request.post<unknown, number>('/hr/invite', data);
+  return request.post<unknown, { id: number; warning?: string }>('/hr/invite', data);
 }
 
 export function cancelHrInviteApi(id: number) {
@@ -270,23 +270,34 @@ export function listHrInvitesApi(data: Record<string, unknown>) {
 }
 
 export function updateHrInviteApi(id: number, data: Record<string, unknown>) {
-  return request.put(`/hr/invite/${id}`, data);
+  return request.put<unknown, { id: number; warning?: string }>(`/hr/invite/${id}`, data);
+}
+
+export function createHrInviteCalendarApi(id: number) {
+  return request.post(`/hr/invite/${id}/calendar`);
+}
+
+export function createHrInviteCalendarBatchApi(ids: number[]) {
+  return request.post<unknown, { id?: number; warning?: string; created?: number; unboundInterviewers?: string[] }>(
+    '/hr/invite/calendar/batch',
+    ids,
+  );
 }
 
 export function deleteHrInviteApi(id: number) {
-  return request.delete(`/hr/invite/${id}`);
+  return request.delete<unknown, { id: number; warning?: string }>(`/hr/invite/${id}`);
 }
 
 export function deleteHrInviteBatchApi(ids: number[]) {
-  return request.delete('/hr/invite/batch', { data: ids });
+  return request.delete<unknown, { id: number; warning?: string }>('/hr/invite/batch', { data: ids });
 }
 
 export function forwardHrInviteApi(id: number, interviewerUserId: number) {
-  return request.post<unknown, number>(`/hr/invite/${id}/forward`, { interviewerUserId });
+  return request.post<unknown, { id: number; warning?: string }>(`/hr/invite/${id}/forward`, { interviewerUserId });
 }
 
 export function addHrInviteInterviewerApi(id: number, interviewerUserId: number) {
-  return request.post<unknown, number>(`/hr/invite/${id}/interviewer`, { interviewerUserId });
+  return request.post<unknown, { id: number; warning?: string }>(`/hr/invite/${id}/interviewer`, { interviewerUserId });
 }
 
 export function listHrInterviewRecordsApi(data: Record<string, unknown>) {
@@ -295,6 +306,34 @@ export function listHrInterviewRecordsApi(data: Record<string, unknown>) {
 
 export function saveHrInterviewRecordApi(data: Record<string, unknown>) {
   return request.post<unknown, string>('/hr/interview-record', data);
+}
+
+export function listHrInterviewReviewsApi(applicationId: number) {
+  return request.get<
+    unknown,
+    {
+      kind: string;
+      roundNo: number;
+      roundName?: string;
+      interviewerName?: string;
+      conclusion?: string;
+      comment?: string;
+      interviewedAt?: string;
+    }[]
+  >(`/hr/application/${applicationId}/reviews`);
+}
+
+export function saveHrInterviewVerdictApi(data: {
+  applicationId: number;
+  roundNo: number;
+  conclusion: string;
+  comment?: string;
+}) {
+  return request.post<unknown, string>('/hr/application/verdict', data);
+}
+
+export function deleteHrInterviewOwnApi(id: number) {
+  return request.delete(`/hr/interview-record/mine/${id}`);
 }
 
 export function deleteHrInterviewRecordApi(id: number) {

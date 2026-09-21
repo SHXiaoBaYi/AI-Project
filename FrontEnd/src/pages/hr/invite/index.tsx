@@ -2,7 +2,6 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Form, Modal, Select } from 'antd';
 import dayjs from 'dayjs';
-import { useNavigate } from 'react-router-dom';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
 import ActionButtons from '@/components/Buttons/ActionButtons';
@@ -10,7 +9,7 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import {
   createHrInviteApi,
-  deleteHrInviteApi,
+  createHrInviteCalendarBatchApi,
   deleteHrInviteBatchApi,
   getHrApplicationsApi,
   getHrRequisitionsApi,
@@ -29,6 +28,7 @@ const ROUNDS = [
 
 const STATUS = [
   { value: 'SUCCESS', label: '已建日程' },
+  { value: 'NO_CALENDAR', label: '未建日程' },
   { value: 'FAILED', label: '日程失败' },
   { value: 'CANCELLED', label: '已取消' },
   { value: 'CANCEL_FAILED', label: '取消失败' },
@@ -36,17 +36,21 @@ const STATUS = [
 
 interface InviteRow {
   id: number;
+  inviteIds: number[];
+  pendingInviteIds: number[];
   applicationId: number;
   displayName: string;
   jobName?: string;
   fileName?: string;
   roundNo: number;
   interviewerUserId: number;
+  interviewerUserIds: number[];
   interviewerName?: string;
   interviewAt?: string;
   durationMin?: number;
   location?: string;
   status?: string;
+  memberStatuses: string[];
   failReason?: string;
 }
 
@@ -98,34 +102,115 @@ function InterviewerSelect({
   );
 }
 
+function notifyCalendarResult(
+  saved: { warning?: string; created?: number; unboundInterviewers?: string[] } | undefined,
+  messageApi: { warning: (content: string, duration?: number) => void; success: (content: string) => void },
+) {
+  const names = saved?.unboundInterviewers?.filter(Boolean) ?? [];
+  if (names.length) {
+    Modal.warning({
+      title: '以下面试官没有绑定钉钉',
+      okText: '关闭',
+      width: 480,
+      maskClosable: false,
+      content: (
+        <div>
+          <p className='mb-2'>
+            {saved?.created ? `已创建 ${saved.created} 条钉钉日程。` : '未能创建钉钉日程。'}
+            请联系行政绑定后再创建。
+          </p>
+          <ul className='max-h-60 overflow-auto rounded border border-neutral-200'>
+            {names.map((name) => (
+              <li
+                key={name}
+                className='border-b border-neutral-100 px-3 py-2 last:border-b-0'
+              >
+                {name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ),
+    });
+    return;
+  }
+  if (saved?.warning) {
+    messageApi.warning(saved.warning, 8);
+    return;
+  }
+  messageApi.success(`已创建 ${saved?.created ?? 0} 条钉钉日程`);
+}
+
 function textOf(value: unknown) {
   if (value == null || value === '') return undefined;
   return String(value);
 }
 
 function mapRow(raw: Record<string, unknown>): InviteRow {
+  const interviewerUserId = Number(raw.interviewer_user_id);
+  const status = textOf(raw.status);
   return {
     id: Number(raw.id),
+    inviteIds: [Number(raw.id)],
+    pendingInviteIds: status === 'NO_CALENDAR' || status === 'FAILED' ? [Number(raw.id)] : [],
     applicationId: Number(raw.application_id),
     displayName: String(raw.display_name ?? ''),
     jobName: textOf(raw.job_name),
     fileName: textOf(raw.file_name),
     roundNo: Number(raw.round_no),
-    interviewerUserId: Number(raw.interviewer_user_id),
+    interviewerUserId,
+    interviewerUserIds: [interviewerUserId],
     interviewerName: textOf(raw.interviewer_name),
     interviewAt: raw.interview_at == null ? undefined : String(raw.interview_at).replace('T', ' ').slice(0, 19),
     durationMin: raw.duration_min == null ? 60 : Number(raw.duration_min),
     location: textOf(raw.location),
-    status: textOf(raw.status),
+    status,
+    memberStatuses: status ? [status] : [],
     failReason: textOf(raw.fail_reason),
   };
 }
 
+function sessionKey(row: Pick<InviteRow, 'applicationId' | 'roundNo' | 'interviewAt'>) {
+  return `${row.applicationId}|${row.roundNo}|${row.interviewAt ?? ''}`;
+}
+
+function groupSessions(rows: InviteRow[]) {
+  const grouped = new Map<string, InviteRow>();
+  rows.forEach((row) => {
+    const key = sessionKey(row);
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        ...row,
+        inviteIds: [...row.inviteIds],
+        pendingInviteIds: [...row.pendingInviteIds],
+        interviewerUserIds: [...row.interviewerUserIds],
+        memberStatuses: [...row.memberStatuses],
+      });
+      return;
+    }
+    existing.inviteIds.push(row.id);
+    existing.pendingInviteIds.push(...row.pendingInviteIds);
+    if (!existing.interviewerUserIds.includes(row.interviewerUserId)) {
+      existing.interviewerUserIds.push(row.interviewerUserId);
+      existing.interviewerName = [existing.interviewerName, row.interviewerName].filter(Boolean).join('、');
+    }
+    if (row.status) existing.memberStatuses.push(row.status);
+    if (row.failReason && existing.failReason !== row.failReason) {
+      existing.failReason = [existing.failReason, row.failReason].filter(Boolean).join('；');
+    }
+  });
+  return [...grouped.values()].map((row) => {
+    const unique = [...new Set(row.memberStatuses)];
+    return unique.length <= 1 ? { ...row, status: unique[0] } : { ...row, status: 'MIXED' };
+  });
+}
+
 const InvitePage = memo(function InvitePage() {
   const { message } = App.useApp();
-  const navigate = useNavigate();
   const actionRef = useRef<ActionType>(null);
   const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const groupedRef = useRef<InviteRow[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InviteRow | null>(null);
@@ -178,9 +263,10 @@ const InvitePage = memo(function InvitePage() {
       {
         title: '操作',
         valueType: 'option',
-        width: 220,
+        width: 300,
         render: (_, record) => (
           <ActionButtons
+            maxVisible={4}
             items={[
               {
                 key: 'edit',
@@ -191,32 +277,30 @@ const InvitePage = memo(function InvitePage() {
                   setOpen(true);
                 },
               },
-              {
-                key: 'record',
-                label: '生成面试记录',
-                perm: 'hr:record:add',
-                onClick: () => {
-                  navigate('/hr/record', {
-                    state: {
-                      fromInvite: {
-                        inviteId: record.id,
-                        applicationId: record.applicationId,
-                        roundNo: record.roundNo,
-                        interviewerUserId: record.interviewerUserId,
-                        interviewAt: record.interviewAt,
+              ...(record.pendingInviteIds.length
+                ? [
+                    {
+                      key: 'calendar',
+                      label: '创建钉钉日程',
+                      perm: 'hr:invite:edit',
+                      confirmTitle: `确认为「${record.displayName}」这场邀约创建钉钉日程？面试官需已绑定钉钉。`,
+                      onClick: async () => {
+                        const saved = await createHrInviteCalendarBatchApi(record.pendingInviteIds);
+                        notifyCalendarResult(saved, message);
+                        actionRef.current?.reload();
                       },
                     },
-                  });
-                },
-              },
+                  ]
+                : []),
               {
                 key: 'delete',
                 label: '删除',
                 perm: 'hr:invite:delete',
-                confirmTitle: `确认删除「${record.displayName}」这场邀约？钉钉日程会一并取消。`,
+                confirmTitle: `确认删除「${record.displayName}」这场邀约？同一场的面试官都会删除，已建的钉钉日程会一并取消。`,
                 onClick: async () => {
-                  await deleteHrInviteApi(record.id);
-                  message.success('已删除');
+                  const saved = await deleteHrInviteBatchApi(record.inviteIds);
+                  if (saved?.warning) message.warning(saved.warning, 8);
+                  else message.success('已删除这场邀约');
                   actionRef.current?.reload();
                 },
               },
@@ -307,7 +391,14 @@ const InvitePage = memo(function InvitePage() {
         valueType: 'select',
         hideInForm: true,
         fieldProps: { options: STATUS, allowClear: true },
-        render: (_, record) => STATUS.find((item) => item.value === record.status)?.label || record.status,
+        render: (_, record) => {
+          if (record.status === 'MIXED') {
+            return [...new Set(record.memberStatuses)]
+              .map((item) => STATUS.find((status) => status.value === item)?.label || item)
+              .join('、');
+          }
+          return STATUS.find((item) => item.value === record.status)?.label || record.status;
+        },
       },
       {
         title: '失败原因',
@@ -317,7 +408,7 @@ const InvitePage = memo(function InvitePage() {
         ellipsis: true,
       },
     ],
-    [appReq, candidates, editing, message, navigate, plans, users],
+    [appReq, candidates, editing, message, plans, users],
   );
 
   return (
@@ -331,19 +422,24 @@ const InvitePage = memo(function InvitePage() {
           const rows = await listHrInvitesApi({
             candidateName: params.displayName,
             roundNo: params.roundNo,
-            interviewerUserId: params.interviewerUserId,
-            status: params.status,
           });
-          const mapped = rows.map(mapRow);
-          const filtered = params.applicationId
-            ? mapped.filter((row) => row.applicationId === Number(params.applicationId))
-            : mapped;
+          let grouped = groupSessions(rows.map(mapRow));
+          if (params.applicationId) {
+            grouped = grouped.filter((row) => row.applicationId === Number(params.applicationId));
+          }
+          if (params.interviewerUserId) {
+            grouped = grouped.filter((row) => row.interviewerUserIds.includes(Number(params.interviewerUserId)));
+          }
+          if (params.status) {
+            grouped = grouped.filter((row) => row.memberStatuses.includes(String(params.status)));
+          }
+          groupedRef.current = grouped;
           const pageSize = params.pageSize || 10;
           const current = params.current || 1;
           const start = (current - 1) * pageSize;
-          const pageRows = filtered.slice(start, start + pageSize);
+          const pageRows = grouped.slice(start, start + pageSize);
           currentPageKeysRef.current = new Set(pageRows.map((row) => row.id));
-          return { data: pageRows, success: true, total: filtered.length };
+          return { data: pageRows, success: true, total: grouped.length };
         }}
         rowSelection={{
           selectedRowKeys,
@@ -358,6 +454,38 @@ const InvitePage = memo(function InvitePage() {
         }}
         toolBarRender={() => [
           <PermissionButton
+            key='calendar'
+            perm='hr:invite:edit'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要创建钉钉日程的面试邀约');
+                return;
+              }
+              const inviteIds = groupedRef.current
+                .filter((row) => selectedRowKeys.map(Number).includes(row.id))
+                .flatMap((row) => row.pendingInviteIds);
+              if (inviteIds.length === 0) {
+                message.warning('所选场次都已经有钉钉日程');
+                return;
+              }
+              Modal.confirm({
+                title: '批量创建钉钉日程',
+                content: `将为选中场次里尚未建日程的 ${inviteIds.length} 条面试官邀约创建钉钉日程。面试官未绑定钉钉的不能创建。`,
+                okText: '创建',
+                cancelText: '取消',
+                onOk: async () => {
+                  const saved = await createHrInviteCalendarBatchApi(inviteIds);
+                  notifyCalendarResult(saved, message);
+                  setSelectedRowKeys([]);
+                  currentPageKeysRef.current = new Set();
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量创建钉钉日程
+          </PermissionButton>,
+          <PermissionButton
             key='del'
             color='danger'
             variant='filled'
@@ -367,15 +495,19 @@ const InvitePage = memo(function InvitePage() {
                 message.warning('请先选择要删除的面试邀约');
                 return;
               }
+              const inviteIds = groupedRef.current
+                .filter((row) => selectedRowKeys.map(Number).includes(row.id))
+                .flatMap((row) => row.inviteIds);
               Modal.confirm({
                 title: '批量删除面试邀约',
-                content: `确定要删除选中的 ${selectedRowKeys.length} 条邀约吗？此操作不可撤销。`,
+                content: `确定要删除选中的 ${selectedRowKeys.length} 场邀约吗？同一场的面试官都会删除，此操作不可撤销。`,
                 okText: '确定删除',
                 cancelText: '取消',
                 okButtonProps: { danger: true },
                 onOk: async () => {
-                  await deleteHrInviteBatchApi(selectedRowKeys as number[]);
-                  message.success(`已删除 ${selectedRowKeys.length} 条邀约`);
+                  const saved = await deleteHrInviteBatchApi(inviteIds);
+                  if (saved?.warning) message.warning(saved.warning, 8);
+                  else message.success(`已删除 ${selectedRowKeys.length} 场邀约`);
                   setSelectedRowKeys([]);
                   currentPageKeysRef.current = new Set();
                   actionRef.current?.reload();
@@ -405,7 +537,7 @@ const InvitePage = memo(function InvitePage() {
         open={open}
         onOpenChange={setOpen}
         initialValues={
-          editing ? { ...editing, interviewerUserIds: [editing.interviewerUserId] } : { roundNo: 1, durationMin: 60 }
+          editing ? { ...editing, interviewerUserIds: editing.interviewerUserIds } : { roundNo: 1, durationMin: 60 }
         }
         onFinish={async (values) => {
           const form = values as InviteRow & { interviewerUserIds?: number[] };
@@ -423,15 +555,18 @@ const InvitePage = memo(function InvitePage() {
             location: form.location,
           };
           if (editing) {
-            await updateHrInviteApi(editing.id, payload);
-            message.success(
-              ids.length > 1
-                ? `已保存，并为另外 ${ids.length - 1} 名面试官新建了邀约`
-                : '已保存，钉钉日程已按新时间重建',
-            );
+            const saved = await updateHrInviteApi(editing.id, payload);
+            if (saved?.warning) {
+              message.warning(saved.warning, 8);
+            } else {
+              message.success(
+                ids.length > 1 ? `已保存这场邀约，共 ${ids.length} 名面试官` : '已保存，钉钉日程已按新时间重建',
+              );
+            }
           } else {
-            await createHrInviteApi(payload);
-            message.success(`已为 ${ids.length} 名面试官发起邀约。钉钉未配置或未绑定时，会提示不能自动创建日程`);
+            const saved = await createHrInviteApi(payload);
+            if (saved?.warning) message.warning(saved.warning, 8);
+            else message.success(`已为 ${ids.length} 名面试官发起邀约，钉钉日程已创建`);
           }
           actionRef.current?.reload();
           return true;

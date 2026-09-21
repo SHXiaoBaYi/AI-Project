@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react';
-import { App, Card, Select, Table } from 'antd';
-import PermissionButton from '@/components/Buttons/PermissionButton';
+import { App, Form, Input, Modal, Select, Table } from 'antd';
+import dayjs from 'dayjs';
+import ActionButtons from '@/components/Buttons/ActionButtons';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import {
   addHrInviteInterviewerApi,
@@ -8,6 +9,7 @@ import {
   getHrUsersApi,
   listMyHrInvitesApi,
   saveHrInterviewRecordApi,
+  deleteHrInterviewOwnApi,
 } from '@/api/hr';
 
 const ROUNDS = [
@@ -24,91 +26,20 @@ const CONCLUSIONS = [
   { value: 'PENDING', label: '待定' },
 ];
 
-function ScheduleActions({
-  row,
-  users,
-  onDone,
-}: {
-  row: Record<string, unknown>;
-  users: { value: number; label: string }[];
-  onDone: () => void;
-}) {
-  const { message } = App.useApp();
-  const [target, setTarget] = useState<number>();
-  const [conclusion, setConclusion] = useState<string>();
-  const [comment, setComment] = useState('');
-  return (
-    <div className='flex flex-col gap-2'>
-      <Select
-        className='w-full'
-        placeholder='选择面试官'
-        options={users}
-        showSearch
-        optionFilterProp='label'
-        onChange={setTarget}
-      />
-      <div className='flex gap-2'>
-        <PermissionButton
-          perm='hr:interview:mine'
-          onClick={async () => {
-            if (!target) return message.warning('请先选择面试官');
-            await forwardHrInviteApi(Number(row.id), target);
-            message.success('已转发，原日程已取消');
-            onDone();
-          }}
-        >
-          转发
-        </PermissionButton>
-        <PermissionButton
-          perm='hr:interview:mine'
-          onClick={async () => {
-            if (!target) return message.warning('请先选择面试官');
-            await addHrInviteInterviewerApi(Number(row.id), target);
-            message.success('已添加面试官并建立日程');
-            onDone();
-          }}
-        >
-          添加面试官
-        </PermissionButton>
-      </div>
-      <Select
-        placeholder='面试结论'
-        options={CONCLUSIONS}
-        onChange={setConclusion}
-      />
-      <input
-        className='rounded border border-neutral-300 px-2 py-1'
-        placeholder='评语'
-        value={comment}
-        onChange={(event) => setComment(event.target.value)}
-      />
-      <PermissionButton
-        perm='hr:interview:mine'
-        type='primary'
-        onClick={async () => {
-          if (!conclusion) return message.warning('请选择结论');
-          const msg = await saveHrInterviewRecordApi({
-            applicationId: row.application_id,
-            requisitionId: row.requisition_id,
-            inviteId: row.id,
-            roundNo: row.round_no,
-            interviewerUserId: row.interviewer_user_id,
-            conclusion,
-            comment,
-            interviewedAt: row.interview_at,
-          });
-          message.success(msg || '已保存');
-          onDone();
-        }}
-      >
-        提交结论
-      </PermissionButton>
-    </div>
-  );
+function interviewEnded(value: unknown) {
+  if (value == null || value === '') return false;
+  return !dayjs(String(value).replace('T', ' ')).isAfter(dayjs());
 }
+
 const MinePage = memo(function MinePage() {
+  const { message } = App.useApp();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
+  const [reviewing, setReviewing] = useState<Record<string, unknown> | null>(null);
+  const [transfer, setTransfer] = useState<{ row: Record<string, unknown>; mode: 'forward' | 'add' } | null>(null);
+  const [target, setTarget] = useState<number>();
+  const [saving, setSaving] = useState(false);
+  const [form] = Form.useForm();
 
   const load = () => listMyHrInvitesApi().then(setRows);
 
@@ -125,52 +56,218 @@ const MinePage = memo(function MinePage() {
   }, []);
 
   return (
-    <Card title='我的面试'>
-      <p className='mb-3 text-sm text-neutral-500'>
-        这里是还没填写通过或未通过结论的日程。转发出去后，这场日程从你这里移走；添加面试官会给对方再建一条钉钉日程。
-      </p>
-      <Table
-        rowKey='id'
-        dataSource={rows}
-        pagination={false}
-        scroll={{ x: 'max-content' }}
-        columns={[
-          {
-            title: '操作',
-            fixed: 'left',
-            width: 280,
-            render: (_, row) => (
-              <ScheduleActions
-                row={row}
-                users={users}
-                onDone={load}
-              />
-            ),
-          },
-          {
-            title: '候选人',
-            dataIndex: 'display_name',
-          },
-          {
-            title: '简历',
-            render: (_, row) => (
-              <ResumeViewButton
-                applicationId={Number(row.application_id)}
-                fileName={row.file_name ? String(row.file_name) : undefined}
-              />
-            ),
-          },
-          { title: '岗位', dataIndex: 'job_name' },
-          {
-            title: '轮次',
-            dataIndex: 'round_no',
-            render: (value: number) => ROUNDS.find((item) => item.value === Number(value))?.label || value,
-          },
-          { title: '时间', dataIndex: 'interview_at' },
-          { title: '地点', dataIndex: 'location' },
-        ]}
-      />
-    </Card>
+    <>
+      <div className='rounded bg-white p-4'>
+        <h2 className='mb-1 text-base font-medium'>我的面试</h2>
+        <p className='mb-3 text-sm text-neutral-500'>
+          这里是分配给你、候选人还没进入下一阶段的面试。面试时间到了之后可以填写评价；进入下一阶段之前，可以修改或删除自己的评价。已填写评价的不能再转发或添加面试官。
+        </p>
+        <Table
+          rowKey='id'
+          dataSource={rows}
+          pagination={false}
+          scroll={{ x: 'max-content' }}
+          columns={[
+            {
+              title: '操作',
+              fixed: 'left',
+              width: 260,
+              render: (_, row) => {
+                const ended = interviewEnded(row.interview_at);
+                const reviewed = Number(row.reviewed) > 0;
+                return (
+                  <ActionButtons
+                    maxVisible={4}
+                    items={[
+                      reviewed
+                        ? {
+                            key: 'edit-review',
+                            label: '修改评价',
+                            perm: 'hr:interview:mine',
+                            onClick: () => {
+                              form.setFieldsValue({
+                                conclusion: row.my_conclusion,
+                                comment: row.my_comment || '',
+                              });
+                              setReviewing(row);
+                            },
+                          }
+                        : {
+                            key: 'review',
+                            label: '评价',
+                            perm: 'hr:interview:mine',
+                            disabled: !ended,
+                            onClick: () => {
+                              form.resetFields();
+                              setReviewing(row);
+                            },
+                          },
+                      ...(reviewed
+                        ? [
+                            {
+                              key: 'delete-review',
+                              label: '删除评价',
+                              perm: 'hr:interview:mine',
+                              confirmTitle: '确认删除你对这场面试的评价？',
+                              onClick: async () => {
+                                await deleteHrInterviewOwnApi(Number(row.record_id));
+                                message.success('已删除评价');
+                                load();
+                              },
+                            },
+                          ]
+                        : [
+                            {
+                              key: 'forward',
+                              label: '转发',
+                              perm: 'hr:interview:mine',
+                              onClick: () => {
+                                setTarget(undefined);
+                                setTransfer({ row, mode: 'forward' });
+                              },
+                            },
+                            {
+                              key: 'add',
+                              label: '添加面试官',
+                              perm: 'hr:interview:mine',
+                              onClick: () => {
+                                setTarget(undefined);
+                                setTransfer({ row, mode: 'add' });
+                              },
+                            },
+                          ]),
+                    ]}
+                  />
+                );
+              },
+            },
+            { title: '候选人', dataIndex: 'display_name' },
+            {
+              title: '简历',
+              render: (_, row) => (
+                <ResumeViewButton
+                  applicationId={Number(row.application_id)}
+                  fileName={row.file_name ? String(row.file_name) : undefined}
+                />
+              ),
+            },
+            { title: '岗位', dataIndex: 'job_name' },
+            {
+              title: '轮次',
+              dataIndex: 'round_no',
+              render: (value: number) => ROUNDS.find((item) => item.value === Number(value))?.label || value,
+            },
+            {
+              title: '时间',
+              dataIndex: 'interview_at',
+              render: (value: string) => (value ? String(value).replace('T', ' ').slice(0, 19) : '—'),
+            },
+            { title: '地点', dataIndex: 'location' },
+            {
+              title: '我的结论',
+              dataIndex: 'my_conclusion',
+              render: (value: string) => CONCLUSIONS.find((item) => item.value === value)?.label || '—',
+            },
+            {
+              title: '我的评语',
+              dataIndex: 'my_comment',
+              ellipsis: true,
+              render: (value: string) => value || '—',
+            },
+          ]}
+        />
+      </div>
+      <Modal
+        title={
+          reviewing ? `${Number(reviewing.reviewed) > 0 ? '修改评价' : '评价'}：${reviewing.display_name}` : '评价'
+        }
+        open={!!reviewing}
+        confirmLoading={saving}
+        okText={reviewing && Number(reviewing.reviewed) > 0 ? '保存修改' : '提交评价'}
+        onCancel={() => setReviewing(null)}
+        onOk={async () => {
+          const values = await form.validateFields();
+          if (!reviewing) return;
+          setSaving(true);
+          try {
+            const msg = await saveHrInterviewRecordApi({
+              applicationId: reviewing.application_id,
+              requisitionId: reviewing.requisition_id,
+              inviteId: reviewing.id,
+              roundNo: reviewing.round_no,
+              interviewerUserId: reviewing.interviewer_user_id,
+              ...(reviewing.record_id ? { id: reviewing.record_id } : {}),
+              conclusion: values.conclusion,
+              comment: values.comment,
+              interviewedAt: reviewing.interview_at
+                ? String(reviewing.interview_at).replace('T', ' ').slice(0, 19)
+                : undefined,
+            });
+            message.success(msg || '已保存');
+            setReviewing(null);
+            load();
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <Form
+          form={form}
+          layout='vertical'
+        >
+          <Form.Item
+            name='conclusion'
+            label='结论'
+            rules={[{ required: true, message: '请选择结论' }]}
+          >
+            <Select
+              options={CONCLUSIONS}
+              placeholder='请选择结论'
+            />
+          </Form.Item>
+          <Form.Item
+            name='comment'
+            label='评语'
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder='填写面试评价'
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={transfer?.mode === 'add' ? '添加面试官' : '转发面试'}
+        open={!!transfer}
+        okText='确定'
+        onCancel={() => setTransfer(null)}
+        onOk={async () => {
+          if (!transfer) return;
+          if (!target) {
+            message.warning('请先选择面试官');
+            return;
+          }
+          const saved =
+            transfer.mode === 'add'
+              ? await addHrInviteInterviewerApi(Number(transfer.row.id), target)
+              : await forwardHrInviteApi(Number(transfer.row.id), target);
+          if (saved?.warning) message.warning(saved.warning, 8);
+          else message.success(transfer.mode === 'add' ? '已添加面试官并建立日程' : '已转发，原日程已取消');
+          setTransfer(null);
+          load();
+        }}
+      >
+        <Select
+          className='w-full'
+          placeholder='选择面试官'
+          options={users}
+          showSearch
+          optionFilterProp='label'
+          value={target}
+          onChange={setTarget}
+        />
+      </Modal>
+    </>
   );
 });
 

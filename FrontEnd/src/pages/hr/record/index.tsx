@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Form, Modal, Select } from 'antd';
+import { App, Form, Input, Modal, Select } from 'antd';
 import dayjs from 'dayjs';
 import { useLocation, useNavigate } from 'react-router-dom';
 import BaseProTable from '@/components/BaseProTable';
@@ -9,13 +9,13 @@ import ActionButtons from '@/components/Buttons/ActionButtons';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import {
-  deleteHrInterviewRecordApi,
   deleteHrInterviewRecordBatchApi,
   getHrApplicationsApi,
   getHrRequisitionsApi,
   getHrUsersApi,
   listHrInterviewRecordsApi,
   saveHrInterviewRecordApi,
+  saveHrInterviewVerdictApi,
 } from '@/api/hr';
 
 const ROUNDS = [
@@ -32,8 +32,18 @@ const CONCLUSIONS = [
   { value: 'PENDING', label: '待定' },
 ];
 
+interface RecordMember {
+  id: number;
+  interviewerUserId: number;
+  interviewerName?: string;
+  conclusion?: string;
+  comment?: string;
+  interviewedAt?: string;
+}
+
 interface RecordRow {
   id: number;
+  recordIds: number[];
   applicationId: number;
   requisitionId?: number;
   inviteId?: number;
@@ -42,10 +52,15 @@ interface RecordRow {
   fileName?: string;
   roundNo: number;
   interviewerUserId: number;
+  interviewerUserIds: number[];
   interviewerName?: string;
   conclusion?: string;
+  conclusionsDiffer: boolean;
   comment?: string;
   interviewedAt?: string;
+  currentStage?: string;
+  hasVerdict: boolean;
+  members: RecordMember[];
 }
 
 interface FromInvite {
@@ -117,9 +132,21 @@ function textOf(value: unknown) {
   return String(value);
 }
 
+function conclusionLabel(value?: string) {
+  return CONCLUSIONS.find((item) => item.value === value)?.label || '未填';
+}
+
 function mapRow(raw: Record<string, unknown>): RecordRow {
+  const conclusion = textOf(raw.conclusion);
+  const comment = textOf(raw.comment);
+  const interviewerName = textOf(raw.interviewer_name);
+  const interviewedAt =
+    raw.interviewed_at == null ? undefined : String(raw.interviewed_at).replace('T', ' ').slice(0, 19);
+  const interviewerUserId = Number(raw.interviewer_user_id);
+  const id = Number(raw.id);
   return {
-    id: Number(raw.id),
+    id,
+    recordIds: [id],
     applicationId: Number(raw.application_id),
     requisitionId: raw.requisition_id == null ? undefined : Number(raw.requisition_id),
     inviteId: raw.invite_id == null ? undefined : Number(raw.invite_id),
@@ -127,24 +154,88 @@ function mapRow(raw: Record<string, unknown>): RecordRow {
     jobName: textOf(raw.job_name),
     fileName: textOf(raw.file_name),
     roundNo: Number(raw.round_no),
-    interviewerUserId: Number(raw.interviewer_user_id),
-    interviewerName: textOf(raw.interviewer_name),
-    conclusion: textOf(raw.conclusion),
-    comment: textOf(raw.comment),
-    interviewedAt: raw.interviewed_at == null ? undefined : String(raw.interviewed_at).replace('T', ' ').slice(0, 19),
+    interviewerUserId,
+    interviewerUserIds: [interviewerUserId],
+    interviewerName,
+    conclusion,
+    conclusionsDiffer: false,
+    comment,
+    interviewedAt,
+    currentStage: textOf(raw.current_stage),
+    hasVerdict: Number(raw.has_verdict) === 1,
+    members: [
+      {
+        id,
+        interviewerUserId,
+        interviewerName,
+        conclusion,
+        comment,
+        interviewedAt,
+      },
+    ],
   };
+}
+
+function groupRecords(rows: RecordRow[]) {
+  const grouped = new Map<string, RecordRow>();
+  rows.forEach((row) => {
+    const key = `${row.applicationId}|${row.roundNo}`;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        ...row,
+        recordIds: [...row.recordIds],
+        interviewerUserIds: [...row.interviewerUserIds],
+        members: row.members.map((member) => ({ ...member })),
+      });
+      return;
+    }
+    existing.recordIds.push(row.id);
+    existing.members.push({ ...row.members[0] });
+    existing.hasVerdict = existing.hasVerdict || row.hasVerdict;
+    if (!existing.interviewerUserIds.includes(row.interviewerUserId)) {
+      existing.interviewerUserIds.push(row.interviewerUserId);
+      existing.interviewerName = [existing.interviewerName, row.interviewerName].filter(Boolean).join('、');
+    }
+    if (row.interviewedAt && (!existing.interviewedAt || row.interviewedAt > existing.interviewedAt)) {
+      existing.interviewedAt = row.interviewedAt;
+    }
+  });
+  return [...grouped.values()].map((row) => {
+    const filled = row.members.map((member) => member.conclusion).filter((item): item is string => Boolean(item));
+    const unique = [...new Set(filled)];
+    const differ = row.members.length > 1 && filled.length === row.members.length && unique.length > 1;
+    const sameComment = row.members.every((member) => member.comment === row.members[0].comment);
+    return {
+      ...row,
+      conclusionsDiffer: differ,
+      conclusion: unique.length === 1 ? unique[0] : undefined,
+      comment:
+        row.members.length === 1 || sameComment
+          ? row.members[0].comment
+          : row.members.map((member) => `${member.interviewerName || '面试官'}：${member.comment || '—'}`).join('；'),
+    };
+  });
+}
+
+function groupKey(row: Pick<RecordRow, 'applicationId' | 'roundNo'>) {
+  return `${row.applicationId}-${row.roundNo}`;
 }
 
 const RecordPage = memo(function RecordPage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
-  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const currentPageKeysRef = useRef<Set<string>>(new Set());
+  const groupedRef = useRef<RecordRow[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<RecordRow | null>(null);
   const [fromInvite, setFromInvite] = useState<FromInvite | null>(null);
+  const [verdictTarget, setVerdictTarget] = useState<RecordRow | null>(null);
+  const [verdictSaving, setVerdictSaving] = useState(false);
+  const [verdictForm] = Form.useForm();
   const [candidates, setCandidates] = useState<{ value: number; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
@@ -203,26 +294,43 @@ const RecordPage = memo(function RecordPage() {
       {
         title: '操作',
         valueType: 'option',
-        width: 140,
+        width: 200,
         render: (_, record) => (
           <ActionButtons
             items={[
-              {
-                key: 'edit',
-                label: '修改',
-                perm: 'hr:record:edit',
-                onClick: () => {
-                  setEditing(record);
-                  setOpen(true);
-                },
-              },
+              ...(record.conclusionsDiffer && !record.hasVerdict
+                ? [
+                    {
+                      key: 'verdict',
+                      label: '联合评价',
+                      perm: 'hr:record:edit',
+                      onClick: () => {
+                        verdictForm.resetFields();
+                        setVerdictTarget(record);
+                      },
+                    },
+                  ]
+                : []),
+              ...(!record.conclusionsDiffer
+                ? [
+                    {
+                      key: 'edit',
+                      label: '修改',
+                      perm: 'hr:record:edit',
+                      onClick: () => {
+                        setEditing(record);
+                        setOpen(true);
+                      },
+                    },
+                  ]
+                : []),
               {
                 key: 'delete',
                 label: '删除',
                 perm: 'hr:record:delete',
-                confirmTitle: `确认删除「${record.displayName}」的这条评语？`,
+                confirmTitle: `确认删除「${record.displayName}」${ROUNDS.find((item) => item.value === record.roundNo)?.label || ''}的面试记录？`,
                 onClick: async () => {
-                  await deleteHrInterviewRecordApi(record.id);
+                  await deleteHrInterviewRecordBatchApi(record.recordIds);
                   message.success('已删除');
                   actionRef.current?.reload();
                 },
@@ -297,7 +405,12 @@ const RecordPage = memo(function RecordPage() {
         search: false,
         fieldProps: { options: CONCLUSIONS },
         formItemProps: { rules: [{ required: true, message: '请选择结论' }] },
-        render: (_, record) => CONCLUSIONS.find((item) => item.value === record.conclusion)?.label || '—',
+        render: (_, record) =>
+          record.conclusionsDiffer
+            ? record.members
+                .map((member) => `${member.interviewerName || '面试官'} ${conclusionLabel(member.conclusion)}`)
+                .join('、')
+            : conclusionLabel(record.conclusion),
       },
       {
         title: '评语',
@@ -313,38 +426,42 @@ const RecordPage = memo(function RecordPage() {
         search: false,
       },
     ],
-    [appReq, candidates, editing, fromInvite, message, plans, users],
+    [appReq, candidates, fromInvite, message, plans, users, verdictForm],
   );
 
   return (
     <>
       <BaseProTable<RecordRow>
-        rowKey='id'
+        rowKey={(row) => groupKey(row)}
         actionRef={actionRef}
         columns={columns}
         headerTitle='面试记录'
         request={async (params) => {
           const rows = await listHrInterviewRecordsApi({
             roundNo: params.roundNo,
-            interviewerUserId: params.interviewerUserId,
           });
-          const mapped = rows
-            .map(mapRow)
-            .filter((row) => !params.applicationId || row.applicationId === Number(params.applicationId));
+          const grouped = groupRecords(rows.map(mapRow)).filter((row) => {
+            if (params.applicationId && row.applicationId !== Number(params.applicationId)) return false;
+            if (params.interviewerUserId && !row.interviewerUserIds.includes(Number(params.interviewerUserId))) {
+              return false;
+            }
+            return true;
+          });
+          groupedRef.current = grouped;
           const pageSize = params.pageSize || 10;
           const current = params.current || 1;
           const start = (current - 1) * pageSize;
-          const pageRows = mapped.slice(start, start + pageSize);
-          currentPageKeysRef.current = new Set(pageRows.map((row) => row.id));
-          return { data: pageRows, success: true, total: mapped.length };
+          const pageRows = grouped.slice(start, start + pageSize);
+          currentPageKeysRef.current = new Set(pageRows.map((row) => groupKey(row)));
+          return { data: pageRows, success: true, total: grouped.length };
         }}
         rowSelection={{
           selectedRowKeys,
           onChange: (keys) => {
             setSelectedRowKeys((prev) => {
-              const global = new Set(prev as number[]);
+              const global = new Set(prev as string[]);
               currentPageKeysRef.current.forEach((k) => global.delete(k));
-              (keys as number[]).forEach((k) => global.add(k));
+              (keys as string[]).forEach((k) => global.add(k));
               return [...global];
             });
           },
@@ -367,7 +484,10 @@ const RecordPage = memo(function RecordPage() {
                 cancelText: '取消',
                 okButtonProps: { danger: true },
                 onOk: async () => {
-                  await deleteHrInterviewRecordBatchApi(selectedRowKeys as number[]);
+                  const ids = groupedRef.current
+                    .filter((row) => selectedRowKeys.includes(groupKey(row)))
+                    .flatMap((row) => row.recordIds);
+                  await deleteHrInterviewRecordBatchApi(ids);
                   message.success(`已删除 ${selectedRowKeys.length} 条面试记录`);
                   setSelectedRowKeys([]);
                   currentPageKeysRef.current = new Set();
@@ -400,7 +520,16 @@ const RecordPage = memo(function RecordPage() {
         onOpenChange={setOpen}
         initialValues={
           editing
-            ? { ...editing, interviewerUserIds: [editing.interviewerUserId] }
+            ? {
+                applicationId: editing.applicationId,
+                roundNo: editing.roundNo,
+                interviewerUserIds: editing.interviewerUserIds,
+                conclusion: editing.conclusion,
+                comment: editing.members.every((member) => member.comment === editing.members[0]?.comment)
+                  ? editing.members[0]?.comment
+                  : undefined,
+                interviewedAt: editing.interviewedAt,
+              }
             : {
                 applicationId: fromInvite?.applicationId,
                 roundNo: fromInvite?.roundNo,
@@ -418,7 +547,7 @@ const RecordPage = memo(function RecordPage() {
             ? dayjs(form.interviewedAt).format('YYYY-MM-DD HH:mm:ss')
             : undefined;
           const msg = await saveHrInterviewRecordApi({
-            id: editing?.id,
+            id: editing?.members.find((member) => member.interviewerUserId === ids[0])?.id,
             applicationId: form.applicationId,
             requisitionId: editing?.requisitionId,
             inviteId: editing?.inviteId ?? fromInvite?.inviteId,
@@ -433,6 +562,61 @@ const RecordPage = memo(function RecordPage() {
           return true;
         }}
       />
+      <Modal
+        title={
+          verdictTarget
+            ? `联合评价：${verdictTarget.displayName} · ${ROUNDS.find((item) => item.value === verdictTarget.roundNo)?.label || ''}`
+            : '联合评价'
+        }
+        open={verdictTarget != null}
+        confirmLoading={verdictSaving}
+        okText='提交联合评价'
+        maskClosable={false}
+        onCancel={() => setVerdictTarget(null)}
+        onOk={async () => {
+          const values = await verdictForm.validateFields();
+          if (!verdictTarget) return;
+          setVerdictSaving(true);
+          try {
+            const msg = await saveHrInterviewVerdictApi({
+              applicationId: verdictTarget.applicationId,
+              roundNo: verdictTarget.roundNo,
+              conclusion: values.conclusion,
+              comment: values.comment,
+            });
+            message.success(msg || '已更新候选人阶段');
+            setVerdictTarget(null);
+            actionRef.current?.reload();
+          } finally {
+            setVerdictSaving(false);
+          }
+        }}
+      >
+        <Form
+          form={verdictForm}
+          layout='vertical'
+        >
+          <Form.Item
+            name='conclusion'
+            label='最终结论'
+            rules={[{ required: true, message: '请选择结论' }]}
+          >
+            <Select
+              options={CONCLUSIONS}
+              placeholder='请选择结论'
+            />
+          </Form.Item>
+          <Form.Item
+            name='comment'
+            label='联合评价'
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder='填写联合评价，提交后更新候选人阶段'
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 });

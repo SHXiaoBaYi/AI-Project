@@ -8,6 +8,7 @@ import ActionButtons from '@/components/Buttons/ActionButtons';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import { AiAnalysisDrawer } from '@/components/hr/AiAnalysisDrawer';
+import InterviewReviewDrawer from '@/components/hr/InterviewReviewDrawer';
 import ApplicationFormModal from './components/ApplicationFormModal';
 import ImportApplicationModal from './components/ImportApplicationModal';
 import {
@@ -86,6 +87,7 @@ const ApplicationPage = memo(function ApplicationPage() {
   const [stages, setStages] = useState<{ value: string; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [aiTarget, setAiTarget] = useState<AppRow | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<AppRow | null>(null);
 
   useEffect(() => {
     getHrRequisitionsApi().then((rows) =>
@@ -136,10 +138,16 @@ const ApplicationPage = memo(function ApplicationPage() {
       {
         title: '操作',
         valueType: 'option',
-        width: 180,
+        width: 280,
         render: (_, record) => (
           <ActionButtons
+            maxVisible={4}
             items={[
+              {
+                key: 'reviews',
+                label: '面试评价',
+                onClick: () => setReviewTarget(record),
+              },
               {
                 key: 'ai',
                 label: 'AI分析',
@@ -363,6 +371,12 @@ const ApplicationPage = memo(function ApplicationPage() {
           setAiTarget(null);
           actionRef.current?.reload();
         }}
+      />
+      <InterviewReviewDrawer
+        applicationId={reviewTarget?.id}
+        candidateName={reviewTarget?.displayName}
+        open={reviewTarget != null}
+        onClose={() => setReviewTarget(null)}
       />
     </>
   );
