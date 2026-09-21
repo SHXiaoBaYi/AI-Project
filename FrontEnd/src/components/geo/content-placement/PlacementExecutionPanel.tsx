@@ -50,6 +50,7 @@ const fileHref = (url?: string) => {
   return `${String(import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080').replace(/\/$/, '')}${url}`;
 };
 
+/** 投放进度抽屉：发布明细、引用和完成证明 */
 const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
   open,
   placement,

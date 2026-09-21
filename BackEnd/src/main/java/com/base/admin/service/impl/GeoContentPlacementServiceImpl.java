@@ -215,10 +215,11 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         String statusFilter = StringUtils.hasText(query.getPublishStatus())
                 ? normalizePublishStatus(query.getPublishStatus())
                 : null;
+        String platformName = StringUtils.hasText(query.getPlatformName()) ? query.getPlatformName().trim() : null;
         LambdaQueryWrapper<GeoContentPlacementItem> iw = new LambdaQueryWrapper<GeoContentPlacementItem>()
                 .in(placementIds != null, GeoContentPlacementItem::getPlacementId, placementIds)
                 .like(StringUtils.hasText(query.getTitle()), GeoContentPlacementItem::getTitle, query.getTitle())
-                .eq(StringUtils.hasText(query.getPlatformName()), GeoContentPlacementItem::getPlatformName, query.getPlatformName().trim())
+                .eq(platformName != null, GeoContentPlacementItem::getPlatformName, platformName)
                 .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter);
         if (query.getPublishTimeStart() != null) {
             iw.ge(GeoContentPlacementItem::getPublishTime, query.getPublishTimeStart().atStartOfDay());
