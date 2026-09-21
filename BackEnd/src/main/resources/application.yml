@@ -91,6 +91,7 @@ geo:
     content-monthly-cron: "0 25 2 1 * ?"
 
 dingtalk:
+  # 页面「系统管理 → 钉钉应用配置」优先。这里仅在库里没有启用配置时作备用。
   enabled: ${DINGTALK_ENABLED:false}
   client-id: ${DINGTALK_CLIENT_ID:}
   client-secret: ${DINGTALK_CLIENT_SECRET:}

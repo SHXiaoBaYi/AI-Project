@@ -4,6 +4,7 @@ import {
   CalendarOutlined,
   DashboardOutlined,
   FormOutlined,
+  ScheduleOutlined,
   SendOutlined,
   SettingOutlined,
   TagsOutlined,
@@ -21,6 +22,7 @@ import { getGeoContentPlacementListApi, getGeoDailyBoardApi } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoDailyBoard } from '@/types/geo';
 import { AGG_COLOR } from '@/components/geo/content-placement/constants';
 import { demoRangeByGrain } from '@/constants/demoData';
+import DingTalkBusyModal from '@/pages/workbench/DingTalkBusyModal';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 
@@ -28,8 +30,9 @@ type Shortcut = {
   key: string;
   label: string;
   desc: string;
-  path: string;
-  perm: string;
+  path?: string;
+  perm?: string;
+  perms?: string[];
   icon: ReactNode;
 };
 
@@ -98,6 +101,13 @@ const SHORTCUTS: Shortcut[] = [
     perm: 'system:role:list',
     icon: <SettingOutlined />,
   },
+  {
+    key: 'dingtalk-busy',
+    label: '钉钉闲忙',
+    desc: '查询同事日程闲忙',
+    perms: ['system:dingtalk:busy', 'hr:invite:list', 'system:dingtalk:list'],
+    icon: <ScheduleOutlined />,
+  },
 ];
 
 function resolvePersona(has: (p: string) => boolean, roles: string[]): { title: string; hint: string } {
@@ -160,7 +170,11 @@ export default function Workbench() {
   const userId = userInfo?.userId;
 
   const persona = useMemo(() => resolvePersona(has, roles), [has, roles]);
-  const shortcuts = useMemo(() => SHORTCUTS.filter((s) => has(s.perm)), [has]);
+  const shortcuts = useMemo(
+    () => SHORTCUTS.filter((item) => (item.perms ? item.perms.some((perm) => has(perm)) : has(item.perm || ''))),
+    [has],
+  );
+  const [busyOpen, setBusyOpen] = useState(false);
 
   const showExpose = has('geo:expose:list') || has('geo:daily:list') || has('geo:day:list');
   const showMyWork = has('geo:content:work');
@@ -277,7 +291,13 @@ export default function Workbench() {
                 <button
                   type='button'
                   className='flex w-full cursor-pointer flex-col gap-1 rounded-lg border border-neutral-200 bg-white px-3 py-3 text-left transition hover:border-blue-400 hover:shadow-sm'
-                  onClick={() => navigate(s.path)}
+                  onClick={() => {
+                    if (s.key === 'dingtalk-busy') {
+                      setBusyOpen(true);
+                      return;
+                    }
+                    if (s.path) navigate(s.path);
+                  }}
                 >
                   <span className='text-lg text-blue-600'>{s.icon}</span>
                   <span className='text-sm font-medium text-neutral-800'>{s.label}</span>
@@ -290,6 +310,11 @@ export default function Workbench() {
           <Typography.Text type='secondary'>暂无可用模块权限，请联系管理员开通菜单。</Typography.Text>
         )}
       </Card>
+
+      <DingTalkBusyModal
+        open={busyOpen}
+        onClose={() => setBusyOpen(false)}
+      />
 
       <Row gutter={[16, 16]}>
         {showExpose ? (
