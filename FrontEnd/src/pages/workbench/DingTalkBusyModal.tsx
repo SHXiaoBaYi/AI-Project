@@ -1,6 +1,6 @@
-import { memo, useEffect, useMemo, useState } from 'react';
-import { App, DatePicker, Input, Modal, Select, Table, Tag } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import { memo, useEffect, useMemo, useState, type Key } from 'react';
+import { App, DatePicker, Modal, Select, Table, Tag } from 'antd';
+import type { ColumnsType, TableProps } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
   getDingTalkBusyUsersApi,
@@ -15,6 +15,13 @@ const STATUS_COLOR: Record<string, string> = {
   BUSY: 'error',
   TENTATIVE: 'warning',
 };
+
+const STATUS_FILTERS = [
+  { text: '闲', value: 'FREE' },
+  { text: '忙', value: 'BUSY' },
+  { text: '暂定', value: 'TENTATIVE' },
+  { text: '—', value: '__EMPTY__' },
+];
 
 type TimelineRow = {
   key: string;
@@ -46,7 +53,8 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
   ]);
   const [querying, setQuerying] = useState(false);
   const [result, setResult] = useState<DingTalkBusyUser[]>([]);
-  const [keyword, setKeyword] = useState('');
+  const [tableKey, setTableKey] = useState(0);
+  const [filteredInfo, setFilteredInfo] = useState<Record<string, (Key | boolean)[] | null>>({});
 
   useEffect(() => {
     if (!open) return;
@@ -57,27 +65,9 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
       .finally(() => setLoadingUsers(false));
   }, [open]);
 
-  const filtered = useMemo(() => {
-    const text = keyword.trim().toLowerCase();
-    if (!text) return result;
-    return result
-      .map((user) => {
-        const name = `${user.nickname || ''} ${user.username || ''}`.toLowerCase();
-        if (name.includes(text) || (user.error || '').toLowerCase().includes(text)) {
-          return user;
-        }
-        const slots = (user.slots ?? []).filter((slot) => {
-          const blob = `${slot.statusLabel} ${slot.status} ${slot.start} ${slot.end}`.toLowerCase();
-          return blob.includes(text);
-        });
-        return slots.length ? { ...user, slots } : null;
-      })
-      .filter((user): user is DingTalkBusyUser => user != null);
-  }, [keyword, result]);
-
   const timeline = useMemo(() => {
     const rows = new Map<string, TimelineRow>();
-    for (const user of filtered) {
+    for (const user of result) {
       for (const slot of user.slots ?? []) {
         const key = `${slot.start}|${slot.end}`;
         const row = rows.get(key) ?? { key, label: slotLabel(slot.start, slot.end), byUser: {} };
@@ -86,26 +76,56 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
       }
     }
     return [...rows.values()].sort((a, b) => a.key.localeCompare(b.key));
-  }, [filtered]);
+  }, [result]);
 
   const columns = useMemo<ColumnsType<TimelineRow>>(() => {
-    const people: ColumnsType<TimelineRow> = filtered.map((user) => ({
-      title: (
-        <div className='flex min-w-24 flex-col gap-1'>
-          <span>{user.nickname || user.username}</span>
-          {user.error ? <Tag color='error'>{user.error}</Tag> : null}
-        </div>
-      ),
-      key: String(user.userId),
-      width: 140,
-      render: (_, row) => {
-        const slot = row.byUser[user.userId];
-        if (!slot) return <span className='text-neutral-300'>—</span>;
-        return <Tag color={STATUS_COLOR[slot.status] || 'default'}>{slot.statusLabel}</Tag>;
+    const timeFilters = timeline.map((row) => ({ text: row.label, value: row.key }));
+    const people: ColumnsType<TimelineRow> = result.map((user) => {
+      const colKey = `user-${user.userId}`;
+      return {
+        title: (
+          <div className='flex min-w-24 flex-col gap-1'>
+            <span>{user.nickname || user.username}</span>
+            {user.error ? <Tag color='error'>{user.error}</Tag> : null}
+          </div>
+        ),
+        key: colKey,
+        width: 140,
+        filters: STATUS_FILTERS,
+        filteredValue: filteredInfo[colKey] || null,
+        filterMultiple: true,
+        onFilter: (value, row) => {
+          const slot = row.byUser[user.userId];
+          if (value === '__EMPTY__') return !slot;
+          return slot?.status === value;
+        },
+        render: (_, row) => {
+          const slot = row.byUser[user.userId];
+          if (!slot) return <span className='text-neutral-300'>—</span>;
+          return <Tag color={STATUS_COLOR[slot.status] || 'default'}>{slot.statusLabel}</Tag>;
+        },
+      };
+    });
+    return [
+      {
+        title: '时间',
+        dataIndex: 'label',
+        key: 'time',
+        width: 168,
+        fixed: 'left',
+        filters: timeFilters,
+        filteredValue: filteredInfo.time || null,
+        filterSearch: true,
+        filterMultiple: true,
+        onFilter: (value, row) => row.key === value,
       },
-    }));
-    return [{ title: '时间', dataIndex: 'label', width: 168, fixed: 'left' }, ...people];
-  }, [filtered]);
+      ...people,
+    ];
+  }, [filteredInfo, result, timeline]);
+
+  const handleTableChange: TableProps<TimelineRow>['onChange'] = (_pagination, filters) => {
+    setFilteredInfo(filters as Record<string, (Key | boolean)[] | null>);
+  };
 
   const handleQuery = async () => {
     if (userIds.length === 0) {
@@ -124,7 +144,8 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
         endTime: range[1].format('YYYY-MM-DD HH:mm:ss'),
       });
       setResult(rows ?? []);
-      setKeyword('');
+      setFilteredInfo({});
+      setTableKey((key) => key + 1);
     } finally {
       setQuerying(false);
     }
@@ -147,7 +168,7 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
     >
       <div className='mb-3 text-sm text-neutral-500'>
         从系统用户里选择。已绑定钉钉的才能查出闲忙；未绑定的会标出来，需要先在用户管理里绑定。一次最多 20
-        人。结果按半小时一段对齐展示，一段里只要有忙就整段算忙。
+        人。结果按半小时一段对齐展示，一段里只要有忙就整段算忙。可用列头漏斗筛选时间或闲忙状态。
       </div>
       <div className='mb-3 grid gap-3 md:grid-cols-2'>
         <Select
@@ -170,7 +191,9 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
           options={users.map((user) => ({
             value: user.userId,
             disabled: user.dingtalkBound !== 1,
-            label: `${user.nickname || user.username}${user.username ? `（${user.username}）` : ''}${user.dingtalkBound === 1 ? '' : ' · 未绑定钉钉'}`,
+            label: `${user.nickname || user.username}${user.username ? `（${user.username}）` : ''}${
+              user.dingtalkBound === 1 ? '' : ' · 未绑定钉钉'
+            }`,
           }))}
           notFoundContent={loadingUsers ? '加载中' : '没有系统用户'}
         />
@@ -185,43 +208,34 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
         />
       </div>
       {result.length > 0 ? (
-        <>
-          <Input.Search
-            allowClear
-            className='mb-3'
-            placeholder='检索用户、时间或闲忙状态'
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
+        timeline.length === 0 ? (
+          <div className='flex flex-col gap-2'>
+            {result.map((user) => (
+              <div
+                key={user.userId}
+                className='flex flex-wrap items-center gap-2 text-sm'
+              >
+                <span className='font-medium text-neutral-800'>{user.nickname || user.username}</span>
+                {user.error ? (
+                  <Tag color='error'>{user.error}</Tag>
+                ) : (
+                  <span className='text-neutral-400'>没有可展示的时间段</span>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Table<TimelineRow>
+            key={tableKey}
+            size='small'
+            rowKey='key'
+            pagination={false}
+            scroll={{ x: 168 + result.length * 140, y: 420 }}
+            dataSource={timeline}
+            columns={columns}
+            onChange={handleTableChange}
           />
-          {filtered.length === 0 ? (
-            <div className='py-8 text-center text-sm text-neutral-400'>没有匹配的记录</div>
-          ) : timeline.length === 0 ? (
-            <div className='flex flex-col gap-2'>
-              {filtered.map((user) => (
-                <div
-                  key={user.userId}
-                  className='flex flex-wrap items-center gap-2 text-sm'
-                >
-                  <span className='font-medium text-neutral-800'>{user.nickname || user.username}</span>
-                  {user.error ? (
-                    <Tag color='error'>{user.error}</Tag>
-                  ) : (
-                    <span className='text-neutral-400'>没有可展示的时间段</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Table<TimelineRow>
-              size='small'
-              rowKey='key'
-              pagination={false}
-              scroll={{ x: 168 + filtered.length * 140, y: 420 }}
-              dataSource={timeline}
-              columns={columns}
-            />
-          )}
-        </>
+        )
       ) : null}
     </Modal>
   );
