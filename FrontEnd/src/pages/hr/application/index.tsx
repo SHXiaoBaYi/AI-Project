@@ -9,6 +9,8 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import { AiAnalysisDrawer } from '@/components/hr/AiAnalysisDrawer';
 import InterviewReviewDrawer from '@/components/hr/InterviewReviewDrawer';
+import InviteFormModal, { maxRoundOf, type InviteFormPreset } from '@/components/hr/InviteFormModal';
+import { canCreateInvite, nextInviteRound } from '@/components/hr/inviteRound';
 import ApplicationFormModal from './components/ApplicationFormModal';
 import ImportApplicationModal from './components/ImportApplicationModal';
 import {
@@ -88,16 +90,45 @@ const ApplicationPage = memo(function ApplicationPage() {
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [aiTarget, setAiTarget] = useState<AppRow | null>(null);
   const [reviewTarget, setReviewTarget] = useState<AppRow | null>(null);
+  const [invitePreset, setInvitePreset] = useState<InviteFormPreset | null>(null);
+  const [roundPlans, setRoundPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
+  const [ccRoundPlans, setCcRoundPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
 
   useEffect(() => {
-    getHrRequisitionsApi().then((rows) =>
+    getHrRequisitionsApi().then((rows) => {
       setJobs(
         (rows as Record<string, unknown>[]).map((row) => ({
           value: Number(row.id),
           label: `${row.job_name}${row.location_code === 'XJ' ? ' · 新疆' : ' · 上海'}`,
         })),
-      ),
-    );
+      );
+      const nextInterviewers = new Map<number, Map<number, number[]>>();
+      const nextCcs = new Map<number, Map<number, number[]>>();
+      const parseRounds = (text: unknown) => {
+        const rounds = new Map<number, number[]>();
+        String(text ?? '')
+          .split(',')
+          .filter(Boolean)
+          .forEach((part) => {
+            const [round, ids] = part.split(':');
+            rounds.set(
+              Number(round),
+              (ids ?? '')
+                .split('|')
+                .filter(Boolean)
+                .map(Number)
+                .filter((id) => id > 0),
+            );
+          });
+        return rounds;
+      };
+      rows.forEach((row) => {
+        nextInterviewers.set(Number(row.id), parseRounds(row.interview_rounds));
+        nextCcs.set(Number(row.id), parseRounds(row.interview_round_ccs));
+      });
+      setRoundPlans(nextInterviewers);
+      setCcRoundPlans(nextCcs);
+    });
     getHrChannelsApi().then((rows) =>
       setChannels(
         rows.map((item) => {
@@ -138,44 +169,70 @@ const ApplicationPage = memo(function ApplicationPage() {
       {
         title: '操作',
         valueType: 'option',
-        width: 280,
-        render: (_, record) => (
-          <ActionButtons
-            maxVisible={4}
-            items={[
-              {
-                key: 'reviews',
-                label: '面试评价',
-                onClick: () => setReviewTarget(record),
-              },
-              {
-                key: 'ai',
-                label: 'AI分析',
-                onClick: () => setAiTarget(record),
-              },
-              {
-                key: 'edit',
-                label: '编辑',
-                perm: 'hr:application:edit',
-                onClick: () => {
-                  setEditing(record);
-                  setOpen(true);
+        width: 320,
+        render: (_, record) => {
+          const roundNo = nextInviteRound(record.currentStage);
+          const maxRound = maxRoundOf(roundPlans, record.requisitionId);
+          const inviteable = canCreateInvite(record.currentStage, maxRound) && record.requisitionId != null;
+          return (
+            <ActionButtons
+              maxVisible={4}
+              items={[
+                ...(inviteable && roundNo != null
+                  ? [
+                      {
+                        key: 'invite',
+                        label: '邀约',
+                        perm: 'hr:invite:add',
+                        onClick: () => {
+                          const reqId = record.requisitionId!;
+                          setInvitePreset({
+                            applicationId: record.id,
+                            displayName: record.displayName,
+                            jobName: record.jobName,
+                            roundNo,
+                            interviewerUserIds: roundPlans.get(reqId)?.get(roundNo),
+                            ccUserIds: ccRoundPlans.get(reqId)?.get(roundNo),
+                            durationMin: 60,
+                          });
+                        },
+                      },
+                    ]
+                  : []),
+                {
+                  key: 'reviews',
+                  label: '面试评价',
+                  onClick: () => setReviewTarget(record),
                 },
-              },
-              {
-                key: 'delete',
-                label: '删除',
-                perm: 'hr:application:delete',
-                confirmTitle: `确认删除「${record.displayName}」？`,
-                onClick: async () => {
-                  await deleteHrApplicationApi(record.id);
-                  message.success('已删除');
-                  actionRef.current?.reload();
+                {
+                  key: 'ai',
+                  label: 'AI分析',
+                  onClick: () => setAiTarget(record),
                 },
-              },
-            ]}
-          />
-        ),
+                {
+                  key: 'edit',
+                  label: '编辑',
+                  perm: 'hr:application:edit',
+                  onClick: () => {
+                    setEditing(record);
+                    setOpen(true);
+                  },
+                },
+                {
+                  key: 'delete',
+                  label: '删除',
+                  perm: 'hr:application:delete',
+                  confirmTitle: `确认删除「${record.displayName}」？`,
+                  onClick: async () => {
+                    await deleteHrApplicationApi(record.id);
+                    message.success('已删除');
+                    actionRef.current?.reload();
+                  },
+                },
+              ]}
+            />
+          );
+        },
       },
       {
         title: '姓名',
@@ -258,7 +315,7 @@ const ApplicationPage = memo(function ApplicationPage() {
         search: false,
       },
     ],
-    [channels, jobs, message, stages, users],
+    [ccRoundPlans, channels, jobs, message, roundPlans, stages, users],
   );
 
   return (
@@ -377,6 +434,16 @@ const ApplicationPage = memo(function ApplicationPage() {
         candidateName={reviewTarget?.displayName}
         open={reviewTarget != null}
         onClose={() => setReviewTarget(null)}
+      />
+      <InviteFormModal
+        open={invitePreset != null}
+        preset={invitePreset}
+        lockCandidate
+        lockRound
+        onOpenChange={(next) => {
+          if (!next) setInvitePreset(null);
+        }}
+        onSuccess={() => actionRef.current?.reload()}
       />
     </>
   );
