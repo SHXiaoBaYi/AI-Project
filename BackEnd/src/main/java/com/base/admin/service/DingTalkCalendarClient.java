@@ -5,6 +5,7 @@ import com.base.admin.domain.vo.DingTalkDirectoryUserVO;
 import com.base.admin.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -48,30 +49,58 @@ public class DingTalkCalendarClient {
 
     public CalendarCall createEvent(String unionId, String title, String description, LocalDateTime start,
                                     int durationMin, String location) {
+        return createEvent(unionId, title, description, start, durationMin, location, List.of(), false);
+    }
+
+    /**
+     * 在 owner 的主日历建日程；attendeeUnionIds 为额外参与人 unionId（不含 owner 也可再传）。
+     * onlineMeeting=true 时写入钉钉日程扩展字段，尽量拉起线上会议能力。
+     */
+    public CalendarCall createEvent(String ownerUnionId, String title, String description, LocalDateTime start,
+                                    int durationMin, String location, List<String> attendeeUnionIds, boolean onlineMeeting) {
         if (!ready()) {
             return CalendarCall.fail("钉钉未配置。请到「系统管理 → 钉钉应用配置」填写并启用");
         }
-        if (!StringUtils.hasText(unionId)) {
-            return CalendarCall.fail("面试官没有钉钉 unionId，不能建日程");
+        if (!StringUtils.hasText(ownerUnionId)) {
+            return CalendarCall.fail("没有钉钉 unionId，不能建日程");
         }
         try {
             String token = accessToken();
             ObjectNode body = objectMapper.createObjectNode();
             body.put("summary", title);
-            body.put("description", description);
+            if (StringUtils.hasText(description)) {
+                body.put("description", description);
+            }
             body.put("isAllDay", false);
             body.set("start", timeNode(start));
-            body.set("end", timeNode(start.plusMinutes(durationMin)));
+            body.set("end", timeNode(start.plusMinutes(Math.max(durationMin, 15))));
             if (StringUtils.hasText(location)) {
                 ObjectNode place = objectMapper.createObjectNode();
                 place.put("displayName", location.trim());
                 body.set("location", place);
             }
-            ObjectNode attendee = objectMapper.createObjectNode();
-            attendee.put("id", unionId);
-            body.putArray("attendees").add(attendee);
+            ArrayNode attendees = body.putArray("attendees");
+            java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+            ids.add(ownerUnionId.trim());
+            if (attendeeUnionIds != null) {
+                for (String id : attendeeUnionIds) {
+                    if (StringUtils.hasText(id)) {
+                        ids.add(id.trim());
+                    }
+                }
+            }
+            for (String id : ids) {
+                ObjectNode attendee = objectMapper.createObjectNode();
+                attendee.put("id", id);
+                attendees.add(attendee);
+            }
+            if (onlineMeeting) {
+                ObjectNode extra = objectMapper.createObjectNode();
+                extra.put("onlineMeetingOpen", true);
+                body.set("extra", extra);
+            }
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.dingtalk.com/v1.0/calendar/users/" + encode(unionId) + "/calendars/primary/events"))
+                    .uri(URI.create("https://api.dingtalk.com/v1.0/calendar/users/" + encode(ownerUnionId) + "/calendars/primary/events"))
                     .timeout(Duration.ofSeconds(15))
                     .header("Content-Type", "application/json")
                     .header("x-acs-dingtalk-access-token", token)
@@ -124,6 +153,11 @@ public class DingTalkCalendarClient {
         }
     }
 
+    /** 纯 Markdown 工作通知（无附件） */
+    public NoticeCall notifyMarkdown(String dingUserId, String markdownTitle, String markdownText) {
+        return notifyInterview(dingUserId, markdownTitle, markdownText, null, null);
+    }
+
     public CalendarCall deleteEvent(String unionId, String eventId) {
         if (!ready()) {
             return CalendarCall.fail("钉钉未配置。请到「系统管理 → 钉钉应用配置」填写并启用");
@@ -144,6 +178,68 @@ public class DingTalkCalendarClient {
             return CalendarCall.ok(eventId, response.body().isBlank() ? "{\"deleted\":true}" : response.body());
         } catch (Exception ex) {
             return CalendarCall.fail("钉钉取消日程失败：" + ex.getMessage());
+        }
+    }
+
+    /** 更新主日历事件（主题/时间/地点/描述/参与人） */
+    public CalendarCall updateEvent(String ownerUnionId, String eventId, String title, String description,
+                                    LocalDateTime start, int durationMin, String location,
+                                    List<String> attendeeUnionIds, boolean onlineMeeting) {
+        if (!ready()) {
+            return CalendarCall.fail("钉钉未配置。请到「系统管理 → 钉钉应用配置」填写并启用");
+        }
+        if (!StringUtils.hasText(ownerUnionId) || !StringUtils.hasText(eventId)) {
+            return CalendarCall.fail("缺少 unionId 或日程 ID，不能更新");
+        }
+        try {
+            String token = accessToken();
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("id", eventId);
+            body.put("summary", title);
+            if (StringUtils.hasText(description)) {
+                body.put("description", description);
+            } else {
+                body.put("description", "");
+            }
+            body.put("isAllDay", false);
+            body.set("start", timeNode(start));
+            body.set("end", timeNode(start.plusMinutes(Math.max(durationMin, 15))));
+            ObjectNode place = objectMapper.createObjectNode();
+            place.put("displayName", StringUtils.hasText(location) ? location.trim() : "");
+            body.set("location", place);
+            ArrayNode attendees = body.putArray("attendees");
+            java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+            ids.add(ownerUnionId.trim());
+            if (attendeeUnionIds != null) {
+                for (String id : attendeeUnionIds) {
+                    if (StringUtils.hasText(id)) {
+                        ids.add(id.trim());
+                    }
+                }
+            }
+            for (String id : ids) {
+                ObjectNode attendee = objectMapper.createObjectNode();
+                attendee.put("id", id);
+                attendees.add(attendee);
+            }
+            ObjectNode extra = objectMapper.createObjectNode();
+            extra.put("onlineMeetingOpen", onlineMeeting);
+            body.set("extra", extra);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.dingtalk.com/v1.0/calendar/users/" + encode(ownerUnionId)
+                            + "/calendars/primary/events/" + encode(eventId)))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("Content-Type", "application/json")
+                    .header("x-acs-dingtalk-access-token", token)
+                    .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 300) {
+                return CalendarCall.fail("钉钉更新日程失败：" + response.body(), response.body());
+            }
+            return CalendarCall.ok(eventId, response.body().isBlank() ? "{\"updated\":true}" : response.body());
+        } catch (Exception ex) {
+            return CalendarCall.fail("钉钉更新日程失败：" + ex.getMessage());
         }
     }
 

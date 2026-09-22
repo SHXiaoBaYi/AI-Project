@@ -40,9 +40,11 @@ function slotLabel(start: string, end: string) {
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** 打开时预选用户 */
+  initialUserIds?: number[];
 };
 
-const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Props) {
+const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose, initialUserIds }: Props) {
   const { message } = App.useApp();
   const [users, setUsers] = useState<DingTalkBusyUserOption[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -58,12 +60,15 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose }: Pro
 
   useEffect(() => {
     if (!open) return;
+    if (initialUserIds?.length) {
+      setUserIds(initialUserIds.slice(0, 20));
+    }
     setLoadingUsers(true);
     void getDingTalkBusyUsersApi()
       .then((rows) => setUsers(rows ?? []))
       .catch(() => setUsers([]))
       .finally(() => setLoadingUsers(false));
-  }, [open]);
+  }, [open, initialUserIds]);
 
   const timeline = useMemo(() => {
     const rows = new Map<string, TimelineRow>();

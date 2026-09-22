@@ -123,6 +123,8 @@ type InviteFormModalProps = {
   /** 编辑已有邀约时传入主键 */
   editingId?: number | null;
   editingInitial?: InviteFormValues | null;
+  /** 助手等场景预填，不锁定字段 */
+  seed?: InviteFormValues | null;
 };
 
 export default function InviteFormModal({
@@ -134,6 +136,7 @@ export default function InviteFormModal({
   lockRound = false,
   editingId,
   editingInitial,
+  seed,
 }: InviteFormModalProps) {
   const { message } = App.useApp();
   const [form] = Form.useForm<InviteFormValues>();
@@ -213,8 +216,20 @@ export default function InviteFormModal({
       });
       return;
     }
+    if (seed) {
+      form.setFieldsValue({
+        roundNo: seed.roundNo ?? 1,
+        durationMin: seed.durationMin ?? 60,
+        applicationId: seed.applicationId,
+        interviewerUserIds: seed.interviewerUserIds,
+        ccUserIds: seed.ccUserIds,
+        location: seed.location,
+        interviewAt: seed.interviewAt ? dayjs(seed.interviewAt) : undefined,
+      });
+      return;
+    }
     form.setFieldsValue({ roundNo: 1, durationMin: 60, interviewerUserIds: undefined, ccUserIds: undefined });
-  }, [open, preset, editingInitial, form]);
+  }, [open, preset, editingInitial, seed, form]);
 
   const title = editingId ? '编辑邀约' : preset ? `邀约：${preset.displayName}` : '新增邀约';
   const autoFillPeople = !editingId;

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 're
 import { Button, Card, Col, Progress, Row, Space, Statistic, Table, Tag, Typography } from 'antd';
 import {
   CalendarOutlined,
+  CommentOutlined,
   DashboardOutlined,
   FormOutlined,
   ScheduleOutlined,
@@ -23,6 +24,7 @@ import type { GeoContentPlacementListItem, GeoDailyBoard } from '@/types/geo';
 import { AGG_COLOR } from '@/components/geo/content-placement/constants';
 import { demoRangeByGrain } from '@/constants/demoData';
 import DingTalkBusyModal from '@/pages/workbench/DingTalkBusyModal';
+import DingTalkAssistantModal from '@/pages/workbench/DingTalkAssistantModal';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 
@@ -108,6 +110,13 @@ const SHORTCUTS: Shortcut[] = [
     perms: ['system:dingtalk:busy', 'hr:invite:list', 'system:dingtalk:list'],
     icon: <ScheduleOutlined />,
   },
+  {
+    key: 'dingtalk-assistant',
+    label: '日程助手',
+    desc: '问闲忙并建议约谈',
+    perms: ['system:dingtalk:busy', 'hr:invite:list', 'system:dingtalk:list'],
+    icon: <CommentOutlined />,
+  },
 ];
 
 function resolvePersona(has: (p: string) => boolean, roles: string[]): { title: string; hint: string } {
@@ -175,6 +184,8 @@ export default function Workbench() {
     [has],
   );
   const [busyOpen, setBusyOpen] = useState(false);
+  const [busyInitialUserIds, setBusyInitialUserIds] = useState<number[]>([]);
+  const [assistantOpen, setAssistantOpen] = useState(false);
 
   const showExpose = has('geo:expose:list') || has('geo:daily:list') || has('geo:day:list');
   const showMyWork = has('geo:content:work');
@@ -293,7 +304,12 @@ export default function Workbench() {
                   className='flex w-full cursor-pointer flex-col gap-1 rounded-lg border border-neutral-200 bg-white px-3 py-3 text-left transition hover:border-blue-400 hover:shadow-sm'
                   onClick={() => {
                     if (s.key === 'dingtalk-busy') {
+                      setBusyInitialUserIds([]);
                       setBusyOpen(true);
+                      return;
+                    }
+                    if (s.key === 'dingtalk-assistant') {
+                      setAssistantOpen(true);
                       return;
                     }
                     if (s.path) navigate(s.path);
@@ -313,7 +329,19 @@ export default function Workbench() {
 
       <DingTalkBusyModal
         open={busyOpen}
-        onClose={() => setBusyOpen(false)}
+        initialUserIds={busyInitialUserIds}
+        onClose={() => {
+          setBusyOpen(false);
+          setBusyInitialUserIds([]);
+        }}
+      />
+      <DingTalkAssistantModal
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        onOpenBusy={(ids) => {
+          setBusyInitialUserIds(ids);
+          setBusyOpen(true);
+        }}
       />
 
       <Row gutter={[16, 16]}>
