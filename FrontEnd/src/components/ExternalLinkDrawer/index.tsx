@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { Button, Drawer, Tooltip, Typography } from 'antd';
-import { canOpenExternalInApp, resolveExternalUrl } from '@/utils/externalUrl';
+import { blocksIframeEmbed, canOpenExternalInApp, openExternalInNewTab, resolveExternalUrl } from '@/utils/externalUrl';
 
 type ExternalLinkContextValue = {
   openExternal: (url: string, title?: string) => void;
@@ -16,6 +16,11 @@ export function ExternalLinkProvider({ children }: { children: ReactNode }) {
     if (!canOpenExternalInApp(raw)) return;
     const resolved = resolveExternalUrl(raw);
     if (!resolved) return;
+    // 禁止 iframe 嵌入的站点直接新标签打开，避免空白抽屉
+    if (blocksIframeEmbed(resolved)) {
+      openExternalInNewTab(resolved);
+      return;
+    }
     setTitle(nextTitle || '外部链接');
     setUrl(resolved);
   }, []);
@@ -38,7 +43,7 @@ export function ExternalLinkProvider({ children }: { children: ReactNode }) {
             type='link'
             disabled={!url}
             onClick={() => {
-              if (url) window.open(url, '_blank', 'noopener,noreferrer');
+              if (url) openExternalInNewTab(url);
             }}
           >
             新窗口打开
@@ -48,7 +53,7 @@ export function ExternalLinkProvider({ children }: { children: ReactNode }) {
         {url ? (
           <div className='flex h-full flex-col'>
             <p className='m-0 shrink-0 border-b border-black/6 px-4 py-2 text-xs text-black/45'>
-              抖音、头条、知乎等站点禁止被嵌入。若下方空白，请点右上角「新窗口打开」。
+              若下方空白，请点右上角「新窗口打开」。
             </p>
             <iframe
               title={title}
@@ -75,7 +80,7 @@ export function useExternalLinkOptional() {
   return useContext(ExternalLinkContext);
 }
 
-/** 表格内展示外链：省略号 + Tooltip，不撑破单元格；合法链接可点开抽屉 */
+/** 表格内展示外链：省略号 + Tooltip；可嵌套则抽屉预览，禁止嵌套则新标签打开 */
 export function ExternalLinkText({
   href,
   children,
@@ -118,7 +123,12 @@ export function ExternalLinkText({
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        ctx?.openExternal(resolved, drawerTitle);
+        if (!resolved) return;
+        if (blocksIframeEmbed(resolved) || !ctx) {
+          openExternalInNewTab(resolved);
+          return;
+        }
+        ctx.openExternal(resolved, drawerTitle);
       }}
     >
       {display}

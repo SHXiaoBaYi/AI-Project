@@ -56,3 +56,74 @@ export function resolveExternalUrl(url?: string | null): string {
   if (u.startsWith('//')) return `https:${u}`;
   return `https://${u}`;
 }
+
+/**
+ * 已知禁止被 iframe 嵌入的站点（X-Frame-Options / CSP frame-ancestors）。
+ * 浏览器无法跨域读取响应头，只能按主机名启发式判断。
+ */
+const IFRAME_BLOCKED_HOST_SUFFIXES = [
+  'douyin.com',
+  'iesdouyin.com',
+  'toutiao.com',
+  'jinritoutiao.com',
+  'zhihu.com',
+  'zhimg.com',
+  'weixin.qq.com',
+  'qq.com',
+  'bilibili.com',
+  'b23.tv',
+  'xiaohongshu.com',
+  'xhslink.com',
+  'weibo.com',
+  'weibo.cn',
+  'sina.com.cn',
+  'kuaishou.com',
+  'chenzhongtech.com',
+  'baidu.com',
+  'csdn.net',
+  'juejin.cn',
+  'jianshu.com',
+  'sspai.com',
+  'thepaper.cn',
+  '163.com',
+  'sohu.com',
+  'feishu.cn',
+  'larksuite.com',
+  'dingtalk.com',
+  'aliwork.com',
+  'yuque.com',
+  'notion.so',
+  'notion.site',
+  'linkedin.com',
+  'twitter.com',
+  'x.com',
+  'facebook.com',
+  'instagram.com',
+  'youtube.com',
+  'youtu.be',
+  'tiktok.com',
+];
+
+function hostMatchesSuffix(host: string, suffix: string): boolean {
+  return host === suffix || host.endsWith(`.${suffix}`);
+}
+
+/** 该链接是否大概率禁止 iframe 嵌入，应直接新标签打开 */
+export function blocksIframeEmbed(url?: string | null): boolean {
+  const resolved = resolveExternalUrl(url);
+  if (!resolved) return false;
+  try {
+    const host = new URL(resolved).hostname.toLowerCase();
+    return IFRAME_BLOCKED_HOST_SUFFIXES.some((suffix) => hostMatchesSuffix(host, suffix));
+  } catch {
+    return false;
+  }
+}
+
+/** 在系统外用浏览器新标签打开；失败时返回 false */
+export function openExternalInNewTab(url?: string | null): boolean {
+  const resolved = resolveExternalUrl(url);
+  if (!resolved) return false;
+  window.open(resolved, '_blank', 'noopener,noreferrer');
+  return true;
+}
