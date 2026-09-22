@@ -1,5 +1,5 @@
-# 编译输出的 class 文件
-**/target/
+# 编译输出的 class 文件（仅 Java Maven，勿用 **/target/，会误伤 FrontEnd/src/pages/hr/target）
+BackEnd/target/
 **/classes/
 **/*.class
 
