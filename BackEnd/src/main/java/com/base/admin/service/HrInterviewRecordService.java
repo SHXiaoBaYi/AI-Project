@@ -105,6 +105,7 @@ public class HrInterviewRecordService {
             one.setInterviewerUserId(ids.get(i));
             one.setInviteId(matchInvite(dto.getApplicationId(), dto.getRoundNo(), ids.get(i), dto.getInviteId()));
             one.setConclusion(dto.getConclusion());
+            one.setFailReason(dto.getFailReason());
             one.setComment(dto.getComment());
             one.setInterviewedAt(dto.getInterviewedAt());
             saveOne(one);
