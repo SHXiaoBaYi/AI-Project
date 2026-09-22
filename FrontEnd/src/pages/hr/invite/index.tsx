@@ -52,6 +52,7 @@ interface InviteRow {
   status?: string;
   memberStatuses: string[];
   failReason?: string;
+  hasRecord: boolean;
 }
 
 function InterviewerSelect({
@@ -149,10 +150,11 @@ function textOf(value: unknown) {
 function mapRow(raw: Record<string, unknown>): InviteRow {
   const interviewerUserId = Number(raw.interviewer_user_id);
   const status = textOf(raw.status);
+  const hasRecord = raw.record_id != null && raw.record_id !== '';
   return {
     id: Number(raw.id),
     inviteIds: [Number(raw.id)],
-    pendingInviteIds: status === 'NO_CALENDAR' || status === 'FAILED' ? [Number(raw.id)] : [],
+    pendingInviteIds: !hasRecord && (status === 'NO_CALENDAR' || status === 'FAILED') ? [Number(raw.id)] : [],
     applicationId: Number(raw.application_id),
     displayName: String(raw.display_name ?? ''),
     jobName: textOf(raw.job_name),
@@ -167,6 +169,7 @@ function mapRow(raw: Record<string, unknown>): InviteRow {
     status,
     memberStatuses: status ? [status] : [],
     failReason: textOf(raw.fail_reason),
+    hasRecord,
   };
 }
 
@@ -186,11 +189,13 @@ function groupSessions(rows: InviteRow[]) {
         pendingInviteIds: [...row.pendingInviteIds],
         interviewerUserIds: [...row.interviewerUserIds],
         memberStatuses: [...row.memberStatuses],
+        hasRecord: row.hasRecord,
       });
       return;
     }
     existing.inviteIds.push(row.id);
     existing.pendingInviteIds.push(...row.pendingInviteIds);
+    existing.hasRecord = existing.hasRecord || row.hasRecord;
     if (!existing.interviewerUserIds.includes(row.interviewerUserId)) {
       existing.interviewerUserIds.push(row.interviewerUserId);
       existing.interviewerName = [existing.interviewerName, row.interviewerName].filter(Boolean).join('、');
@@ -272,6 +277,7 @@ const InvitePage = memo(function InvitePage() {
                 key: 'edit',
                 label: '编辑',
                 perm: 'hr:invite:edit',
+                disabled: record.hasRecord,
                 onClick: () => {
                   setEditing(record);
                   setOpen(true);
@@ -296,6 +302,7 @@ const InvitePage = memo(function InvitePage() {
                 key: 'delete',
                 label: '删除',
                 perm: 'hr:invite:delete',
+                disabled: record.hasRecord,
                 confirmTitle: `确认删除「${record.displayName}」这场邀约？同一场的面试官都会删除，已建的钉钉日程会一并取消。`,
                 onClick: async () => {
                   const saved = await deleteHrInviteBatchApi(record.inviteIds);
@@ -461,11 +468,14 @@ const InvitePage = memo(function InvitePage() {
                 message.warning('请先选择要创建钉钉日程的面试邀约');
                 return;
               }
-              const inviteIds = groupedRef.current
-                .filter((row) => selectedRowKeys.map(Number).includes(row.id))
-                .flatMap((row) => row.pendingInviteIds);
+              const selected = groupedRef.current.filter((row) => selectedRowKeys.map(Number).includes(row.id));
+              if (selected.every((row) => row.hasRecord)) {
+                message.warning('所选场次都已有面试记录，不能创建钉钉日程');
+                return;
+              }
+              const inviteIds = selected.filter((row) => !row.hasRecord).flatMap((row) => row.pendingInviteIds);
               if (inviteIds.length === 0) {
-                message.warning('所选场次都已经有钉钉日程');
+                message.warning('所选场次都已经有钉钉日程，或已有面试记录');
                 return;
               }
               Modal.confirm({
@@ -495,19 +505,26 @@ const InvitePage = memo(function InvitePage() {
                 message.warning('请先选择要删除的面试邀约');
                 return;
               }
-              const inviteIds = groupedRef.current
-                .filter((row) => selectedRowKeys.map(Number).includes(row.id))
-                .flatMap((row) => row.inviteIds);
+              const selected = groupedRef.current.filter((row) => selectedRowKeys.map(Number).includes(row.id));
+              const deletable = selected.filter((row) => !row.hasRecord);
+              if (deletable.length === 0) {
+                message.warning('所选场次都已有面试记录，不能删除');
+                return;
+              }
+              const inviteIds = deletable.flatMap((row) => row.inviteIds);
+              const skipped = selected.length - deletable.length;
               Modal.confirm({
                 title: '批量删除面试邀约',
-                content: `确定要删除选中的 ${selectedRowKeys.length} 场邀约吗？同一场的面试官都会删除，此操作不可撤销。`,
+                content: skipped
+                  ? `将删除 ${deletable.length} 场邀约；另有 ${skipped} 场已有面试记录，会跳过。此操作不可撤销。`
+                  : `确定要删除选中的 ${deletable.length} 场邀约吗？同一场的面试官都会删除，此操作不可撤销。`,
                 okText: '确定删除',
                 cancelText: '取消',
                 okButtonProps: { danger: true },
                 onOk: async () => {
                   const saved = await deleteHrInviteBatchApi(inviteIds);
                   if (saved?.warning) message.warning(saved.warning, 8);
-                  else message.success(`已删除 ${selectedRowKeys.length} 场邀约`);
+                  else message.success(`已删除 ${deletable.length} 场邀约`);
                   setSelectedRowKeys([]);
                   currentPageKeysRef.current = new Set();
                   actionRef.current?.reload();
@@ -555,6 +572,10 @@ const InvitePage = memo(function InvitePage() {
             location: form.location,
           };
           if (editing) {
+            if (editing.hasRecord) {
+              message.warning('这场邀约已有面试记录，不能修改');
+              return false;
+            }
             const saved = await updateHrInviteApi(editing.id, payload);
             if (saved?.warning) {
               message.warning(saved.warning, 8);

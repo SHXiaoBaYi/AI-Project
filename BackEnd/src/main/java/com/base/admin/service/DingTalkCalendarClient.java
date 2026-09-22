@@ -10,12 +10,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -30,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -42,7 +46,8 @@ public class DingTalkCalendarClient {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
 
-    public CalendarCall createEvent(String unionId, String title, String description, LocalDateTime start, int durationMin) {
+    public CalendarCall createEvent(String unionId, String title, String description, LocalDateTime start,
+                                    int durationMin, String location) {
         if (!ready()) {
             return CalendarCall.fail("钉钉未配置。请到「系统管理 → 钉钉应用配置」填写并启用");
         }
@@ -57,6 +62,11 @@ public class DingTalkCalendarClient {
             body.put("isAllDay", false);
             body.set("start", timeNode(start));
             body.set("end", timeNode(start.plusMinutes(durationMin)));
+            if (StringUtils.hasText(location)) {
+                ObjectNode place = objectMapper.createObjectNode();
+                place.put("displayName", location.trim());
+                body.set("location", place);
+            }
             ObjectNode attendee = objectMapper.createObjectNode();
             attendee.put("id", unionId);
             body.putArray("attendees").add(attendee);
@@ -79,6 +89,38 @@ public class DingTalkCalendarClient {
             return CalendarCall.ok(eventId, response.body());
         } catch (Exception ex) {
             return CalendarCall.fail("钉钉创建日程失败：" + ex.getMessage());
+        }
+    }
+
+    /**
+     * 钉钉日程接口本身不支持附件。创建日程后改为：工作通知发流程说明 + 把简历当文件消息发给面试官。
+     */
+    public NoticeCall notifyInterview(String dingUserId, String markdownTitle, String markdownText,
+                                      Path resumeFile, String resumeFileName) {
+        if (!ready()) {
+            return NoticeCall.fail("钉钉未配置");
+        }
+        if (!StringUtils.hasText(dingUserId)) {
+            return NoticeCall.fail("面试官没有钉钉 userid，不能发工作通知");
+        }
+        Long agentId = dingTalkAppService.agentId();
+        if (agentId == null) {
+            return NoticeCall.fail("钉钉应用未配置 AgentId，不能发工作通知");
+        }
+        try {
+            String token = legacyToken(credential());
+            sendWorkNotice(token, agentId, dingUserId, markdownMsg(markdownTitle, markdownText));
+            boolean resumeSent = false;
+            if (resumeFile != null && Files.isRegularFile(resumeFile)) {
+                String mediaId = uploadMedia(token, resumeFile, resumeFileName);
+                sendWorkNotice(token, agentId, dingUserId, fileMsg(mediaId));
+                resumeSent = true;
+            }
+            return NoticeCall.ok(resumeSent);
+        } catch (BusinessException ex) {
+            return NoticeCall.fail(ex.getMessage());
+        } catch (Exception ex) {
+            return NoticeCall.fail("发送钉钉工作通知失败：" + ex.getMessage());
         }
     }
 
@@ -522,6 +564,67 @@ public class DingTalkCalendarClient {
         return null;
     }
 
+    private ObjectNode markdownMsg(String title, String text) {
+        ObjectNode msg = objectMapper.createObjectNode();
+        msg.put("msgtype", "markdown");
+        ObjectNode markdown = objectMapper.createObjectNode();
+        markdown.put("title", title);
+        markdown.put("text", text);
+        msg.set("markdown", markdown);
+        return msg;
+    }
+
+    private ObjectNode fileMsg(String mediaId) {
+        ObjectNode msg = objectMapper.createObjectNode();
+        msg.put("msgtype", "file");
+        ObjectNode file = objectMapper.createObjectNode();
+        file.put("media_id", mediaId);
+        msg.set("file", file);
+        return msg;
+    }
+
+    private void sendWorkNotice(String token, Long agentId, String dingUserId, ObjectNode msg) throws Exception {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("agent_id", agentId);
+        body.put("userid_list", dingUserId);
+        body.put("to_all_user", false);
+        body.set("msg", msg);
+        JsonNode json = postJson(
+                "https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=" + encode(token),
+                body);
+        assertDingOk(json, "发送钉钉工作通知失败");
+    }
+
+    private String uploadMedia(String token, Path file, String fileName) throws Exception {
+        if (Files.size(file) > 20L * 1024 * 1024) {
+            throw new BusinessException("简历超过 20MB，钉钉不能作为工作通知附件发送");
+        }
+        String name = StringUtils.hasText(fileName) ? fileName : file.getFileName().toString();
+        String boundary = "----DingTalk" + UUID.randomUUID().toString().replace("-", "");
+        byte[] fileBytes = Files.readAllBytes(file);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        String preamble = "--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"media\"; filename=\"" + name.replace("\"", "") + "\"\r\n"
+                + "Content-Type: application/octet-stream\r\n\r\n";
+        out.write(preamble.getBytes(StandardCharsets.UTF_8));
+        out.write(fileBytes);
+        out.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://oapi.dingtalk.com/media/upload?access_token=" + encode(token) + "&type=file"))
+                .timeout(Duration.ofSeconds(30))
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(out.toByteArray()))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        JsonNode json = objectMapper.readTree(response.body());
+        assertDingOk(json, "上传简历到钉钉失败");
+        String mediaId = json.path("media_id").asText("");
+        if (!StringUtils.hasText(mediaId)) {
+            throw new BusinessException("钉钉未返回简历 media_id");
+        }
+        return mediaId;
+    }
+
     private JsonNode postForm(String url, String... pairs) throws Exception {
         StringBuilder form = new StringBuilder();
         for (int i = 0; i < pairs.length; i += 2) {
@@ -621,6 +724,16 @@ public class DingTalkCalendarClient {
 
         static CalendarCall fail(String message, String response) {
             return new CalendarCall(false, null, message, response);
+        }
+    }
+
+    public record NoticeCall(boolean success, boolean resumeSent, String message) {
+        static NoticeCall ok(boolean resumeSent) {
+            return new NoticeCall(true, resumeSent, null);
+        }
+
+        static NoticeCall fail(String message) {
+            return new NoticeCall(false, false, message);
         }
     }
 

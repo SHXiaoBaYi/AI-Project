@@ -49,6 +49,22 @@ public class DingTalkAppService {
         return new Credential(stored.clientId().trim(), stored.clientSecret().trim());
     }
 
+    /** 工作通知需要的 AgentId；未配置时返回 null。 */
+    public Long agentId() {
+        Stored stored = loadStored();
+        if (stored == null || stored.enabled() == null || stored.enabled() != 1) {
+            return null;
+        }
+        if (!StringUtils.hasText(stored.agentId())) {
+            return null;
+        }
+        try {
+            return Long.parseLong(stored.agentId().trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
     /** 测试连接：密钥留空时用已保存的值，不把密钥回传。 */
     public Credential resolveForTest(DingTalkAppDTO dto) {
         String clientId = dto.getClientId().trim();

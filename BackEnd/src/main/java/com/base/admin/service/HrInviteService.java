@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +28,7 @@ public class HrInviteService {
 
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalk;
+    private final FileStorageService fileStorage;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -83,34 +86,8 @@ public class HrInviteService {
         if (person == null) {
             throw new BusinessException("投递或面试官不存在");
         }
-        String unionId = findUnionId(dto.getInterviewerUserId());
         long inviteId = insertInvite(dto, duration);
-        if (!StringUtils.hasText(unionId)) {
-            markNoCalendar(inviteId);
-            writeRoundAndStage(dto, person);
-            return new InviteWrite(inviteId, interviewerName(dto.getInterviewerUserId()));
-        }
-        String title = "【" + ROUND_NAME.get(dto.getRoundNo()) + "】" + person.get("candidate_name") + " - " + person.get("job_name");
-        String description = "候选人：" + person.get("candidate_name")
-                + "\n岗位：" + person.get("job_name")
-                + "\n电话：" + blank(person.get("phone"))
-                + "\n邮箱：" + blank(person.get("email"))
-                + "\n地点：" + blank(dto.getLocation());
-        DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(unionId, title, description, dto.getInterviewAt(), duration);
-        writeLog(inviteId, "CREATE_CALENDAR", call, SecurityUtils.getCurrentUserId(), call.eventId(),
-                Map.of("title", title, "start", String.valueOf(dto.getInterviewAt()), "unionId", blank(unionId)));
-        if (!call.success()) {
-            jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
-                    cut(call.message()), inviteId);
-            return new InviteWrite(inviteId, null);
-        }
-        jdbc.update("""
-                UPDATE hr_interview_invite
-                SET status = 'SUCCESS', dingtalk_event_id = ?, dingtalk_calendar_id = 'primary', fail_reason = NULL
-                WHERE id = ?
-                """, call.eventId(), inviteId);
-        writeRoundAndStage(dto, person);
-        return new InviteWrite(inviteId, null);
+        return new InviteWrite(inviteId, attachCalendar(inviteId, dto, duration));
     }
 
     @Transactional
@@ -284,6 +261,7 @@ public class HrInviteService {
     }
 
     private String[] rewriteInvite(Long inviteId, Long oldInterviewerId, String eventId, HrInviteCreateDTO dto, Long interviewerId) {
+        assertNoInterviewRecord(inviteId, "修改");
         String released = releaseCalendar(inviteId, oldInterviewerId, eventId);
         int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
         jdbc.update("""
@@ -304,6 +282,7 @@ public class HrInviteService {
 
     @Transactional
     public HrInviteSaveVO remove(Long id) {
+        assertNoInterviewRecord(id, "删除");
         Map<String, Object> invite = loadInvite(id);
         String unboundName = releaseCalendar(id, (Long) invite.get("interviewerUserId"), (String) invite.get("eventId"));
         String warning = StringUtils.hasText(unboundName)
@@ -319,16 +298,25 @@ public class HrInviteService {
             throw new BusinessException("请选择要删除的面试邀约");
         }
         java.util.List<String> warnings = new ArrayList<>();
+        int removed = 0;
         Long last = null;
         for (Long id : ids) {
             if (id == null) {
                 continue;
             }
+            if (hasInterviewRecord(id)) {
+                warnings.add("已有面试记录的邀约不能删除");
+                continue;
+            }
             HrInviteSaveVO one = remove(id);
             last = one.getId();
+            removed++;
             if (StringUtils.hasText(one.getWarning())) {
                 warnings.add(one.getWarning());
             }
+        }
+        if (removed == 0) {
+            throw new BusinessException(warnings.isEmpty() ? "没有可删除的面试邀约" : String.join("；", warnings));
         }
         return saveResult(last, warnings.isEmpty() ? null : String.join("；", warnings));
     }
@@ -374,6 +362,10 @@ public class HrInviteService {
             String eventId = (String) invite.get("eventId");
             if ("CANCELLED".equals(status)) {
                 problems.add("已取消的邀约不能创建钉钉日程");
+                continue;
+            }
+            if (hasInterviewRecord(id)) {
+                problems.add("已有面试记录的邀约不能创建钉钉日程");
                 continue;
             }
             if ("SUCCESS".equals(status) && StringUtils.hasText(eventId)) {
@@ -424,6 +416,7 @@ public class HrInviteService {
     }
 
     private void assertCalendarCreatable(Map<String, Object> invite) {
+        assertNoInterviewRecord(((Number) invite.get("id")).longValue(), "创建钉钉日程");
         String status = (String) invite.get("status");
         String eventId = (String) invite.get("eventId");
         if ("CANCELLED".equals(status)) {
@@ -478,6 +471,27 @@ public class HrInviteService {
         if (reviewed != null && reviewed > 0) {
             throw new BusinessException("这条面试已经有评价，不能转发或添加面试官");
         }
+    }
+
+    private void assertNoInterviewRecord(Long inviteId, String action) {
+        if (hasInterviewRecord(inviteId)) {
+            throw new BusinessException("这条邀约已有面试记录，不能" + action);
+        }
+    }
+
+    private boolean hasInterviewRecord(Long inviteId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(1)
+                FROM hr_interview_invite i
+                JOIN hr_interview_record rec ON rec.is_active = 1
+                  AND (
+                    rec.invite_id = i.id
+                    OR (rec.application_id = i.application_id AND rec.round_no = i.round_no
+                        AND rec.interviewer_user_id = i.interviewer_user_id)
+                  )
+                WHERE i.id = ? AND i.is_active = 1
+                """, Integer.class, inviteId);
+        return count != null && count > 0;
     }
 
     private HrInviteCreateDTO copyInvite(Map<String, Object> invite, Long interviewerUserId) {
@@ -568,12 +582,10 @@ public class HrInviteService {
         }
         String title = "【" + ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面") + "】"
                 + person.get("candidate_name") + " - " + person.get("job_name");
-        String description = "候选人：" + person.get("candidate_name")
-                + "\n岗位：" + person.get("job_name")
-                + "\n电话：" + blank(person.get("phone"))
-                + "\n邮箱：" + blank(person.get("email"))
-                + "\n地点：" + blank(dto.getLocation());
-        DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(unionId, title, description, dto.getInterviewAt(), duration);
+        ResumeFile resume = loadResume(dto.getApplicationId());
+        String description = buildCalendarDescription(dto, person, resume);
+        DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
+                unionId, title, description, dto.getInterviewAt(), duration, dto.getLocation());
         writeLog(inviteId, "CREATE_CALENDAR", call, SecurityUtils.getCurrentUserId(), call.eventId(),
                 Map.of("title", title, "start", String.valueOf(dto.getInterviewAt()), "unionId", blank(unionId)));
         if (!call.success()) {
@@ -586,7 +598,74 @@ public class HrInviteService {
                 WHERE id = ?
                 """, call.eventId(), inviteId);
         writeRoundAndStage(dto, person);
+        notifyInterviewer(inviteId, dto, person, resume);
         return null;
+    }
+
+    private void notifyInterviewer(Long inviteId, HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume) {
+        String dingUserId = findDingUserId(dto.getInterviewerUserId());
+        String round = ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面");
+        String when = dto.getInterviewAt() == null ? "-" : dto.getInterviewAt().toString().replace('T', ' ');
+        String markdown = "### 面试邀约通知\n\n"
+                + "- **候选人**：" + blank(person.get("candidate_name")) + "\n"
+                + "- **岗位**：" + blank(person.get("job_name")) + "\n"
+                + "- **轮次**：" + round + "\n"
+                + "- **时间**：" + when + "\n"
+                + "- **地点**：" + blank(dto.getLocation()) + "\n\n"
+                + "#### 面试流程\n"
+                + "1. 请提前查看候选人简历（若有简历，会紧接着再发一条文件消息）\n"
+                + "2. 请按约定时间准时参加面试，日程已写入你的钉钉日历\n"
+                + "3. 面试结束后，请到本系统「我的面试」填写评价结论\n"
+                + "4. 结论为通过 / 不通过；不通过时请选择未通过原因并补充评语\n"
+                + "5. 如需改期或无法出席，请尽快联系招聘负责人\n";
+        Path resumePath = resume == null ? null : resume.path();
+        String resumeName = resume == null ? null : resume.fileName();
+        DingTalkCalendarClient.NoticeCall notice = dingTalk.notifyInterview(
+                dingUserId, "面试邀约：" + blank(person.get("candidate_name")), markdown, resumePath, resumeName);
+        writeLog(inviteId, "NOTIFY_INTERVIEWER",
+                notice.success()
+                        ? DingTalkCalendarClient.CalendarCall.ok(null,
+                        notice.resumeSent() ? "{\"resumeSent\":true}" : "{\"resumeSent\":false}")
+                        : DingTalkCalendarClient.CalendarCall.fail(notice.message()),
+                SecurityUtils.getCurrentUserId(), null,
+                Map.of("dingUserId", blank(dingUserId), "resume", resumeName == null ? "" : resumeName));
+    }
+
+    private String buildCalendarDescription(HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume) {
+        String round = ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面");
+        return "候选人：" + blank(person.get("candidate_name"))
+                + "\n岗位：" + blank(person.get("job_name"))
+                + "\n轮次：" + round
+                + "\n电话：" + blank(person.get("phone"))
+                + "\n邮箱：" + blank(person.get("email"))
+                + "\n地点：" + blank(dto.getLocation())
+                + "\n简历：" + (resume == null ? "未上传（请联系招聘负责人）" : resume.fileName())
+                + "\n\n面试流程："
+                + "\n1. 提前查看简历（简历通过钉钉工作通知以文件发送）"
+                + "\n2. 按时参加面试"
+                + "\n3. 结束后在系统「我的面试」填写评价"
+                + "\n4. 不通过时请选择原因并补充评语";
+    }
+
+    private ResumeFile loadResume(Long applicationId) {
+        if (applicationId == null) {
+            return null;
+        }
+        return jdbc.query("""
+                SELECT file_name, storage_path FROM hr_resume_file
+                WHERE application_id = ? AND is_active = 1
+                LIMIT 1
+                """, rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            String fileName = rs.getString("file_name");
+            Path path = fileStorage.resolveUploadPath(rs.getString("storage_path"));
+            if (path == null || !Files.isRegularFile(path)) {
+                return null;
+            }
+            return new ResumeFile(fileName == null || fileName.isBlank() ? path.getFileName().toString() : fileName, path);
+        }, applicationId);
     }
 
     private long insertInvite(HrInviteCreateDTO dto, int duration) {
@@ -615,6 +694,14 @@ public class HrInviteService {
             return null;
         }
         return jdbc.query("SELECT dingtalk_union_id FROM hr_user_dingtalk WHERE user_id = ? AND is_active = 1",
+                rs -> rs.next() ? rs.getString(1) : null, userId);
+    }
+
+    private String findDingUserId(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        return jdbc.query("SELECT dingtalk_user_id FROM hr_user_dingtalk WHERE user_id = ? AND is_active = 1",
                 rs -> rs.next() ? rs.getString(1) : null, userId);
     }
 
@@ -678,6 +765,9 @@ public class HrInviteService {
     }
 
     private record InviteWrite(long id, String unboundName) {
+    }
+
+    private record ResumeFile(String fileName, Path path) {
     }
 
     private void writeLog(long inviteId, String action, DingTalkCalendarClient.CalendarCall call, Long operatorId,
