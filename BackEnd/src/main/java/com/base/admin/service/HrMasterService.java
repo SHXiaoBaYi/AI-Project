@@ -57,11 +57,23 @@ public class HrMasterService {
                         ), '')) ORDER BY rr.round_no SEPARATOR ',')
                         FROM hr_requisition_round rr
                         WHERE rr.requisition_id = r.id AND rr.is_active = 1) interview_rounds,
+                       (SELECT GROUP_CONCAT(CONCAT(rr.round_no, ':', IFNULL((
+                            SELECT GROUP_CONCAT(c.cc_user_id ORDER BY c.id SEPARATOR '|')
+                            FROM hr_requisition_round_cc c
+                            WHERE c.requisition_id = rr.requisition_id AND c.round_no = rr.round_no AND c.is_active = 1
+                        ), '')) ORDER BY rr.round_no SEPARATOR ',')
+                        FROM hr_requisition_round rr
+                        WHERE rr.requisition_id = r.id AND rr.is_active = 1) interview_round_ccs,
                        (SELECT GROUP_CONCAT(CONCAT(CASE rr.round_no WHEN 1 THEN '一面' WHEN 2 THEN '二面' WHEN 3 THEN '三面' WHEN 4 THEN '四面' ELSE '五面' END, ' ', IFNULL((
                             SELECT GROUP_CONCAT(u.nickname ORDER BY i.id SEPARATOR '、')
                             FROM hr_requisition_round_interviewer i
                             LEFT JOIN sys_user u ON u.user_id = i.interviewer_user_id
                             WHERE i.requisition_id = rr.requisition_id AND i.round_no = rr.round_no AND i.is_active = 1
+                        ), ''), IFNULL((
+                            SELECT CONCAT('（抄送：', GROUP_CONCAT(u.nickname ORDER BY c.id SEPARATOR '、'), '）')
+                            FROM hr_requisition_round_cc c
+                            LEFT JOIN sys_user u ON u.user_id = c.cc_user_id
+                            WHERE c.requisition_id = rr.requisition_id AND c.round_no = rr.round_no AND c.is_active = 1
                         ), '')) ORDER BY rr.round_no SEPARATOR '；')
                         FROM hr_requisition_round rr
                         WHERE rr.requisition_id = r.id AND rr.is_active = 1) interview_flow
@@ -214,6 +226,7 @@ public class HrMasterService {
         }
         jdbc.update("UPDATE hr_requisition_round SET is_active = 0 WHERE requisition_id = ?", requisitionId);
         jdbc.update("UPDATE hr_requisition_round_interviewer SET is_active = 0 WHERE requisition_id = ?", requisitionId);
+        jdbc.update("UPDATE hr_requisition_round_cc SET is_active = 0 WHERE requisition_id = ?", requisitionId);
         int sort = 1;
         for (HrRequisitionDTO.InterviewRound item : items) {
             Long first = item.getInterviewerUserIds().get(0);
@@ -231,6 +244,18 @@ public class HrMasterService {
                         VALUES (?, ?, ?, ?, 1)
                         ON DUPLICATE KEY UPDATE is_active = 1
                         """, requisitionId, item.getRoundNo(), userId, SecurityUtils.getCurrentUsername());
+            }
+            if (item.getCcUserIds() != null) {
+                for (Long userId : item.getCcUserIds()) {
+                    if (userId == null) {
+                        continue;
+                    }
+                    jdbc.update("""
+                            INSERT INTO hr_requisition_round_cc (requisition_id, round_no, cc_user_id, create_by, is_active)
+                            VALUES (?, ?, ?, ?, 1)
+                            ON DUPLICATE KEY UPDATE is_active = 1
+                            """, requisitionId, item.getRoundNo(), userId, SecurityUtils.getCurrentUsername());
+                }
             }
         }
     }

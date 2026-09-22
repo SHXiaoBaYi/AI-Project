@@ -29,6 +29,9 @@ public class HrInviteCreateDTO {
     @Schema(description = "面试官用户ID，新增时可多人，每人一条日程")
     private java.util.List<Long> interviewerUserIds;
 
+    @Schema(description = "抄送人用户ID，可多人；不传则按招聘需求该轮抄送配置")
+    private java.util.List<Long> ccUserIds;
+
     @NotNull
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     @Schema(description = "开始时间")

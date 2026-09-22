@@ -63,5 +63,8 @@ public class HrRequisitionDTO {
 
         @Schema(description = "该轮面试官，可多人")
         private java.util.List<Long> interviewerUserIds;
+
+        @Schema(description = "该轮抄送人，可多人")
+        private java.util.List<Long> ccUserIds;
     }
 }

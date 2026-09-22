@@ -45,6 +45,7 @@ const ROUND_COUNT = [
 ];
 
 const ROUND_INTERVIEWER = ['一面面试官', '二面面试官', '三面面试官', '四面面试官', '五面面试官'];
+const ROUND_CC = ['一面抄送人', '二面抄送人', '三面抄送人', '四面抄送人', '五面抄送人'];
 
 interface Dept {
   id: number;
@@ -75,6 +76,11 @@ interface Req {
   interviewer3?: number[];
   interviewer4?: number[];
   interviewer5?: number[];
+  cc1?: number[];
+  cc2?: number[];
+  cc3?: number[];
+  cc4?: number[];
+  cc5?: number[];
 }
 
 function flattenDepts(rows: Dept[], prefix = ''): { value: number; label: string }[] {
@@ -114,6 +120,7 @@ function roundsOf(value: unknown) {
 function mapRow(raw: Record<string, unknown>): Req {
   const ownerIds = textOf(raw.owner_user_ids);
   const rounds = roundsOf(raw.interview_rounds);
+  const ccs = roundsOf(raw.interview_round_ccs);
   const roundCount = rounds.size ? Math.max(...rounds.keys()) : 0;
   return {
     id: Number(raw.id),
@@ -136,6 +143,11 @@ function mapRow(raw: Record<string, unknown>): Req {
     interviewer3: rounds.get(3),
     interviewer4: rounds.get(4),
     interviewer5: rounds.get(5),
+    cc1: ccs.get(1),
+    cc2: ccs.get(2),
+    cc3: ccs.get(3),
+    cc4: ccs.get(4),
+    cc5: ccs.get(5),
     ownerUserIds: ownerIds
       ? ownerIds
           .split(',')
@@ -156,6 +168,13 @@ const RequisitionPage = memo(function RequisitionPage() {
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [interviewers, setInterviewers] = useState<{ value: number; label: string }[]>([]);
   const [targets, setTargets] = useState<{ value: string; label: string }[]>([]);
+  const ccOptions = useMemo(() => {
+    const map = new Map<number, string>();
+    [...users, ...interviewers].forEach((item) => {
+      if (item.value) map.set(item.value, item.label);
+    });
+    return [...map.entries()].map(([value, label]) => ({ value, label }));
+  }, [users, interviewers]);
 
   useEffect(() => {
     getHrDepartmentsApi().then((tree) => setDepts(flattenDepts(tree as unknown as Dept[])));
@@ -292,8 +311,9 @@ const RequisitionPage = memo(function RequisitionPage() {
         name: ['roundCount'],
         hideInTable: true,
         hideInSearch: true,
-        columns: ({ roundCount }: { roundCount?: number }) =>
-          ROUND_INTERVIEWER.slice(0, Number(roundCount || 0)).map((title, index) => ({
+        columns: ({ roundCount }: { roundCount?: number }) => {
+          const count = Number(roundCount || 0);
+          const interviewerCols = ROUND_INTERVIEWER.slice(0, count).map((title, index) => ({
             title,
             dataIndex: `interviewer${index + 1}`,
             valueType: 'select' as const,
@@ -302,10 +322,36 @@ const RequisitionPage = memo(function RequisitionPage() {
               options: interviewers,
               showSearch: true,
               optionFilterProp: 'label',
-              mode: 'multiple',
+              mode: 'multiple' as const,
               allowClear: true,
             },
-          })),
+          }));
+          const ccCols = ROUND_CC.slice(0, count).map((title, index) => ({
+            title,
+            dataIndex: `cc${index + 1}`,
+            valueType: 'select' as const,
+            fieldProps: {
+              options: ccOptions,
+              showSearch: true,
+              optionFilterProp: 'label',
+              mode: 'multiple' as const,
+              allowClear: true,
+              placeholder: '可选，多人',
+            },
+          }));
+          const merged = [] as Array<{
+            title: string;
+            dataIndex: string;
+            valueType: 'select';
+            formItemProps?: { rules: { required: boolean; message: string }[] };
+            fieldProps: Record<string, unknown>;
+          }>;
+          for (let i = 0; i < count; i++) {
+            merged.push(interviewerCols[i]);
+            merged.push(ccCols[i]);
+          }
+          return merged;
+        },
       },
       {
         title: '操作',
@@ -384,7 +430,7 @@ const RequisitionPage = memo(function RequisitionPage() {
         ),
       },
     ],
-    [depts, interviewers, message, targets, users],
+    [ccOptions, depts, interviewers, message, targets, users],
   );
 
   return (
@@ -490,6 +536,7 @@ const RequisitionPage = memo(function RequisitionPage() {
             form.interviewer4,
             form.interviewer5,
           ];
+          const ccs = [form.cc1, form.cc2, form.cc3, form.cc4, form.cc5];
           await saveHrRequisitionApi({
             id: editing?.id,
             jobName: form.jobName,
@@ -505,6 +552,7 @@ const RequisitionPage = memo(function RequisitionPage() {
             interviewRounds: Array.from({ length: count }, (_, index) => ({
               roundNo: index + 1,
               interviewerUserIds: picked[index] || [],
+              ccUserIds: ccs[index] || [],
             })),
           });
           message.success(editing ? '已保存' : '已新增');

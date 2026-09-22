@@ -46,6 +46,8 @@ interface InviteRow {
   interviewerUserId: number;
   interviewerUserIds: number[];
   interviewerName?: string;
+  ccUserIds: number[];
+  ccNames?: string;
   interviewAt?: string;
   durationMin?: number;
   location?: string;
@@ -55,18 +57,20 @@ interface InviteRow {
   hasRecord: boolean;
 }
 
-function InterviewerSelect({
+function RoundPeopleSelect({
   value,
   onChange,
   users,
   appReq,
   plans,
+  placeholder,
 }: {
   value?: number[];
   onChange?: (value: number[]) => void;
   users: { value: number; label: string }[];
   appReq: Map<number, number>;
   plans: Map<number, Map<number, number[]>>;
+  placeholder: string;
 }) {
   const form = Form.useFormInstance();
   const applicationId = Form.useWatch('applicationId', form);
@@ -83,7 +87,8 @@ function InterviewerSelect({
     if (seen.current === key) return;
     const opening = seen.current === null;
     seen.current = key;
-    if (opening && value?.length) return;
+    // 编辑打开时保留已有值（含空数组）；新增或切换候选人/轮次时按需求配置带出
+    if (opening && value != null) return;
     const reqId = appReq.get(Number(applicationId));
     const ids = reqId == null ? [] : (plans.get(reqId)?.get(Number(roundNo)) ?? []);
     onChangeRef.current?.(ids);
@@ -97,8 +102,9 @@ function InterviewerSelect({
       options={users}
       showSearch
       optionFilterProp='label'
-      placeholder='选择候选人与轮次后自动带出'
+      placeholder={placeholder}
       style={{ width: '100%' }}
+      allowClear
     />
   );
 }
@@ -151,6 +157,10 @@ function mapRow(raw: Record<string, unknown>): InviteRow {
   const interviewerUserId = Number(raw.interviewer_user_id);
   const status = textOf(raw.status);
   const hasRecord = raw.record_id != null && raw.record_id !== '';
+  const ccUserIds = String(raw.cc_user_ids ?? '')
+    .split('|')
+    .map((item) => Number(item))
+    .filter((item) => item > 0);
   return {
     id: Number(raw.id),
     inviteIds: [Number(raw.id)],
@@ -163,6 +173,8 @@ function mapRow(raw: Record<string, unknown>): InviteRow {
     interviewerUserId,
     interviewerUserIds: [interviewerUserId],
     interviewerName: textOf(raw.interviewer_name),
+    ccUserIds,
+    ccNames: textOf(raw.cc_names),
     interviewAt: raw.interview_at == null ? undefined : String(raw.interview_at).replace('T', ' ').slice(0, 19),
     durationMin: raw.duration_min == null ? 60 : Number(raw.duration_min),
     location: textOf(raw.location),
@@ -188,6 +200,7 @@ function groupSessions(rows: InviteRow[]) {
         inviteIds: [...row.inviteIds],
         pendingInviteIds: [...row.pendingInviteIds],
         interviewerUserIds: [...row.interviewerUserIds],
+        ccUserIds: [...row.ccUserIds],
         memberStatuses: [...row.memberStatuses],
         hasRecord: row.hasRecord,
       });
@@ -199,6 +212,12 @@ function groupSessions(rows: InviteRow[]) {
     if (!existing.interviewerUserIds.includes(row.interviewerUserId)) {
       existing.interviewerUserIds.push(row.interviewerUserId);
       existing.interviewerName = [existing.interviewerName, row.interviewerName].filter(Boolean).join('、');
+    }
+    row.ccUserIds.forEach((id) => {
+      if (!existing.ccUserIds.includes(id)) existing.ccUserIds.push(id);
+    });
+    if (row.ccNames && existing.ccNames !== row.ccNames) {
+      existing.ccNames = [existing.ccNames, row.ccNames].filter(Boolean).join('、');
     }
     if (row.status) existing.memberStatuses.push(row.status);
     if (row.failReason && existing.failReason !== row.failReason) {
@@ -223,6 +242,7 @@ const InvitePage = memo(function InvitePage() {
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
   const [plans, setPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
+  const [ccPlans, setCcPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
 
   useEffect(() => {
     getHrApplicationsApi().then((rows) => {
@@ -239,19 +259,32 @@ const InvitePage = memo(function InvitePage() {
       setAppReq(next);
     });
     getHrRequisitionsApi().then((rows) => {
-      const next = new Map<number, Map<number, number[]>>();
-      rows.forEach((row) => {
+      const nextInterviewers = new Map<number, Map<number, number[]>>();
+      const nextCcs = new Map<number, Map<number, number[]>>();
+      const parseRounds = (text: unknown) => {
         const rounds = new Map<number, number[]>();
-        String(row.interview_rounds ?? '')
+        String(text ?? '')
           .split(',')
           .filter(Boolean)
           .forEach((part) => {
             const [round, ids] = part.split(':');
-            rounds.set(Number(round), (ids ?? '').split('|').filter(Boolean).map(Number));
+            rounds.set(
+              Number(round),
+              (ids ?? '')
+                .split('|')
+                .filter(Boolean)
+                .map(Number)
+                .filter((id) => id > 0),
+            );
           });
-        next.set(Number(row.id), rounds);
+        return rounds;
+      };
+      rows.forEach((row) => {
+        nextInterviewers.set(Number(row.id), parseRounds(row.interview_rounds));
+        nextCcs.set(Number(row.id), parseRounds(row.interview_round_ccs));
       });
-      setPlans(next);
+      setPlans(nextInterviewers);
+      setCcPlans(nextCcs);
     });
     getHrUsersApi().then((list) =>
       setUsers(
@@ -358,6 +391,14 @@ const InvitePage = memo(function InvitePage() {
         render: (_, record) => record.interviewerName,
       },
       {
+        title: '抄送人',
+        dataIndex: 'ccNames',
+        search: false,
+        hideInForm: true,
+        ellipsis: true,
+        render: (_, record) => record.ccNames || '-',
+      },
+      {
         title: '面试官',
         dataIndex: 'interviewerUserIds',
         hideInTable: true,
@@ -366,10 +407,27 @@ const InvitePage = memo(function InvitePage() {
         colProps: { span: 24 },
         formItemProps: { rules: [{ required: true, message: '请选择面试官' }] },
         formItemRender: () => (
-          <InterviewerSelect
+          <RoundPeopleSelect
             users={users}
             appReq={appReq}
             plans={plans}
+            placeholder='选择候选人与轮次后自动带出'
+          />
+        ),
+      },
+      {
+        title: '抄送人',
+        dataIndex: 'ccUserIds',
+        hideInTable: true,
+        hideInSearch: true,
+        hideInForm: false,
+        colProps: { span: 24 },
+        formItemRender: () => (
+          <RoundPeopleSelect
+            users={users}
+            appReq={appReq}
+            plans={ccPlans}
+            placeholder='选择候选人与轮次后自动带出，可改'
           />
         ),
       },
@@ -415,7 +473,7 @@ const InvitePage = memo(function InvitePage() {
         ellipsis: true,
       },
     ],
-    [appReq, candidates, editing, message, plans, users],
+    [appReq, candidates, ccPlans, editing, message, plans, users],
   );
 
   return (
@@ -554,10 +612,16 @@ const InvitePage = memo(function InvitePage() {
         open={open}
         onOpenChange={setOpen}
         initialValues={
-          editing ? { ...editing, interviewerUserIds: editing.interviewerUserIds } : { roundNo: 1, durationMin: 60 }
+          editing
+            ? {
+                ...editing,
+                interviewerUserIds: editing.interviewerUserIds,
+                ccUserIds: editing.ccUserIds ?? [],
+              }
+            : { roundNo: 1, durationMin: 60 }
         }
         onFinish={async (values) => {
-          const form = values as InviteRow & { interviewerUserIds?: number[] };
+          const form = values as InviteRow & { interviewerUserIds?: number[]; ccUserIds?: number[] };
           const ids = form.interviewerUserIds ?? [];
           if (!ids.length) {
             message.warning('请选择面试官');
@@ -567,6 +631,7 @@ const InvitePage = memo(function InvitePage() {
             applicationId: form.applicationId,
             roundNo: form.roundNo,
             interviewerUserIds: ids,
+            ccUserIds: form.ccUserIds ?? [],
             interviewAt: dayjs(form.interviewAt).format('YYYY-MM-DD HH:mm:ss'),
             durationMin: form.durationMin,
             location: form.location,

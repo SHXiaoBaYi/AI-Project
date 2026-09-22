@@ -319,6 +319,7 @@ export function createHrInviteApi(data: {
   roundNo: number;
   interviewerUserId?: number;
   interviewerUserIds?: number[];
+  ccUserIds?: number[];
   interviewAt: string;
   durationMin?: number;
   location?: string;

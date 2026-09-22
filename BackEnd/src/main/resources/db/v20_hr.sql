@@ -493,7 +493,7 @@ CREATE TABLE IF NOT EXISTS hr_requisition_round (
 
 UPDATE hr_requisition SET target_text = TRIM(target_text) WHERE target_text <> TRIM(target_text);
 
-CREATE TABLE IF NOT EXISTS hr_requisition_round_interviewer (
+    CREATE TABLE IF NOT EXISTS hr_requisition_round_interviewer (
   id                  BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
   requisition_id      BIGINT      NOT NULL                COMMENT '招聘需求',
   round_no            TINYINT     NOT NULL                COMMENT '轮次',
@@ -506,6 +506,34 @@ CREATE TABLE IF NOT EXISTS hr_requisition_round_interviewer (
   PRIMARY KEY (id),
   UNIQUE KEY uk_hr_round_interviewer (requisition_id, round_no, interviewer_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘需求每轮面试官';
+
+CREATE TABLE IF NOT EXISTS hr_requisition_round_cc (
+  id             BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+  requisition_id BIGINT      NOT NULL                COMMENT '招聘需求',
+  round_no       TINYINT     NOT NULL                COMMENT '轮次',
+  cc_user_id     BIGINT      NOT NULL                COMMENT '抄送人',
+  create_by      VARCHAR(50) DEFAULT ''              COMMENT '创建者',
+  create_time    DATETIME    DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_by      VARCHAR(50) DEFAULT ''              COMMENT '更新者',
+  update_time    DATETIME    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  is_active      TINYINT     NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_hr_round_cc (requisition_id, round_no, cc_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘需求每轮抄送人';
+
+CREATE TABLE IF NOT EXISTS hr_interview_invite_cc (
+  id                BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+  invite_id         BIGINT      NOT NULL                COMMENT '面试邀约',
+  cc_user_id        BIGINT      NOT NULL                COMMENT '抄送人',
+  dingtalk_event_id VARCHAR(64) NULL                    COMMENT '抄送人钉钉日程ID',
+  create_by         VARCHAR(50) DEFAULT ''              COMMENT '创建者',
+  create_time       DATETIME    DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_by         VARCHAR(50) DEFAULT ''              COMMENT '更新者',
+  update_time       DATETIME    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  is_active         TINYINT     NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_hr_invite_cc (invite_id, cc_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试邀约抄送人';
 
 INSERT INTO hr_requisition_round_interviewer (requisition_id, round_no, interviewer_user_id, create_by, is_active)
 SELECT r.requisition_id, r.round_no, r.interviewer_user_id, 'hr-migrate', 1

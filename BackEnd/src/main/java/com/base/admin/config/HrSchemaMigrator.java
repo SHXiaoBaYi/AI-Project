@@ -39,6 +39,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         seedAliases();
         seedTaskType();
         ensureFailReasonColumn();
+        ensureInviteCcEventColumn();
         log.info("招聘表结构、角色、用户和菜单已同步");
     }
 
@@ -225,6 +226,11 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 "ALTER TABLE hr_interview_record ADD COLUMN fail_reason VARCHAR(64) NULL COMMENT '未通过原因' AFTER conclusion");
         addColumnIfMissing("hr_interview_verdict", "fail_reason",
                 "ALTER TABLE hr_interview_verdict ADD COLUMN fail_reason VARCHAR(64) NULL COMMENT '未通过原因' AFTER conclusion");
+    }
+
+    private void ensureInviteCcEventColumn() {
+        addColumnIfMissing("hr_interview_invite_cc", "dingtalk_event_id",
+                "ALTER TABLE hr_interview_invite_cc ADD COLUMN dingtalk_event_id VARCHAR(64) NULL COMMENT '抄送人钉钉日程ID' AFTER cc_user_id");
     }
 
     private void addColumnIfMissing(String table, String column, String ddl) {
