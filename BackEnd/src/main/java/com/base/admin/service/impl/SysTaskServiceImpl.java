@@ -8,6 +8,7 @@ import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.SysTaskAssignDTO;
 import com.base.admin.domain.dto.SysTaskBatchAssignDTO;
 import com.base.admin.domain.dto.SysTaskBatchCompleteDTO;
+import com.base.admin.domain.dto.SysTaskBatchDeleteDTO;
 import com.base.admin.domain.dto.SysTaskCompleteDTO;
 import com.base.admin.domain.dto.SysTaskDTO;
 import com.base.admin.domain.dto.SysTaskFileItemDTO;
@@ -198,11 +199,61 @@ public class SysTaskServiceImpl implements SysTaskService {
     @Transactional
     public void delete(Long id) {
         SysTask task = require(id);
-        if (!isDeletable(task)) {
-            throw new BusinessException("外源生成的任务不允许删除");
-        }
         assigneeMapper.physicalDeleteByTaskId(id);
         taskMapper.deleteById(id);
+    }
+
+    @Override
+    public String deleteBatch(SysTaskBatchDeleteDTO dto) {
+        if (dto.getTaskIds() == null || dto.getTaskIds().isEmpty()) {
+            throw new BusinessException("请选择至少一条任务");
+        }
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        for (Long id : dto.getTaskIds()) {
+            if (id != null) {
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) {
+            throw new BusinessException("请选择至少一条任务");
+        }
+        if (ids.size() > 100) {
+            throw new BusinessException("单次最多批量删除 100 条");
+        }
+        SysTaskService self = selfProvider.getObject();
+        int ok = 0;
+        int skip = 0;
+        List<String> errors = new ArrayList<>();
+        for (Long id : ids) {
+            SysTask task = taskMapper.selectById(id);
+            if (task == null) {
+                skip++;
+                continue;
+            }
+            try {
+                self.delete(id);
+                ok++;
+            } catch (BusinessException e) {
+                errors.add("#" + id + " " + e.getMessage());
+                log.warn("批量删除任务 #{} 失败: {}", id, e.getMessage());
+            } catch (Exception e) {
+                errors.add("#" + id + " " + e.getMessage());
+                log.error("批量删除任务 #{} 异常", id, e);
+            }
+        }
+        if (ok == 0) {
+            throw new BusinessException(errors.isEmpty()
+                    ? "没有可删除的任务"
+                    : "批量删除失败：" + String.join("；", errors));
+        }
+        StringBuilder msg = new StringBuilder("已删除 ").append(ok).append(" 条");
+        if (skip > 0) {
+            msg.append("，跳过 ").append(skip).append(" 条");
+        }
+        if (!errors.isEmpty()) {
+            msg.append("；部分失败：").append(String.join("；", errors));
+        }
+        return msg.toString();
     }
 
     @Override
@@ -1035,7 +1086,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setRemark(task.getRemark());
         vo.setCreateTime(task.getCreateTime());
         vo.setOverdue(isOverdue(task));
-        vo.setDeletable(isDeletable(task));
+        vo.setDeletable(true);
         vo.setAssignable(isAssignable(task));
         vo.setCompletable(isCompletable(task));
         SysTaskType typeCfg = typeMap.get(task.getTaskType());
@@ -1086,10 +1137,6 @@ public class SysTaskServiceImpl implements SysTaskService {
         }
         SysTaskType typeCfg = taskTypeService.getByTypeName(task.getTaskType());
         return typeCfg != null && StringUtils.hasText(typeCfg.getAssignField());
-    }
-
-    private static boolean isDeletable(SysTask task) {
-        return !StringUtils.hasText(task.getBizType());
     }
 
     private static boolean isOverdue(SysTask task) {

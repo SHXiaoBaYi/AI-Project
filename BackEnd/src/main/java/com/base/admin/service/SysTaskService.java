@@ -4,6 +4,7 @@ import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.SysTaskAssignDTO;
 import com.base.admin.domain.dto.SysTaskBatchAssignDTO;
 import com.base.admin.domain.dto.SysTaskBatchCompleteDTO;
+import com.base.admin.domain.dto.SysTaskBatchDeleteDTO;
 import com.base.admin.domain.dto.SysTaskCompleteDTO;
 import com.base.admin.domain.dto.SysTaskDTO;
 import com.base.admin.domain.dto.SysTaskQueryDTO;
@@ -23,6 +24,9 @@ public interface SysTaskService {
     void update(SysTaskDTO dto);
 
     void delete(Long id);
+
+    /** 批量删除任务 */
+    String deleteBatch(SysTaskBatchDeleteDTO dto);
 
     /** 分配负责人/执行人；GEO 待分配类任务会回写投放发布人/撰写人 */
     void assign(Long id, SysTaskAssignDTO dto);

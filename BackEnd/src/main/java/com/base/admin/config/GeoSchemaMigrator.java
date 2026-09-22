@@ -60,11 +60,41 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensurePublishedArticleMenu(connection);
             ensureCiteScreenshotColumn(connection);
             ensureItemPublishTimeDateTime(connection);
+            ensureGeoStaffRoles(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
         }
         log.info("GEO 平台主数据、看板落库与菜单已同步");
+    }
+
+    /** GEO 选人角色：运营录入 / 管理复盘（不存在则创建） */
+    private void ensureGeoStaffRoles(Connection connection) throws Exception {
+        ensureRole(connection, "GEO运营录入", "geo_ops_entry", 40, "GEO日监测与内容投放录入");
+        ensureRole(connection, "GEO管理复盘", "geo_mgmt_review", 41, "GEO复盘与管理选人");
+    }
+
+    private void ensureRole(Connection connection, String roleName, String roleKey, int sortOrder, String remark)
+            throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT role_id FROM sys_role WHERE role_key = '" + roleKey.replace("'", "''")
+                             + "' AND is_active = 1 LIMIT 1")) {
+            if (rs.next()) {
+                return;
+            }
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_role (role_name, role_key, sort_order, status, remark, is_active)
+                    VALUES ('%s', '%s', %d, 0, '%s', 1)
+                    """.formatted(
+                    roleName.replace("'", "''"),
+                    roleKey.replace("'", "''"),
+                    sortOrder,
+                    remark.replace("'", "''")));
+            log.info("已创建 GEO 角色 {} ({})", roleName, roleKey);
+        }
     }
 
     private void ensureBoardLockedColumn(Connection connection) throws Exception {

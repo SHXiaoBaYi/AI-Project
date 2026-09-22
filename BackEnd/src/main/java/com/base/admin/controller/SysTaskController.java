@@ -7,6 +7,7 @@ import com.base.admin.common.Result;
 import com.base.admin.domain.dto.SysTaskAssignDTO;
 import com.base.admin.domain.dto.SysTaskBatchAssignDTO;
 import com.base.admin.domain.dto.SysTaskBatchCompleteDTO;
+import com.base.admin.domain.dto.SysTaskBatchDeleteDTO;
 import com.base.admin.domain.dto.SysTaskCompleteDTO;
 import com.base.admin.domain.dto.SysTaskDTO;
 import com.base.admin.domain.dto.SysTaskQueryDTO;
@@ -141,5 +142,13 @@ public class SysTaskController {
     public Result<Void> delete(@PathVariable Long id) {
         taskService.delete(id);
         return Result.ok();
+    }
+
+    @Operation(summary = "批量删除任务")
+    @PostMapping("/delete/batch")
+    @RequiresPermission("task:delete")
+    @Log(title = "任务批量删除", businessType = 3)
+    public Result<String> deleteBatch(@Valid @RequestBody SysTaskBatchDeleteDTO dto) {
+        return Result.ok(taskService.deleteBatch(dto));
     }
 }

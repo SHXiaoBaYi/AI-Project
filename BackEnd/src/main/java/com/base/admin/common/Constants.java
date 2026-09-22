@@ -78,6 +78,13 @@ public class Constants {
     /** 分配回写字段：撰写人 */
     public static final String TASK_ASSIGN_FIELD_WRITER = "writer";
 
+    /** GEO 模块选人角色：运营录入 */
+    public static final String GEO_ROLE_OPS_ENTRY = "GEO运营录入";
+    /** GEO 模块选人角色：管理复盘 */
+    public static final String GEO_ROLE_MGMT_REVIEW = "GEO管理复盘";
+    public static final String GEO_ROLE_KEY_OPS_ENTRY = "geo_ops_entry";
+    public static final String GEO_ROLE_KEY_MGMT_REVIEW = "geo_mgmt_review";
+
     /** 演示数据标记：create_by / 备注前缀 */
     public static final String DEMO_MARKER = "【演示】";
     /** 演示数据 create_by */

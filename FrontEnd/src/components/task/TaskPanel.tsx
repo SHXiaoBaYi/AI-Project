@@ -12,6 +12,7 @@ import {
   assignTaskApi,
   batchAssignTaskApi,
   batchCompleteTaskApi,
+  batchDeleteTaskApi,
   completeTaskApi,
   createTaskApi,
   deleteTaskApi,
@@ -439,7 +440,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
                 },
               }
             : null,
-          !mineOnly && record.deletable !== false
+          !mineOnly
             ? {
                 key: 'delete',
                 label: '删除',
@@ -478,14 +479,14 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             setSelectedRows(rows);
           },
           getCheckboxProps: (record) => ({
-            disabled: mineOnly ? !canBatchComplete(record) : !record.assignable,
+            disabled: mineOnly ? !canBatchComplete(record) : false,
           }),
         }}
         tableAlertRender={({ selectedRowKeys: keys }) =>
           mineOnly ? (
             <span>已选 {keys.length} 条（仅可勾选无需证明附件的可完成任务）</span>
           ) : (
-            <span>已选 {keys.length} 条（仅可勾选可分配任务）</span>
+            <span>已选 {keys.length} 条</span>
           )
         }
         request={async (params) => {
@@ -523,6 +524,38 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
                 </Button>,
               ]
             : [
+                <PermissionButton
+                  key='batch-delete'
+                  danger
+                  color='danger'
+                  variant='filled'
+                  perm='task:delete'
+                  disabled={!selectedRowKeys.length}
+                  onClick={() => {
+                    if (!selectedRowKeys.length) {
+                      message.warning('请先选择要删除的任务');
+                      return;
+                    }
+                    Modal.confirm({
+                      title: '批量删除任务',
+                      content: `确定要删除选中的 ${selectedRowKeys.length} 条任务吗？此操作不可撤销。`,
+                      okText: '确定删除',
+                      cancelText: '取消',
+                      okButtonProps: { danger: true },
+                      onOk: async () => {
+                        const msg = await batchDeleteTaskApi({
+                          taskIds: selectedRowKeys.map((k) => Number(k)),
+                        });
+                        message.success(msg || `已删除 ${selectedRowKeys.length} 条`);
+                        setSelectedRowKeys([]);
+                        setSelectedRows([]);
+                        actionRef.current?.reload();
+                      },
+                    });
+                  }}
+                >
+                  批量删除
+                </PermissionButton>,
                 <PermissionButton
                   key='batch-assign'
                   perm='task:edit'

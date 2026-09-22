@@ -17,7 +17,9 @@ import com.base.admin.domain.entity.GeoMonitorDaily;
 import com.base.admin.domain.entity.GeoPlatform;
 import com.base.admin.domain.entity.GeoTopic;
 import com.base.admin.domain.entity.GeoYearTarget;
+import com.base.admin.domain.entity.SysRole;
 import com.base.admin.domain.entity.SysUser;
+import com.base.admin.domain.entity.SysUserRole;
 import com.base.admin.domain.enums.GeoPeriodType;
 import com.base.admin.domain.vo.GeoChartPointVO;
 import com.base.admin.domain.vo.GeoDailyBoardVO;
@@ -40,7 +42,9 @@ import com.base.admin.mapper.GeoBoardPeriodStatMapper;
 import com.base.admin.mapper.GeoMonitorDailyMapper;
 import com.base.admin.mapper.GeoTopicMapper;
 import com.base.admin.mapper.GeoYearTargetMapper;
+import com.base.admin.mapper.SysRoleMapper;
 import com.base.admin.mapper.SysUserMapper;
+import com.base.admin.mapper.SysUserRoleMapper;
 import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoMonitorService;
 import com.base.admin.service.GeoPlatformService;
@@ -101,6 +105,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private final GeoTopicService topicService;
     private final GeoPlatformService platformService;
     private final SysUserMapper userMapper;
+    private final SysRoleMapper roleMapper;
+    private final SysUserRoleMapper userRoleMapper;
     private final FileStorageService fileStorageService;
 
     @Override
@@ -449,8 +455,32 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
 
     @Override
     public List<GeoOwnerOptionVO> listOwnerOptions() {
+        List<SysRole> roles = roleMapper.selectList(new LambdaQueryWrapper<SysRole>()
+                .eq(SysRole::getStatus, Constants.STATUS_ACTIVE)
+                .and(w -> w.in(SysRole::getRoleName, Constants.GEO_ROLE_OPS_ENTRY, Constants.GEO_ROLE_MGMT_REVIEW)
+                        .or()
+                        .in(SysRole::getRoleKey, Constants.GEO_ROLE_KEY_OPS_ENTRY, Constants.GEO_ROLE_KEY_MGMT_REVIEW)));
+        if (roles.isEmpty()) {
+            return List.of();
+        }
+        List<Long> roleIds = roles.stream().map(SysRole::getRoleId).toList();
+        List<SysUserRole> links = userRoleMapper.selectList(new LambdaQueryWrapper<SysUserRole>()
+                .in(SysUserRole::getRoleId, roleIds));
+        if (links.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<Long> userIds = new LinkedHashSet<>();
+        for (SysUserRole link : links) {
+            if (link.getUserId() != null) {
+                userIds.add(link.getUserId());
+            }
+        }
+        if (userIds.isEmpty()) {
+            return List.of();
+        }
         List<SysUser> users = userMapper.selectList(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getStatus, Constants.STATUS_ACTIVE)
+                .in(SysUser::getUserId, userIds)
                 .orderByAsc(SysUser::getUserId));
         List<GeoOwnerOptionVO> options = new ArrayList<>();
         for (SysUser user : users) {

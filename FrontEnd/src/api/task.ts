@@ -134,6 +134,10 @@ export function deleteTaskApi(id: number) {
   return request.delete(`/task/${id}`);
 }
 
+export function batchDeleteTaskApi(data: { taskIds: number[] }) {
+  return request.post<unknown, string>('/task/delete/batch', data);
+}
+
 export function assignTaskApi(id: number, data: { ownerUserId?: number; assigneeUserIds: number[] }) {
   return request.post(`/task/${id}/assign`, data);
 }
