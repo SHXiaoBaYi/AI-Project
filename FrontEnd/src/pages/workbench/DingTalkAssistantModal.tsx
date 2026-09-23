@@ -393,7 +393,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       <Modal
         title='钉钉日程助手'
         open={open}
-        width={780}
+        width={1200}
         footer={null}
         maskClosable={false}
         destroyOnHidden
