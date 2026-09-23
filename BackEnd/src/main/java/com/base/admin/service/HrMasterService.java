@@ -185,7 +185,8 @@ public class HrMasterService {
     }
 
     private void replaceOwners(Long requisitionId, List<Long> ownerUserIds) {
-        jdbc.update("UPDATE hr_requisition_owner SET is_active = 0 WHERE requisition_id = ? AND user_id IS NOT NULL", requisitionId);
+        // 全量软删，避免 Excel 灌数留下的 alias-only（user_id 为空）脏行在改负责人后仍被 GROUP_CONCAT 拼进 owner_names
+        jdbc.update("UPDATE hr_requisition_owner SET is_active = 0 WHERE requisition_id = ?", requisitionId);
         if (ownerUserIds == null) {
             return;
         }

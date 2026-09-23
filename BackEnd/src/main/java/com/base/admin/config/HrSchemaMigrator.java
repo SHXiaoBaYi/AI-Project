@@ -37,6 +37,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         seedUsers();
         seedMenus();
         seedAliases();
+        cleanupOrphanOwnerAliases();
         seedTaskType();
         ensureFailReasonColumn();
         ensureInviteCcEventColumn();
@@ -260,7 +261,19 @@ public class HrSchemaMigrator implements ApplicationRunner {
     private void seedAliases() {
         alias("王", "王艳", userIdByNickname("王艳"));
         alias("庞", "庞焯文", userIdByNickname("庞焯文"));
-        alias("肖", "肖", null);
+        alias("肖", "肖霞飞", userIdByNickname("肖霞飞"));
+    }
+
+    /** 软删灌数遗留的 alias=肖 且未绑用户的脏负责人行，避免列表 owner_names 拼出「肖、肖霞飞」。 */
+    private void cleanupOrphanOwnerAliases() {
+        int n = jdbc.update("""
+                UPDATE hr_requisition_owner
+                SET is_active = 0
+                WHERE is_active = 1 AND user_id IS NULL AND alias = '肖'
+                """);
+        if (n > 0) {
+            log.info("已软删 {} 条未绑定用户的 alias=肖 脏负责人", n);
+        }
     }
 
     private void alias(String alias, String displayName, Long userId) {
