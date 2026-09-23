@@ -7,7 +7,7 @@ import lombok.Data;
 @Schema(description = "登录页公开选项")
 public class LoginOptionsVO {
 
-    @Schema(description = "是否允许账号密码登录（仅本机）", example = "true")
+    @Schema(description = "是否允许账号密码登录", example = "true")
     private Boolean passwordLoginEnabled;
 
     @Schema(description = "钉钉扫码是否可用", example = "true")

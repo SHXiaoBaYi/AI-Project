@@ -24,7 +24,6 @@ import com.base.admin.service.DingTalkAuthService;
 import com.base.admin.service.DingTalkCalendarClient;
 import com.base.admin.service.OnlineSessionService;
 import com.base.admin.service.SysLoginService;
-import com.base.admin.util.LocalhostAccess;
 import com.base.admin.util.TreeUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -62,9 +61,6 @@ public class SysLoginServiceImpl implements SysLoginService {
 
     @Override
     public LoginVO login(LoginDTO dto, String ip, String userAgent, HttpServletRequest request) {
-        if (!LocalhostAccess.isLocalhostRequest(request)) {
-            throw new BusinessException("本系统仅支持钉钉扫码登录");
-        }
         SysUser user = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, dto.getUsername()));
         if (user == null) {
@@ -89,17 +85,16 @@ public class SysLoginServiceImpl implements SysLoginService {
     @Override
     public LoginOptionsVO loginOptions(HttpServletRequest request) {
         LoginOptionsVO vo = new LoginOptionsVO();
-        boolean local = LocalhostAccess.isLocalhostRequest(request);
-        vo.setPasswordLoginEnabled(local);
+        vo.setPasswordLoginEnabled(true);
         DingTalkLoginConfigVO ding = dingTalkAppService.loginConfig();
         vo.setDingTalkEnabled(ding.getEnabled() != null && ding.getEnabled() == 1);
         vo.setClientId(ding.getClientId());
         vo.setCorpId(ding.getCorpId());
         vo.setExclusiveLogin(ding.getExclusiveLogin());
         if (Boolean.TRUE.equals(vo.getDingTalkEnabled())) {
-            vo.setMessage(local ? "本机可扫码或使用账号密码登录" : "请使用钉钉扫码登录");
+            vo.setMessage("可使用账号密码或钉钉扫码登录");
         } else {
-            vo.setMessage(local ? "钉钉未配置，本机可使用账号密码登录" : (ding.getMessage() == null ? "钉钉扫码登录未配置" : ding.getMessage()));
+            vo.setMessage("请使用账号密码登录");
         }
         return vo;
     }
