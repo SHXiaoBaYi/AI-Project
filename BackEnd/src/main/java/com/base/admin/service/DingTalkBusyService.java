@@ -5,12 +5,13 @@ import com.base.admin.domain.vo.DingTalkBusySlotVO;
 import com.base.admin.domain.vo.DingTalkBusyUserOptionVO;
 import com.base.admin.domain.vo.DingTalkBusyUserVO;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.util.ChinaHoliday;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -22,7 +23,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class DingTalkBusyService {
 
-    private static final Duration MAX_RANGE = Duration.ofDays(31);
     private static final int SLOT_MINUTES = 30;
     /** 工作时段：仅统计每天 09:30～18:30 */
     private static final LocalTime WORK_START = LocalTime.of(9, 30);
@@ -56,12 +56,19 @@ public class DingTalkBusyService {
         if (!dto.getStartTime().isBefore(dto.getEndTime())) {
             throw new BusinessException("结束时间必须晚于开始时间");
         }
-        if (Duration.between(dto.getStartTime(), dto.getEndTime()).compareTo(MAX_RANGE) > 0) {
-            throw new BusinessException("查询范围不能超过 31 天");
+        LocalDate today = LocalDate.now();
+        LocalDate maxDay = ChinaHoliday.maxBookableDate(today);
+        LocalDateTime earliest = today.atTime(WORK_START);
+        LocalDateTime latest = maxDay.atTime(WORK_END);
+        if (dto.getStartTime().toLocalDate().isBefore(today) || dto.getEndTime().toLocalDate().isBefore(today)) {
+            throw new BusinessException("不能查询已经过去的日期");
         }
-        // 仅统计每天工作时段 09:30～18:30
-        LocalDateTime rangeStart = alignToWorkStart(dto.getStartTime());
-        LocalDateTime rangeEnd = alignToWorkEnd(dto.getEndTime());
+        if (dto.getStartTime().toLocalDate().isAfter(maxDay) || dto.getEndTime().toLocalDate().isAfter(maxDay)) {
+            throw new BusinessException("最多只能查看未来 " + ChinaHoliday.BOOKING_MAX_DAYS + " 天内的闲忙");
+        }
+        // 仅统计每天工作时段 09:30～18:30；法定节假日不生成时段（范围可跨过假日）
+        LocalDateTime rangeStart = alignToWorkStart(dto.getStartTime().isBefore(earliest) ? earliest : dto.getStartTime());
+        LocalDateTime rangeEnd = alignToWorkEnd(dto.getEndTime().isAfter(latest) ? latest : dto.getEndTime());
         if (!rangeStart.isBefore(rangeEnd)) {
             throw new BusinessException("所选范围不包含工作时段（每天 09:30～18:30）");
         }
@@ -136,6 +143,10 @@ public class DingTalkBusyService {
         List<DingTalkBusySlotVO> slots = new ArrayList<>();
         LocalDateTime cursor = alignToWorkStart(rangeStart);
         while (cursor.isBefore(rangeEnd)) {
+            if (ChinaHoliday.isOffDay(cursor.toLocalDate())) {
+                cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
+                continue;
+            }
             if (cursor.toLocalTime().isBefore(WORK_START)) {
                 cursor = cursor.toLocalDate().atTime(WORK_START);
                 continue;
@@ -160,18 +171,23 @@ public class DingTalkBusyService {
             slots.add(slot(statusOf(cursor, slotEnd, clipped), cursor, slotEnd));
             cursor = slotEnd;
         }
+        // 双保险：丢掉落在法定节假日上的时段
+        slots.removeIf(s -> s.getStart() != null && ChinaHoliday.isOffDay(s.getStart().toLocalDate()));
         return slots;
     }
 
-    /** 落到查询范围内的第一个工作时段起点 */
+    /** 落到查询范围内的第一个工作时段起点（跳过法定节假日） */
     private static LocalDateTime alignToWorkStart(LocalDateTime time) {
-        if (time.toLocalTime().isBefore(WORK_START)) {
-            return time.toLocalDate().atTime(WORK_START);
+        LocalDateTime cursor = time;
+        if (cursor.toLocalTime().isBefore(WORK_START)) {
+            cursor = cursor.toLocalDate().atTime(WORK_START);
+        } else if (!cursor.toLocalTime().isBefore(WORK_END)) {
+            cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
         }
-        if (!time.toLocalTime().isBefore(WORK_END)) {
-            return time.toLocalDate().plusDays(1).atTime(WORK_START);
+        while (ChinaHoliday.isOffDay(cursor.toLocalDate())) {
+            cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
         }
-        return time;
+        return cursor;
     }
 
     /** 落到查询范围内的最后一个工作时段终点 */

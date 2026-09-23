@@ -12,6 +12,7 @@ import com.base.admin.domain.vo.DingTalkAssistantSuggestVO;
 import com.base.admin.domain.vo.DingTalkBusySlotVO;
 import com.base.admin.domain.vo.DingTalkBusyUserVO;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.util.ChinaHoliday;
 import com.base.admin.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,6 +28,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -39,9 +41,11 @@ import java.util.Map;
 public class DingTalkAssistantService {
 
     private static final int DEFAULT_DURATION = 60;
-    private static final int MAX_WINDOWS = 8;
     private static final int MAX_SLOTS_PER_DAY = 24;
     private static final int SLOT_STEP_MIN = 30;
+    /** 推荐时段仅落在每天工作时间 09:30～18:30 */
+    private static final LocalTime WORK_START = LocalTime.of(9, 30);
+    private static final LocalTime WORK_END = LocalTime.of(18, 30);
     private static final DateTimeFormatter LABEL_DAY = DateTimeFormatter.ofPattern("MM-dd HH:mm");
     private static final DateTimeFormatter LABEL_TIME = DateTimeFormatter.ofPattern("HH:mm");
     private static final DateTimeFormatter API_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -90,7 +94,8 @@ public class DingTalkAssistantService {
         }
 
         List<DingTalkAssistantSuggestVO.FreeWindow> windows = findFreeWindows(user.getSlots(), duration);
-        List<DingTalkAssistantSuggestVO.DayGroup> dayGroups = buildDayGroups(windows, duration);
+        List<DingTalkAssistantSuggestVO.DayGroup> dayGroups = buildDayGroups(
+                dto.getStartTime(), dto.getEndTime(), windows, duration);
         vo.setFreeWindows(windows);
         vo.setDayGroups(dayGroups);
         vo.setAdviceText(buildAdvice(vo.getTargetNickname(), duration, dayGroups));
@@ -538,33 +543,59 @@ public class DingTalkAssistantService {
         return user;
     }
 
+    /**
+     * 按查询范围内的每个非节假日自然日建 Tab；同一日期范围对不同人天数一致。
+     * 时段严格落在当天 09:30～18:30，且结束不超过下班时间。
+     */
     private static List<DingTalkAssistantSuggestVO.DayGroup> buildDayGroups(
+            LocalDateTime rangeStart, LocalDateTime rangeEnd,
             List<DingTalkAssistantSuggestVO.FreeWindow> windows, int durationMin) {
         Map<String, DingTalkAssistantSuggestVO.DayGroup> map = new LinkedHashMap<>();
-        for (DingTalkAssistantSuggestVO.FreeWindow window : windows) {
-            if (window.getStart() == null || window.getEnd() == null) {
-                continue;
-            }
-            LocalDateTime cursor = window.getStart();
-            while (!cursor.plusMinutes(durationMin).isAfter(window.getEnd())) {
-                LocalDate day = cursor.toLocalDate();
-                String key = day.format(DAY_KEY);
-                DingTalkAssistantSuggestVO.DayGroup group = map.computeIfAbsent(key, k -> {
-                    DingTalkAssistantSuggestVO.DayGroup g = new DingTalkAssistantSuggestVO.DayGroup();
-                    g.setDay(k);
-                    g.setDayLabel(day.format(DAY_TAB) + " " + WEEK[day.getDayOfWeek().getValue() - 1]);
-                    return g;
-                });
-                if (group.getSlots().size() >= MAX_SLOTS_PER_DAY) {
-                    break;
+        if (rangeStart != null && rangeEnd != null && !rangeStart.toLocalDate().isAfter(rangeEnd.toLocalDate())) {
+            for (LocalDate day = rangeStart.toLocalDate(); !day.isAfter(rangeEnd.toLocalDate()); day = day.plusDays(1)) {
+                if (ChinaHoliday.isOffDay(day)) {
+                    continue;
                 }
-                LocalDateTime slotEnd = cursor.plusMinutes(durationMin);
-                DingTalkAssistantSuggestVO.SlotOption slot = new DingTalkAssistantSuggestVO.SlotOption();
-                slot.setStart(cursor);
-                slot.setEnd(slotEnd);
-                slot.setLabel(cursor.format(LABEL_TIME) + "–" + slotEnd.format(LABEL_TIME));
-                group.getSlots().add(slot);
-                cursor = cursor.plusMinutes(SLOT_STEP_MIN);
+                String key = day.format(DAY_KEY);
+                DingTalkAssistantSuggestVO.DayGroup g = new DingTalkAssistantSuggestVO.DayGroup();
+                g.setDay(key);
+                g.setDayLabel(day.format(DAY_TAB) + " " + WEEK[day.getDayOfWeek().getValue() - 1]);
+                map.put(key, g);
+            }
+        }
+        if (windows != null) {
+            for (DingTalkAssistantSuggestVO.FreeWindow window : windows) {
+                if (window.getStart() == null || window.getEnd() == null) {
+                    continue;
+                }
+                LocalDateTime cursor = ceilToSlot(window.getStart());
+                LocalDateTime windowEnd = clipToWorkEnd(window.getEnd());
+                if (cursor == null || windowEnd == null || !cursor.isBefore(windowEnd)) {
+                    continue;
+                }
+                while (!cursor.plusMinutes(durationMin).isAfter(windowEnd)) {
+                    LocalDateTime slotEnd = cursor.plusMinutes(durationMin);
+                    if (slotEnd.toLocalTime().isAfter(WORK_END)
+                            || cursor.toLocalTime().isBefore(WORK_START)
+                            || ChinaHoliday.isOffDay(cursor.toLocalDate())) {
+                        break;
+                    }
+                    String key = cursor.toLocalDate().format(DAY_KEY);
+                    DingTalkAssistantSuggestVO.DayGroup group = map.get(key);
+                    if (group == null) {
+                        cursor = cursor.plusMinutes(SLOT_STEP_MIN);
+                        continue;
+                    }
+                    if (group.getSlots().size() >= MAX_SLOTS_PER_DAY) {
+                        break;
+                    }
+                    DingTalkAssistantSuggestVO.SlotOption slot = new DingTalkAssistantSuggestVO.SlotOption();
+                    slot.setStart(cursor);
+                    slot.setEnd(slotEnd);
+                    slot.setLabel(cursor.format(LABEL_TIME) + "–" + slotEnd.format(LABEL_TIME));
+                    group.getSlots().add(slot);
+                    cursor = cursor.plusMinutes(SLOT_STEP_MIN);
+                }
             }
         }
         return new ArrayList<>(map.values());
@@ -583,6 +614,7 @@ public class DingTalkAssistantService {
         return null;
     }
 
+    /** 合并连续 FREE 半小时格为窗口；强制裁剪到每天 09:30～18:30，不跨天、不跨节假日 */
     private static List<DingTalkAssistantSuggestVO.FreeWindow> findFreeWindows(List<DingTalkBusySlotVO> slots, int durationMin) {
         List<DingTalkAssistantSuggestVO.FreeWindow> result = new ArrayList<>();
         if (slots == null || slots.isEmpty()) {
@@ -594,25 +626,35 @@ public class DingTalkAssistantService {
             if (slot == null || slot.getStart() == null || slot.getEnd() == null) {
                 continue;
             }
+            LocalDateTime[] clipped = clipToWorkDay(slot.getStart(), slot.getEnd());
+            if (clipped == null) {
+                if (runStart != null) {
+                    addIfLongEnough(result, runStart, runEnd, durationMin);
+                    runStart = null;
+                    runEnd = null;
+                }
+                continue;
+            }
+            LocalDateTime start = clipped[0];
+            LocalDateTime end = clipped[1];
             boolean free = "FREE".equalsIgnoreCase(slot.getStatus());
             if (free) {
                 if (runStart == null) {
-                    runStart = slot.getStart();
-                    runEnd = slot.getEnd();
-                } else if (runEnd != null && runEnd.equals(slot.getStart())) {
-                    runEnd = slot.getEnd();
+                    runStart = start;
+                    runEnd = end;
+                } else if (runEnd != null
+                        && runEnd.equals(start)
+                        && runStart.toLocalDate().equals(start.toLocalDate())) {
+                    runEnd = end;
                 } else {
                     addIfLongEnough(result, runStart, runEnd, durationMin);
-                    runStart = slot.getStart();
-                    runEnd = slot.getEnd();
+                    runStart = start;
+                    runEnd = end;
                 }
             } else if (runStart != null) {
                 addIfLongEnough(result, runStart, runEnd, durationMin);
                 runStart = null;
                 runEnd = null;
-            }
-            if (result.size() >= MAX_WINDOWS) {
-                return result;
             }
         }
         if (runStart != null) {
@@ -621,13 +663,62 @@ public class DingTalkAssistantService {
         return result;
     }
 
+    /** 裁到同一自然日的工作时段；节假日或无交集则返回 null */
+    private static LocalDateTime[] clipToWorkDay(LocalDateTime start, LocalDateTime end) {
+        if (start == null || end == null || !start.isBefore(end)) {
+            return null;
+        }
+        LocalDate day = start.toLocalDate();
+        if (ChinaHoliday.isOffDay(day)) {
+            return null;
+        }
+        LocalDateTime dayStart = day.atTime(WORK_START);
+        LocalDateTime dayEnd = day.atTime(WORK_END);
+        LocalDateTime s = start.isBefore(dayStart) ? dayStart : start;
+        LocalDateTime e = end.isAfter(dayEnd) ? dayEnd : end;
+        if (end.toLocalDate().isAfter(day)) {
+            e = dayEnd;
+        }
+        if (!s.isBefore(e)) {
+            return null;
+        }
+        return new LocalDateTime[]{s, e};
+    }
+
+    /** 向上对齐到半点，并保证落在工作时段内 */
+    private static LocalDateTime ceilToSlot(LocalDateTime time) {
+        if (time == null) {
+            return null;
+        }
+        LocalDateTime t = time.withSecond(0).withNano(0);
+        if (t.toLocalTime().isBefore(WORK_START)) {
+            t = t.toLocalDate().atTime(WORK_START);
+        }
+        int rem = t.getMinute() % SLOT_STEP_MIN;
+        if (rem != 0) {
+            t = t.plusMinutes(SLOT_STEP_MIN - rem);
+        }
+        if (!t.toLocalTime().isBefore(WORK_END)) {
+            return null;
+        }
+        return t;
+    }
+
+    private static LocalDateTime clipToWorkEnd(LocalDateTime time) {
+        if (time == null) {
+            return null;
+        }
+        LocalDateTime dayEnd = time.toLocalDate().atTime(WORK_END);
+        return time.isAfter(dayEnd) ? dayEnd : time;
+    }
+
     private static void addIfLongEnough(List<DingTalkAssistantSuggestVO.FreeWindow> out,
                                         LocalDateTime start, LocalDateTime end, int durationMin) {
         if (start == null || end == null || !start.isBefore(end)) {
             return;
         }
         long minutes = Duration.between(start, end).toMinutes();
-        if (minutes < durationMin || out.size() >= MAX_WINDOWS) {
+        if (minutes < durationMin) {
             return;
         }
         DingTalkAssistantSuggestVO.FreeWindow window = new DingTalkAssistantSuggestVO.FreeWindow();
@@ -647,11 +738,12 @@ public class DingTalkAssistantService {
 
     private static String buildAdvice(String name, int durationMin, List<DingTalkAssistantSuggestVO.DayGroup> dayGroups) {
         int slotCount = dayGroups == null ? 0 : dayGroups.stream().mapToInt(d -> d.getSlots() == null ? 0 : d.getSlots().size()).sum();
+        int freeDays = dayGroups == null ? 0 : (int) dayGroups.stream().filter(d -> d.getSlots() != null && !d.getSlots().isEmpty()).count();
         if (slotCount == 0) {
-            return name + " 在所选范围内没有可按 " + durationMin + " 分钟切分的空闲时段。可以扩大时间范围，或改短期望时长后再问。";
+            return "根据钉钉日程，" + name + " 在所选范围内的工作时段（每天 09:30～18:30）没有连续 " + durationMin + " 分钟空闲。";
         }
-        return "根据钉钉日程，" + name + " 共有 " + dayGroups.size() + " 天、" + slotCount
-                + " 个可约时段（每段 " + durationMin + " 分钟）。请按天切换查看，选中后再发起面试邀约、邀请开会或安排工作汇报。";
+        return "根据钉钉日程，" + name + " 共有 " + freeDays + " 天有空、" + slotCount
+                + " 个可约时段（每天 09:30～18:30，每段 " + durationMin + " 分钟）。请按天切换查看后再发起面试/会议/汇报。";
     }
 
     private static List<DingTalkAssistantSuggestVO.Action> baseActions(DingTalkAssistantSuggestVO vo,

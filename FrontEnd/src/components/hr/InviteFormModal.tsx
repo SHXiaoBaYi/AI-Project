@@ -16,6 +16,12 @@ import {
   mapApplicationCandidates,
   type InviteCandidateOption,
 } from '@/components/hr/inviteRound';
+import {
+  BOOKING_MAX_DAYS,
+  bookingDateTimeError,
+  disabledBookingDate,
+  interviewPastDisabledTime,
+} from '@/utils/chinaHoliday';
 
 export { maxRoundOf } from '@/components/hr/inviteRound';
 
@@ -31,18 +37,20 @@ const ROUNDS = [
 const INTERVIEW_START_MIN = 9 * 60 + 30;
 const INTERVIEW_END_MIN = 17 * 60 + 30;
 
-function interviewAtDisabledTime() {
+function interviewAtDisabledTime(selected?: Dayjs | null) {
+  const past = interviewPastDisabledTime(selected);
   return {
     disabledHours: () => {
-      const hours: number[] = [];
+      const hours = new Set<number>(past.disabledHours());
       for (let h = 0; h < 24; h++) {
-        if (h < 9 || h > 17) hours.push(h);
+        if (h < 9 || h > 17) hours.add(h);
       }
-      return hours;
+      return [...hours];
     },
     disabledMinutes: (hour: number) => {
-      if (hour === 9) return [0];
-      return [];
+      const blocked = new Set<number>(past.disabledMinutes(hour));
+      if (hour === 9) blocked.add(0);
+      return [...blocked];
     },
   };
 }
@@ -58,6 +66,8 @@ function validateInterviewAt(_: unknown, value: Dayjs | null | undefined) {
   if (mins < INTERVIEW_START_MIN || mins > INTERVIEW_END_MIN) {
     return Promise.reject(new Error('开始时间须在每天 09:30～17:30 之间'));
   }
+  const bookingErr = bookingDateTimeError(value);
+  if (bookingErr) return Promise.reject(new Error(bookingErr));
   return Promise.resolve();
 }
 
@@ -379,19 +389,20 @@ export default function InviteFormModal({
         <Form.Item
           name='interviewAt'
           label='开始时间'
-          extra='每天 09:30～17:30，半小时一档'
+          extra={`每天 09:30～17:30，半小时一档；不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`}
           rules={[{ required: true, validator: validateInterviewAt }]}
         >
           <DatePicker
             className='w-full'
             format='YYYY-MM-DD HH:mm'
+            disabledDate={disabledBookingDate}
             showTime={{
               format: 'HH:mm',
               minuteStep: 30,
               hideDisabledOptions: true,
               showSecond: false,
             }}
-            disabledTime={interviewAtDisabledTime}
+            disabledTime={(date) => interviewAtDisabledTime(date)}
           />
         </Form.Item>
         <Form.Item

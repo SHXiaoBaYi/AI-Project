@@ -462,7 +462,8 @@ public class DingTalkCalendarClient {
             return null;
         }
         LocalDate day = LocalDate.parse(date);
-        return end ? day.atStartOfDay() : day.atStartOfDay();
+        // 全天事件：开始为当天 00:00，结束为次日 00:00，才能盖住整日工作时段
+        return end ? day.plusDays(1).atStartOfDay() : day.atStartOfDay();
     }
 
     private boolean ready() {

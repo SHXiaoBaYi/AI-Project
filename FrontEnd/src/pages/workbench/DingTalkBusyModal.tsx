@@ -9,6 +9,13 @@ import {
   type DingTalkBusyUser,
   type DingTalkBusyUserOption,
 } from '@/api/dingtalk';
+import {
+  BOOKING_MAX_DAYS,
+  bookingRangeError,
+  bookingWindow,
+  disabledBookingDate,
+  isChinaHoliday,
+} from '@/utils/chinaHoliday';
 
 const STATUS_COLOR: Record<string, string> = {
   FREE: 'success',
@@ -49,10 +56,10 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose, initi
   const [users, setUsers] = useState<DingTalkBusyUserOption[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userIds, setUserIds] = useState<number[]>([]);
-  const [range, setRange] = useState<[Dayjs, Dayjs]>([
-    dayjs().hour(9).minute(30).second(0),
-    dayjs().hour(18).minute(30).second(0),
-  ]);
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => {
+    const { min } = bookingWindow();
+    return [min.hour(9).minute(30).second(0), min.hour(18).minute(30).second(0)];
+  });
   const [querying, setQuerying] = useState(false);
   const [result, setResult] = useState<DingTalkBusyUser[]>([]);
   const [tableKey, setTableKey] = useState(0);
@@ -74,6 +81,7 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose, initi
     const rows = new Map<string, TimelineRow>();
     for (const user of result) {
       for (const slot of user.slots ?? []) {
+        if (isChinaHoliday(slot.start) || isChinaHoliday(slot.end)) continue;
         const key = `${slot.start}|${slot.end}`;
         const row = rows.get(key) ?? { key, label: slotLabel(slot.start, slot.end), byUser: {} };
         row.byUser[user.userId] = slot;
@@ -141,6 +149,11 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose, initi
       message.warning('请选择有效的时间范围');
       return;
     }
+    const rangeErr = bookingRangeError(range[0], range[1]);
+    if (rangeErr) {
+      message.warning(rangeErr);
+      return;
+    }
     setQuerying(true);
     try {
       const rows = await queryDingTalkBusyApi({
@@ -173,7 +186,8 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose, initi
     >
       <div className='mb-3 text-sm text-neutral-500'>
         从系统用户里选择。已绑定钉钉的才能查出闲忙；未绑定的会标出来，需要先在用户管理里绑定。一次最多 20
-        人。结果仅统计每天 09:30～18:30，按半小时一段对齐；一段里只要有忙就整段算忙。可用列头漏斗筛选时间或闲忙状态。
+        人。结果仅统计每天 09:30～18:30，按半小时一段对齐；一段里只要有忙就整段算忙。不可选过去、法定节假日，最多未来{' '}
+        {BOOKING_MAX_DAYS} 天。可用列头漏斗筛选时间或闲忙状态。
       </div>
       <div className='mb-3 grid gap-3 md:grid-cols-2'>
         <Select
@@ -207,6 +221,7 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose, initi
           className='w-full'
           format='YYYY-MM-DD HH:mm'
           value={range}
+          disabledDate={disabledBookingDate}
           onChange={(value) => {
             if (value?.[0] && value?.[1]) setRange([value[0], value[1]]);
           }}

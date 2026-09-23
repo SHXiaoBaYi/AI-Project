@@ -16,6 +16,14 @@ import {
   type DingTalkBusyUserOption,
 } from '@/api/dingtalk';
 import type { RootState } from '@/store';
+import {
+  BOOKING_MAX_DAYS,
+  bookingDateTimeError,
+  bookingRangeError,
+  bookingWindow,
+  disabledBookingDate,
+  isChinaHoliday,
+} from '@/utils/chinaHoliday';
 
 const ASSISTANT_NAME = '日程助手';
 const WORK_START = { hour: 9, minute: 30 };
@@ -76,10 +84,34 @@ function slotStart(slot: DingTalkAssistantSlot | null | undefined) {
 }
 
 function toWorkRange(from: Dayjs, to: Dayjs): [Dayjs, Dayjs] {
+  const { min, max } = bookingWindow();
+  let start = from.startOf('day');
+  let end = to.startOf('day');
+  if (start.isBefore(min, 'day')) start = min.startOf('day');
+  if (end.isAfter(max, 'day')) end = max.startOf('day');
+  if (end.isBefore(start, 'day')) end = start;
   return [
-    from.hour(WORK_START.hour).minute(WORK_START.minute).second(0),
-    to.hour(WORK_END.hour).minute(WORK_END.minute).second(0),
+    start.hour(WORK_START.hour).minute(WORK_START.minute).second(0),
+    end.hour(WORK_END.hour).minute(WORK_END.minute).second(0),
   ];
+}
+
+function defaultAskRange(): [Dayjs, Dayjs] {
+  const { min, max } = bookingWindow();
+  let end = min.add(4, 'day');
+  if (end.isAfter(max, 'day')) end = max.startOf('day');
+  return toWorkRange(min, end);
+}
+
+/** 去掉法定节假日天，以及落在假日上的推荐时段 */
+function filterSuggestHolidays(data: DingTalkAssistantSuggest): DingTalkAssistantSuggest {
+  const dayGroups = (data.dayGroups ?? [])
+    .filter((day) => !isChinaHoliday(day.day))
+    .map((day) => ({
+      ...day,
+      slots: (day.slots ?? []).filter((slot) => !isChinaHoliday(slot.start) && !isChinaHoliday(slot.end)),
+    }));
+  return { ...data, dayGroups };
 }
 
 function initialOf(name: string) {
@@ -98,7 +130,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [targetUserId, setTargetUserId] = useState<number>();
   const [durationMin, setDurationMin] = useState(60);
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => toWorkRange(dayjs(), dayjs().add(4, 'day')));
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => defaultAskRange());
   const [querying, setQuerying] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -159,6 +191,11 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       message.warning('请选择有效的日期范围');
       return;
     }
+    const rangeErr = bookingRangeError(range[0], range[1]);
+    if (rangeErr) {
+      message.warning(rangeErr);
+      return;
+    }
     const nickname = composerTargetLabel;
     const askedDuration = durationMin;
     const askedUserId = targetUserId;
@@ -171,13 +208,15 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
     push({ role: 'user', text: userText });
     setQuerying(true);
     try {
-      const data = await suggestDingTalkAssistantApi({
-        targetUserId: askedUserId,
-        startTime: askStart.format('YYYY-MM-DD HH:mm:ss'),
-        endTime: askEnd.format('YYYY-MM-DD HH:mm:ss'),
-        durationMin: askedDuration,
-      });
-      const firstDay = data.dayGroups?.[0];
+      const data = filterSuggestHolidays(
+        await suggestDingTalkAssistantApi({
+          targetUserId: askedUserId,
+          startTime: askStart.format('YYYY-MM-DD HH:mm:ss'),
+          endTime: askEnd.format('YYYY-MM-DD HH:mm:ss'),
+          durationMin: askedDuration,
+        }),
+      );
+      const firstDay = data.dayGroups?.find((d) => (d.slots?.length ?? 0) > 0) ?? data.dayGroups?.[0];
       const firstSlot = firstDay?.slots?.[0];
       push({
         role: 'assistant',
@@ -290,6 +329,11 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       return;
     }
     const values = await meetingForm.validateFields();
+    const startErr = bookingDateTimeError(dayjs(values.startTime));
+    if (startErr) {
+      message.warning(startErr);
+      return;
+    }
     setActionSaving(true);
     try {
       const result = await createDingTalkAssistantMeetingApi({
@@ -318,6 +362,11 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       return;
     }
     const values = await reportForm.validateFields();
+    const startErr = bookingDateTimeError(dayjs(values.startTime));
+    if (startErr) {
+      message.warning(startErr);
+      return;
+    }
     setActionSaving(true);
     try {
       const result = await createDingTalkAssistantReportApi({
@@ -478,7 +527,9 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
           </div>
 
           <div className='shrink-0 border-t border-neutral-200 bg-white px-4 py-3'>
-            <div className='mb-2 text-xs text-neutral-400'>闲忙仅统计每天 09:30～18:30</div>
+            <div className='mb-2 text-xs text-neutral-400'>
+              闲忙仅统计每天 09:30～18:30；不可选过去、法定节假日，最多未来 {BOOKING_MAX_DAYS} 天
+            </div>
             <div className='mb-2 grid gap-2 md:grid-cols-2'>
               <Select
                 showSearch
@@ -512,6 +563,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
                 className='w-full md:col-span-2'
                 format='YYYY-MM-DD'
                 value={range}
+                disabledDate={disabledBookingDate}
                 onChange={(value) => {
                   if (value?.[0] && value?.[1]) setRange(toWorkRange(value[0], value[1]));
                 }}
@@ -578,6 +630,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
               showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false }}
               className='w-full'
               format='YYYY-MM-DD HH:mm'
+              disabledDate={disabledBookingDate}
             />
           </Form.Item>
           <Form.Item
@@ -657,6 +710,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
               showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false }}
               className='w-full'
               format='YYYY-MM-DD HH:mm'
+              disabledDate={disabledBookingDate}
             />
           </Form.Item>
           <Form.Item

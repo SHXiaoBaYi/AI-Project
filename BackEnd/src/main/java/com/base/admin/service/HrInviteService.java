@@ -4,6 +4,7 @@ import com.base.admin.domain.dto.HrBoardQueryDTO;
 import com.base.admin.domain.dto.HrInviteCreateDTO;
 import com.base.admin.domain.vo.HrInviteSaveVO;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.util.ChinaHoliday;
 import com.base.admin.util.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,7 @@ import org.springframework.util.StringUtils;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -936,6 +938,18 @@ public class HrInviteService {
     private static void validateInterviewAt(LocalDateTime interviewAt) {
         if (interviewAt == null) {
             throw new BusinessException("请选择开始时间");
+        }
+        LocalDateTime now = LocalDateTime.now().withSecond(0).withNano(0);
+        if (!interviewAt.isAfter(now)) {
+            throw new BusinessException("不能预约已经过去的时间");
+        }
+        LocalDate today = now.toLocalDate();
+        LocalDate day = interviewAt.toLocalDate();
+        if (day.isAfter(ChinaHoliday.maxBookableDate(today))) {
+            throw new BusinessException("最多只能预约未来 " + ChinaHoliday.BOOKING_MAX_DAYS + " 天内的面试");
+        }
+        if (ChinaHoliday.isOffDay(day)) {
+            throw new BusinessException("不能预约国家法定节假日");
         }
         LocalTime time = interviewAt.toLocalTime().withSecond(0).withNano(0);
         if (interviewAt.getSecond() != 0 || interviewAt.getNano() != 0 || time.getMinute() % 30 != 0) {
