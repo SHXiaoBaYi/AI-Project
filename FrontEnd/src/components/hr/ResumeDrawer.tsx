@@ -3,9 +3,18 @@ import { Button, Descriptions, Drawer } from 'antd';
 import { renderAsync } from 'docx-preview';
 import { fetchHrResumeApi, getHrApplicationApi } from '@/api/hr';
 
-function isPdf(fileName: string, contentType: string) {
+function isPdf(fileName: string, contentType: string, blob?: Blob) {
   const lower = fileName.toLowerCase();
-  return contentType.includes('pdf') || lower.endsWith('.pdf');
+  if (contentType.includes('pdf') || lower.endsWith('.pdf')) {
+    return true;
+  }
+  return false;
+}
+
+async function blobLooksLikePdf(blob: Blob): Promise<boolean> {
+  const head = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
+  // %PDF-
+  return head.length >= 4 && head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46;
 }
 
 function isDocx(fileName: string, contentType: string) {
@@ -84,6 +93,11 @@ function ResumeDrawer({
         const { blob, contentType } = resume;
 
         if (isPdf(name, contentType)) {
+          if (!(await blobLooksLikePdf(blob))) {
+            setMode('unsupported');
+            setError('简历内容不是有效 PDF（可能文件只在远程服务器，请确认本机可访问公网附件）');
+            return;
+          }
           const file = new Blob([blob], { type: 'application/pdf' });
           objectUrl = window.URL.createObjectURL(file);
           setPdfUrl(objectUrl);

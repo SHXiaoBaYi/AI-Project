@@ -437,18 +437,25 @@ export async function fetchHrResumeApi(id: number) {
   const token = getToken();
   const res = await fetch(withBase(`/api/hr/application/${id}/resume`), {
     headers: { Authorization: `Bearer ${token}` },
+    redirect: 'follow',
   });
-  if (!res.ok) {
+  const contentType = res.headers.get('content-type') || '';
+  const buffer = await res.arrayBuffer();
+  // 业务异常常以 HTTP 200 + JSON Result 返回，不能当文件打开
+  const looksJson =
+    contentType.includes('application/json') ||
+    (buffer.byteLength > 0 && buffer.byteLength < 4096 && new TextDecoder().decode(buffer.slice(0, 1)) === '{');
+  if (!res.ok || looksJson) {
     let msg = '简历打不开';
     try {
-      const body = (await res.json()) as { msg?: string };
+      const body = JSON.parse(new TextDecoder().decode(buffer)) as { msg?: string; code?: number };
       if (body?.msg) msg = body.msg;
     } catch {
-      /* 非 JSON */
+      if (!res.ok) msg = `简历打不开（${res.status}）`;
     }
     throw new Error(msg);
   }
-  return { blob: await res.blob(), contentType: res.headers.get('content-type') || '' };
+  return { blob: new Blob([buffer], { type: contentType || undefined }), contentType };
 }
 
 export function listHrInvitesApi(data: Record<string, unknown>) {

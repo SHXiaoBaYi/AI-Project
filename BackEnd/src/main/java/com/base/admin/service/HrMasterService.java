@@ -391,6 +391,7 @@ public class HrMasterService {
             throw new BusinessException("候选人不存在");
         }
         Path stored = fileStorage.saveHrResume(file);
+        String storagePath = fileStorage.toRelativeUploadPath(stored);
         String original = file.getOriginalFilename() == null ? stored.getFileName().toString() : file.getOriginalFilename();
         String ext = original.contains(".") ? original.substring(original.lastIndexOf('.') + 1) : null;
         if (ext != null && ext.length() > 8) {
@@ -404,12 +405,12 @@ public class HrMasterService {
                     UPDATE hr_resume_file
                     SET file_name = ?, storage_path = ?, file_ext = ?, update_by = ?, is_active = 1
                     WHERE application_id = ?
-                    """, original, stored.toString(), ext, user, applicationId);
+                    """, original, storagePath, ext, user, applicationId);
         } else {
             jdbc.update("""
                     INSERT INTO hr_resume_file (application_id, file_name, storage_path, file_ext, create_by, is_active)
                     VALUES (?, ?, ?, ?, ?, 1)
-                    """, applicationId, original, stored.toString(), ext, user);
+                    """, applicationId, original, storagePath, ext, user);
         }
     }
 
@@ -697,10 +698,19 @@ public class HrMasterService {
     }
 
     public Path resumeFile(Long applicationId) {
+        Path local = findLocalResumeFile(applicationId);
+        if (local != null) {
+            return local;
+        }
+        throw new BusinessException("简历文件不在服务器上");
+    }
+
+    /** 本地磁盘上的简历；本机连远程库时通常为空（文件在公网机器上） */
+    public Path findLocalResumeFile(Long applicationId) {
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "SELECT file_name, storage_path FROM hr_resume_file WHERE application_id = ? AND is_active = 1", applicationId);
         if (rows.isEmpty()) {
-            throw new BusinessException("没有简历文件");
+            return null;
         }
         String fileName = rows.get(0).get("file_name") == null ? null : String.valueOf(rows.get(0).get("file_name"));
         String stored = rows.get(0).get("storage_path") == null ? null : String.valueOf(rows.get(0).get("storage_path"));
@@ -720,22 +730,37 @@ public class HrMasterService {
         }
         Path root = hrFilesRoot();
         if (fileName == null || fileName.isBlank() || root == null) {
-            throw new BusinessException("简历文件不在服务器上");
+            return null;
         }
         try (var walk = Files.walk(root)) {
             Path found = walk.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().equals(fileName))
                     .findFirst().orElse(null);
             if (found == null) {
-                throw new BusinessException("简历文件不在服务器上");
+                return null;
             }
             jdbc.update("UPDATE hr_resume_file SET storage_path = ? WHERE application_id = ? AND is_active = 1",
-                    found.toString(), applicationId);
+                    fileStorage.toRelativeUploadPath(found), applicationId);
             return found;
-        } catch (BusinessException ex) {
-            throw ex;
         } catch (Exception ex) {
-            throw new BusinessException("简历文件不在服务器上");
+            return null;
         }
+    }
+
+    /** 公网可打开的简历地址（本地无文件时回退用） */
+    public String resumePublicUrl(Long applicationId) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT storage_path FROM hr_resume_file WHERE application_id = ? AND is_active = 1", applicationId);
+        if (rows.isEmpty() || rows.get(0).get("storage_path") == null) {
+            return null;
+        }
+        String url = fileStorage.toPublicUrl(String.valueOf(rows.get(0).get("storage_path")));
+        if (url == null || url.isBlank() || !url.contains("/uploads/")) {
+            return null;
+        }
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+        return null;
     }
 
     private static Path hrFilesRoot() {

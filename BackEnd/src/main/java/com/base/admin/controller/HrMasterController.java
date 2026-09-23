@@ -4,6 +4,7 @@ import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
+import com.base.admin.exception.BusinessException;
 import com.base.admin.domain.dto.HrSchoolQueryDTO;
 import com.base.admin.domain.vo.HrApplicationImportResultVO;
 import com.base.admin.domain.vo.HrDingTalkIdentityVO;
@@ -38,6 +39,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -53,8 +55,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -268,9 +272,17 @@ public class HrMasterController {
     @GetMapping("/application/{id}/resume")
     @RequiresPermission("hr:application:list")
     public ResponseEntity<Resource> resume(@PathVariable Long id) {
-        Path path = masterService.resumeFile(id);
-        String storedName = path.getFileName().toString();
+        Path path = masterService.findLocalResumeFile(id);
         String displayName = masterService.resumeDisplayName(id);
+        // 本地无文件（常见：本机后端连远程库）时跳转公网 uploads
+        if (path == null || !Files.isRegularFile(path)) {
+            String publicUrl = masterService.resumePublicUrl(id);
+            if (publicUrl != null && !publicUrl.isBlank()) {
+                return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(publicUrl)).build();
+            }
+            throw new BusinessException("简历文件不在服务器上");
+        }
+        String storedName = path.getFileName().toString();
         if (displayName == null || displayName.isBlank()) {
             displayName = storedName;
         }

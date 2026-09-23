@@ -190,7 +190,7 @@ public class FileStorageService {
         if (!StringUtils.hasText(raw)) {
             return null;
         }
-        String stored = raw.trim();
+        String stored = raw.trim().replace('\\', '/');
         if (stored.startsWith("http://") || stored.startsWith("https://")) {
             try {
                 URI uri = URI.create(stored);
@@ -210,10 +210,29 @@ public class FileStorageService {
         if (stored.startsWith("/api/uploads/")) {
             return stored.substring("/api".length());
         }
+        // 本机/服务器绝对路径：.../uploads/hr/resume/xxx.pdf → /uploads/hr/resume/xxx.pdf
+        int idx = stored.indexOf("/uploads/");
+        if (idx >= 0) {
+            return stored.substring(idx);
+        }
         if (!stored.startsWith("/")) {
             stored = "/" + stored;
         }
         return stored;
+    }
+
+    /** 绝对落盘路径 → 相对 /uploads/...，便于跨机器用公网地址打开 */
+    public String toRelativeUploadPath(Path absoluteFile) {
+        if (absoluteFile == null) {
+            return null;
+        }
+        Path abs = absoluteFile.toAbsolutePath().normalize();
+        Path root = Path.of(uploadDir).toAbsolutePath().normalize();
+        if (abs.startsWith(root)) {
+            String rel = root.relativize(abs).toString().replace('\\', '/');
+            return "/uploads/" + rel;
+        }
+        return normalizeStoragePath(abs.toString());
     }
 
     /** 给前端/下载用的公网绝对地址 */
@@ -245,10 +264,13 @@ public class FileStorageService {
                 return stored;
             }
         }
+        if (!stored.startsWith("/uploads/")) {
+            return storedOrPublic;
+        }
         String base = uploadPublicBase == null ? "" : uploadPublicBase.trim().replaceAll("/+$", "");
         if (!StringUtils.hasText(base)) {
             return stored.startsWith("/api/") ? stored : "/api" + (stored.startsWith("/") ? stored : "/" + stored);
         }
-        return base + (stored.startsWith("/") ? stored : "/" + stored);
+        return base + stored;
     }
 }

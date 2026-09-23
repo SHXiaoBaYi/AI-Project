@@ -13,8 +13,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -896,8 +903,10 @@ public class HrInviteService {
                 + "- **时间**：" + when + "\n";
         if (resume == null) {
             markdown += "\n简历：未上传\n";
-        } else {
+        } else if (resume.path() != null && Files.isRegularFile(resume.path())) {
             markdown += "\n简历：见下一条文件消息（" + resume.fileName() + "）\n";
+        } else {
+            markdown += "\n简历：" + resume.fileName() + "（已上传，请在系统中查看）\n";
         }
         Path resumePath = resume == null ? null : resume.path();
         String resumeName = resume == null ? null : resume.fileName();
@@ -917,12 +926,15 @@ public class HrInviteService {
                                             String organizerName) {
         String round = ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面");
         String organizer = StringUtils.hasText(organizerName) ? organizerName : currentOrganizerName();
+        String resumeLine = resume == null
+                ? "未上传（请联系招聘负责人）"
+                : resume.fileName();
         return "组织人：" + organizer
                 + "\n候选人：" + blank(person.get("candidate_name"))
                 + "\n岗位：" + blank(person.get("job_name"))
                 + "\n轮次：" + round
                 + "\n时间：" + formatInterviewAt(dto.getInterviewAt())
-                + "\n简历：" + (resume == null ? "未上传（请联系招聘负责人）" : resume.fileName());
+                + "\n简历：" + resumeLine;
     }
 
     private static String formatInterviewAt(LocalDateTime at) {
@@ -957,12 +969,69 @@ public class HrInviteService {
                 return null;
             }
             String fileName = rs.getString("file_name");
-            Path path = fileStorage.resolveUploadPath(rs.getString("storage_path"));
-            if (path == null || !Files.isRegularFile(path)) {
+            String storagePath = rs.getString("storage_path");
+            String displayName = StringUtils.hasText(fileName) ? fileName.trim() : null;
+            Path path = fileStorage.resolveUploadPath(storagePath);
+            if (path != null && Files.isRegularFile(path)) {
+                if (displayName == null) {
+                    displayName = path.getFileName().toString();
+                }
+                return new ResumeFile(displayName, path);
+            }
+            // 本机无文件时（连远程库）从公网 uploads 拉临时文件，供钉钉附件发送
+            Path downloaded = downloadResumeFromPublic(storagePath, displayName);
+            if (downloaded != null) {
+                if (displayName == null) {
+                    displayName = downloaded.getFileName().toString();
+                }
+                return new ResumeFile(displayName, downloaded);
+            }
+            // 库里有简历记录：文案不能写成「未上传」
+            if (displayName != null || StringUtils.hasText(storagePath)) {
+                return new ResumeFile(displayName != null ? displayName : "已上传简历", null);
+            }
+            return null;
+        }, applicationId);
+    }
+
+    private Path downloadResumeFromPublic(String storagePath, String fileName) {
+        String publicUrl = fileStorage.toPublicUrl(storagePath);
+        if (!StringUtils.hasText(publicUrl) || !publicUrl.startsWith("http")) {
+            return null;
+        }
+        try {
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(publicUrl))
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
+            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() >= 300) {
                 return null;
             }
-            return new ResumeFile(fileName == null || fileName.isBlank() ? path.getFileName().toString() : fileName, path);
-        }, applicationId);
+            String suffix = ".bin";
+            String name = StringUtils.hasText(fileName) ? fileName : storagePath;
+            int dot = name == null ? -1 : name.lastIndexOf('.');
+            if (dot >= 0 && dot < name.length() - 1) {
+                suffix = name.substring(dot);
+                if (suffix.length() > 16) {
+                    suffix = ".bin";
+                }
+            }
+            Path temp = Files.createTempFile("hr-resume-", suffix);
+            try (InputStream in = response.body()) {
+                Files.copy(in, temp, StandardCopyOption.REPLACE_EXISTING);
+            }
+            if (Files.size(temp) <= 0) {
+                Files.deleteIfExists(temp);
+                return null;
+            }
+            temp.toFile().deleteOnExit();
+            return temp;
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     private long insertInvite(HrInviteCreateDTO dto, int duration) {
