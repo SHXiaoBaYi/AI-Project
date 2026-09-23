@@ -33,7 +33,7 @@ export default function TableModal<T = Record<string, any>, ValueType = 'text'>(
   const adaptedColumns = useMemo(() => {
     if (!Array.isArray(callerColumns)) return callerColumns;
     return callerColumns
-      .filter((col: any) => col.valueType !== 'option')
+      .filter((col: any) => col.valueType !== 'option' && col.hideInForm !== true)
       .map(({ render: _, ...restCol }: any) => restCol);
   }, [callerColumns]);
 

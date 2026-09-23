@@ -156,7 +156,7 @@ function mapRow(raw: Record<string, unknown>): RecordRow {
   const comment = textOf(raw.comment);
   const interviewerName = textOf(raw.interviewer_name);
   const interviewedAt =
-    raw.interviewed_at == null ? undefined : String(raw.interviewed_at).replace('T', ' ').slice(0, 19);
+    raw.interviewed_at == null ? undefined : String(raw.interviewed_at).replace('T', ' ').slice(0, 16);
   const interviewerUserId = Number(raw.interviewer_user_id);
   const id = Number(raw.id);
   return {
@@ -266,6 +266,7 @@ const RecordPage = memo(function RecordPage() {
   const [verdictForm] = Form.useForm();
   const [candidates, setCandidates] = useState<InviteCandidateOption[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
+  const [jobOptions, setJobOptions] = useState<{ value: string; label: string }[]>([]);
   const [failReasons, setFailReasons] = useState<{ value: string; label: string }[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
   const [plans, setPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
@@ -287,6 +288,7 @@ const RecordPage = memo(function RecordPage() {
     });
     getHrRequisitionsApi().then((rows) => {
       const next = new Map<number, Map<number, number[]>>();
+      const jobs = new Set<string>();
       rows.forEach((row) => {
         const rounds = new Map<number, number[]>();
         String(row.interview_rounds ?? '')
@@ -297,8 +299,11 @@ const RecordPage = memo(function RecordPage() {
             rounds.set(Number(round), (ids ?? '').split('|').filter(Boolean).map(Number));
           });
         next.set(Number(row.id), rounds);
+        const name = String(row.job_name ?? '').trim();
+        if (name) jobs.add(name);
       });
       setPlans(next);
+      setJobOptions([...jobs].sort().map((name) => ({ value: name, label: name })));
     });
     getHrUsersApi().then((list) =>
       setUsers(
@@ -369,10 +374,26 @@ const RecordPage = memo(function RecordPage() {
         ),
       },
       {
+        title: '岗位',
+        dataIndex: 'jobName',
+        valueType: 'select',
+        hideInForm: true,
+        fieldProps: { options: jobOptions, showSearch: true, optionFilterProp: 'label', allowClear: true },
+      },
+      {
         title: '候选人',
         dataIndex: 'applicationId',
         valueType: 'select',
-        fieldProps: { options: candidates, showSearch: true, optionFilterProp: 'label' },
+        hideInForm: true,
+        fieldProps: { options: candidates, showSearch: true, optionFilterProp: 'label', allowClear: true },
+        render: (_, record) => record.displayName,
+      },
+      {
+        title: '候选人',
+        dataIndex: 'applicationId',
+        hideInTable: true,
+        hideInSearch: true,
+        search: false,
         formItemProps: {
           rules: [{ required: true, message: '请选择候选人' }],
           extra: '仅展示阶段可邀约的候选人；选中后自动带出轮次与面试官，可再改',
@@ -384,13 +405,6 @@ const RecordPage = memo(function RecordPage() {
             autoRound={!editing}
           />
         ),
-        render: (_, record) => record.displayName,
-      },
-      {
-        title: '岗位',
-        dataIndex: 'jobName',
-        search: false,
-        hideInForm: true,
       },
       {
         title: '简历',
@@ -408,6 +422,7 @@ const RecordPage = memo(function RecordPage() {
         title: '轮次',
         dataIndex: 'roundNo',
         valueType: 'select',
+        search: false,
         fieldProps: { options: ROUNDS },
         formItemProps: { rules: [{ required: true, message: '请选择轮次' }] },
         render: (_, record) => ROUNDS.find((item) => item.value === record.roundNo)?.label,
@@ -417,7 +432,7 @@ const RecordPage = memo(function RecordPage() {
         dataIndex: 'interviewerUserId',
         valueType: 'select',
         hideInForm: true,
-        fieldProps: { options: users, showSearch: true, optionFilterProp: 'label' },
+        fieldProps: { options: users, showSearch: true, optionFilterProp: 'label', allowClear: true },
         render: (_, record) => record.interviewerName,
       },
       {
@@ -425,6 +440,7 @@ const RecordPage = memo(function RecordPage() {
         dataIndex: 'interviewerUserIds',
         hideInTable: true,
         hideInSearch: true,
+        search: false,
         hideInForm: false,
         colProps: { span: 24 },
         formItemProps: { rules: [{ required: true, message: '请选择面试官' }] },
@@ -452,11 +468,43 @@ const RecordPage = memo(function RecordPage() {
             : conclusionLabel(record.conclusion),
       },
       {
-        title: '未通过原因',
+        title: '面试时间',
+        dataIndex: 'interviewedAt',
+        valueType: 'dateTime',
+        search: false,
+        fieldProps: {
+          format: 'YYYY-MM-DD HH:mm',
+          showTime: { format: 'HH:mm', showSecond: false },
+        },
+        render: (_, record) => record.interviewedAt || '—',
+      },
+      {
+        title: '面试时间',
+        dataIndex: 'interviewTimeRange',
+        valueType: 'dateRange',
+        hideInTable: true,
+        hideInForm: true,
+        fieldProps: { allowClear: true },
+      },
+      {
+        title: '面试结果',
+        dataIndex: 'interviewResult',
+        valueType: 'select',
+        hideInTable: true,
+        hideInForm: true,
+        fieldProps: {
+          options: [
+            { value: 'PASS', label: '通过' },
+            { value: 'FAIL', label: '未通过' },
+          ],
+          allowClear: true,
+        },
+      },
+      {
+        title: '面试未通过原因',
         dataIndex: 'failReason',
         valueType: 'select',
-        search: false,
-        fieldProps: { options: failReasons, showSearch: true, optionFilterProp: 'label' },
+        fieldProps: { options: failReasons, showSearch: true, optionFilterProp: 'label', allowClear: true },
         formItemProps: {
           rules: [
             ({ getFieldValue }) => ({
@@ -511,14 +559,20 @@ const RecordPage = memo(function RecordPage() {
           );
         },
       },
-      {
-        title: '面试时间',
-        dataIndex: 'interviewedAt',
-        valueType: 'dateTime',
-        search: false,
-      },
     ],
-    [appReq, candidates, editing, failReasons, formCandidates, fromInvite, message, plans, users, verdictForm],
+    [
+      appReq,
+      candidates,
+      editing,
+      failReasons,
+      formCandidates,
+      fromInvite,
+      jobOptions,
+      message,
+      plans,
+      users,
+      verdictForm,
+    ],
   );
 
   return (
@@ -529,13 +583,36 @@ const RecordPage = memo(function RecordPage() {
         columns={columns}
         headerTitle='面试记录'
         request={async (params) => {
-          const rows = await listHrInterviewRecordsApi({
-            roundNo: params.roundNo,
-          });
+          const rows = await listHrInterviewRecordsApi({});
           const grouped = groupRecords(rows.map(mapRow)).filter((row) => {
+            if (params.jobName && row.jobName !== String(params.jobName)) return false;
             if (params.applicationId && row.applicationId !== Number(params.applicationId)) return false;
             if (params.interviewerUserId && !row.interviewerUserIds.includes(Number(params.interviewerUserId))) {
               return false;
+            }
+            if (params.interviewResult) {
+              const result = String(params.interviewResult);
+              const hit =
+                row.conclusion === result ||
+                row.verdictConclusion === result ||
+                row.members.some((member) => member.conclusion === result);
+              if (!hit) return false;
+            }
+            if (params.failReason) {
+              const reason = String(params.failReason);
+              const hit =
+                row.failReason === reason ||
+                row.verdictFailReason === reason ||
+                row.members.some((member) => member.failReason === reason);
+              if (!hit) return false;
+            }
+            const range = params.interviewTimeRange as [string, string] | undefined;
+            if (range?.[0] && range?.[1]) {
+              if (!row.interviewedAt) return false;
+              const at = dayjs(row.interviewedAt);
+              const start = dayjs(range[0]).startOf('day');
+              const end = dayjs(range[1]).endOf('day');
+              if (at.isBefore(start) || at.isAfter(end)) return false;
             }
             return true;
           });

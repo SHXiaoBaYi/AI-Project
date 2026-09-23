@@ -228,7 +228,7 @@ function mapRow(raw: Record<string, unknown>): InviteRow {
     interviewerName: textOf(raw.interviewer_name),
     ccUserIds,
     ccNames: textOf(raw.cc_names),
-    interviewAt: raw.interview_at == null ? undefined : String(raw.interview_at).replace('T', ' ').slice(0, 19),
+    interviewAt: raw.interview_at == null ? undefined : String(raw.interview_at).replace('T', ' ').slice(0, 16),
     durationMin: raw.duration_min == null ? 60 : Number(raw.duration_min),
     location: textOf(raw.location),
     status,
@@ -293,6 +293,7 @@ const InvitePage = memo(function InvitePage() {
   const [editing, setEditing] = useState<InviteRow | null>(null);
   const [candidates, setCandidates] = useState<InviteCandidateOption[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
+  const [jobOptions, setJobOptions] = useState<{ value: string; label: string }[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
   const [plans, setPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
   const [ccPlans, setCcPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
@@ -324,12 +325,16 @@ const InvitePage = memo(function InvitePage() {
           });
         return rounds;
       };
+      const jobs = new Set<string>();
       rows.forEach((row) => {
         nextInterviewers.set(Number(row.id), parseRounds(row.interview_rounds));
         nextCcs.set(Number(row.id), parseRounds(row.interview_round_ccs));
+        const name = String(row.job_name ?? '').trim();
+        if (name) jobs.add(name);
       });
       setPlans(nextInterviewers);
       setCcPlans(nextCcs);
+      setJobOptions([...jobs].sort().map((name) => ({ value: name, label: name })));
     });
     getHrUsersApi().then((list) =>
       setUsers(
@@ -399,10 +404,26 @@ const InvitePage = memo(function InvitePage() {
         ),
       },
       {
+        title: '岗位',
+        dataIndex: 'jobName',
+        valueType: 'select',
+        hideInForm: true,
+        fieldProps: { options: jobOptions, showSearch: true, optionFilterProp: 'label', allowClear: true },
+      },
+      {
         title: '候选人',
         dataIndex: 'applicationId',
         valueType: 'select',
-        fieldProps: { options: candidates, showSearch: true, optionFilterProp: 'label' },
+        hideInForm: true,
+        fieldProps: { options: candidates, showSearch: true, optionFilterProp: 'label', allowClear: true },
+        render: (_, record) => record.displayName,
+      },
+      {
+        title: '候选人',
+        dataIndex: 'applicationId',
+        hideInTable: true,
+        hideInSearch: true,
+        search: false,
         formItemProps: {
           rules: [{ required: true, message: '请选择候选人' }],
           extra: '仅展示阶段可邀约的候选人；选中后自动带出轮次、面试官与抄送人，可再改',
@@ -414,13 +435,6 @@ const InvitePage = memo(function InvitePage() {
             autoRound={!editing}
           />
         ),
-        render: (_, record) => record.displayName,
-      },
-      {
-        title: '岗位',
-        dataIndex: 'jobName',
-        search: false,
-        hideInForm: true,
       },
       {
         title: '简历',
@@ -438,6 +452,7 @@ const InvitePage = memo(function InvitePage() {
         title: '轮次',
         dataIndex: 'roundNo',
         valueType: 'select',
+        search: false,
         fieldProps: { options: ROUNDS },
         formItemProps: { rules: [{ required: true, message: '请选择轮次' }] },
         render: (_, record) => ROUNDS.find((item) => item.value === record.roundNo)?.label,
@@ -447,7 +462,7 @@ const InvitePage = memo(function InvitePage() {
         dataIndex: 'interviewerUserId',
         valueType: 'select',
         hideInForm: true,
-        fieldProps: { options: users, showSearch: true, optionFilterProp: 'label' },
+        fieldProps: { options: users, showSearch: true, optionFilterProp: 'label', allowClear: true },
         render: (_, record) => record.interviewerName,
       },
       {
@@ -463,6 +478,7 @@ const InvitePage = memo(function InvitePage() {
         dataIndex: 'interviewerUserIds',
         hideInTable: true,
         hideInSearch: true,
+        search: false,
         hideInForm: false,
         colProps: { span: 24 },
         formItemProps: { rules: [{ required: true, message: '请选择面试官' }] },
@@ -480,6 +496,7 @@ const InvitePage = memo(function InvitePage() {
         dataIndex: 'ccUserIds',
         hideInTable: true,
         hideInSearch: true,
+        search: false,
         hideInForm: false,
         colProps: { span: 24 },
         formItemRender: () => (
@@ -511,6 +528,15 @@ const InvitePage = memo(function InvitePage() {
           extra: `每天 09:30～17:30，半小时一档；不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`,
           rules: [{ required: true, validator: validateInterviewAt }],
         },
+        render: (_, record) => record.interviewAt || '—',
+      },
+      {
+        title: '邀约时间',
+        dataIndex: 'inviteTimeRange',
+        valueType: 'dateRange',
+        hideInTable: true,
+        hideInForm: true,
+        fieldProps: { allowClear: true },
       },
       {
         title: '时长',
@@ -525,7 +551,7 @@ const InvitePage = memo(function InvitePage() {
         search: false,
       },
       {
-        title: '状态',
+        title: '邀约状态',
         dataIndex: 'status',
         valueType: 'select',
         hideInForm: true,
@@ -547,7 +573,7 @@ const InvitePage = memo(function InvitePage() {
         ellipsis: true,
       },
     ],
-    [appReq, candidates, ccPlans, editing, formCandidates, message, plans, users],
+    [appReq, candidates, ccPlans, editing, formCandidates, jobOptions, message, plans, users],
   );
 
   return (
@@ -558,11 +584,11 @@ const InvitePage = memo(function InvitePage() {
         columns={columns}
         headerTitle='面试邀约记录'
         request={async (params) => {
-          const rows = await listHrInvitesApi({
-            candidateName: params.displayName,
-            roundNo: params.roundNo,
-          });
+          const rows = await listHrInvitesApi({});
           let grouped = groupSessions(rows.map(mapRow));
+          if (params.jobName) {
+            grouped = grouped.filter((row) => row.jobName === String(params.jobName));
+          }
           if (params.applicationId) {
             grouped = grouped.filter((row) => row.applicationId === Number(params.applicationId));
           }
@@ -571,6 +597,16 @@ const InvitePage = memo(function InvitePage() {
           }
           if (params.status) {
             grouped = grouped.filter((row) => row.memberStatuses.includes(String(params.status)));
+          }
+          const range = params.inviteTimeRange as [string, string] | undefined;
+          if (range?.[0] && range?.[1]) {
+            const start = dayjs(range[0]).startOf('day');
+            const end = dayjs(range[1]).endOf('day');
+            grouped = grouped.filter((row) => {
+              if (!row.interviewAt) return false;
+              const at = dayjs(row.interviewAt);
+              return !at.isBefore(start) && !at.isAfter(end);
+            });
           }
           groupedRef.current = grouped;
           const pageSize = params.pageSize || 10;

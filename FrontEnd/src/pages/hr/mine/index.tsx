@@ -166,7 +166,7 @@ const MinePage = memo(function MinePage() {
             {
               title: '时间',
               dataIndex: 'interview_at',
-              render: (value: string) => (value ? String(value).replace('T', ' ').slice(0, 19) : '—'),
+              render: (value: string) => (value ? String(value).replace('T', ' ').slice(0, 16) : '—'),
             },
             { title: '地点', dataIndex: 'location' },
             {

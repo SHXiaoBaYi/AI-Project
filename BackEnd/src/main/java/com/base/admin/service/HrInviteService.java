@@ -876,7 +876,8 @@ public class HrInviteService {
                 + "- **候选人**：" + blank(person.get("candidate_name")) + "\n"
                 + "- **岗位**：" + blank(person.get("job_name")) + "\n"
                 + "- **轮次**：" + round + "\n"
-                + "- **时间**：" + when + "\n";
+                + "- **时间**：" + when + "\n"
+                + "- **组织人**：" + currentOrganizerName() + "\n";
         if (resume == null) {
             markdown += "\n简历：未上传\n";
         } else {
@@ -902,7 +903,19 @@ public class HrInviteService {
                 + "\n岗位：" + blank(person.get("job_name"))
                 + "\n轮次：" + round
                 + "\n时间：" + (dto.getInterviewAt() == null ? "-" : dto.getInterviewAt().toString().replace('T', ' '))
+                + "\n组织人：" + currentOrganizerName()
                 + "\n简历：" + (resume == null ? "未上传（请联系招聘负责人）" : resume.fileName());
+    }
+
+    /** 组织人 = 当前登录用户（昵称优先，否则用户名） */
+    private String currentOrganizerName() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            return SecurityUtils.getCurrentUsername();
+        }
+        String name = jdbc.query("SELECT COALESCE(NULLIF(nickname, ''), username) FROM sys_user WHERE user_id = ?",
+                rs -> rs.next() ? rs.getString(1) : null, userId);
+        return name == null || name.isBlank() ? SecurityUtils.getCurrentUsername() : name;
     }
 
     private ResumeFile loadResume(Long applicationId) {
