@@ -33,7 +33,12 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(authenticationEntryPoint))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/login", "/auth/dingtalk/config", "/auth/dingtalk/login").permitAll()
+                        .requestMatchers(
+                                "/auth/login",
+                                "/auth/login-options",
+                                "/auth/dingtalk/config",
+                                "/auth/dingtalk/login")
+                        .permitAll()
                         .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated()

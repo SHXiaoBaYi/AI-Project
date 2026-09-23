@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { dingTalkLoginApi, getUserInfoApi, logoutApi } from '@/api/auth';
+import { dingTalkLoginApi, loginApi, getUserInfoApi, logoutApi } from '@/api/auth';
 import { getToken, setToken, removeToken } from '@/utils/auth';
 import type { UserInfo } from '@/types/user';
 import type { MenuTree } from '@/types/menu';
@@ -22,6 +22,26 @@ const initialState: UserState = {
   permissions: [],
   menus: [],
 };
+
+export const login = createAsyncThunk(
+  'user/login',
+  async (
+    { username, password, force = false }: { username: string; password: string; force?: boolean },
+    { rejectWithValue },
+  ) => {
+    try {
+      const res = await loginApi(username, password, force);
+      setToken(res.token);
+      return res.token;
+    } catch (err) {
+      const e = err as Error & { code?: number };
+      return rejectWithValue({
+        code: e.code,
+        message: e.message || '登录失败',
+      } satisfies LoginRejectPayload);
+    }
+  },
+);
 
 export const loginByDingTalk = createAsyncThunk(
   'user/loginByDingTalk',
@@ -69,6 +89,9 @@ const userSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(login.fulfilled, (state, action) => {
+        state.token = action.payload;
+      })
       .addCase(loginByDingTalk.fulfilled, (state, action) => {
         state.token = action.payload;
       })

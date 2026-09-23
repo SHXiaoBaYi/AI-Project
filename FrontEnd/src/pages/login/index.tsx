@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card, Modal, Spin } from 'antd';
-import { ExclamationCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Card, Divider, Form, Input, Modal, Spin } from 'antd';
+import { ExclamationCircleOutlined, LockOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons';
 import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { getDingTalkLoginConfigApi, type DingTalkLoginConfig } from '@/api/auth';
+import { getLoginOptionsApi, type LoginOptions } from '@/api/auth';
 import { CODE_LOGIN_CONFLICT } from '@/api/request';
-import { getInfo, loginByDingTalk } from '@/store/slices/userSlice';
+import { getInfo, login, loginByDingTalk } from '@/store/slices/userSlice';
 import { message } from '@/store/slices/staticFunctionSlice';
 import type { AppDispatch } from '@/store';
 import loginBg from '@/assets/login-bg.png';
@@ -55,10 +55,12 @@ function loadDingTalkScript() {
 export default function Login() {
   const [loading, setLoading] = useState(false);
   const [configLoading, setConfigLoading] = useState(true);
-  const [config, setConfig] = useState<DingTalkLoginConfig | null>(null);
+  const [options, setOptions] = useState<LoginOptions | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [qrError, setQrError] = useState('');
   const [qrKey, setQrKey] = useState(0);
   const loggingRef = useRef(false);
+  const [form] = Form.useForm();
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
 
@@ -70,35 +72,43 @@ export default function Login() {
     }
   }, []);
 
-  const completeLogin = useCallback(
+  const afterToken = useCallback(async () => {
+    await dispatch(getInfo()).unwrap();
+    message.success('登录成功!');
+    navigate('/', { replace: true });
+  }, [dispatch, navigate]);
+
+  const handleConflict = useCallback((retry: () => Promise<void>) => {
+    Modal.confirm({
+      title: '账号登录提示',
+      icon: <ExclamationCircleOutlined />,
+      content: '该账号已在其他设备登录，是否强制对方下线？',
+      okText: '强制下线',
+      cancelText: '取消',
+      centered: true,
+      onOk: async () => {
+        loggingRef.current = false;
+        await retry();
+      },
+      onCancel: () => {
+        loggingRef.current = false;
+        setQrKey((k) => k + 1);
+      },
+    });
+  }, []);
+
+  const completeDingLogin = useCallback(
     async (authCode: string, force = false) => {
       if (loggingRef.current) return;
       loggingRef.current = true;
       setLoading(true);
       try {
         await dispatch(loginByDingTalk({ authCode, force })).unwrap();
-        await dispatch(getInfo()).unwrap();
-        message.success('登录成功!');
-        navigate('/', { replace: true });
+        await afterToken();
       } catch (err) {
         const code = Number((err as { code?: number | string })?.code);
         if (code === CODE_LOGIN_CONFLICT) {
-          Modal.confirm({
-            title: '账号登录提示',
-            icon: <ExclamationCircleOutlined />,
-            content: '该账号已在其他设备登录，是否强制对方下线？',
-            okText: '强制下线',
-            cancelText: '取消',
-            centered: true,
-            onOk: async () => {
-              loggingRef.current = false;
-              await completeLogin(authCode, true);
-            },
-            onCancel: () => {
-              loggingRef.current = false;
-              setQrKey((k) => k + 1);
-            },
-          });
+          handleConflict(() => completeDingLogin(authCode, true));
           return;
         }
         loggingRef.current = false;
@@ -107,7 +117,29 @@ export default function Login() {
         setLoading(false);
       }
     },
-    [dispatch, navigate],
+    [afterToken, dispatch, handleConflict],
+  );
+
+  const completePasswordLogin = useCallback(
+    async (username: string, password: string, force = false) => {
+      if (loggingRef.current) return;
+      loggingRef.current = true;
+      setLoading(true);
+      try {
+        await dispatch(login({ username, password, force })).unwrap();
+        await afterToken();
+      } catch (err) {
+        const code = Number((err as { code?: number | string })?.code);
+        if (code === CODE_LOGIN_CONFLICT) {
+          handleConflict(() => completePasswordLogin(username, password, true));
+          return;
+        }
+        loggingRef.current = false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [afterToken, dispatch, handleConflict],
   );
 
   useEffect(() => {
@@ -115,14 +147,14 @@ export default function Login() {
     (async () => {
       setConfigLoading(true);
       try {
-        const data = await getDingTalkLoginConfigApi();
-        if (!cancelled) setConfig(data);
+        const data = await getLoginOptionsApi();
+        if (!cancelled) setOptions(data);
       } catch {
         if (!cancelled) {
-          setConfig({
-            enabled: 0,
-            clientId: '',
-            message: '无法获取钉钉登录配置',
+          setOptions({
+            passwordLoginEnabled: false,
+            dingTalkEnabled: false,
+            message: '无法获取登录配置',
           });
         }
       } finally {
@@ -139,12 +171,12 @@ export default function Login() {
     const authCode = params.get('authCode') || params.get('code');
     if (authCode) {
       window.history.replaceState({}, '', window.location.pathname);
-      void completeLogin(authCode);
+      void completeDingLogin(authCode);
     }
-  }, [completeLogin]);
+  }, [completeDingLogin]);
 
   useEffect(() => {
-    if (!config || config.enabled !== 1 || !config.clientId || loading) return;
+    if (!options?.dingTalkEnabled || !options.clientId || loading) return;
     let cancelled = false;
     (async () => {
       setQrError('');
@@ -155,22 +187,22 @@ export default function Login() {
         if (box) box.innerHTML = '';
         const loginParams: Record<string, string> = {
           redirect_uri: encodeURIComponent(loginRedirectUri()),
-          client_id: config.clientId,
+          client_id: options.clientId!,
           scope: 'openid',
           response_type: 'code',
           prompt: 'consent',
           state: `xby_${Date.now()}`,
         };
-        if (config.exclusiveLogin && config.corpId) {
+        if (options.exclusiveLogin && options.corpId) {
           loginParams.exclusiveLogin = 'true';
-          loginParams.exclusiveCorpId = config.corpId;
+          loginParams.exclusiveCorpId = options.corpId;
         }
         window.DTFrameLogin(
           { id: QR_BOX_ID, width: 300, height: 300 },
           loginParams,
           (result) => {
             if (result?.authCode) {
-              void completeLogin(result.authCode);
+              void completeDingLogin(result.authCode);
             } else {
               setQrError('未获取到授权码，请刷新二维码重试');
             }
@@ -186,9 +218,10 @@ export default function Login() {
     return () => {
       cancelled = true;
     };
-  }, [completeLogin, config, loading, qrKey]);
+  }, [completeDingLogin, loading, options, qrKey]);
 
-  const enabled = config?.enabled === 1 && !!config.clientId;
+  const dingEnabled = !!options?.dingTalkEnabled && !!options.clientId;
+  const passwordEnabled = !!options?.passwordLoginEnabled;
 
   return (
     <div
@@ -234,11 +267,11 @@ export default function Login() {
             <span className='text-2xl font-bold text-white'>小</span>
           </div>
           <h1 className='text-2xl font-bold tracking-tight text-gray-800'>小巴依(上海)</h1>
-          <p className='mt-1.5 text-sm text-gray-400'>请使用钉钉扫码登录</p>
+          <p className='mt-1.5 text-sm text-gray-400'>{options?.message || '请使用钉钉扫码登录'}</p>
         </div>
 
         <Spin spinning={configLoading || loading}>
-          {enabled ? (
+          {dingEnabled ? (
             <div className='flex flex-col items-center gap-3'>
               <div
                 id={QR_BOX_ID}
@@ -256,13 +289,72 @@ export default function Login() {
               >
                 刷新二维码
               </Button>
-              <p className='text-center text-xs text-gray-400'>使用企业钉钉扫码；未绑定系统账号将无法登录</p>
+              <p className='text-center text-xs text-gray-400'>使用企业钉钉扫码；首次扫码将自动注册为普通账号</p>
             </div>
-          ) : (
+          ) : !passwordEnabled ? (
             <div className='rounded-lg bg-amber-50 px-4 py-6 text-center text-sm text-amber-800'>
-              {config?.message || '钉钉扫码登录未配置，请联系管理员'}
+              {options?.message || '钉钉扫码登录未配置，请联系管理员'}
             </div>
-          )}
+          ) : null}
+
+          {passwordEnabled ? (
+            <div className='mt-2'>
+              {dingEnabled ? (
+                <>
+                  <Divider plain>
+                    <Button
+                      type='link'
+                      size='small'
+                      onClick={() => setShowPassword((v) => !v)}
+                    >
+                      {showPassword ? '收起账号密码' : '本机账号密码登录'}
+                    </Button>
+                  </Divider>
+                </>
+              ) : (
+                <p className='mb-3 text-center text-xs text-gray-400'>本机调试：账号密码登录</p>
+              )}
+              {(showPassword || !dingEnabled) && (
+                <Form
+                  form={form}
+                  size='large'
+                  onFinish={(values) => void completePasswordLogin(values.username, values.password)}
+                >
+                  <Form.Item
+                    name='username'
+                    rules={[{ required: true, message: '请输入用户名' }]}
+                  >
+                    <Input
+                      prefix={<UserOutlined className='text-gray-400' />}
+                      placeholder='用户名'
+                      className='rounded-lg!'
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name='password'
+                    rules={[{ required: true, message: '请输入密码' }]}
+                  >
+                    <Input.Password
+                      prefix={<LockOutlined className='text-gray-400' />}
+                      placeholder='密码'
+                      className='rounded-lg!'
+                    />
+                  </Form.Item>
+                  <Form.Item className='mb-0!'>
+                    <Button
+                      type='primary'
+                      htmlType='submit'
+                      loading={loading}
+                      block
+                      className='h-11! rounded-lg!'
+                    >
+                      登 录
+                    </Button>
+                  </Form.Item>
+                </Form>
+              )}
+            </div>
+          ) : null}
         </Spin>
       </Card>
     </div>

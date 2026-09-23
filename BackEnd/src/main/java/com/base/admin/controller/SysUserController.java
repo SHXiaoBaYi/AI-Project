@@ -1,6 +1,5 @@
 package com.base.admin.controller;
 
-import com.alibaba.excel.EasyExcel;
 import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
@@ -8,11 +7,11 @@ import com.base.admin.common.Result;
 import com.base.admin.domain.dto.ChangeStatusDTO;
 import com.base.admin.domain.dto.ResetPwdDTO;
 import com.base.admin.domain.dto.UserDTO;
-import com.base.admin.domain.dto.UserExcelRowDTO;
 import com.base.admin.domain.dto.UserPageQueryDTO;
 import com.base.admin.domain.dto.UserRoleDTO;
 import com.base.admin.domain.vo.UserImportResultVO;
 import com.base.admin.domain.vo.UserVO;
+import com.base.admin.exception.BusinessException;
 import com.base.admin.service.SysUserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,11 +22,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-@Tag(name = "用户管理", description = "系统用户增删改查及导入导出接口")
+@Tag(name = "用户管理", description = "系统用户查询、编辑与角色分配（新增/删除/导入导出/重置密码已关闭，新用户走钉钉扫码注册）")
 @RestController
 @RequestMapping("/system/user")
 @RequiredArgsConstructor
@@ -49,7 +46,7 @@ public class SysUserController {
         return Result.ok(userService.getById(userId));
     }
 
-    @Operation(summary = "新增用户")
+    @Operation(summary = "新增用户（已关闭）")
     @PostMapping
     @RequiresPermission("system:user:add")
     @Log(title = "用户管理", businessType = 1)
@@ -67,7 +64,7 @@ public class SysUserController {
         return Result.ok();
     }
 
-    @Operation(summary = "删除用户")
+    @Operation(summary = "删除用户（已关闭）")
     @DeleteMapping("/{userId}")
     @RequiresPermission("system:user:delete")
     @Log(title = "用户管理", businessType = 3)
@@ -76,7 +73,7 @@ public class SysUserController {
         return Result.ok();
     }
 
-    @Operation(summary = "批量删除用户")
+    @Operation(summary = "批量删除用户（已关闭）")
     @DeleteMapping("/batch")
     @RequiresPermission("system:user:delete")
     @Log(title = "用户管理-批量删除", businessType = 3)
@@ -85,7 +82,7 @@ public class SysUserController {
         return Result.ok();
     }
 
-    @Operation(summary = "重置用户密码")
+    @Operation(summary = "重置用户密码（已关闭）")
     @PutMapping("/resetPwd")
     @RequiresPermission("system:user:resetPwd")
     @Log(title = "用户管理-重置密码", businessType = 2)
@@ -111,7 +108,7 @@ public class SysUserController {
         return Result.ok();
     }
 
-    @Operation(summary = "批量导入用户")
+    @Operation(summary = "批量导入用户（已关闭）")
     @PostMapping("/import")
     @RequiresPermission("system:user:import")
     @Log(title = "用户管理-批量导入", businessType = 1)
@@ -119,7 +116,7 @@ public class SysUserController {
         return Result.ok(userService.importUsers(file));
     }
 
-    @Operation(summary = "批量导出用户")
+    @Operation(summary = "批量导出用户（已关闭）")
     @PostMapping("/export")
     @RequiresPermission("system:user:export")
     @Log(title = "用户管理-批量导出", businessType = 4)
@@ -127,40 +124,10 @@ public class SysUserController {
         userService.exportUsers(ids, response);
     }
 
-    @Operation(summary = "下载用户导入模板")
+    @Operation(summary = "下载用户导入模板（已关闭）")
     @GetMapping("/import/template")
     @RequiresPermission("system:user:import")
-    public void downloadTemplate(HttpServletResponse response) throws IOException {
-        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        String filename = URLEncoder.encode("用户导入模板.xlsx", StandardCharsets.UTF_8);
-        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + filename);
-
-        // 示例数据行
-        UserExcelRowDTO example = new UserExcelRowDTO();
-        example.setUsername("zhangsan");
-        example.setPassword("123456");
-        example.setNickname("张三");
-        example.setEmail("zhangsan@example.com");
-        example.setPhone("13800138000");
-        example.setGender("男");
-        example.setStatus("启用");
-
-        // 填写说明数据（不含表头，表头由 head() 指定）
-        List<List<String>> instructions = List.of(
-                List.of("用户名", "是", "字母、数字、下划线，不能以数字开头", "zhangsan"),
-                List.of("密码", "是", "不少于6位", "123456"),
-                List.of("昵称", "否", "任意文本", "张三"),
-                List.of("邮箱", "否", "标准邮箱格式，如 xxx@domain.com", "zhangsan@example.com"),
-                List.of("手机号", "否", "11位中国大陆手机号，1开头", "13800138000"),
-                List.of("性别", "否", "填写：男 / 女，或 1 / 2，不填默认 0", "男"),
-                List.of("账户状态", "否", "填写：启用 / 停用，或 0 / 1，不填默认 0", "启用")
-        );
-
-        com.alibaba.excel.ExcelWriter writer = EasyExcel.write(response.getOutputStream(), UserExcelRowDTO.class).build();
-        writer.write(List.of(example), EasyExcel.writerSheet(0, "用户导入模板").build());
-        List<List<String>> head = List.of(
-                List.of("字段"), List.of("必填"), List.of("填写规则"), List.of("示例"));
-        writer.write(instructions, EasyExcel.writerSheet(1, "填写说明").head(head).build());
-        writer.finish();
+    public void downloadTemplate() {
+        throw new BusinessException("已关闭批量导入用户，请通过钉钉扫码登录自动注册");
     }
 }

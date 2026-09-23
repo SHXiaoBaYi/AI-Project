@@ -80,6 +80,9 @@ public class Constants {
     /** 分配回写字段：撰写人 */
     public static final String TASK_ASSIGN_FIELD_WRITER = "writer";
 
+    /** 招聘普通账号（钉钉扫码自动注册默认角色） */
+    public static final String HR_USER_ROLE_KEY = "hr_user";
+
     /** GEO 模块选人角色：运营录入 */
     public static final String GEO_ROLE_OPS_ENTRY = "GEO运营录入";
     /** GEO 模块选人角色：管理复盘 */

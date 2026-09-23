@@ -33,6 +33,7 @@ function PagePlaceholder() {
 const Login = lazy(() => import('@/pages/login'));
 const NotFound = lazy(() => import('@/pages/404'));
 const Demo = lazy(() => import('@/pages/test/demo'));
+const DataScopePage = lazy(() => import('@/pages/system/data-scope'));
 
 function withSuspense(Component: LazyExoticComponent<any>) {
   return (
@@ -154,6 +155,11 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
           {
             path: '/demo',
             element: withSuspense(Demo),
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            path: '/system/data-scope',
+            element: withSuspense(DataScopePage),
             errorElement: <RouteErrorPage />,
           },
           ...dynamicRoutes,

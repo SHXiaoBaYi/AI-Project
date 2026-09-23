@@ -1,21 +1,11 @@
-import { memo, useRef, useState, useMemo, useEffect, type Key } from 'react';
-import { ProFormText, ProFormSelect } from '@ant-design/pro-components';
+import { memo, useRef, useState, useMemo, useEffect } from 'react';
+import { ProFormSelect } from '@ant-design/pro-components';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm/index';
-import { App, Tag, Modal } from 'antd';
-import {
-  getUserListApi,
-  createUserApi,
-  updateUserApi,
-  deleteUserApi,
-  deleteUserBatchApi,
-  resetPwdApi,
-  assignRolesApi,
-  exportUsersApi,
-} from '@/api/user';
+import { App, Tag } from 'antd';
+import { getUserListApi, updateUserApi, assignRolesApi } from '@/api/user';
 import { getRoleListApi } from '@/api/role';
-import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import TableModal from '@/components/TableModal';
 import dictionary from '@/dictionary';
@@ -23,7 +13,6 @@ import IconStatus from '@/components/IconStatus';
 import tools from '@/utils/tools';
 import validate from '@/utils/validate';
 import type { UserVO } from '@/types/user';
-import ImportUserModal from './components/ImportUserModal';
 import BindDingTalkModal from './components/BindDingTalkModal';
 import { unbindHrDingTalkApi } from '@/api/hr';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
@@ -34,36 +23,27 @@ const UserManage = memo(function UserManage() {
   const [editingUser, setEditingUser] = useState<UserVO | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [resetPwdOpen, setResetPwdOpen] = useState(false);
-  const [resetPwdUserId, setResetPwdUserId] = useState<number>(0);
   const [assignRoleOpen, setAssignRoleOpen] = useState(false);
   const [assignRoleUserId, setAssignRoleUserId] = useState<number>(0);
   const [initialRoleIds, setInitialRoleIds] = useState<number[]>([]);
   const [allRoles, setAllRoles] = useState<{ key: string; title: string }[]>([]);
   const [formModalKey, setFormModalKey] = useState(0);
-  const [importOpen, setImportOpen] = useState(false);
   const [bindUser, setBindUser] = useState<UserVO | null>(null);
   const [bindOpen, setBindOpen] = useState(false);
-  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
-  /** 当前页所有行的 key，用于跨页选择时正确合并 */
-  const currentPageKeysRef = useRef<Set<number>>(new Set());
 
   const openUserModal = async (user?: UserVO) => {
     setEditingUser(user ?? null);
     setFormModalKey((k) => k + 1);
   };
 
-  /** 页面挂载时预加载角色列表，避免弹窗打开时下拉数据为空 */
   useEffect(() => {
     getRoleListApi({ pageNum: 1, pageSize: 100 }).then((res) => {
       setAllRoles(res.rows?.map((r) => ({ key: String(r.roleId), title: r.roleName })));
     });
   }, []);
 
-  /** 统一列配置：表格 + 详情（只读表单）+ 新增/编辑（可编辑表单）共用 */
   const columns: ProColumnType<UserVO>[] = useMemo(() => {
     const result: ProColumnType<UserVO>[] = [
-      // 搜索框disabled会被编辑弹窗的disabled影响，需要写2个配置
       {
         title: '用户名',
         dataIndex: 'username',
@@ -75,22 +55,9 @@ const UserManage = memo(function UserManage() {
         title: '用户名',
         dataIndex: 'username',
         hideInTable: true,
-        formItemProps: { rules: validate.username },
-        fieldProps: editingUser ? { disabled: true } : undefined,
         search: false,
+        fieldProps: { disabled: true },
       },
-      ...(!editingUser
-        ? [
-            {
-              title: '密码',
-              dataIndex: 'password',
-              valueType: 'password',
-              hideInTable: true,
-              search: false,
-              formItemProps: { rules: validate.password },
-            } as ProColumnType<UserVO>,
-          ]
-        : []),
       { title: '昵称', dataIndex: 'nickname', width: 100, ellipsis: true },
       { title: '手机号', dataIndex: 'phone', width: 140, formItemProps: { rules: validate.phone } },
       {
@@ -222,16 +189,6 @@ const UserManage = memo(function UserManage() {
                 },
               },
               {
-                key: 'resetPwd',
-                perm: 'system:user:resetPwd',
-                label: '重置密码',
-                onClick: () => {
-                  setResetPwdUserId(record.userId);
-                  setResetPwdOpen(true);
-                },
-              },
-
-              {
                 key: 'assignRole',
                 perm: 'system:user:role-management',
                 label: '分配角色',
@@ -270,24 +227,13 @@ const UserManage = memo(function UserManage() {
                   setDetailOpen(true);
                 },
               },
-              {
-                key: 'delete',
-                perm: 'system:user:delete',
-                label: '删除',
-                onClick: async () => {
-                  await deleteUserApi(record.userId);
-                  message.success('已删除');
-                  actionRef.current?.reload();
-                },
-                confirmTitle: '确定删除吗?',
-              },
             ]}
           />
         ),
       },
     ];
     return result;
-  }, [allRoles, editingUser, message]);
+  }, [allRoles, message]);
 
   return (
     <>
@@ -298,107 +244,23 @@ const UserManage = memo(function UserManage() {
         scroll={{ x: 1680 }}
         request={async (params) => {
           const { rows: data, total } = await getUserListApi(tools.handleSearchParams(params));
-          currentPageKeysRef.current = new Set(data.map((u) => u.userId));
           return { data, total, success: true };
         }}
         columns={columns}
-        rowSelection={{
-          selectedRowKeys,
-          onChange: (keys, _rows, { type }) => {
-            // 取消选择
-            if (type === 'none') {
-              return setSelectedRowKeys([]);
-            }
-            setSelectedRowKeys((prev) => {
-              const global = new Set(prev as number[]);
-              // 先移除当前页所有 key，再用 onChange 传入的 key 重新加入
-              currentPageKeysRef.current.forEach((k) => global.delete(k));
-              (keys as number[]).forEach((k) => global.add(k));
-              return [...global];
-            });
-          },
-        }}
         toolBarRender={() => [
-          <PermissionButton
-            key='import'
-            color='default'
-            variant='filled'
-            perm='system:user:import'
-            onClick={() => setImportOpen(true)}
+          <span
+            key='hint'
+            className='text-sm text-neutral-500'
           >
-            批量导入
-          </PermissionButton>,
-          <PermissionButton
-            key='export'
-            color='default'
-            variant='filled'
-            perm='system:user:export'
-            onClick={async () => {
-              if (selectedRowKeys.length === 0) {
-                message.warning('请先选择要导出的用户');
-                return;
-              }
-              if (selectedRowKeys.length > 500) {
-                message.warning('单次最多导出500条');
-                return;
-              }
-              try {
-                await exportUsersApi(selectedRowKeys as number[]);
-                message.success('导出成功');
-              } catch {
-                message.error('导出失败');
-              }
-            }}
-          >
-            批量导出
-          </PermissionButton>,
-          <PermissionButton
-            key='del'
-            color='danger'
-            variant='filled'
-            perm='system:user:delete'
-            onClick={() => {
-              if (selectedRowKeys.length === 0) {
-                message.warning('请先选择要删除的用户');
-                return;
-              }
-              Modal.confirm({
-                title: '批量删除用户',
-                content: `确定要删除选中的 ${selectedRowKeys.length} 个用户吗？此操作不可撤销。`,
-                okText: '确定删除',
-                cancelText: '取消',
-                okButtonProps: { danger: true },
-                onOk: async () => {
-                  await deleteUserBatchApi(selectedRowKeys as number[]);
-                  message.success(`已删除 ${selectedRowKeys.length} 个用户`);
-                  setSelectedRowKeys([]);
-                  currentPageKeysRef.current = new Set();
-                  actionRef.current?.reload();
-                },
-              });
-            }}
-          >
-            批量删除
-          </PermissionButton>,
-          <PermissionButton
-            key='add'
-            perm='system:user:add'
-            type='primary'
-            onClick={() => {
-              openUserModal();
-              setFormOpen(true);
-            }}
-          >
-            添加
-          </PermissionButton>,
+            新用户请通过钉钉扫码登录自动注册（默认普通账号）
+          </span>,
         ]}
       />
 
-      {/* 新增 / 编辑 — 与详情共用 columns，TableModal 自动过滤 option 列 */}
       <TableModal
         key={formModalKey}
         readonly={false}
-        title={editingUser ? '编辑用户' : '添加用户'}
+        title='编辑用户'
         columns={columns as any}
         open={formOpen}
         onOpenChange={setFormOpen}
@@ -408,21 +270,15 @@ const UserManage = memo(function UserManage() {
             : ({ gender: 0, status: 0 } as any)
         }
         onFinish={async (values) => {
-          const dto = { ...values } as any;
-          if (editingUser) {
-            dto.userId = editingUser.userId;
-            await updateUserApi(dto);
-            message.success('已更新');
-          } else {
-            await createUserApi(dto);
-            message.success('创建成功');
-          }
+          if (!editingUser) return false;
+          const dto = { ...values, userId: editingUser.userId } as any;
+          await updateUserApi(dto);
+          message.success('已更新');
           actionRef.current?.reload();
           return true;
         }}
       />
 
-      {/* 详情 — 只读，columns 中 hideInForm: true 的列自动隐藏 */}
       <TableModal
         title='用户详情'
         columns={columns as any}
@@ -434,41 +290,6 @@ const UserManage = memo(function UserManage() {
           roleIds: editingUser?.roles?.map((r) => r.roleId),
         }}
       />
-
-      {/* 重置密码 / 分配角色 — ProForm children 模式，继续使用 BaseModalForm */}
-      <BaseModalForm
-        title='重置密码'
-        width={400}
-        open={resetPwdOpen}
-        onOpenChange={setResetPwdOpen}
-        onFinish={async (values) => {
-          await resetPwdApi(resetPwdUserId, values.password);
-          message.success('密码已重置');
-          return true;
-        }}
-      >
-        <ProFormText.Password
-          name='password'
-          label='新密码'
-          rules={[{ required: true, message: '请输入新密码' }]}
-        />
-        <ProFormText.Password
-          name='confirm'
-          label='确认密码'
-          dependencies={['password']}
-          rules={[
-            { required: true, message: '请确认密码' },
-            ({ getFieldValue }) => ({
-              validator(_, value) {
-                if (!value || getFieldValue('password') === value) {
-                  return Promise.resolve();
-                }
-                return Promise.reject(new Error('两次输入的密码不一致'));
-              },
-            }),
-          ]}
-        />
-      </BaseModalForm>
 
       <BaseModalForm
         title='分配角色'
@@ -493,12 +314,6 @@ const UserManage = memo(function UserManage() {
           options={allRoles?.map((r) => ({ value: Number(r.key), label: r.title }))}
         />
       </BaseModalForm>
-      {/* 批量导入 */}
-      <ImportUserModal
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        onSuccess={() => actionRef.current?.reload()}
-      />
       <BindDingTalkModal
         user={bindUser}
         open={bindOpen}

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import { ProLayout, PageContainer } from '@ant-design/pro-components';
-import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { getIconComponent } from '@/utils/iconMap';
 import { Dropdown, theme } from 'antd';
 import { useSelector, useDispatch } from 'react-redux';
@@ -13,6 +13,7 @@ import avatarPng from '@/assets/avatar.png';
 import PageErrorBoundary from '@/components/PageErrorBoundary';
 import { ExternalLinkProvider } from '@/components/ExternalLinkDrawer';
 import { resolveMenuFullPath } from '@/utils/menuPath';
+import { canSeeDataScopePage } from '@/utils/localhostAccess';
 
 function convertMenusToRoute(menus: MenuTree[], parentPath = ''): any[] {
   return menus.map((item) => {
@@ -67,6 +68,26 @@ export default function BasicLayout() {
     navigate('/login', { replace: true });
   };
 
+  const showDataScope = canSeeDataScopePage(userInfo?.username);
+  const avatarMenuItems = [
+    ...(showDataScope
+      ? [
+          {
+            key: 'data-scope',
+            icon: <SafetyCertificateOutlined />,
+            label: '数据权限配置',
+            onClick: () => navigate('/system/data-scope'),
+          },
+        ]
+      : []),
+    {
+      key: 'logout',
+      icon: <LogoutOutlined />,
+      label: '退出登录',
+      onClick: handleLogout,
+    },
+  ];
+
   return (
     <ProLayout
       title='小巴依(上海)'
@@ -117,22 +138,7 @@ export default function BasicLayout() {
           />
         ),
         title: userInfo?.nickname || userInfo?.username,
-        render: (_, defaultDom) => (
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'logout',
-                  icon: <LogoutOutlined />,
-                  label: '退出登录',
-                  onClick: handleLogout,
-                },
-              ],
-            }}
-          >
-            {defaultDom}
-          </Dropdown>
-        ),
+        render: (_, defaultDom) => <Dropdown menu={{ items: avatarMenuItems }}>{defaultDom}</Dropdown>,
       }}
       menuFooterRender={() => {
         return (
