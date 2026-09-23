@@ -660,14 +660,22 @@ public class HrInviteService {
             writeRoundAndStage(dto, person);
             return interviewerName(dto.getInterviewerUserId());
         }
+        String organizerName = currentOrganizerName();
         String title = "【" + ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面") + "】"
                 + person.get("candidate_name") + " - " + person.get("job_name");
         ResumeFile resume = loadResume(dto.getApplicationId());
-        String description = buildCalendarDescription(dto, person, resume);
+        String description = buildCalendarDescription(dto, person, resume, organizerName);
+        // 组织人（当前登录用户）作为参与人写入，便于在钉钉日程参与人列表中看到
+        List<String> attendees = new ArrayList<>();
+        String organizerUnionId = findUnionId(SecurityUtils.getCurrentUserId());
+        if (StringUtils.hasText(organizerUnionId) && !organizerUnionId.equals(unionId)) {
+            attendees.add(organizerUnionId);
+        }
         DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
-                unionId, title, description, dto.getInterviewAt(), duration, dto.getLocation());
+                unionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees, false);
         writeLog(inviteId, "CREATE_CALENDAR", call, SecurityUtils.getCurrentUserId(), call.eventId(),
-                Map.of("title", title, "start", String.valueOf(dto.getInterviewAt()), "unionId", blank(unionId)));
+                Map.of("title", title, "start", String.valueOf(dto.getInterviewAt()), "unionId", blank(unionId),
+                        "organizer", organizerName));
         if (!call.success()) {
             jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?", cut(call.message()), inviteId);
             return null;
@@ -683,7 +691,8 @@ public class HrInviteService {
     }
 
     private void notifyInterviewer(Long inviteId, HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume) {
-        notifyWorkNotice(inviteId, dto.getInterviewerUserId(), person, dto, resume, "NOTIFY_INTERVIEWER");
+        notifyWorkNotice(inviteId, dto.getInterviewerUserId(), person, dto, resume, "NOTIFY_INTERVIEWER",
+                currentOrganizerName());
     }
 
     /** 给抄送人创建钉钉日程并发送工作通知；跳过已作为面试官的人 */
@@ -723,9 +732,10 @@ public class HrInviteService {
         }
         ResumeFile resume = loadResume(dto.getApplicationId());
         int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
+        String organizerName = currentOrganizerName();
         String title = "【抄送】【" + ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面") + "】"
                 + person.get("candidate_name") + " - " + person.get("job_name");
-        String description = buildCalendarDescription(dto, person, resume);
+        String description = buildCalendarDescription(dto, person, resume, organizerName);
         // 同场多面试官时只建一套抄送日程：先清旧再按人建
         releaseCcCalendarsForSession(dto.getApplicationId(), dto.getRoundNo(), dto.getInterviewAt());
         for (Long ccUserId : ccIds) {
@@ -734,7 +744,7 @@ public class HrInviteService {
             }
             String eventId = attachCcCalendar(inviteId, ccUserId, title, description, dto, duration);
             saveCcEventIdForSession(dto.getApplicationId(), dto.getRoundNo(), dto.getInterviewAt(), ccUserId, eventId);
-            notifyWorkNotice(inviteId, ccUserId, person, dto, resume, "NOTIFY_CC");
+            notifyWorkNotice(inviteId, ccUserId, person, dto, resume, "NOTIFY_CC", organizerName);
         }
     }
 
@@ -748,8 +758,13 @@ public class HrInviteService {
                     Map.of("ccUserId", String.valueOf(ccUserId)));
             return null;
         }
+        List<String> attendees = new ArrayList<>();
+        String organizerUnionId = findUnionId(SecurityUtils.getCurrentUserId());
+        if (StringUtils.hasText(organizerUnionId) && !organizerUnionId.equals(unionId)) {
+            attendees.add(organizerUnionId);
+        }
         DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
-                unionId, title, description, dto.getInterviewAt(), duration, dto.getLocation());
+                unionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees, false);
         writeLog(inviteId, "CREATE_CC_CALENDAR", call, SecurityUtils.getCurrentUserId(), call.eventId(),
                 Map.of("title", title, "ccUserId", String.valueOf(ccUserId), "unionId", blank(unionId),
                         "start", String.valueOf(dto.getInterviewAt())));
@@ -867,17 +882,18 @@ public class HrInviteService {
     }
 
     private void notifyWorkNotice(Long inviteId, Long userId, Map<String, Object> person, HrInviteCreateDTO dto,
-                                  ResumeFile resume, String action) {
+                                  ResumeFile resume, String action, String organizerName) {
         String dingUserId = findDingUserId(userId);
         String title = "NOTIFY_CC".equals(action) ? "面试邀约抄送通知" : "面试邀约通知";
         String round = ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面");
-        String when = dto.getInterviewAt() == null ? "-" : dto.getInterviewAt().toString().replace('T', ' ');
+        String when = formatInterviewAt(dto.getInterviewAt());
+        String organizer = StringUtils.hasText(organizerName) ? organizerName : currentOrganizerName();
         String markdown = "### " + title + "\n\n"
+                + "- **组织人**：" + organizer + "\n"
                 + "- **候选人**：" + blank(person.get("candidate_name")) + "\n"
                 + "- **岗位**：" + blank(person.get("job_name")) + "\n"
                 + "- **轮次**：" + round + "\n"
-                + "- **时间**：" + when + "\n"
-                + "- **组织人**：" + currentOrganizerName() + "\n";
+                + "- **时间**：" + when + "\n";
         if (resume == null) {
             markdown += "\n简历：未上传\n";
         } else {
@@ -894,17 +910,27 @@ public class HrInviteService {
                         : DingTalkCalendarClient.CalendarCall.fail(notice.message()),
                 SecurityUtils.getCurrentUserId(), null,
                 Map.of("dingUserId", blank(dingUserId), "userId", String.valueOf(userId),
-                        "resume", resumeName == null ? "" : resumeName));
+                        "resume", resumeName == null ? "" : resumeName, "organizer", organizer));
     }
 
-    private String buildCalendarDescription(HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume) {
+    private String buildCalendarDescription(HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume,
+                                            String organizerName) {
         String round = ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面");
-        return "候选人：" + blank(person.get("candidate_name"))
+        String organizer = StringUtils.hasText(organizerName) ? organizerName : currentOrganizerName();
+        return "组织人：" + organizer
+                + "\n候选人：" + blank(person.get("candidate_name"))
                 + "\n岗位：" + blank(person.get("job_name"))
                 + "\n轮次：" + round
-                + "\n时间：" + (dto.getInterviewAt() == null ? "-" : dto.getInterviewAt().toString().replace('T', ' '))
-                + "\n组织人：" + currentOrganizerName()
+                + "\n时间：" + formatInterviewAt(dto.getInterviewAt())
                 + "\n简历：" + (resume == null ? "未上传（请联系招聘负责人）" : resume.fileName());
+    }
+
+    private static String formatInterviewAt(LocalDateTime at) {
+        if (at == null) {
+            return "-";
+        }
+        String text = at.toString().replace('T', ' ');
+        return text.length() >= 16 ? text.substring(0, 16) : text;
     }
 
     /** 组织人 = 当前登录用户（昵称优先，否则用户名） */
@@ -913,9 +939,9 @@ public class HrInviteService {
         if (userId == null) {
             return SecurityUtils.getCurrentUsername();
         }
-        String name = jdbc.query("SELECT COALESCE(NULLIF(nickname, ''), username) FROM sys_user WHERE user_id = ?",
+        String name = jdbc.query("SELECT COALESCE(NULLIF(TRIM(nickname), ''), username) FROM sys_user WHERE user_id = ?",
                 rs -> rs.next() ? rs.getString(1) : null, userId);
-        return name == null || name.isBlank() ? SecurityUtils.getCurrentUsername() : name;
+        return name == null || name.isBlank() ? SecurityUtils.getCurrentUsername() : name.trim();
     }
 
     private ResumeFile loadResume(Long applicationId) {
