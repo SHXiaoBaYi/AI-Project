@@ -19,6 +19,7 @@ import type { RootState } from '@/store';
 import {
   BOOKING_MAX_DAYS,
   bookingDateTimeError,
+  bookingPastDisabledTime,
   bookingRangeError,
   bookingWindow,
   disabledBookingDate,
@@ -103,13 +104,16 @@ function defaultAskRange(): [Dayjs, Dayjs] {
   return toWorkRange(min, end);
 }
 
-/** 去掉法定节假日天，以及落在假日上的推荐时段 */
+/** 去掉法定节假日天、假日上的推荐时段，以及已经过去的时段 */
 function filterSuggestHolidays(data: DingTalkAssistantSuggest): DingTalkAssistantSuggest {
+  const now = dayjs();
   const dayGroups = (data.dayGroups ?? [])
     .filter((day) => !isChinaHoliday(day.day))
     .map((day) => ({
       ...day,
-      slots: (day.slots ?? []).filter((slot) => !isChinaHoliday(slot.start) && !isChinaHoliday(slot.end)),
+      slots: (day.slots ?? []).filter(
+        (slot) => !isChinaHoliday(slot.start) && !isChinaHoliday(slot.end) && dayjs(slot.start).isAfter(now),
+      ),
     }));
   return { ...data, dayGroups };
 }
@@ -624,13 +628,24 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
           <Form.Item
             name='startTime'
             label='开始时间'
-            rules={[{ required: true, message: '请选择开始时间' }]}
+            extra={`不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`}
+            rules={[
+              { required: true, message: '请选择开始时间' },
+              {
+                validator: async (_, value) => {
+                  const err = bookingDateTimeError(value);
+                  if (err) return Promise.reject(new Error(err));
+                  return Promise.resolve();
+                },
+              },
+            ]}
           >
             <DatePicker
-              showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false }}
+              showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false, hideDisabledOptions: true }}
               className='w-full'
               format='YYYY-MM-DD HH:mm'
               disabledDate={disabledBookingDate}
+              disabledTime={(date) => bookingPastDisabledTime(date)}
             />
           </Form.Item>
           <Form.Item
@@ -704,13 +719,24 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
           <Form.Item
             name='startTime'
             label='开始时间'
-            rules={[{ required: true, message: '请选择开始时间' }]}
+            extra={`不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`}
+            rules={[
+              { required: true, message: '请选择开始时间' },
+              {
+                validator: async (_, value) => {
+                  const err = bookingDateTimeError(value);
+                  if (err) return Promise.reject(new Error(err));
+                  return Promise.resolve();
+                },
+              },
+            ]}
           >
             <DatePicker
-              showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false }}
+              showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false, hideDisabledOptions: true }}
               className='w-full'
               format='YYYY-MM-DD HH:mm'
               disabledDate={disabledBookingDate}
+              disabledTime={(date) => bookingPastDisabledTime(date)}
             />
           </Form.Item>
           <Form.Item

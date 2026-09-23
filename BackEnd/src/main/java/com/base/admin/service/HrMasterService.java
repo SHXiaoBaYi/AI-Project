@@ -914,8 +914,38 @@ public class HrMasterService {
         jdbc.update("""
                 INSERT INTO hr_user_dingtalk (user_id, dingtalk_user_id, dingtalk_union_id, create_by, is_active)
                 VALUES (?, ?, ?, ?, 1)
-                ON DUPLICATE KEY UPDATE dingtalk_user_id = VALUES(dingtalk_user_id), dingtalk_union_id = VALUES(dingtalk_union_id), is_active = 1
+                ON DUPLICATE KEY UPDATE dingtalk_user_id = VALUES(dingtalk_user_id), dingtalk_union_id = VALUES(dingtalk_union_id),
+                  is_active = 1, update_by = VALUES(create_by)
                 """, dto.getUserId(), identity.getDingtalkUserId(), identity.getUnionId(), SecurityUtils.getCurrentUsername());
+    }
+
+    /**
+     * 按手机号静默刷新企业钉钉绑定（优先专属账号）。失败不抛错，避免打断建日程主流程。
+     */
+    public void refreshDingTalkBindingQuietly(Long userId) {
+        if (userId == null || !dingTalk.configured()) {
+            return;
+        }
+        try {
+            String phone = jdbc.query("SELECT phone FROM sys_user WHERE user_id = ? AND is_active = 1",
+                    rs -> rs.next() ? rs.getString(1) : null, userId);
+            if (phone == null || phone.isBlank()) {
+                return;
+            }
+            DingTalkCalendarClient.DingIdentity identity = resolveDingIdentity(userId, phone.trim());
+            if (identity == null || identity.unionId() == null || identity.unionId().isBlank()) {
+                return;
+            }
+            jdbc.update("""
+                    INSERT INTO hr_user_dingtalk (user_id, dingtalk_user_id, dingtalk_union_id, create_by, is_active)
+                    VALUES (?, ?, ?, ?, 1)
+                    ON DUPLICATE KEY UPDATE dingtalk_user_id = VALUES(dingtalk_user_id),
+                      dingtalk_union_id = VALUES(dingtalk_union_id), is_active = 1,
+                      update_by = VALUES(create_by)
+                    """, userId, identity.userId(), identity.unionId(), SecurityUtils.getCurrentUsername());
+        } catch (Exception ignored) {
+            // 静默：通讯录暂时不可达时仍用库里已有绑定
+        }
     }
 
     public void unbindDingTalk(Long userId) {

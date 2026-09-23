@@ -255,23 +255,34 @@ public class DingTalkCalendarClient {
         }
         try {
             String token = legacyToken(credential);
-            String userId = useridFromLegacyMobile(token, normalized);
+            // 先走 v2，并优先企业专属账号，避免落到「以前的个人钉钉账号」
+            String userId = useridFromV2Mobile(token, normalized);
             if (!StringUtils.hasText(userId)) {
-                userId = useridFromV2Mobile(token, normalized);
+                userId = useridFromLegacyMobile(token, normalized);
             }
             if (StringUtils.hasText(userId)) {
                 return identityOf(token, userId);
             }
             List<DingTalkDirectoryUserVO> directory = listDirectory();
+            DingTalkDirectoryUserVO exclusiveHit = null;
+            DingTalkDirectoryUserVO normalHit = null;
             for (DingTalkDirectoryUserVO row : directory) {
                 if (!normalized.equals(normalizeMobile(row.getMobile()))) {
                     continue;
                 }
-                if (StringUtils.hasText(row.getUserid()) && StringUtils.hasText(row.getUnionId())) {
-                    return new DingIdentity(row.getUserid(), row.getUnionId());
+                if (Boolean.TRUE.equals(row.getExclusiveAccount())) {
+                    exclusiveHit = row;
+                } else if (normalHit == null) {
+                    normalHit = row;
                 }
-                if (StringUtils.hasText(row.getUserid())) {
-                    return identityOf(token, row.getUserid());
+            }
+            DingTalkDirectoryUserVO hit = exclusiveHit != null ? exclusiveHit : normalHit;
+            if (hit != null) {
+                if (StringUtils.hasText(hit.getUserid()) && StringUtils.hasText(hit.getUnionId())) {
+                    return new DingIdentity(hit.getUserid(), hit.getUnionId());
+                }
+                if (StringUtils.hasText(hit.getUserid())) {
+                    return identityOf(token, hit.getUserid());
                 }
             }
             if (StringUtils.hasText(nickname)) {
@@ -552,30 +563,46 @@ public class DingTalkCalendarClient {
             return "";
         }
         JsonNode result = byMobile.path("result");
-        String userId = result.path("userid").asText("");
-        if (StringUtils.hasText(userId)) {
-            return userId;
+        // 同一手机号可能同时有个人受邀账号与企业专属账号：优先专属账号
+        String exclusiveId = firstExclusiveUserId(result.path("exclusive_account_userid_list"));
+        if (StringUtils.hasText(exclusiveId)) {
+            return exclusiveId;
         }
-        JsonNode exclusive = result.path("exclusive_account_userid_list");
+        return result.path("userid").asText("");
+    }
+
+    private String firstExclusiveUserId(JsonNode exclusive) {
+        if (exclusive == null || exclusive.isMissingNode() || exclusive.isNull()) {
+            return "";
+        }
         if (exclusive.isArray()) {
             for (JsonNode item : exclusive) {
                 if (StringUtils.hasText(item.asText(""))) {
                     return item.asText("");
                 }
             }
+            return "";
         }
         String raw = exclusive.asText("").trim();
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
         if (raw.startsWith("[")) {
-            JsonNode parsed = objectMapper.readTree(raw);
-            if (parsed.isArray()) {
-                for (JsonNode item : parsed) {
-                    if (StringUtils.hasText(item.asText(""))) {
-                        return item.asText("");
+            try {
+                JsonNode parsed = objectMapper.readTree(raw);
+                if (parsed.isArray()) {
+                    for (JsonNode item : parsed) {
+                        if (StringUtils.hasText(item.asText(""))) {
+                            return item.asText("");
+                        }
                     }
                 }
+            } catch (Exception ignored) {
+                return "";
             }
+            return "";
         }
-        return "";
+        return raw;
     }
 
     private DingIdentity identityOf(String token, String userId) throws Exception {

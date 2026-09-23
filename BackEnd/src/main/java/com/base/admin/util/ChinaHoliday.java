@@ -53,4 +53,23 @@ public final class ChinaHoliday {
     public static LocalDate maxBookableDate(LocalDate today) {
         return today.plusDays(BOOKING_MAX_DAYS);
     }
+
+    /** 校验可预约开始时间：非空、非过去、非法定节假日、不超过未来 BOOKING_MAX_DAYS 天 */
+    public static void requireBookableStart(LocalDateTime start) {
+        if (start == null) {
+            throw new IllegalArgumentException("请选择开始时间");
+        }
+        LocalDateTime now = LocalDateTime.now().withSecond(0).withNano(0);
+        LocalDateTime at = start.withSecond(0).withNano(0);
+        if (!at.isAfter(now)) {
+            throw new IllegalArgumentException("不能选择已经过去的时间");
+        }
+        if (isOffDay(at.toLocalDate())) {
+            throw new IllegalArgumentException("不能选择国家法定节假日");
+        }
+        LocalDate today = now.toLocalDate();
+        if (at.toLocalDate().isAfter(maxBookableDate(today))) {
+            throw new IllegalArgumentException("最多只能预约未来 " + BOOKING_MAX_DAYS + " 天内的时间");
+        }
+    }
 }

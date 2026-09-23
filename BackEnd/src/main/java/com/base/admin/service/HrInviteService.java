@@ -41,6 +41,7 @@ public class HrInviteService {
 
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalk;
+    private final HrMasterService hrMasterService;
     private final FileStorageService fileStorage;
     private final ObjectMapper objectMapper;
 
@@ -1084,6 +1085,7 @@ public class HrInviteService {
         if (userId == null) {
             return null;
         }
+        hrMasterService.refreshDingTalkBindingQuietly(userId);
         return jdbc.query("SELECT dingtalk_union_id FROM hr_user_dingtalk WHERE user_id = ? AND is_active = 1",
                 rs -> rs.next() ? rs.getString(1) : null, userId);
     }
@@ -1092,6 +1094,7 @@ public class HrInviteService {
         if (userId == null) {
             return null;
         }
+        hrMasterService.refreshDingTalkBindingQuietly(userId);
         return jdbc.query("SELECT dingtalk_user_id FROM hr_user_dingtalk WHERE user_id = ? AND is_active = 1",
                 rs -> rs.next() ? rs.getString(1) : null, userId);
     }

@@ -56,6 +56,7 @@ public class DingTalkAssistantService {
 
     private final DingTalkBusyService busyService;
     private final DingTalkCalendarClient dingTalk;
+    private final HrMasterService hrMasterService;
     private final SysTaskService taskService;
     private final JdbcTemplate jdbc;
 
@@ -106,6 +107,7 @@ public class DingTalkAssistantService {
 
     @Transactional
     public DingTalkAssistantActionResultVO createMeeting(DingTalkAssistantMeetingDTO dto) {
+        validateBookableStart(dto.getStartTime());
         BoundUser querier = requireCurrentBound();
         BoundUser target = requireBound(dto.getTargetUserId(), "被邀请人");
         int duration = dto.getDurationMin() == null ? DEFAULT_DURATION : dto.getDurationMin();
@@ -117,14 +119,14 @@ public class DingTalkAssistantService {
             location = "钉钉视频会议";
         }
 
-        CalendarPair calendars = createPairCalendars(
+        CalendarPair calendars = createSharedCalendar(
                 querier, target, title, description, dto.getStartTime(), duration, location, online);
-        if (!calendars.querierOk() && !calendars.targetOk()) {
+        if (!calendars.querierOk()) {
             throw new BusinessException(buildActionMessage("会议", calendars, false));
         }
         Long recordId = insertRecord("MEETING", title, description, location, online ? 1 : 0,
                 dto.getStartTime(), duration, querier, target,
-                calendars.querierEventId(), calendars.targetEventId(), null);
+                calendars.querierEventId(), null, null);
 
         String when = dto.getStartTime().format(NOTICE_TIME);
         String markdown = "### 会议已创建\n\n"
@@ -143,6 +145,7 @@ public class DingTalkAssistantService {
 
     @Transactional
     public DingTalkAssistantActionResultVO createReport(DingTalkAssistantReportDTO dto) {
+        validateBookableStart(dto.getStartTime());
         BoundUser querier = requireCurrentBound();
         BoundUser target = requireBound(dto.getTargetUserId(), "汇报对象");
         int duration = dto.getDurationMin() == null ? DEFAULT_DURATION : dto.getDurationMin();
@@ -169,11 +172,14 @@ public class DingTalkAssistantService {
         task.setRemark("日程助手 · 汇报工作");
         Long taskId = taskService.create(task);
 
-        CalendarPair calendars = createPairCalendars(
+        CalendarPair calendars = createSharedCalendar(
                 querier, target, title, content, dto.getStartTime(), duration, location, false);
+        if (!calendars.querierOk()) {
+            throw new BusinessException(buildActionMessage("工作汇报", calendars, false));
+        }
         Long recordId = insertRecord("REPORT", title, content, location, 0,
                 dto.getStartTime(), duration, querier, target,
-                calendars.querierEventId(), calendars.targetEventId(), taskId);
+                calendars.querierEventId(), null, taskId);
 
         String when = dto.getStartTime().format(NOTICE_TIME);
         String markdown = "### 工作汇报已安排\n\n"
@@ -250,6 +256,7 @@ public class DingTalkAssistantService {
 
     @Transactional
     public DingTalkAssistantActionResultVO updateSchedule(DingTalkAssistantScheduleUpdateDTO dto) {
+        validateBookableStart(dto.getStartTime());
         ScheduleRow row = loadMine(dto.getId());
         if ("CANCELLED".equals(row.status())) {
             throw new BusinessException("已取消的日程不能编辑");
@@ -264,57 +271,42 @@ public class DingTalkAssistantService {
         if (online && !StringUtils.hasText(location)) {
             location = "钉钉视频会议";
         }
-        List<String> both = List.of(querier.unionId(), target.unionId());
+        List<String> attendees = List.of(target.unionId());
 
         String querierEventId = row.querierEventId();
         String targetEventId = row.targetEventId();
         String querierErr = null;
-        String targetErr = null;
         boolean querierOk = false;
-        boolean targetOk = false;
 
+        // 只维护发起人侧那一条共享日程；对方通过参与人同步，不再单独建第二条
         if (StringUtils.hasText(querierEventId)) {
             DingTalkCalendarClient.CalendarCall call = dingTalk.updateEvent(
-                    querier.unionId(), querierEventId, title, description, dto.getStartTime(), duration, location, both, online);
+                    querier.unionId(), querierEventId, title, description, dto.getStartTime(), duration, location, attendees, online);
             querierOk = call.success();
             querierErr = call.message();
             if (!querierOk) {
                 DingTalkCalendarClient.CalendarCall recreate = dingTalk.createEvent(
-                        querier.unionId(), title, description, dto.getStartTime(), duration, location, both, online);
+                        querier.unionId(), title, description, dto.getStartTime(), duration, location, attendees, online);
                 querierOk = recreate.success();
                 querierEventId = recreate.eventId();
                 querierErr = recreate.message();
             }
         } else {
             DingTalkCalendarClient.CalendarCall recreate = dingTalk.createEvent(
-                    querier.unionId(), title, description, dto.getStartTime(), duration, location, both, online);
+                    querier.unionId(), title, description, dto.getStartTime(), duration, location, attendees, online);
             querierOk = recreate.success();
             querierEventId = recreate.eventId();
             querierErr = recreate.message();
         }
 
+        // 历史数据曾在对方日历另建一条，更新时顺手删掉，避免继续重复
         if (StringUtils.hasText(targetEventId)) {
-            DingTalkCalendarClient.CalendarCall call = dingTalk.updateEvent(
-                    target.unionId(), targetEventId, title, description, dto.getStartTime(), duration, location, both, online);
-            targetOk = call.success();
-            targetErr = call.message();
-            if (!targetOk) {
-                DingTalkCalendarClient.CalendarCall recreate = dingTalk.createEvent(
-                        target.unionId(), title, description, dto.getStartTime(), duration, location, both, online);
-                targetOk = recreate.success();
-                targetEventId = recreate.eventId();
-                targetErr = recreate.message();
-            }
-        } else {
-            DingTalkCalendarClient.CalendarCall recreate = dingTalk.createEvent(
-                    target.unionId(), title, description, dto.getStartTime(), duration, location, both, online);
-            targetOk = recreate.success();
-            targetEventId = recreate.eventId();
-            targetErr = recreate.message();
+            dingTalk.deleteEvent(target.unionId(), targetEventId);
+            targetEventId = null;
         }
 
-        if (!querierOk && !targetOk) {
-            throw new BusinessException("更新钉钉日程失败：" + blankToEmpty(querierErr) + " / " + blankToEmpty(targetErr));
+        if (!querierOk) {
+            throw new BusinessException("更新钉钉日程失败：" + blankToEmpty(querierErr));
         }
 
         jdbc.update("""
@@ -327,7 +319,7 @@ public class DingTalkAssistantService {
                 dto.getStartTime(), duration, dto.getStartTime().plusMinutes(duration),
                 querierEventId, targetEventId, SecurityUtils.getCurrentUsername(), dto.getId());
 
-        CalendarPair pair = new CalendarPair(querierOk, querierEventId, querierErr, targetOk, targetEventId, targetErr);
+        CalendarPair pair = new CalendarPair(true, querierEventId, null, true, null, null);
         boolean noticeSent = notifyQuerier(querier, "助手日程已更新",
                 "### 日程已更新\n\n- **主题**：" + title + "\n- **时间**：" + dto.getStartTime().format(NOTICE_TIME) + "\n");
         return actionResult(dto.getId(), pair, noticeSent, row.taskId(), "日程更新");
@@ -467,16 +459,18 @@ public class DingTalkAssistantService {
         return vo;
     }
 
-    private CalendarPair createPairCalendars(BoundUser querier, BoundUser target, String title, String description,
-                                             LocalDateTime start, int duration, String location, boolean online) {
-        List<String> both = List.of(querier.unionId(), target.unionId());
-        DingTalkCalendarClient.CalendarCall forQuerier = dingTalk.createEvent(
-                querier.unionId(), title, description, start, duration, location, both, online);
-        DingTalkCalendarClient.CalendarCall forTarget = dingTalk.createEvent(
-                target.unionId(), title, description, start, duration, location, both, online);
+    /**
+     * 只在发起人主日历建一条日程，并把对方列为参与人。
+     * 若双方各建一条，钉钉会同步出两条一模一样的日程。
+     */
+    private CalendarPair createSharedCalendar(BoundUser querier, BoundUser target, String title, String description,
+                                              LocalDateTime start, int duration, String location, boolean online) {
+        List<String> attendees = List.of(target.unionId());
+        DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
+                querier.unionId(), title, description, start, duration, location, attendees, online);
         return new CalendarPair(
-                forQuerier.success(), forQuerier.eventId(), forQuerier.message(),
-                forTarget.success(), forTarget.eventId(), forTarget.message());
+                call.success(), call.eventId(), call.message(),
+                call.success(), null, null);
     }
 
     private boolean notifyQuerier(BoundUser querier, String title, String markdown) {
@@ -488,17 +482,10 @@ public class DingTalkAssistantService {
 
     private static String buildActionMessage(String kind, CalendarPair calendars, boolean noticeSent) {
         StringBuilder sb = new StringBuilder();
-        if (calendars.querierOk() && calendars.targetOk()) {
-            sb.append("已为你和对方创建钉钉日程。");
-        } else if (calendars.querierOk()) {
-            sb.append("已为你创建钉钉日程；对方日程失败：").append(blankToEmpty(calendars.targetError())).append("。");
-        } else if (calendars.targetOk()) {
-            sb.append("已为对方创建钉钉日程；你的日程失败：").append(blankToEmpty(calendars.querierError())).append("。");
+        if (calendars.querierOk()) {
+            sb.append("已创建钉钉日程，并邀请对方参加。");
         } else {
-            sb.append(kind).append("日程创建失败：")
-                    .append(blankToEmpty(calendars.querierError()))
-                    .append(" / ")
-                    .append(blankToEmpty(calendars.targetError()));
+            sb.append(kind).append("日程创建失败：").append(blankToEmpty(calendars.querierError()));
             return sb.toString();
         }
         if (noticeSent) {
@@ -507,6 +494,14 @@ public class DingTalkAssistantService {
             sb.append(" 未能向你发送钉钉工作通知（请确认已绑定钉钉 userid）。");
         }
         return sb.toString();
+    }
+
+    private static void validateBookableStart(LocalDateTime start) {
+        try {
+            ChinaHoliday.requireBookableStart(start);
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(ex.getMessage());
+        }
     }
 
     private BoundUser requireCurrentBound() {
@@ -518,6 +513,8 @@ public class DingTalkAssistantService {
     }
 
     private BoundUser requireBound(Long userId, String who) {
+        // 建日程前按手机号重绑企业身份，避免仍用旧的个人钉钉账号 unionId
+        hrMasterService.refreshDingTalkBindingQuietly(userId);
         BoundUser user = jdbc.query("""
                 SELECT u.user_id, u.username, u.nickname, d.dingtalk_union_id, d.dingtalk_user_id
                 FROM sys_user u
@@ -545,7 +542,7 @@ public class DingTalkAssistantService {
 
     /**
      * 按查询范围内的每个非节假日自然日建 Tab；同一日期范围对不同人天数一致。
-     * 时段严格落在当天 09:30～18:30，且结束不超过下班时间。
+     * 时段严格落在当天 09:30～18:30，且结束不超过下班时间；已过去的时段不推荐。
      */
     private static List<DingTalkAssistantSuggestVO.DayGroup> buildDayGroups(
             LocalDateTime rangeStart, LocalDateTime rangeEnd,
@@ -563,6 +560,7 @@ public class DingTalkAssistantService {
                 map.put(key, g);
             }
         }
+        LocalDateTime now = LocalDateTime.now().withSecond(0).withNano(0);
         if (windows != null) {
             for (DingTalkAssistantSuggestVO.FreeWindow window : windows) {
                 if (window.getStart() == null || window.getEnd() == null) {
@@ -579,6 +577,11 @@ public class DingTalkAssistantService {
                             || cursor.toLocalTime().isBefore(WORK_START)
                             || ChinaHoliday.isOffDay(cursor.toLocalDate())) {
                         break;
+                    }
+                    // 不能推荐已经过去的时段
+                    if (!cursor.isAfter(now)) {
+                        cursor = cursor.plusMinutes(SLOT_STEP_MIN);
+                        continue;
                     }
                     String key = cursor.toLocalDate().format(DAY_KEY);
                     DingTalkAssistantSuggestVO.DayGroup group = map.get(key);

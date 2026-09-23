@@ -165,3 +165,28 @@ export function interviewPastDisabledTime(selected?: Dayjs | null) {
     },
   };
 }
+
+/** 通用预约：禁用当天已过去的时分（不限制工作时段） */
+export function bookingPastDisabledTime(selected?: Dayjs | null) {
+  const clock = dayjs();
+  const base = selected && dayjs.isDayjs(selected) && selected.isValid() ? selected : clock;
+  const sameDay = base.isSame(clock, 'day');
+  return {
+    disabledHours: () => {
+      if (!sameDay) return [];
+      const hours: number[] = [];
+      for (let h = 0; h < 24; h++) {
+        if (h < clock.hour()) hours.push(h);
+      }
+      return hours;
+    },
+    disabledMinutes: (hour: number) => {
+      if (!sameDay || hour !== clock.hour()) return [];
+      const blocked: number[] = [];
+      for (let m = 0; m < 60; m++) {
+        if (m <= clock.minute()) blocked.push(m);
+      }
+      return blocked;
+    },
+  };
+}

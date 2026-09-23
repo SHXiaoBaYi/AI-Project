@@ -30,6 +30,7 @@ public class DingTalkBusyService {
 
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalk;
+    private final HrMasterService hrMasterService;
 
     public List<DingTalkBusyUserOptionVO> listBoundUsers() {
         return jdbc.query("""
@@ -78,6 +79,9 @@ public class DingTalkBusyService {
         }
         if (userIds.size() > 20) {
             throw new BusinessException("一次最多查询 20 个用户");
+        }
+        for (Long userId : userIds) {
+            hrMasterService.refreshDingTalkBindingQuietly(userId);
         }
         Map<Long, BoundUser> bound = loadBound(userIds);
         List<DingTalkBusyUserVO> result = new ArrayList<>();
