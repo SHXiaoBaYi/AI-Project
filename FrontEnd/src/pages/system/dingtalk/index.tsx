@@ -33,6 +33,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
         appId: data?.appId || '',
         agentId: data?.agentId || '',
         clientId: data?.clientId || '',
+        corpId: data?.corpId || '',
         clientSecret: '',
         enabled: data?.enabled === 1,
       });
@@ -52,6 +53,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
       appId: String(values.appId).trim(),
       agentId: String(values.agentId).trim(),
       clientId: String(values.clientId).trim(),
+      corpId: values.corpId ? String(values.corpId).trim() : '',
       clientSecret: values.clientSecret ? String(values.clientSecret).trim() : undefined,
       enabled: values.enabled ? 1 : 0,
     };
@@ -108,7 +110,8 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
         className='max-w-3xl'
       >
         <p className='mb-4 text-sm text-neutral-500'>
-          用于按系统用户手机号绑定钉钉身份，以及创建、取消面试日程。Client Secret 只保存到数据库，页面只显示脱敏结果。
+          用于钉钉扫码登录、按手机号绑定钉钉身份，以及创建/取消日程。Client Secret
+          只保存到数据库，页面只显示脱敏结果。扫码登录需在钉钉开放平台配置回调域名，并与本系统登录页同源。
         </p>
         {saved?.hasClientSecret ? (
           <div className='mb-4 text-sm text-neutral-600'>
@@ -142,6 +145,13 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
             rules={[{ required: true, message: '请填写 Client ID' }]}
           >
             <Input placeholder='Client ID / AppKey' />
+          </Form.Item>
+          <Form.Item
+            name='corpId'
+            label='CorpId'
+            extra='填写后扫码仅允许本企业专属账号，避免扫到个人钉钉'
+          >
+            <Input placeholder='钉钉企业 CorpId（可选，建议填写）' />
           </Form.Item>
           <Form.Item
             name='clientSecret'

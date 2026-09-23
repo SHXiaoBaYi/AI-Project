@@ -30,17 +30,25 @@ public class OnlineSessionService {
     }
 
     public boolean isTokenActive(Long userId, String tokenId) {
-        if (userId == null || tokenId == null) {
-            return false;
+        return checkToken(userId, tokenId) == TokenStatus.ACTIVE;
+    }
+
+    /** 校验当前请求 token 与库内会话：有效 / 超时 / 被其他设备顶替 / 无会话。 */
+    public TokenStatus checkToken(Long userId, String tokenId) {
+        if (userId == null || tokenId == null || tokenId.isBlank()) {
+            return TokenStatus.MISSING;
         }
         SysUserOnline online = findByUserId(userId);
         if (online == null) {
-            return false;
+            return TokenStatus.MISSING;
         }
-        if (online.getExpireTime() == null || online.getExpireTime().isBefore(LocalDateTime.now())) {
-            return false;
+        if (online.getExpireTime() == null || !online.getExpireTime().isAfter(LocalDateTime.now())) {
+            return TokenStatus.EXPIRED;
         }
-        return tokenId.equals(online.getTokenId());
+        if (!tokenId.equals(online.getTokenId())) {
+            return TokenStatus.REPLACED;
+        }
+        return TokenStatus.ACTIVE;
     }
 
     public void saveSession(Long userId, String username, String tokenId, String ip, String userAgent) {
@@ -70,5 +78,12 @@ public class OnlineSessionService {
             return "";
         }
         return ua.length() > 500 ? ua.substring(0, 500) : ua;
+    }
+
+    public enum TokenStatus {
+        ACTIVE,
+        EXPIRED,
+        REPLACED,
+        MISSING
     }
 }

@@ -21,6 +21,9 @@ public class DingTalkAppDTO {
     @Schema(description = "钉钉 Client ID / AppKey", requiredMode = Schema.RequiredMode.REQUIRED)
     private String clientId;
 
+    @Schema(description = "企业 CorpId；填写后扫码登录限制为企业专属账号")
+    private String corpId;
+
     @Schema(description = "Client Secret；留空表示不修改已保存的密钥")
     private String clientSecret;
 

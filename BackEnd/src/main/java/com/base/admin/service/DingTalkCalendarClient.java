@@ -614,6 +614,26 @@ public class DingTalkCalendarClient {
         return StringUtils.hasText(unionId) ? new DingIdentity(userId, unionId) : null;
     }
 
+    /** 用 unionId 换企业内 userid；找不到时返回空串。 */
+    public String useridByUnionId(String unionId) {
+        DingTalkAppService.Credential credential = credential();
+        if (credential == null || !StringUtils.hasText(unionId)) {
+            return "";
+        }
+        try {
+            String token = legacyToken(credential);
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("unionid", unionId.trim());
+            JsonNode json = postJson("https://oapi.dingtalk.com/topapi/user/getbyunionid?access_token=" + encode(token), body);
+            if (dingCode(json) != 0) {
+                return "";
+            }
+            return json.path("result").path("userid").asText("");
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
     /** 遍历部门成员，用通讯录里的手机号匹配被邀请加入的个人账号。 */
     private DingIdentity findInvitedMember(String token, String mobile) throws Exception {
         ArrayDeque<Long> queue = new ArrayDeque<>();

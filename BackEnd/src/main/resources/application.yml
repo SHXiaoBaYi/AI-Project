@@ -71,7 +71,8 @@ springdoc:
 
 jwt:
   secret: YmFzZS1hZG1pbi1zZWNyZXQta2V5LW11c3QtYmUtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZw==
-  expiration: 86400000
+  # 登录有效期 12 小时（毫秒）；超时后 JWT 与在线会话同时失效，需重新扫码登录
+  expiration: 43200000
 
 geo:
   seed: false

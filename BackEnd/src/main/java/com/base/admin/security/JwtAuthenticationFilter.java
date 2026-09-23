@@ -36,9 +36,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             Long userId = jwtUtils.getUserIdFromToken(token);
             String tokenId = jwtUtils.getTokenId(token);
 
-            // 旧 token 无 jti，或会话已被替换：视为被踢下线
-            if (!StringUtils.hasText(tokenId) || !onlineSessionService.isTokenActive(userId, tokenId)) {
-                writeKicked(response);
+            // 旧 token 无 jti、已超时、或会话已被替换：强制重新登录
+            OnlineSessionService.TokenStatus status = onlineSessionService.checkToken(userId, tokenId);
+            if (status != OnlineSessionService.TokenStatus.ACTIVE) {
+                writeSessionInvalid(response, status);
                 return;
             }
 
@@ -56,12 +57,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private void writeKicked(HttpServletResponse response) throws IOException {
+    private void writeSessionInvalid(HttpServletResponse response, OnlineSessionService.TokenStatus status)
+            throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
-        objectMapper.writeValue(response.getWriter(),
-                Result.fail(Constants.CODE_SESSION_KICKED, "该账号已在其他设备登录，您已被强制下线"));
+        int code;
+        String msg;
+        if (status == OnlineSessionService.TokenStatus.EXPIRED) {
+            code = Constants.CODE_SESSION_EXPIRED;
+            msg = "登录已超过12小时，请重新扫码登录";
+        } else if (status == OnlineSessionService.TokenStatus.REPLACED) {
+            code = Constants.CODE_SESSION_KICKED;
+            msg = "该账号已在其他设备登录，您已被强制下线";
+        } else {
+            code = Constants.CODE_SESSION_EXPIRED;
+            msg = "登录已失效，请重新扫码登录";
+        }
+        objectMapper.writeValue(response.getWriter(), Result.fail(code, msg));
     }
 
     private String extractToken(HttpServletRequest request) {

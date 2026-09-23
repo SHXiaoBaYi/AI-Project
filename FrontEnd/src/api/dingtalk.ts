@@ -4,6 +4,7 @@ export type DingTalkAppVO = {
   appId: string;
   agentId: string;
   clientId: string;
+  corpId?: string;
   clientSecretMasked?: string;
   hasClientSecret?: boolean;
   enabled: number;
@@ -13,6 +14,7 @@ export type DingTalkAppDTO = {
   appId: string;
   agentId: string;
   clientId: string;
+  corpId?: string;
   clientSecret?: string;
   enabled: number;
 };

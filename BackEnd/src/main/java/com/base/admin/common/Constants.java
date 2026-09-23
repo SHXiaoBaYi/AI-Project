@@ -18,6 +18,8 @@ public class Constants {
     public static final int CODE_LOGIN_CONFLICT = 40901;
     /** 当前会话已被其他设备强制下线 */
     public static final int CODE_SESSION_KICKED = 4011;
+    /** 登录已超时，需重新登录 */
+    public static final int CODE_SESSION_EXPIRED = 4012;
 
     /** 日监测话题类型：日巡查 */
     public static final String TERM_TYPE_DAILY = "日巡查";

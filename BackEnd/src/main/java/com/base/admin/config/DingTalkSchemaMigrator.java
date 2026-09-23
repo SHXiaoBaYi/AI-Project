@@ -26,6 +26,7 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                   agent_id       VARCHAR(32)  NOT NULL DEFAULT ''     COMMENT '钉钉 AgentId',
                   client_id      VARCHAR(128) NOT NULL DEFAULT ''     COMMENT 'Client ID / AppKey',
                   client_secret  VARCHAR(256) NOT NULL DEFAULT ''     COMMENT 'Client Secret',
+                  corp_id        VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '企业 CorpId（扫码限制企业专属账号）',
                   enabled        TINYINT      NOT NULL DEFAULT 1      COMMENT '是否启用 1=启用 0=停用',
                   create_by      VARCHAR(50)  DEFAULT ''              COMMENT '创建者',
                   create_time    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -35,6 +36,7 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                   PRIMARY KEY (id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='钉钉企业内部应用配置'
                 """);
+        ensureCorpIdColumn();
         Integer count = jdbc.queryForObject("SELECT COUNT(1) FROM sys_dingtalk_app WHERE id = 1", Integer.class);
         if (count == null || count == 0) {
             jdbc.update("""
@@ -111,5 +113,20 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='日程助手创建的钉钉日程记录'
                 """);
         log.info("钉钉应用配置表与菜单已同步");
+    }
+
+    private void ensureCorpIdColumn() {
+        Integer exists = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_dingtalk_app' AND COLUMN_NAME = 'corp_id'
+                """, Integer.class);
+        if (exists != null && exists > 0) {
+            return;
+        }
+        jdbc.execute("""
+                ALTER TABLE sys_dingtalk_app
+                  ADD COLUMN corp_id VARCHAR(64) NOT NULL DEFAULT '' COMMENT '企业 CorpId（扫码限制企业专属账号）' AFTER client_secret
+                """);
+        log.info("已为 sys_dingtalk_app 增加 corp_id 字段");
     }
 }

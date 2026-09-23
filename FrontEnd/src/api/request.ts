@@ -9,6 +9,7 @@ const HTTP_FORBIDDEN = 403;
 const HTTP_SUCCESS = 200;
 const CODE_LOGIN_CONFLICT = 40901;
 const CODE_SESSION_KICKED = 4011;
+const CODE_SESSION_EXPIRED = 4012;
 
 const HTTP_STATUS_MESSAGES: Record<number, string> = {
   400: '请求参数错误',
@@ -24,15 +25,18 @@ let kicking = false;
 
 /** 处理认证/授权失败，返回 true 表示已拦截 */
 function handleAuthError(code: number, tip?: string): boolean {
-  if (code === CODE_SESSION_KICKED || code === HTTP_UNAUTHORIZED) {
+  if (code === CODE_SESSION_KICKED || code === CODE_SESSION_EXPIRED || code === HTTP_UNAUTHORIZED) {
     if (kicking) {
       return true;
     }
     kicking = true;
-    sessionStorage.setItem(
-      'authError',
-      tip || (code === CODE_SESSION_KICKED ? '该账号已在其他设备登录，您已被强制下线' : '登录已失效，请重新登录'),
-    );
+    const defaultTip =
+      code === CODE_SESSION_KICKED
+        ? '该账号已在其他设备登录，您已被强制下线'
+        : code === CODE_SESSION_EXPIRED
+          ? '登录已超过12小时，请重新扫码登录'
+          : '登录已失效，请重新扫码登录';
+    sessionStorage.setItem('authError', tip || defaultTip);
     removeToken();
     window.location.href = withBase('/login');
     return true;
@@ -82,13 +86,17 @@ service.interceptors.response.use(
   (error) => {
     const httpStatus = error.response?.status;
     const body = error.response?.data as ApiResult<unknown> | undefined;
-    if (body?.code === CODE_SESSION_KICKED || body?.code === CODE_LOGIN_CONFLICT) {
+    if (
+      body?.code === CODE_SESSION_KICKED ||
+      body?.code === CODE_SESSION_EXPIRED ||
+      body?.code === CODE_LOGIN_CONFLICT
+    ) {
       if (body.code === CODE_LOGIN_CONFLICT) {
         const err = new Error(body.msg || '账号已在其他设备登录') as Error & { code: number };
         err.code = CODE_LOGIN_CONFLICT;
         return Promise.reject(err);
       }
-      handleAuthError(CODE_SESSION_KICKED, body.msg);
+      handleAuthError(body.code, body.msg);
       return Promise.reject(error);
     }
     if (!handleAuthError(httpStatus)) {
@@ -104,4 +112,4 @@ service.interceptors.response.use(
 );
 
 export default service;
-export { CODE_LOGIN_CONFLICT, CODE_SESSION_KICKED };
+export { CODE_LOGIN_CONFLICT, CODE_SESSION_KICKED, CODE_SESSION_EXPIRED };

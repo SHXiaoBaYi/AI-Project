@@ -2,8 +2,20 @@ import request from './request';
 import type { MenuTree } from '@/types/menu';
 import type { UserInfo } from '@/types/user';
 
-export function loginApi(username: string, password: string, force = false) {
-  return request.post<unknown, { token: string }>('/auth/login', { username, password, force });
+export type DingTalkLoginConfig = {
+  enabled: number;
+  clientId: string;
+  corpId?: string;
+  exclusiveLogin?: boolean;
+  message?: string;
+};
+
+export function getDingTalkLoginConfigApi() {
+  return request.get<unknown, DingTalkLoginConfig>('/auth/dingtalk/config');
+}
+
+export function dingTalkLoginApi(authCode: string, force = false) {
+  return request.post<unknown, { token: string }>('/auth/dingtalk/login', { authCode, force });
 }
 
 export function getUserInfoApi() {

@@ -1,7 +1,9 @@
 package com.base.admin.controller;
 
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.DingTalkLoginDTO;
 import com.base.admin.domain.dto.LoginDTO;
+import com.base.admin.domain.vo.DingTalkLoginConfigVO;
 import com.base.admin.domain.vo.LoginVO;
 import com.base.admin.domain.vo.UserInfoVO;
 import com.base.admin.security.LoginUser;
@@ -22,10 +24,23 @@ public class SysLoginController {
 
     private final SysLoginService loginService;
 
-    @Operation(summary = "用户登录")
+    @Operation(summary = "用户名密码登录（已关闭，请使用钉钉扫码）")
     @PostMapping("/auth/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginDTO dto, HttpServletRequest request) {
         LoginVO vo = loginService.login(dto, IpUtils.getClientIp(request), request.getHeader("User-Agent"));
+        return Result.ok(vo);
+    }
+
+    @Operation(summary = "钉钉扫码登录公开配置")
+    @GetMapping("/auth/dingtalk/config")
+    public Result<DingTalkLoginConfigVO> dingTalkConfig() {
+        return Result.ok(loginService.dingTalkLoginConfig());
+    }
+
+    @Operation(summary = "钉钉扫码登录")
+    @PostMapping("/auth/dingtalk/login")
+    public Result<LoginVO> dingTalkLogin(@Valid @RequestBody DingTalkLoginDTO dto, HttpServletRequest request) {
+        LoginVO vo = loginService.loginByDingTalk(dto, IpUtils.getClientIp(request), request.getHeader("User-Agent"));
         return Result.ok(vo);
     }
 

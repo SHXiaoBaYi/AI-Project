@@ -16,6 +16,9 @@ public class DingTalkAppVO {
     @Schema(description = "钉钉 Client ID / AppKey")
     private String clientId;
 
+    @Schema(description = "企业 CorpId；填写后扫码登录限制为企业专属账号")
+    private String corpId;
+
     @Schema(description = "Client Secret 脱敏展示")
     private String clientSecretMasked;
 

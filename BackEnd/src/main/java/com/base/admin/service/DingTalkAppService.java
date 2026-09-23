@@ -2,6 +2,7 @@ package com.base.admin.service;
 
 import com.base.admin.domain.dto.DingTalkAppDTO;
 import com.base.admin.domain.vo.DingTalkAppVO;
+import com.base.admin.domain.vo.DingTalkLoginConfigVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ public class DingTalkAppService {
             vo.setAppId("");
             vo.setAgentId("");
             vo.setClientId("");
+            vo.setCorpId("");
             vo.setClientSecretMasked("");
             vo.setHasClientSecret(false);
             vo.setEnabled(0);
@@ -31,9 +33,32 @@ public class DingTalkAppService {
         vo.setAppId(stored.appId());
         vo.setAgentId(stored.agentId());
         vo.setClientId(stored.clientId());
+        vo.setCorpId(stored.corpId());
         vo.setHasClientSecret(StringUtils.hasText(stored.clientSecret()));
         vo.setClientSecretMasked(mask(stored.clientSecret()));
         vo.setEnabled(stored.enabled());
+        return vo;
+    }
+
+    /** 登录页公开配置：不返回密钥。 */
+    public DingTalkLoginConfigVO loginConfig() {
+        DingTalkLoginConfigVO vo = new DingTalkLoginConfigVO();
+        Stored stored = loadStored();
+        if (stored == null || stored.enabled() == null || stored.enabled() != 1
+                || !StringUtils.hasText(stored.clientId()) || !StringUtils.hasText(stored.clientSecret())) {
+            vo.setEnabled(0);
+            vo.setClientId("");
+            vo.setCorpId("");
+            vo.setExclusiveLogin(false);
+            vo.setMessage("钉钉扫码登录未配置，请联系管理员在「系统管理 → 钉钉应用配置」启用");
+            return vo;
+        }
+        vo.setEnabled(1);
+        vo.setClientId(stored.clientId().trim());
+        String corpId = stored.corpId() == null ? "" : stored.corpId().trim();
+        vo.setCorpId(corpId);
+        vo.setExclusiveLogin(StringUtils.hasText(corpId));
+        vo.setMessage("请使用钉钉扫码登录");
         return vo;
     }
 
@@ -81,20 +106,23 @@ public class DingTalkAppService {
         if (!StringUtils.hasText(secret)) {
             throw new BusinessException("请填写 Client Secret");
         }
+        String corpId = dto.getCorpId() == null ? "" : dto.getCorpId().trim();
         String user = SecurityUtils.getCurrentUsername();
         Stored current = loadStored();
         if (current == null) {
             jdbc.update("""
-                    INSERT INTO sys_dingtalk_app (id, app_id, agent_id, client_id, client_secret, enabled, create_by, is_active)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, 1)
-                    """, dto.getAppId().trim(), dto.getAgentId().trim(), dto.getClientId().trim(), secret, dto.getEnabled(), user);
+                    INSERT INTO sys_dingtalk_app (id, app_id, agent_id, client_id, client_secret, corp_id, enabled, create_by, is_active)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """, dto.getAppId().trim(), dto.getAgentId().trim(), dto.getClientId().trim(), secret, corpId,
+                    dto.getEnabled(), user);
             return;
         }
         jdbc.update("""
                 UPDATE sys_dingtalk_app
-                SET app_id = ?, agent_id = ?, client_id = ?, client_secret = ?, enabled = ?, update_by = ?, is_active = 1
+                SET app_id = ?, agent_id = ?, client_id = ?, client_secret = ?, corp_id = ?, enabled = ?, update_by = ?, is_active = 1
                 WHERE id = 1
-                """, dto.getAppId().trim(), dto.getAgentId().trim(), dto.getClientId().trim(), secret, dto.getEnabled(), user);
+                """, dto.getAppId().trim(), dto.getAgentId().trim(), dto.getClientId().trim(), secret, corpId,
+                dto.getEnabled(), user);
     }
 
     private String storedSecret() {
@@ -104,17 +132,24 @@ public class DingTalkAppService {
 
     private Stored loadStored() {
         return jdbc.query("""
-                SELECT app_id, agent_id, client_id, client_secret, enabled
+                SELECT app_id, agent_id, client_id, client_secret, corp_id, enabled
                 FROM sys_dingtalk_app WHERE id = 1 AND is_active = 1
                 """, rs -> {
             if (!rs.next()) {
                 return null;
+            }
+            String corpId;
+            try {
+                corpId = rs.getString("corp_id");
+            } catch (Exception ex) {
+                corpId = "";
             }
             return new Stored(
                     rs.getString("app_id"),
                     rs.getString("agent_id"),
                     rs.getString("client_id"),
                     rs.getString("client_secret"),
+                    corpId == null ? "" : corpId,
                     rs.getInt("enabled"));
         });
     }
@@ -130,7 +165,7 @@ public class DingTalkAppService {
         return value.substring(0, 4) + "****" + value.substring(value.length() - 4);
     }
 
-    public record Stored(String appId, String agentId, String clientId, String clientSecret, Integer enabled) {
+    public record Stored(String appId, String agentId, String clientId, String clientSecret, String corpId, Integer enabled) {
     }
 
     public record Credential(String clientId, String clientSecret) {
