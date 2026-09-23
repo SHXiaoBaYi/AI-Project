@@ -50,8 +50,8 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose, initi
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userIds, setUserIds] = useState<number[]>([]);
   const [range, setRange] = useState<[Dayjs, Dayjs]>([
-    dayjs().hour(9).minute(0).second(0),
-    dayjs().hour(18).minute(0).second(0),
+    dayjs().hour(9).minute(30).second(0),
+    dayjs().hour(18).minute(30).second(0),
   ]);
   const [querying, setQuerying] = useState(false);
   const [result, setResult] = useState<DingTalkBusyUser[]>([]);
@@ -173,7 +173,7 @@ const DingTalkBusyModal = memo(function DingTalkBusyModal({ open, onClose, initi
     >
       <div className='mb-3 text-sm text-neutral-500'>
         从系统用户里选择。已绑定钉钉的才能查出闲忙；未绑定的会标出来，需要先在用户管理里绑定。一次最多 20
-        人。结果按半小时一段对齐展示，一段里只要有忙就整段算忙。可用列头漏斗筛选时间或闲忙状态。
+        人。结果仅统计每天 09:30～18:30，按半小时一段对齐；一段里只要有忙就整段算忙。可用列头漏斗筛选时间或闲忙状态。
       </div>
       <div className='mb-3 grid gap-3 md:grid-cols-2'>
         <Select

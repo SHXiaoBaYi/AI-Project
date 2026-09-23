@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,9 @@ public class HrInviteService {
 
     private static final String NO_CALENDAR_REASON = "面试官未绑定钉钉，未创建钉钉日程";
     private static final Map<Integer, String> ROUND_NAME = Map.of(1, "一面", 2, "二面", 3, "三面", 4, "四面", 5, "五面");
+    /** 面试开始时间：每天 09:30～17:30，半小时整点 */
+    private static final LocalTime INTERVIEW_START = LocalTime.of(9, 30);
+    private static final LocalTime INTERVIEW_END = LocalTime.of(17, 30);
 
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalk;
@@ -33,6 +37,7 @@ public class HrInviteService {
 
     @Transactional
     public HrInviteSaveVO create(HrInviteCreateDTO dto) {
+        validateInterviewAt(dto.getInterviewAt());
         java.util.List<Long> ids = interviewerIds(dto);
         java.util.List<String> unbound = new ArrayList<>();
         Long last = null;
@@ -227,6 +232,7 @@ public class HrInviteService {
 
     @Transactional
     public HrInviteSaveVO update(Long id, HrInviteCreateDTO dto) {
+        validateInterviewAt(dto.getInterviewAt());
         java.util.List<Long> desired = interviewerIds(dto);
         Map<String, Object> anchor = loadInvite(id);
         releaseCcCalendarsForSession((Long) anchor.get("applicationId"),
@@ -925,6 +931,19 @@ public class HrInviteService {
                 """, dto.getApplicationId(), dto.getRoundNo(), dto.getInterviewerUserId(), dto.getInterviewAt(),
                 duration, dto.getLocation(), SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentUsername());
         return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private static void validateInterviewAt(LocalDateTime interviewAt) {
+        if (interviewAt == null) {
+            throw new BusinessException("请选择开始时间");
+        }
+        LocalTime time = interviewAt.toLocalTime().withSecond(0).withNano(0);
+        if (interviewAt.getSecond() != 0 || interviewAt.getNano() != 0 || time.getMinute() % 30 != 0) {
+            throw new BusinessException("面试开始时间须为半小时整点（如 09:30、10:00）");
+        }
+        if (time.isBefore(INTERVIEW_START) || time.isAfter(INTERVIEW_END)) {
+            throw new BusinessException("面试开始时间须在每天 09:30～17:30 之间");
+        }
     }
 
     private java.util.List<Long> interviewerIds(HrInviteCreateDTO dto) {

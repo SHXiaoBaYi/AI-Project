@@ -9,8 +9,8 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import { AiAnalysisDrawer } from '@/components/hr/AiAnalysisDrawer';
 import InterviewReviewDrawer from '@/components/hr/InterviewReviewDrawer';
-import InviteFormModal, { maxRoundOf, type InviteFormPreset } from '@/components/hr/InviteFormModal';
-import { canCreateInvite, nextInviteRound } from '@/components/hr/inviteRound';
+import InviteFormModal, { type InviteFormPreset } from '@/components/hr/InviteFormModal';
+import { canCreateInvite, maxRoundOf, nextInviteRound } from '@/components/hr/inviteRound';
 import ApplicationFormModal from './components/ApplicationFormModal';
 import ImportApplicationModal from './components/ImportApplicationModal';
 import {

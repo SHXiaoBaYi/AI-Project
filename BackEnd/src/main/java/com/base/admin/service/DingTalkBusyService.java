@@ -12,6 +12,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +24,9 @@ public class DingTalkBusyService {
 
     private static final Duration MAX_RANGE = Duration.ofDays(31);
     private static final int SLOT_MINUTES = 30;
+    /** 工作时段：仅统计每天 09:30～18:30 */
+    private static final LocalTime WORK_START = LocalTime.of(9, 30);
+    private static final LocalTime WORK_END = LocalTime.of(18, 30);
 
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalk;
@@ -55,6 +59,12 @@ public class DingTalkBusyService {
         if (Duration.between(dto.getStartTime(), dto.getEndTime()).compareTo(MAX_RANGE) > 0) {
             throw new BusinessException("查询范围不能超过 31 天");
         }
+        // 仅统计每天工作时段 09:30～18:30
+        LocalDateTime rangeStart = alignToWorkStart(dto.getStartTime());
+        LocalDateTime rangeEnd = alignToWorkEnd(dto.getEndTime());
+        if (!rangeStart.isBefore(rangeEnd)) {
+            throw new BusinessException("所选范围不包含工作时段（每天 09:30～18:30）");
+        }
         List<Long> userIds = dto.getUserIds().stream().filter(id -> id != null).distinct().toList();
         if (userIds.isEmpty()) {
             throw new BusinessException("请选择用户");
@@ -77,10 +87,10 @@ public class DingTalkBusyService {
             }
             vo.setUsername(user.username());
             vo.setNickname(StringUtils.hasText(user.nickname()) ? user.nickname() : user.username());
-            DingTalkCalendarClient.BusySchedule schedule = dingTalk.queryBusy(user.unionId(), dto.getStartTime(), dto.getEndTime());
+            DingTalkCalendarClient.BusySchedule schedule = dingTalk.queryBusy(user.unionId(), rangeStart, rangeEnd);
             vo.setError(schedule.error());
             if (!StringUtils.hasText(schedule.error())) {
-                vo.setSlots(buildSlots(dto.getStartTime(), dto.getEndTime(), schedule.items()));
+                vo.setSlots(buildSlots(rangeStart, rangeEnd, schedule.items()));
             }
             result.add(vo);
         }
@@ -124,17 +134,55 @@ public class DingTalkBusyService {
             }
         }
         List<DingTalkBusySlotVO> slots = new ArrayList<>();
-        LocalDateTime cursor = rangeStart;
+        LocalDateTime cursor = alignToWorkStart(rangeStart);
         while (cursor.isBefore(rangeEnd)) {
+            if (cursor.toLocalTime().isBefore(WORK_START)) {
+                cursor = cursor.toLocalDate().atTime(WORK_START);
+                continue;
+            }
+            if (!cursor.toLocalTime().isBefore(WORK_END)) {
+                cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
+                continue;
+            }
+            LocalDateTime dayWorkEnd = cursor.toLocalDate().atTime(WORK_END);
             LocalDateTime boundary = nextHalfHour(cursor);
-            LocalDateTime slotEnd = boundary.isAfter(rangeEnd) ? rangeEnd : boundary;
+            LocalDateTime slotEnd = boundary;
+            if (slotEnd.isAfter(dayWorkEnd)) {
+                slotEnd = dayWorkEnd;
+            }
+            if (slotEnd.isAfter(rangeEnd)) {
+                slotEnd = rangeEnd;
+            }
             if (!cursor.isBefore(slotEnd)) {
-                break;
+                cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
+                continue;
             }
             slots.add(slot(statusOf(cursor, slotEnd, clipped), cursor, slotEnd));
             cursor = slotEnd;
         }
         return slots;
+    }
+
+    /** 落到查询范围内的第一个工作时段起点 */
+    private static LocalDateTime alignToWorkStart(LocalDateTime time) {
+        if (time.toLocalTime().isBefore(WORK_START)) {
+            return time.toLocalDate().atTime(WORK_START);
+        }
+        if (!time.toLocalTime().isBefore(WORK_END)) {
+            return time.toLocalDate().plusDays(1).atTime(WORK_START);
+        }
+        return time;
+    }
+
+    /** 落到查询范围内的最后一个工作时段终点 */
+    private static LocalDateTime alignToWorkEnd(LocalDateTime time) {
+        if (time.toLocalTime().isBefore(WORK_START)) {
+            return time.toLocalDate().minusDays(1).atTime(WORK_END);
+        }
+        if (time.toLocalTime().isAfter(WORK_END)) {
+            return time.toLocalDate().atTime(WORK_END);
+        }
+        return time;
     }
 
     /** 对齐到下一个整点或半点。已经落在整点/半点上时，向后推 30 分钟。 */

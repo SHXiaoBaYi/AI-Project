@@ -17,6 +17,13 @@ import {
   listHrInvitesApi,
   updateHrInviteApi,
 } from '@/api/hr';
+import {
+  InviteCandidateSelect,
+  buildAppReqMap,
+  filterInviteableCandidates,
+  mapApplicationCandidates,
+  type InviteCandidateOption,
+} from '@/components/hr/inviteRound';
 
 const ROUNDS = [
   { value: 1, label: '一面' },
@@ -33,6 +40,38 @@ const STATUS = [
   { value: 'CANCELLED', label: '已取消' },
   { value: 'CANCEL_FAILED', label: '取消失败' },
 ];
+
+/** 面试开始：每天 09:30～17:30，半小时一档（不含秒） */
+const INTERVIEW_START_MIN = 9 * 60 + 30;
+const INTERVIEW_END_MIN = 17 * 60 + 30;
+
+function interviewAtDisabledTime() {
+  return {
+    disabledHours: () => {
+      const hours: number[] = [];
+      for (let h = 0; h < 24; h++) {
+        if (h < 9 || h > 17) hours.push(h);
+      }
+      return hours;
+    },
+    disabledMinutes: (hour: number) => (hour === 9 ? [0] : []),
+  };
+}
+
+function validateInterviewAt(_: unknown, value: unknown) {
+  const d = dayjs.isDayjs(value) ? value : value ? dayjs(value as string) : null;
+  if (!d || !d.isValid()) {
+    return Promise.reject(new Error('请选择时间'));
+  }
+  if (d.minute() % 30 !== 0) {
+    return Promise.reject(new Error('开始时间须为半小时整点（如 09:30、10:00）'));
+  }
+  const mins = d.hour() * 60 + d.minute();
+  if (mins < INTERVIEW_START_MIN || mins > INTERVIEW_END_MIN) {
+    return Promise.reject(new Error('开始时间须在每天 09:30～17:30 之间'));
+  }
+  return Promise.resolve();
+}
 
 interface InviteRow {
   id: number;
@@ -238,7 +277,7 @@ const InvitePage = memo(function InvitePage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InviteRow | null>(null);
-  const [candidates, setCandidates] = useState<{ value: number; label: string }[]>([]);
+  const [candidates, setCandidates] = useState<InviteCandidateOption[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
   const [plans, setPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
@@ -246,17 +285,9 @@ const InvitePage = memo(function InvitePage() {
 
   useEffect(() => {
     getHrApplicationsApi().then((rows) => {
-      const next = new Map<number, number>();
-      setCandidates(
-        (rows as Record<string, unknown>[]).map((row) => {
-          if (row.requisition_id != null) next.set(Number(row.id), Number(row.requisition_id));
-          return {
-            value: Number(row.id),
-            label: `${row.display_name} · ${row.job_name || '未定岗'}`,
-          };
-        }),
-      );
-      setAppReq(next);
+      const mapped = mapApplicationCandidates(rows as Record<string, unknown>[]);
+      setCandidates(mapped);
+      setAppReq(buildAppReqMap(mapped));
     });
     getHrRequisitionsApi().then((rows) => {
       const nextInterviewers = new Map<number, Map<number, number[]>>();
@@ -295,6 +326,11 @@ const InvitePage = memo(function InvitePage() {
       ),
     );
   }, []);
+
+  const formCandidates = useMemo(
+    () => filterInviteableCandidates(candidates, plans, [editing?.applicationId]),
+    [candidates, plans, editing?.applicationId],
+  );
 
   const columns: ProColumnType<InviteRow>[] = useMemo(
     () => [
@@ -353,7 +389,17 @@ const InvitePage = memo(function InvitePage() {
         dataIndex: 'applicationId',
         valueType: 'select',
         fieldProps: { options: candidates, showSearch: true, optionFilterProp: 'label' },
-        formItemProps: { rules: [{ required: true, message: '请选择候选人' }] },
+        formItemProps: {
+          rules: [{ required: true, message: '请选择候选人' }],
+          extra: '仅展示阶段可邀约的候选人；选中后自动带出轮次、面试官与抄送人，可再改',
+        },
+        formItemRender: () => (
+          <InviteCandidateSelect
+            options={formCandidates}
+            plans={plans}
+            autoRound={!editing}
+          />
+        ),
         render: (_, record) => record.displayName,
       },
       {
@@ -411,7 +457,7 @@ const InvitePage = memo(function InvitePage() {
             users={users}
             appReq={appReq}
             plans={plans}
-            placeholder='选择候选人与轮次后自动带出'
+            placeholder='选择候选人与轮次后自动带出，可改'
           />
         ),
       },
@@ -436,7 +482,20 @@ const InvitePage = memo(function InvitePage() {
         dataIndex: 'interviewAt',
         valueType: 'dateTime',
         search: false,
-        formItemProps: { rules: [{ required: true, message: '请选择时间' }] },
+        fieldProps: {
+          format: 'YYYY-MM-DD HH:mm',
+          showTime: {
+            format: 'HH:mm',
+            minuteStep: 30,
+            hideDisabledOptions: true,
+            showSecond: false,
+          },
+          disabledTime: interviewAtDisabledTime,
+        },
+        formItemProps: {
+          extra: '每天 09:30～17:30，半小时一档',
+          rules: [{ required: true, validator: validateInterviewAt }],
+        },
       },
       {
         title: '时长',
@@ -473,7 +532,7 @@ const InvitePage = memo(function InvitePage() {
         ellipsis: true,
       },
     ],
-    [appReq, candidates, ccPlans, editing, message, plans, users],
+    [appReq, candidates, ccPlans, editing, formCandidates, message, plans, users],
   );
 
   return (
@@ -632,7 +691,7 @@ const InvitePage = memo(function InvitePage() {
             roundNo: form.roundNo,
             interviewerUserIds: ids,
             ccUserIds: form.ccUserIds ?? [],
-            interviewAt: dayjs(form.interviewAt).format('YYYY-MM-DD HH:mm:ss'),
+            interviewAt: dayjs(form.interviewAt).second(0).format('YYYY-MM-DD HH:mm:ss'),
             durationMin: form.durationMin,
             location: form.location,
           };

@@ -34,7 +34,7 @@ public class HrInviteCreateDTO {
 
     @NotNull
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    @Schema(description = "开始时间")
+    @Schema(description = "开始时间，每天 09:30～17:30，半小时整点")
     private LocalDateTime interviewAt;
 
     @Min(15)

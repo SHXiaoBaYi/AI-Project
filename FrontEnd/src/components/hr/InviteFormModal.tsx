@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { DatePicker } from 'antd';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import {
   createHrInviteApi,
   getHrApplicationsApi,
@@ -9,6 +9,15 @@ import {
   getHrUsersApi,
   updateHrInviteApi,
 } from '@/api/hr';
+import {
+  InviteCandidateSelect,
+  buildAppReqMap,
+  filterInviteableCandidates,
+  mapApplicationCandidates,
+  type InviteCandidateOption,
+} from '@/components/hr/inviteRound';
+
+export { maxRoundOf } from '@/components/hr/inviteRound';
 
 const ROUNDS = [
   { value: 1, label: '一面' },
@@ -17,6 +26,40 @@ const ROUNDS = [
   { value: 4, label: '四面' },
   { value: 5, label: '五面' },
 ];
+
+/** 面试开始：每天 09:30～17:30，半小时一档 */
+const INTERVIEW_START_MIN = 9 * 60 + 30;
+const INTERVIEW_END_MIN = 17 * 60 + 30;
+
+function interviewAtDisabledTime() {
+  return {
+    disabledHours: () => {
+      const hours: number[] = [];
+      for (let h = 0; h < 24; h++) {
+        if (h < 9 || h > 17) hours.push(h);
+      }
+      return hours;
+    },
+    disabledMinutes: (hour: number) => {
+      if (hour === 9) return [0];
+      return [];
+    },
+  };
+}
+
+function validateInterviewAt(_: unknown, value: Dayjs | null | undefined) {
+  if (!value || !dayjs.isDayjs(value) || !value.isValid()) {
+    return Promise.reject(new Error('请选择时间'));
+  }
+  if (value.minute() % 30 !== 0) {
+    return Promise.reject(new Error('开始时间须为半小时整点（如 09:30、10:00）'));
+  }
+  const mins = value.hour() * 60 + value.minute();
+  if (mins < INTERVIEW_START_MIN || mins > INTERVIEW_END_MIN) {
+    return Promise.reject(new Error('开始时间须在每天 09:30～17:30 之间'));
+  }
+  return Promise.resolve();
+}
 
 function parseRoundPeople(text: unknown) {
   const rounds = new Map<number, number[]>();
@@ -45,6 +88,7 @@ function RoundPeopleSelect({
   plans,
   placeholder,
   autoFill,
+  preserveInitial,
 }: {
   value?: number[];
   onChange?: (value: number[]) => void;
@@ -53,6 +97,8 @@ function RoundPeopleSelect({
   plans: Map<number, Map<number, number[]>>;
   placeholder: string;
   autoFill: boolean;
+  /** 打开时若已有初值（编辑/候选人列表预设）则保留，不立刻覆盖 */
+  preserveInitial?: boolean;
 }) {
   const form = Form.useFormInstance();
   const applicationId = Form.useWatch('applicationId', form);
@@ -69,11 +115,11 @@ function RoundPeopleSelect({
     if (seen.current === key) return;
     const opening = seen.current === null;
     seen.current = key;
-    if (opening && Array.isArray(value) && value.length > 0) return;
+    if (opening && preserveInitial && Array.isArray(value) && value.length > 0) return;
     const reqId = appReq.get(Number(applicationId));
     const ids = reqId == null ? [] : (plans.get(reqId)?.get(Number(roundNo)) ?? []);
     onChangeRef.current?.(ids);
-  }, [applicationId, roundNo, appReq, plans, value, autoFill]);
+  }, [applicationId, roundNo, appReq, plans, value, autoFill, preserveInitial]);
 
   return (
     <Select
@@ -142,7 +188,7 @@ export default function InviteFormModal({
   const [form] = Form.useForm<InviteFormValues>();
   const [saving, setSaving] = useState(false);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
-  const [candidates, setCandidates] = useState<{ value: number; label: string }[]>([]);
+  const [allCandidates, setAllCandidates] = useState<InviteCandidateOption[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
   const [plans, setPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
   const [ccPlans, setCcPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
@@ -158,17 +204,9 @@ export default function InviteFormModal({
       ),
     );
     getHrApplicationsApi().then((rows) => {
-      const next = new Map<number, number>();
-      setCandidates(
-        (rows as Record<string, unknown>[]).map((row) => {
-          if (row.requisition_id != null) next.set(Number(row.id), Number(row.requisition_id));
-          return {
-            value: Number(row.id),
-            label: `${row.display_name} · ${row.job_name || '未定岗'}`,
-          };
-        }),
-      );
-      setAppReq(next);
+      const mapped = mapApplicationCandidates(rows as Record<string, unknown>[]);
+      setAllCandidates(mapped);
+      setAppReq(buildAppReqMap(mapped));
     });
     getHrRequisitionsApi().then((rows) => {
       const nextInterviewers = new Map<number, Map<number, number[]>>();
@@ -183,17 +221,22 @@ export default function InviteFormModal({
   }, [open]);
 
   const candidateOptions = useMemo(() => {
-    if (!preset) return candidates;
-    const exists = candidates.some((item) => item.value === preset.applicationId);
-    if (exists) return candidates;
+    const filtered = filterInviteableCandidates(allCandidates, plans, [
+      preset?.applicationId,
+      editingInitial?.applicationId,
+      seed?.applicationId,
+    ]);
+    if (!preset) return filtered;
+    const exists = filtered.some((item) => item.value === preset.applicationId);
+    if (exists) return filtered;
     return [
       {
         value: preset.applicationId,
         label: `${preset.displayName} · ${preset.jobName || '未定岗'}`,
       },
-      ...candidates,
+      ...filtered,
     ];
-  }, [candidates, preset]);
+  }, [allCandidates, plans, preset, editingInitial?.applicationId, seed?.applicationId]);
 
   useEffect(() => {
     if (!open) return;
@@ -233,6 +276,7 @@ export default function InviteFormModal({
 
   const title = editingId ? '编辑邀约' : preset ? `邀约：${preset.displayName}` : '新增邀约';
   const autoFillPeople = !editingId;
+  const preserveInitialPeople = !!editingId || !!preset;
 
   return (
     <Modal
@@ -254,7 +298,7 @@ export default function InviteFormModal({
           roundNo: Number(values.roundNo),
           interviewerUserIds: ids,
           ccUserIds: values.ccUserIds ?? [],
-          interviewAt: dayjs(values.interviewAt).format('YYYY-MM-DD HH:mm:ss'),
+          interviewAt: dayjs(values.interviewAt).second(0).format('YYYY-MM-DD HH:mm:ss'),
           durationMin: values.durationMin,
           location: values.location,
         };
@@ -284,14 +328,14 @@ export default function InviteFormModal({
         <Form.Item
           name='applicationId'
           label='候选人'
+          extra='仅展示阶段可邀约的候选人；选中后自动带出轮次、面试官与抄送人，可再改'
           rules={[{ required: true, message: '请选择候选人' }]}
         >
-          <Select
+          <InviteCandidateSelect
             options={candidateOptions}
-            showSearch
-            optionFilterProp='label'
-            placeholder='请选择候选人'
+            plans={plans}
             disabled={lockCandidate}
+            autoRound={!lockRound}
           />
         </Form.Item>
         <Form.Item
@@ -314,8 +358,9 @@ export default function InviteFormModal({
             users={users}
             appReq={appReq}
             plans={plans}
-            placeholder='选择候选人与轮次后自动带出'
+            placeholder='选择候选人与轮次后自动带出，可改'
             autoFill={autoFillPeople}
+            preserveInitial={preserveInitialPeople}
           />
         </Form.Item>
         <Form.Item
@@ -328,17 +373,25 @@ export default function InviteFormModal({
             plans={ccPlans}
             placeholder='选择候选人与轮次后自动带出，可改'
             autoFill={autoFillPeople}
+            preserveInitial={preserveInitialPeople}
           />
         </Form.Item>
         <Form.Item
           name='interviewAt'
           label='开始时间'
-          rules={[{ required: true, message: '请选择时间' }]}
+          extra='每天 09:30～17:30，半小时一档'
+          rules={[{ required: true, validator: validateInterviewAt }]}
         >
           <DatePicker
-            showTime
             className='w-full'
             format='YYYY-MM-DD HH:mm'
+            showTime={{
+              format: 'HH:mm',
+              minuteStep: 30,
+              hideDisabledOptions: true,
+              showSecond: false,
+            }}
+            disabledTime={interviewAtDisabledTime}
           />
         </Form.Item>
         <Form.Item
@@ -360,12 +413,4 @@ export default function InviteFormModal({
       </Form>
     </Modal>
   );
-}
-
-/** 招聘需求配置的最大轮次 */
-export function maxRoundOf(plans: Map<number, Map<number, number[]>>, requisitionId?: number) {
-  if (requisitionId == null) return null;
-  const rounds = plans.get(requisitionId);
-  if (!rounds || rounds.size === 0) return null;
-  return Math.max(...rounds.keys());
 }

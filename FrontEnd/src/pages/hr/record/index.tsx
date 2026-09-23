@@ -18,6 +18,13 @@ import {
   saveHrInterviewRecordApi,
   saveHrInterviewVerdictApi,
 } from '@/api/hr';
+import {
+  InviteCandidateSelect,
+  buildAppReqMap,
+  filterInviteableCandidates,
+  mapApplicationCandidates,
+  type InviteCandidateOption,
+} from '@/components/hr/inviteRound';
 
 const ROUNDS = [
   { value: 1, label: '一面' },
@@ -257,7 +264,7 @@ const RecordPage = memo(function RecordPage() {
   const [verdictTarget, setVerdictTarget] = useState<RecordRow | null>(null);
   const [verdictSaving, setVerdictSaving] = useState(false);
   const [verdictForm] = Form.useForm();
-  const [candidates, setCandidates] = useState<{ value: number; label: string }[]>([]);
+  const [candidates, setCandidates] = useState<InviteCandidateOption[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [failReasons, setFailReasons] = useState<{ value: string; label: string }[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
@@ -274,17 +281,9 @@ const RecordPage = memo(function RecordPage() {
 
   useEffect(() => {
     getHrApplicationsApi().then((rows) => {
-      const next = new Map<number, number>();
-      setCandidates(
-        (rows as Record<string, unknown>[]).map((row) => {
-          if (row.requisition_id != null) next.set(Number(row.id), Number(row.requisition_id));
-          return {
-            value: Number(row.id),
-            label: `${row.display_name} · ${row.job_name || '未定岗'}`,
-          };
-        }),
-      );
-      setAppReq(next);
+      const mapped = mapApplicationCandidates(rows as Record<string, unknown>[]);
+      setCandidates(mapped);
+      setAppReq(buildAppReqMap(mapped));
     });
     getHrRequisitionsApi().then((rows) => {
       const next = new Map<number, Map<number, number[]>>();
@@ -313,6 +312,11 @@ const RecordPage = memo(function RecordPage() {
       setFailReasons((list ?? []).map((item) => ({ value: item.name, label: item.name }))),
     );
   }, []);
+
+  const formCandidates = useMemo(
+    () => filterInviteableCandidates(candidates, plans, [editing?.applicationId, fromInvite?.applicationId]),
+    [candidates, plans, editing?.applicationId, fromInvite?.applicationId],
+  );
 
   const columns: ProColumnType<RecordRow>[] = useMemo(
     () => [
@@ -369,7 +373,17 @@ const RecordPage = memo(function RecordPage() {
         dataIndex: 'applicationId',
         valueType: 'select',
         fieldProps: { options: candidates, showSearch: true, optionFilterProp: 'label' },
-        formItemProps: { rules: [{ required: true, message: '请选择候选人' }] },
+        formItemProps: {
+          rules: [{ required: true, message: '请选择候选人' }],
+          extra: '仅展示阶段可邀约的候选人；选中后自动带出轮次与面试官，可再改',
+        },
+        formItemRender: () => (
+          <InviteCandidateSelect
+            options={formCandidates}
+            plans={plans}
+            autoRound={!editing}
+          />
+        ),
         render: (_, record) => record.displayName,
       },
       {
@@ -504,7 +518,7 @@ const RecordPage = memo(function RecordPage() {
         search: false,
       },
     ],
-    [appReq, candidates, failReasons, fromInvite, message, plans, users, verdictForm],
+    [appReq, candidates, editing, failReasons, formCandidates, fromInvite, message, plans, users, verdictForm],
   );
 
   return (

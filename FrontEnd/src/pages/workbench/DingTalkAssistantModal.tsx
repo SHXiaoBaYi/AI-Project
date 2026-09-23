@@ -1,5 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Button, DatePicker, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch, Tabs } from 'antd';
+import { memo, useEffect, useRef, useState } from 'react';
+import { App, Avatar, Button, DatePicker, Form, Input, InputNumber, Modal, Radio, Select, Switch, Tabs } from 'antd';
+import { useSelector } from 'react-redux';
 import dayjs, { type Dayjs } from 'dayjs';
 import { usePermission } from '@/hooks/usePermission';
 import InviteFormModal, { type InviteFormValues } from '@/components/hr/InviteFormModal';
@@ -14,6 +15,11 @@ import {
   type DingTalkAssistantSuggest,
   type DingTalkBusyUserOption,
 } from '@/api/dingtalk';
+import type { RootState } from '@/store';
+
+const ASSISTANT_NAME = '日程助手';
+const WORK_START = { hour: 9, minute: 30 };
+const WORK_END = { hour: 18, minute: 30 };
 
 type Props = {
   open: boolean;
@@ -23,42 +29,90 @@ type Props = {
 
 type ChatRole = 'user' | 'assistant' | 'system';
 
+type MessageContext = {
+  targetUserId: number;
+  targetNickname: string;
+  durationMin: number;
+};
+
 type ChatMessage = {
   id: string;
   role: ChatRole;
   text?: string;
   suggest?: DingTalkAssistantSuggest;
-  card?: 'meeting' | 'report';
+  /** 本条建议当前选中的天 */
+  activeDay?: string;
+  /** 本条建议当前选中的时段 */
+  selectedKey?: string;
+  /** 本条建议对应的同事上下文（不受底部输入栏后续改动影响） */
+  context?: MessageContext;
   time: string;
+};
+
+type ActionTarget = {
+  targetUserId: number;
+  targetNickname: string;
 };
 
 function msgId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function findSlot(suggest: DingTalkAssistantSuggest | undefined, selectedKey?: string): DingTalkAssistantSlot | null {
+  const days = suggest?.dayGroups ?? [];
+  if (!days.length) return null;
+  if (selectedKey) {
+    for (const day of days) {
+      for (const slot of day.slots ?? []) {
+        if (`${slot.start}|${slot.end}` === selectedKey) return slot;
+      }
+    }
+  }
+  return days[0]?.slots?.[0] ?? null;
+}
+
+function slotStart(slot: DingTalkAssistantSlot | null | undefined) {
+  return slot ? dayjs(slot.start).format('YYYY-MM-DD HH:mm:ss') : undefined;
+}
+
+function toWorkRange(from: Dayjs, to: Dayjs): [Dayjs, Dayjs] {
+  return [
+    from.hour(WORK_START.hour).minute(WORK_START.minute).second(0),
+    to.hour(WORK_END.hour).minute(WORK_END.minute).second(0),
+  ];
+}
+
+function initialOf(name: string) {
+  const t = name.trim();
+  return t ? t.slice(0, 1) : '?';
+}
+
 const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
   const { message } = App.useApp();
   const { has } = usePermission();
+  const userInfo = useSelector((state: RootState) => state.user.userInfo);
+  const meName = userInfo?.nickname || userInfo?.username || '我';
+  const meAvatar = userInfo?.avatar;
   const listRef = useRef<HTMLDivElement>(null);
   const [users, setUsers] = useState<DingTalkBusyUserOption[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [targetUserId, setTargetUserId] = useState<number>();
   const [durationMin, setDurationMin] = useState(60);
-  const [range, setRange] = useState<[Dayjs, Dayjs]>([
-    dayjs().hour(9).minute(0).second(0),
-    dayjs().add(4, 'day').hour(18).minute(0).second(0),
-  ]);
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => toWorkRange(dayjs(), dayjs().add(4, 'day')));
   const [querying, setQuerying] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [selectedKey, setSelectedKey] = useState<string>();
-  const [activeDay, setActiveDay] = useState<string>();
-  const [lastSuggest, setLastSuggest] = useState<DingTalkAssistantSuggest | null>(null);
-  const [activeCard, setActiveCard] = useState<'meeting' | 'report' | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteSeed, setInviteSeed] = useState<InviteFormValues | null>(null);
   const [actionSaving, setActionSaving] = useState(false);
+  const [meetingOpen, setMeetingOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
   const [meetingForm] = Form.useForm();
   const [reportForm] = Form.useForm();
+
+  const patchMessage = (id: string, patch: Partial<ChatMessage>) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +126,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
         {
           id: msgId(),
           role: 'assistant',
-          text: '你好，我是日程助手。选一位同事和一段时间，我可以根据钉钉闲忙给出建议，并帮你发起面试邀约、邀请开会或安排工作汇报。',
+          text: '你好，我是日程助手。选一位同事和日期范围，我会按每天 09:30～18:30 的工作时段查钉钉闲忙并给出建议，也可帮你发起面试邀约、邀请开会或安排工作汇报。',
           time: dayjs().format('HH:mm'),
         },
       ]);
@@ -83,29 +137,17 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
     if (!open) return;
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, activeCard, open]);
+  }, [messages, open]);
 
-  const dayGroups = useMemo(() => lastSuggest?.dayGroups ?? [], [lastSuggest]);
-
-  const selectedSlot = useMemo(() => {
-    for (const day of dayGroups) {
-      for (const slot of day.slots ?? []) {
-        if (`${slot.start}|${slot.end}` === selectedKey) return slot;
-      }
-    }
-    return dayGroups[0]?.slots?.[0] ?? null;
-  }, [dayGroups, selectedKey]);
-
-  const targetLabel = useMemo(() => {
+  const composerTargetLabel = (() => {
     const user = users.find((u) => u.userId === targetUserId);
     return user ? user.nickname || user.username : '';
-  }, [users, targetUserId]);
-
-  const slotStart = (slot: DingTalkAssistantSlot | null | undefined) =>
-    slot ? dayjs(slot.start).format('YYYY-MM-DD HH:mm:ss') : undefined;
+  })();
 
   const push = (msg: Omit<ChatMessage, 'id' | 'time'> & { time?: string }) => {
-    setMessages((prev) => [...prev, { ...msg, id: msgId(), time: msg.time || dayjs().format('HH:mm') }]);
+    const next: ChatMessage = { ...msg, id: msgId(), time: msg.time || dayjs().format('HH:mm') };
+    setMessages((prev) => [...prev, next]);
+    return next.id;
   };
 
   const handleAsk = async () => {
@@ -113,27 +155,42 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       message.warning('请选择同事');
       return;
     }
-    if (!range?.[0] || !range?.[1] || !range[0].isBefore(range[1])) {
-      message.warning('请选择有效的时间范围');
+    if (!range?.[0] || !range?.[1] || range[0].isAfter(range[1], 'day')) {
+      message.warning('请选择有效的日期范围');
       return;
     }
-    const userText = `查一下「${targetLabel}」在 ${range[0].format('MM-DD HH:mm')} ~ ${range[1].format('MM-DD HH:mm')} 是否有连续 ${durationMin} 分钟空闲？`;
+    const nickname = composerTargetLabel;
+    const askedDuration = durationMin;
+    const askedUserId = targetUserId;
+    const [askStart, askEnd] = toWorkRange(range[0], range[1]);
+    if (!askStart.isBefore(askEnd)) {
+      message.warning('请选择有效的日期范围');
+      return;
+    }
+    const userText = `查一下「${nickname}」在 ${askStart.format('MM-DD')} ~ ${askEnd.format('MM-DD')}（每天 09:30～18:30）是否有连续 ${askedDuration} 分钟空闲？`;
     push({ role: 'user', text: userText });
     setQuerying(true);
-    setActiveCard(null);
     try {
       const data = await suggestDingTalkAssistantApi({
-        targetUserId,
-        startTime: range[0].format('YYYY-MM-DD HH:mm:ss'),
-        endTime: range[1].format('YYYY-MM-DD HH:mm:ss'),
-        durationMin,
+        targetUserId: askedUserId,
+        startTime: askStart.format('YYYY-MM-DD HH:mm:ss'),
+        endTime: askEnd.format('YYYY-MM-DD HH:mm:ss'),
+        durationMin: askedDuration,
       });
-      setLastSuggest(data);
       const firstDay = data.dayGroups?.[0];
       const firstSlot = firstDay?.slots?.[0];
-      setActiveDay(firstDay?.day);
-      setSelectedKey(firstSlot ? `${firstSlot.start}|${firstSlot.end}` : undefined);
-      push({ role: 'assistant', text: data.adviceText || '暂无建议', suggest: data });
+      push({
+        role: 'assistant',
+        text: data.adviceText || '暂无建议',
+        suggest: data,
+        activeDay: firstDay?.day,
+        selectedKey: firstSlot ? `${firstSlot.start}|${firstSlot.end}` : undefined,
+        context: {
+          targetUserId: askedUserId,
+          targetNickname: data.targetNickname || nickname,
+          durationMin: data.durationMin || askedDuration,
+        },
+      });
     } catch (err) {
       push({
         role: 'assistant',
@@ -144,42 +201,56 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
     }
   };
 
-  const openMeetingCard = () => {
-    const start = slotStart(selectedSlot);
+  const openMeetingModal = (msg: ChatMessage) => {
+    const slot = findSlot(msg.suggest, msg.selectedKey);
+    const start = slotStart(slot);
+    const nickname = msg.context?.targetNickname || composerTargetLabel;
+    const userId = msg.context?.targetUserId ?? targetUserId;
+    if (!userId) {
+      message.warning('请先选择同事');
+      return;
+    }
+    const minutes = msg.context?.durationMin || durationMin || 60;
     meetingForm.setFieldsValue({
-      title: targetLabel ? `与${targetLabel}的会议` : '会议',
+      title: nickname ? `与${nickname}的会议` : '会议',
       startTime: start ? dayjs(start) : dayjs().add(1, 'hour').minute(0).second(0),
-      durationMin: durationMin || 60,
+      durationMin: minutes,
       location: '',
       description: '',
       onlineMeeting: true,
     });
-    setActiveCard('meeting');
-    push({ role: 'system', text: '请填写会议信息（字段对齐钉钉日程）', card: 'meeting' });
+    setActionTarget({ targetUserId: userId, targetNickname: nickname || '' });
+    setMeetingOpen(true);
   };
 
-  const openReportCard = () => {
-    const start = slotStart(selectedSlot);
+  const openReportModal = (msg: ChatMessage) => {
+    const slot = findSlot(msg.suggest, msg.selectedKey);
+    const start = slotStart(slot);
+    const nickname = msg.context?.targetNickname || composerTargetLabel;
+    const userId = msg.context?.targetUserId ?? targetUserId;
+    if (!userId) {
+      message.warning('请先选择同事');
+      return;
+    }
+    const minutes = msg.context?.durationMin || durationMin || 60;
     reportForm.setFieldsValue({
-      title: targetLabel ? `工作汇报 · ${targetLabel}` : '工作汇报',
+      title: nickname ? `工作汇报 · ${nickname}` : '工作汇报',
       startTime: start ? dayjs(start) : dayjs().add(1, 'hour').minute(0).second(0),
-      durationMin: durationMin || 60,
+      durationMin: minutes,
       location: '',
       content: '',
     });
-    setActiveCard('report');
-    push({ role: 'system', text: '确认汇报安排后，将创建任务、双方钉钉日程，并通知你', card: 'report' });
+    setActionTarget({ targetUserId: userId, targetNickname: nickname || '' });
+    setReportOpen(true);
   };
 
-  const runAction = (action: DingTalkAssistantAction) => {
+  const runAction = (msg: ChatMessage, action: DingTalkAssistantAction) => {
     const payload = action.payload ?? {};
-    const userId = Number(payload.targetUserId ?? targetUserId);
-    const minutes = Number(payload.durationMin ?? durationMin) || 60;
-    const suggestedStart = selectedSlot
-      ? slotStart(selectedSlot)
-      : payload.suggestedStart
-        ? String(payload.suggestedStart)
-        : undefined;
+    const ctx = msg.context;
+    const userId = Number(payload.targetUserId ?? ctx?.targetUserId ?? targetUserId);
+    const minutes = Number(payload.durationMin ?? ctx?.durationMin ?? durationMin) || 60;
+    const slot = findSlot(msg.suggest, msg.selectedKey);
+    const suggestedStart = slot ? slotStart(slot) : payload.suggestedStart ? String(payload.suggestedStart) : undefined;
 
     if (action.type === 'VIEW_BUSY') {
       onClose();
@@ -201,7 +272,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       return;
     }
     if (action.type === 'CREATE_MEETING') {
-      openMeetingCard();
+      openMeetingModal(msg);
       return;
     }
     if (action.type === 'CREATE_REPORT_TASK') {
@@ -209,12 +280,12 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
         message.warning('没有创建任务的权限');
         return;
       }
-      openReportCard();
+      openReportModal(msg);
     }
   };
 
   const submitMeeting = async () => {
-    if (!targetUserId) {
+    if (!actionTarget?.targetUserId) {
       message.warning('请先选择同事');
       return;
     }
@@ -222,16 +293,18 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
     setActionSaving(true);
     try {
       const result = await createDingTalkAssistantMeetingApi({
-        targetUserId,
+        targetUserId: actionTarget.targetUserId,
         title: values.title,
-        startTime: dayjs(values.startTime).format('YYYY-MM-DD HH:mm:ss'),
+        startTime: dayjs(values.startTime).second(0).format('YYYY-MM-DD HH:mm:ss'),
         durationMin: values.durationMin,
         location: values.location,
         description: values.description,
         onlineMeeting: !!values.onlineMeeting,
       });
-      setActiveCard(null);
-      push({ role: 'user', text: `邀请「${targetLabel}」参加会议：${values.title}` });
+      setMeetingOpen(false);
+      setActionTarget(null);
+      meetingForm.resetFields();
+      push({ role: 'user', text: `邀请「${actionTarget.targetNickname}」参加会议：${values.title}` });
       push({ role: 'assistant', text: result.message || '会议已创建' });
       message.success(result.message || '会议已创建');
     } finally {
@@ -240,7 +313,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
   };
 
   const submitReport = async () => {
-    if (!targetUserId) {
+    if (!actionTarget?.targetUserId) {
       message.warning('请先选择同事');
       return;
     }
@@ -248,15 +321,17 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
     setActionSaving(true);
     try {
       const result = await createDingTalkAssistantReportApi({
-        targetUserId,
+        targetUserId: actionTarget.targetUserId,
         title: values.title,
         content: values.content,
         location: values.location,
-        startTime: dayjs(values.startTime).format('YYYY-MM-DD HH:mm:ss'),
+        startTime: dayjs(values.startTime).second(0).format('YYYY-MM-DD HH:mm:ss'),
         durationMin: values.durationMin,
       });
-      setActiveCard(null);
-      push({ role: 'user', text: `安排与「${targetLabel}」的工作汇报` });
+      setReportOpen(false);
+      setActionTarget(null);
+      reportForm.resetFields();
+      push({ role: 'user', text: `安排与「${actionTarget.targetNickname}」的工作汇报` });
       push({ role: 'assistant', text: result.message || '汇报已安排' });
       message.success(result.message || '汇报已安排');
     } finally {
@@ -282,234 +357,119 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
         <div className='flex h-[70vh] flex-col'>
           <div
             ref={listRef}
-            className='min-h-0 flex-1 space-y-3 overflow-y-auto bg-neutral-50 px-4 py-3'
+            className='min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3'
+            style={{ background: 'linear-gradient(180deg, #e8eef5 0%, #f0f3f7 100%)' }}
           >
             {messages.map((msg) => {
               const isUser = msg.role === 'user';
+              const isSystem = msg.role === 'system';
+              const dayKey = msg.activeDay || msg.suggest?.dayGroups?.[0]?.day;
+              const senderName = isUser ? meName : isSystem ? '系统' : ASSISTANT_NAME;
+              if (isSystem) {
+                return (
+                  <div
+                    key={msg.id}
+                    className='flex justify-center'
+                  >
+                    <div className='max-w-[80%] rounded-md bg-black/5 px-3 py-1 text-center text-xs text-neutral-500'>
+                      {msg.text}
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={msg.id}
-                  className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                  className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
                 >
-                  <div
-                    className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
-                      isUser
-                        ? 'rounded-br-md bg-blue-600 text-white'
-                        : msg.role === 'system'
-                          ? 'rounded-bl-md border border-amber-200 bg-amber-50 text-neutral-800'
-                          : 'rounded-bl-md border border-neutral-200 bg-white text-neutral-800'
-                    }`}
+                  <Avatar
+                    size={36}
+                    src={isUser ? meAvatar || undefined : undefined}
+                    className={`shrink-0 ${isUser ? 'bg-[#0089ff]' : 'bg-[#1f7aef]'}`}
                   >
-                    {msg.text ? <div className='whitespace-pre-wrap'>{msg.text}</div> : null}
-                    {msg.suggest?.dayGroups?.length ? (
-                      <div className='mt-2'>
-                        <div className='mb-1 text-xs text-neutral-500'>
-                          推荐时段（按天浏览，每段 {msg.suggest.durationMin || durationMin} 分钟）
-                        </div>
-                        <Tabs
-                          size='small'
-                          activeKey={activeDay || msg.suggest.dayGroups[0]?.day}
-                          onChange={(key) => {
-                            setActiveDay(key);
-                            const day = msg.suggest?.dayGroups?.find((d) => d.day === key);
-                            const first = day?.slots?.[0];
-                            if (first) setSelectedKey(`${first.start}|${first.end}`);
-                          }}
-                          items={msg.suggest.dayGroups.map((day: DingTalkAssistantDayGroup) => ({
-                            key: day.day,
-                            label: `${day.dayLabel}（${day.slots?.length || 0}）`,
-                            children: (
-                              <Radio.Group
-                                className='flex max-h-40 w-full flex-col gap-1 overflow-y-auto'
-                                value={selectedKey}
-                                onChange={(e) => setSelectedKey(e.target.value)}
-                              >
-                                {(day.slots || []).map((slot) => {
-                                  const key = `${slot.start}|${slot.end}`;
-                                  return (
-                                    <Radio
-                                      key={key}
-                                      value={key}
-                                      className='!mr-0 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1.5'
-                                    >
-                                      <span className='text-xs text-neutral-700'>{slot.label}</span>
-                                    </Radio>
-                                  );
-                                })}
-                              </Radio.Group>
-                            ),
-                          }))}
-                        />
-                      </div>
-                    ) : null}
-                    {msg.suggest?.actions?.length ? (
-                      <div className='mt-2 flex flex-wrap gap-1.5'>
-                        {msg.suggest.actions.map((action) => (
-                          <Button
-                            key={action.type}
+                    {initialOf(senderName)}
+                  </Avatar>
+                  <div className={`flex max-w-[78%] min-w-0 flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+                    <div
+                      className={`mb-1 flex items-center gap-1.5 text-xs text-neutral-500 ${isUser ? 'flex-row-reverse' : ''}`}
+                    >
+                      <span className='font-medium text-neutral-600'>{senderName}</span>
+                      <span className='text-neutral-400'>{msg.time}</span>
+                    </div>
+                    <div
+                      className={`relative rounded-lg px-3 py-2 text-sm leading-relaxed shadow-sm ${
+                        isUser
+                          ? 'rounded-tr-sm bg-[#cce7ff] text-neutral-800'
+                          : 'rounded-tl-sm border border-neutral-100 bg-white text-neutral-800'
+                      }`}
+                    >
+                      {msg.text ? <div className='whitespace-pre-wrap'>{msg.text}</div> : null}
+                      {msg.context?.targetNickname ? (
+                        <div className='mt-1 text-[11px] text-neutral-400'>关于：{msg.context.targetNickname}</div>
+                      ) : null}
+                      {msg.suggest?.dayGroups?.length ? (
+                        <div className='mt-2'>
+                          <div className='mb-1 text-xs text-neutral-500'>
+                            推荐时段（工作日 09:30～18:30，每段{' '}
+                            {msg.suggest.durationMin || msg.context?.durationMin || durationMin} 分钟）
+                          </div>
+                          <Tabs
                             size='small'
-                            type={
-                              action.type === 'CREATE_MEETING' || action.type === 'CREATE_INVITE'
-                                ? 'primary'
-                                : 'default'
-                            }
-                            title={action.hint}
-                            onClick={() => runAction(action)}
-                          >
-                            {action.label}
-                          </Button>
-                        ))}
-                      </div>
-                    ) : null}
-                    {msg.card === 'meeting' && activeCard === 'meeting' ? (
-                      <Form
-                        form={meetingForm}
-                        layout='vertical'
-                        className='mt-2'
-                        size='small'
-                      >
-                        <Form.Item
-                          name='title'
-                          label='主题'
-                          rules={[{ required: true, message: '请填写会议主题' }]}
-                        >
-                          <Input placeholder='与钉钉日程「主题」一致' />
-                        </Form.Item>
-                        <Form.Item
-                          name='startTime'
-                          label='开始时间'
-                          rules={[{ required: true, message: '请选择开始时间' }]}
-                        >
-                          <DatePicker
-                            showTime={{ minuteStep: 15, format: 'HH:mm' }}
-                            className='w-full'
-                            format='YYYY-MM-DD HH:mm'
+                            activeKey={dayKey}
+                            onChange={(key) => {
+                              const day = msg.suggest?.dayGroups?.find((d) => d.day === key);
+                              const first = day?.slots?.[0];
+                              patchMessage(msg.id, {
+                                activeDay: key,
+                                selectedKey: first ? `${first.start}|${first.end}` : msg.selectedKey,
+                              });
+                            }}
+                            items={msg.suggest.dayGroups.map((day: DingTalkAssistantDayGroup) => ({
+                              key: day.day,
+                              label: `${day.dayLabel}（${day.slots?.length || 0}）`,
+                              children: (
+                                <Radio.Group
+                                  className='flex max-h-40 w-full flex-col gap-1 overflow-y-auto'
+                                  value={msg.selectedKey}
+                                  onChange={(e) => patchMessage(msg.id, { selectedKey: e.target.value })}
+                                >
+                                  {(day.slots || []).map((slot) => {
+                                    const key = `${slot.start}|${slot.end}`;
+                                    return (
+                                      <Radio
+                                        key={key}
+                                        value={key}
+                                        className='!mr-0 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1.5'
+                                      >
+                                        <span className='text-xs text-neutral-700'>{slot.label}</span>
+                                      </Radio>
+                                    );
+                                  })}
+                                </Radio.Group>
+                              ),
+                            }))}
                           />
-                        </Form.Item>
-                        <Form.Item
-                          name='durationMin'
-                          label='时长（分钟）'
-                          rules={[{ required: true, message: '请填写时长' }]}
-                        >
-                          <InputNumber
-                            className='w-full'
-                            min={15}
-                            max={240}
-                            step={15}
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name='location'
-                          label='地点'
-                        >
-                          <Input placeholder='会议室 / 线上地址' />
-                        </Form.Item>
-                        <Form.Item
-                          name='description'
-                          label='描述'
-                        >
-                          <Input.TextArea
-                            rows={2}
-                            placeholder='会议说明'
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name='onlineMeeting'
-                          label='钉钉视频会议'
-                          valuePropName='checked'
-                        >
-                          <Switch
-                            checkedChildren='开'
-                            unCheckedChildren='关'
-                          />
-                        </Form.Item>
-                        <Space>
-                          <Button
-                            type='primary'
-                            loading={actionSaving}
-                            onClick={() => void submitMeeting()}
-                          >
-                            创建会议日程
-                          </Button>
-                          <Button
-                            onClick={() => setActiveCard(null)}
-                            disabled={actionSaving}
-                          >
-                            取消
-                          </Button>
-                        </Space>
-                      </Form>
-                    ) : null}
-                    {msg.card === 'report' && activeCard === 'report' ? (
-                      <Form
-                        form={reportForm}
-                        layout='vertical'
-                        className='mt-2'
-                        size='small'
-                      >
-                        <Form.Item
-                          name='title'
-                          label='主题'
-                        >
-                          <Input placeholder='工作汇报标题' />
-                        </Form.Item>
-                        <Form.Item
-                          name='startTime'
-                          label='开始时间'
-                          rules={[{ required: true, message: '请选择开始时间' }]}
-                        >
-                          <DatePicker
-                            showTime={{ minuteStep: 15, format: 'HH:mm' }}
-                            className='w-full'
-                            format='YYYY-MM-DD HH:mm'
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name='durationMin'
-                          label='时长（分钟）'
-                          rules={[{ required: true, message: '请填写时长' }]}
-                        >
-                          <InputNumber
-                            className='w-full'
-                            min={15}
-                            max={240}
-                            step={15}
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name='location'
-                          label='地点'
-                        >
-                          <Input placeholder='可选' />
-                        </Form.Item>
-                        <Form.Item
-                          name='content'
-                          label='说明'
-                        >
-                          <Input.TextArea
-                            rows={2}
-                            placeholder='汇报要点'
-                          />
-                        </Form.Item>
-                        <Space>
-                          <Button
-                            type='primary'
-                            loading={actionSaving}
-                            onClick={() => void submitReport()}
-                          >
-                            确认安排
-                          </Button>
-                          <Button
-                            onClick={() => setActiveCard(null)}
-                            disabled={actionSaving}
-                          >
-                            取消
-                          </Button>
-                        </Space>
-                      </Form>
-                    ) : null}
-                    <div className={`mt-1 text-[10px] ${isUser ? 'text-white/70' : 'text-neutral-400'}`}>
-                      {msg.time}
+                        </div>
+                      ) : null}
+                      {msg.suggest?.actions?.length ? (
+                        <div className='mt-2 flex flex-wrap gap-1.5'>
+                          {msg.suggest.actions.map((action) => (
+                            <Button
+                              key={`${msg.id}-${action.type}`}
+                              size='small'
+                              type={
+                                action.type === 'CREATE_MEETING' || action.type === 'CREATE_INVITE'
+                                  ? 'primary'
+                                  : 'default'
+                              }
+                              title={action.hint}
+                              onClick={() => runAction(msg, action)}
+                            >
+                              {action.label}
+                            </Button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -518,6 +478,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
           </div>
 
           <div className='shrink-0 border-t border-neutral-200 bg-white px-4 py-3'>
+            <div className='mb-2 text-xs text-neutral-400'>闲忙仅统计每天 09:30～18:30</div>
             <div className='mb-2 grid gap-2 md:grid-cols-2'>
               <Select
                 showSearch
@@ -548,12 +509,11 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
                 />
               </div>
               <DatePicker.RangePicker
-                showTime={{ minuteStep: 30, format: 'HH:mm' }}
                 className='w-full md:col-span-2'
-                format='YYYY-MM-DD HH:mm'
+                format='YYYY-MM-DD'
                 value={range}
                 onChange={(value) => {
-                  if (value?.[0] && value?.[1]) setRange([value[0], value[1]]);
+                  if (value?.[0] && value?.[1]) setRange(toWorkRange(value[0], value[1]));
                 }}
               />
             </div>
@@ -579,6 +539,155 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
           if (!next) setInviteSeed(null);
         }}
       />
+
+      <Modal
+        title={actionTarget?.targetNickname ? `邀请「${actionTarget.targetNickname}」开会` : '邀请开会'}
+        open={meetingOpen}
+        width={520}
+        maskClosable={false}
+        destroyOnHidden
+        confirmLoading={actionSaving}
+        okText='创建会议日程'
+        cancelText='取消'
+        onOk={() => void submitMeeting()}
+        onCancel={() => {
+          if (actionSaving) return;
+          setMeetingOpen(false);
+          setActionTarget(null);
+          meetingForm.resetFields();
+        }}
+      >
+        <Form
+          form={meetingForm}
+          layout='vertical'
+          className='pt-2'
+        >
+          <Form.Item
+            name='title'
+            label='主题'
+            rules={[{ required: true, message: '请填写会议主题' }]}
+          >
+            <Input placeholder='与钉钉日程「主题」一致' />
+          </Form.Item>
+          <Form.Item
+            name='startTime'
+            label='开始时间'
+            rules={[{ required: true, message: '请选择开始时间' }]}
+          >
+            <DatePicker
+              showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false }}
+              className='w-full'
+              format='YYYY-MM-DD HH:mm'
+            />
+          </Form.Item>
+          <Form.Item
+            name='durationMin'
+            label='时长（分钟）'
+            rules={[{ required: true, message: '请填写时长' }]}
+          >
+            <InputNumber
+              className='w-full'
+              min={15}
+              max={240}
+              step={15}
+            />
+          </Form.Item>
+          <Form.Item
+            name='location'
+            label='地点'
+          >
+            <Input placeholder='会议室 / 线上地址' />
+          </Form.Item>
+          <Form.Item
+            name='description'
+            label='描述'
+          >
+            <Input.TextArea
+              rows={2}
+              placeholder='会议说明'
+            />
+          </Form.Item>
+          <Form.Item
+            name='onlineMeeting'
+            label='钉钉视频会议'
+            valuePropName='checked'
+          >
+            <Switch
+              checkedChildren='开'
+              unCheckedChildren='关'
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={actionTarget?.targetNickname ? `与「${actionTarget.targetNickname}」汇报工作` : '汇报工作'}
+        open={reportOpen}
+        width={520}
+        maskClosable={false}
+        destroyOnHidden
+        confirmLoading={actionSaving}
+        okText='确认安排'
+        cancelText='取消'
+        onOk={() => void submitReport()}
+        onCancel={() => {
+          if (actionSaving) return;
+          setReportOpen(false);
+          setActionTarget(null);
+          reportForm.resetFields();
+        }}
+      >
+        <Form
+          form={reportForm}
+          layout='vertical'
+          className='pt-2'
+        >
+          <Form.Item
+            name='title'
+            label='主题'
+          >
+            <Input placeholder='工作汇报标题' />
+          </Form.Item>
+          <Form.Item
+            name='startTime'
+            label='开始时间'
+            rules={[{ required: true, message: '请选择开始时间' }]}
+          >
+            <DatePicker
+              showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false }}
+              className='w-full'
+              format='YYYY-MM-DD HH:mm'
+            />
+          </Form.Item>
+          <Form.Item
+            name='durationMin'
+            label='时长（分钟）'
+            rules={[{ required: true, message: '请填写时长' }]}
+          >
+            <InputNumber
+              className='w-full'
+              min={15}
+              max={240}
+              step={15}
+            />
+          </Form.Item>
+          <Form.Item
+            name='location'
+            label='地点'
+          >
+            <Input placeholder='可选' />
+          </Form.Item>
+          <Form.Item
+            name='content'
+            label='说明'
+          >
+            <Input.TextArea
+              rows={2}
+              placeholder='汇报要点'
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 });
