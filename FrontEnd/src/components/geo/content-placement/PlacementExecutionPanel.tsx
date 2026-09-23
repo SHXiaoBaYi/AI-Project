@@ -33,6 +33,7 @@ import {
   GEO_PLATFORM_TYPE_CONTENT,
 } from '@/constants/geo';
 import { AGG_COLOR, STATUS_COLOR, canOpenExternalInApp, derivePlacementProgress } from './constants';
+import { resolveUploadUrl } from '@/utils/uploadUrl';
 
 type Props = {
   open: boolean;
@@ -42,12 +43,6 @@ type Props = {
   editPerm?: string;
   onClose: () => void;
   onChanged?: (next: Partial<GeoContentPlacementListItem>) => void;
-};
-
-const fileHref = (url?: string) => {
-  if (!url) return '#';
-  if (/^https?:\/\//i.test(url)) return url;
-  return `${String(import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080').replace(/\/$/, '')}${url}`;
 };
 
 /** 投放进度抽屉：发布明细、引用和完成证明 */
@@ -305,7 +300,7 @@ const PlacementExecutionPanel = memo(function PlacementExecutionPanel({
                   </div>
                   <a
                     className='shrink-0'
-                    href={fileHref(f.fileUrl)}
+                    href={resolveUploadUrl(f.fileUrl)}
                     target='_blank'
                     rel='noreferrer'
                     download={f.fileName}

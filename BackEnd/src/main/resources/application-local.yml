@@ -1,11 +1,19 @@
 # 本机开发：浏览器访问 localhost / 127.0.0.1 时使用
 # 连接阿里云 RDS 外网地址（本机无法访问 VPC 内网）
+#
+# 注意：与线上共用同一套 RDS 时，前端本地开发默认把 /api 与附件代理到
+# http://121.40.119.134/shxby ，上传落盘在服务器，避免本机有库无文件。
+# 仅调试本机后端时：FrontEnd 设 VITE_API_PROXY_TARGET=http://127.0.0.1:8080
 spring:
   datasource:
     url: jdbc:mysql://${xby.rds.external-host}:${xby.rds.port}/${xby.rds.database}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=true&allowPublicKeyRetrieval=true
     username: ${xby.rds.username}
     password: ${xby.rds.password}
     driver-class-name: com.mysql.cj.jdbc.Driver
+
+# 本机后端若仍启动，附件目录固定（仅在不走线上代理时用到）
+xby:
+  upload-dir: ${UPLOAD_DIR:D:/AI-XBY/AI-Project/BackEnd/uploads}
 
 # AI 试用（任选一家配 key，设 enabled=true 后重启）：
 # xby:

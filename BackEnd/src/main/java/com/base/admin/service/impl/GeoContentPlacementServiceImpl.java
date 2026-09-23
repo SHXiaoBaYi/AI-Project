@@ -52,6 +52,7 @@ import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.AiChatService;
+import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoTopicService;
 import com.base.admin.service.PlacementTaskSyncService;
@@ -116,6 +117,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final ObjectMapper objectMapper;
     private final SysTaskMapper taskMapper;
     private final SysTaskFileMapper taskFileMapper;
+    private final FileStorageService fileStorageService;
 
     @Override
     public PageResult<GeoContentPlacementListVO> list(GeoContentPlacementQueryDTO query) {
@@ -438,14 +440,14 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setTaskType(StringUtils.hasText(task.getTaskType()) ? task.getTaskType().trim() : null);
     }
 
-    private static SysTaskFileVO toTaskFileVo(SysTaskFile f) {
+    private SysTaskFileVO toTaskFileVo(SysTaskFile f) {
         SysTaskFileVO vo = new SysTaskFileVO();
         vo.setId(f.getId());
         vo.setTaskId(f.getTaskId());
         vo.setBizType(f.getBizType());
         vo.setBizId(f.getBizId());
         vo.setFileName(f.getFileName());
-        vo.setFileUrl(f.getFileUrl());
+        vo.setFileUrl(fileStorageService.toPublicUrl(f.getFileUrl()));
         vo.setFileSize(f.getFileSize());
         vo.setContentType(f.getContentType());
         vo.setUploadUserName(f.getUploadUserName());
@@ -1283,7 +1285,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         cite.setAskQuestion(nz(dto.getAskQuestion()));
         cite.setAiPlatform(nz(dto.getAiPlatform()));
         cite.setCiteUrl(nz(dto.getCiteUrl()));
-        cite.setScreenshotUrl(dto.getScreenshotUrl());
+        String shot = fileStorageService.normalizeStoragePath(dto.getScreenshotUrl());
+        cite.setScreenshotUrl(shot);
         cite.setSortOrder(dto.getSortOrder());
         cite.setRemark(dto.getRemark());
     }
@@ -1522,7 +1525,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setAskQuestion(cite.getAskQuestion());
         vo.setAiPlatform(cite.getAiPlatform());
         vo.setCiteUrl(cite.getCiteUrl());
-        vo.setScreenshotUrl(cite.getScreenshotUrl());
+        vo.setScreenshotUrl(fileStorageService.toPublicUrl(cite.getScreenshotUrl()));
         vo.setRemark(cite.getRemark());
         return vo;
     }

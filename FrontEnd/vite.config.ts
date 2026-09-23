@@ -12,6 +12,9 @@ const __dirname = path.dirname(__filename);
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd());
   const base = env.VITE_BASE || '/';
+  // 本地默认把 /api 代理到线上公网，上传落盘与查看都在服务器；要测本机后端时设 VITE_API_PROXY_TARGET=http://127.0.0.1:8080
+  const apiProxyTarget =
+    env.VITE_API_PROXY_TARGET || (mode === 'development' ? 'http://121.40.119.134/shxby' : 'http://127.0.0.1:8080');
 
   return {
     base,
@@ -30,8 +33,9 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         '/api': {
-          target: env.VITE_API_URL || 'http://127.0.0.1:8080',
+          target: apiProxyTarget,
           changeOrigin: true,
+          secure: true,
           configure: (proxy) => {
             proxy.on('error', (err) => {
               console.error('[vite proxy /api]', err.message);
@@ -39,8 +43,10 @@ export default defineConfig(({ mode }) => {
           },
         },
         '/uploads': {
-          target: env.VITE_API_URL || 'http://127.0.0.1:8080',
+          target: apiProxyTarget,
           changeOrigin: true,
+          secure: true,
+          rewrite: (p) => (p.startsWith('/api/') ? p : `/api${p}`),
         },
       },
     },

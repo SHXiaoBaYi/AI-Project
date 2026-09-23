@@ -3,9 +3,11 @@ package com.base.admin.service;
 import com.base.admin.exception.BusinessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -19,6 +21,13 @@ public class FileStorageService {
 
     @Value("${xby.upload-dir:./uploads}")
     private String uploadDir;
+
+    /**
+     * 对外访问根（含 /api），例如 http://121.40.119.134/shxby/api。
+     * 落库仍用相对路径 /uploads/...；返回给前端时拼成公网地址。
+     */
+    @Value("${xby.upload-public-base:http://121.40.119.134/shxby/api}")
+    private String uploadPublicBase;
 
     public String saveGeoImage(MultipartFile file) {
         if (file == null || file.isEmpty()) {
@@ -123,7 +132,10 @@ public class FileStorageService {
         if (storagePath == null || storagePath.isBlank()) {
             return null;
         }
-        String stored = storagePath.trim();
+        String stored = normalizeStoragePath(storagePath);
+        if (stored == null) {
+            return null;
+        }
         Path path;
         if (stored.startsWith("/uploads/") || stored.startsWith("uploads/")) {
             String relative = stored.startsWith("/") ? stored.substring("/uploads/".length()) : stored.substring("uploads/".length());
@@ -139,5 +151,74 @@ public class FileStorageService {
             return path;
         }
         return null;
+    }
+
+    /**
+     * 落库用的相对路径（/uploads/...）。若已是本系统的公网/本地绝对地址，先剥成相对路径。
+     */
+    public String normalizeStoragePath(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        String stored = raw.trim();
+        if (stored.startsWith("http://") || stored.startsWith("https://")) {
+            try {
+                URI uri = URI.create(stored);
+                String path = uri.getPath() == null ? "" : uri.getPath();
+                int idx = path.indexOf("/uploads/");
+                if (idx >= 0) {
+                    return path.substring(idx);
+                }
+                if (path.startsWith("/api/uploads/")) {
+                    return path.substring("/api".length());
+                }
+            } catch (Exception ignored) {
+                return stored;
+            }
+            return stored;
+        }
+        if (stored.startsWith("/api/uploads/")) {
+            return stored.substring("/api".length());
+        }
+        if (!stored.startsWith("/")) {
+            stored = "/" + stored;
+        }
+        return stored;
+    }
+
+    /** 给前端/下载用的公网绝对地址 */
+    public String toPublicUrl(String storedOrPublic) {
+        if (!StringUtils.hasText(storedOrPublic)) {
+            return storedOrPublic;
+        }
+        String stored = normalizeStoragePath(storedOrPublic);
+        if (stored == null) {
+            return storedOrPublic;
+        }
+        if (stored.startsWith("http://") || stored.startsWith("https://")) {
+            // 本机调试地址一律改写到公网
+            try {
+                URI uri = URI.create(stored);
+                String host = uri.getHost() == null ? "" : uri.getHost();
+                if ("127.0.0.1".equals(host) || "localhost".equalsIgnoreCase(host)) {
+                    String path = uri.getPath() == null ? "" : uri.getPath();
+                    int idx = path.indexOf("/uploads/");
+                    if (idx >= 0) {
+                        stored = path.substring(idx);
+                    } else {
+                        return stored;
+                    }
+                } else {
+                    return stored;
+                }
+            } catch (Exception e) {
+                return stored;
+            }
+        }
+        String base = uploadPublicBase == null ? "" : uploadPublicBase.trim().replaceAll("/+$", "");
+        if (!StringUtils.hasText(base)) {
+            return stored.startsWith("/api/") ? stored : "/api" + (stored.startsWith("/") ? stored : "/" + stored);
+        }
+        return base + (stored.startsWith("/") ? stored : "/" + stored);
     }
 }

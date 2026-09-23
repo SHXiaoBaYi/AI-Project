@@ -112,9 +112,10 @@ public class SysTaskController {
     @PostMapping("/file/upload")
     @RequiresPermission({"task:mine", "task:edit", "task:list"})
     public Result<Map<String, Object>> uploadFile(@RequestParam("file") MultipartFile file) {
-        String url = fileStorageService.saveTaskAttachment(file);
+        String stored = fileStorageService.saveTaskAttachment(file);
         Map<String, Object> data = new HashMap<>();
-        data.put("url", url);
+        data.put("url", fileStorageService.toPublicUrl(stored));
+        data.put("storagePath", stored);
         data.put("fileName", file.getOriginalFilename() == null ? "" : file.getOriginalFilename());
         data.put("fileSize", file.getSize());
         data.put("contentType", file.getContentType() == null ? "" : file.getContentType());

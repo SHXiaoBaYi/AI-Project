@@ -184,7 +184,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             one.setMentioned(item.getMentioned());
             one.setRankNo(item.getRankNo());
             one.setRecommendStatus(item.getRecommendStatus());
-            one.setScreenshotUrl(item.getScreenshotUrl());
+            one.setScreenshotUrl(fileStorageService.normalizeStoragePath(item.getScreenshotUrl()));
             one.setThirdPartyUrl(item.getThirdPartyUrl());
             one.setNegativeContent(item.getNegativeContent());
             one.setCompetitors(item.getCompetitors());
@@ -256,7 +256,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 one.setMentioned(item.getMentioned());
                 one.setRankNo(item.getRankNo());
                 one.setRecommendStatus(item.getRecommendStatus());
-                one.setScreenshotUrl(item.getScreenshotUrl());
+                one.setScreenshotUrl(fileStorageService.normalizeStoragePath(item.getScreenshotUrl()));
                 one.setThirdPartyUrl(item.getThirdPartyUrl());
                 one.setNegativeContent(item.getNegativeContent());
                 one.setCompetitors(item.getCompetitors());
@@ -1085,7 +1085,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             platform.setThirdPartyUrl(record.getThirdPartyUrl());
             platform.setCompetitors(record.getCompetitors());
             platform.setNegativeContent(record.getNegativeContent());
-            platform.setScreenshotUrl(record.getScreenshotUrl());
+            platform.setScreenshotUrl(fileStorageService.toPublicUrl(record.getScreenshotUrl()));
             topic.getPlatforms().add(platform);
         }
         List<GeoDailyBoardVO.GeoDailySummaryDateVO> groups = new ArrayList<>();
@@ -1132,7 +1132,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             platform.setThirdPartyUrl(record.getThirdPartyUrl());
             platform.setCompetitors(record.getCompetitors());
             platform.setNegativeContent(record.getNegativeContent());
-            platform.setScreenshotUrl(record.getScreenshotUrl());
+            platform.setScreenshotUrl(fileStorageService.toPublicUrl(record.getScreenshotUrl()));
             owner.getPlatforms().add(platform);
         }
         List<GeoDailyBoardVO.GeoDailySummaryDateVO> groups = new ArrayList<>();
@@ -1690,7 +1690,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         entity.setRankNo(dto.getRankNo());
         entity.setRecommendStatus(dto.getRecommendStatus());
         if (dto.getScreenshotUrl() != null) {
-            entity.setScreenshotUrl(dto.getScreenshotUrl());
+            entity.setScreenshotUrl(fileStorageService.normalizeStoragePath(dto.getScreenshotUrl()));
         }
         entity.setThirdPartyUrl(dto.getThirdPartyUrl());
         entity.setNegativeContent(dto.getNegativeContent());
@@ -1791,7 +1791,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         vo.setMentioned(e.getMentioned());
         vo.setRankNo(e.getRankNo());
         vo.setRecommendStatus(e.getRecommendStatus());
-        vo.setScreenshotUrl(e.getScreenshotUrl());
+        vo.setScreenshotUrl(fileStorageService.toPublicUrl(e.getScreenshotUrl()));
         vo.setThirdPartyUrl(e.getThirdPartyUrl());
         vo.setNegativeContent(e.getNegativeContent());
         vo.setCompetitors(e.getCompetitors());

@@ -1,15 +1,7 @@
 import { useState } from 'react';
 import { Button, Image } from 'antd';
 import { ZoomInOutlined } from '@ant-design/icons';
-import { withBase } from '@/utils/basePath';
-
-function resolveScreenshotUrl(src?: string) {
-  if (!src) return '';
-  if (/^https?:\/\//i.test(src) || src.startsWith('data:')) return src;
-  const path = src.startsWith('/') ? src : `/${src}`;
-  if (path.startsWith('/api/') || path === '/api') return withBase(path);
-  return withBase(`/api${path}`);
-}
+import { resolveUploadUrl } from '@/utils/uploadUrl';
 
 /** 监测截图：缩略图点击弹窗预览；列表可用「查看」再打开 */
 export function GeoScreenshot({
@@ -28,7 +20,7 @@ export function GeoScreenshot({
 }) {
   const [open, setOpen] = useState(false);
   if (!src) return <span className='text-neutral-400'>-</span>;
-  const url = resolveScreenshotUrl(src);
+  const url = resolveUploadUrl(src);
 
   if (trigger === 'link') {
     return (

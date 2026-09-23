@@ -28,6 +28,8 @@ xby:
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
   upload-dir: ${UPLOAD_DIR:./uploads}
+  # 附件对外访问根（含 /api）。落库仍用 /uploads/...，接口返回时拼成公网地址
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.119.134/shxby/api}
   # 通用 AI（OpenAI 兼容）。未启用或未配 key 时，相似问题走本地启发式
   # provider: deepseek | tongyi | zhipu | moonshot
   # 你有阿里云账号时优先试 tongyi（DashScope 兼容模式）

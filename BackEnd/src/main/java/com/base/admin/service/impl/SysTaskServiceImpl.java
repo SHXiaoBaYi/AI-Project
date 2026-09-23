@@ -28,6 +28,7 @@ import com.base.admin.mapper.SysTaskAssigneeMapper;
 import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
+import com.base.admin.service.FileStorageService;
 import com.base.admin.service.HrHirePipelineService;
 import com.base.admin.service.PlacementTaskSyncService;
 import com.base.admin.service.SysTaskService;
@@ -72,6 +73,7 @@ public class SysTaskServiceImpl implements SysTaskService {
     private final ObjectProvider<PlacementTaskSyncService> placementTaskSync;
     /** 避免自调用导致 @Transactional 失效（批量分配需逐条独立提交并回写业务） */
     private final ObjectProvider<SysTaskService> selfProvider;
+    private final FileStorageService fileStorageService;
 
     @Override
     public PageResult<SysTaskVO> list(SysTaskQueryDTO query) {
@@ -576,12 +578,16 @@ public class SysTaskServiceImpl implements SysTaskService {
             if (item == null || !StringUtils.hasText(item.getFileUrl()) || !StringUtils.hasText(item.getFileName())) {
                 continue;
             }
+            String stored = fileStorageService.normalizeStoragePath(item.getFileUrl());
+            if (!StringUtils.hasText(stored)) {
+                continue;
+            }
             SysTaskFile row = new SysTaskFile();
             row.setTaskId(task.getId());
             row.setBizType(bizType);
             row.setBizId(bizId);
             row.setFileName(item.getFileName().trim());
-            row.setFileUrl(item.getFileUrl().trim());
+            row.setFileUrl(stored);
             row.setFileSize(item.getFileSize() == null ? 0L : Math.max(0L, item.getFileSize()));
             row.setContentType(nz(item.getContentType()));
             row.setUploadUserId(uploadUserId);
@@ -659,7 +665,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setBizType(f.getBizType());
         vo.setBizId(f.getBizId());
         vo.setFileName(f.getFileName());
-        vo.setFileUrl(f.getFileUrl());
+        vo.setFileUrl(fileStorageService.toPublicUrl(f.getFileUrl()));
         vo.setFileSize(f.getFileSize());
         vo.setContentType(f.getContentType());
         vo.setUploadUserName(f.getUploadUserName());

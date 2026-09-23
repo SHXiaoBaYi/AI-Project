@@ -2,18 +2,13 @@ import { memo, useEffect, useState } from 'react';
 import { Modal, Tag } from 'antd';
 import { getGeoContentPlacementProofFilesApi } from '@/api/geo';
 import type { GeoContentPlacementProofFile } from '@/types/geo';
+import { resolveUploadUrl } from '@/utils/uploadUrl';
 
 type Props = {
   open: boolean;
   placementId: number | null;
   title?: string;
   onClose: () => void;
-};
-
-const fileHref = (url?: string) => {
-  if (!url) return '#';
-  if (/^https?:\/\//i.test(url)) return url;
-  return `${String(import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080').replace(/\/$/, '')}${url}`;
 };
 
 /** 列表「附件」列：查看/下载弹窗（展示所属任务与上传人） */
@@ -70,7 +65,7 @@ const PlacementProofFilesModal = memo(function PlacementProofFilesModal({ open, 
               </div>
               <a
                 className='shrink-0 pt-1'
-                href={fileHref(f.fileUrl)}
+                href={resolveUploadUrl(f.fileUrl)}
                 target='_blank'
                 rel='noreferrer'
                 download={f.fileName}

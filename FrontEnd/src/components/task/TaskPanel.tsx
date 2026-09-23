@@ -28,6 +28,7 @@ import {
 import { getGeoOwnerOptionsApi } from '@/api/geo';
 import type { GeoOwnerOption } from '@/types/geo';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
+import { resolveUploadUrl } from '@/utils/uploadUrl';
 
 type Props = {
   mineOnly?: boolean;
@@ -51,11 +52,7 @@ const statusColor: Record<string, string> = {
 };
 
 function fileOpenUrl(url?: string) {
-  if (!url) return '#';
-  if (/^https?:\/\//i.test(url)) return url;
-  // 开发态优先走 Vite /uploads 代理；无代理时回退直连后端静态资源
-  const api = String(import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
-  return `${api}${url}`;
+  return resolveUploadUrl(url);
 }
 
 const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Props) {
