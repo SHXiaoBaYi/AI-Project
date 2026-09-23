@@ -102,7 +102,8 @@ public class FileStorageService {
         }
     }
 
-    private static final Set<String> RESUME_EXT = Set.of(".pdf", ".doc", ".docx");
+    private static final Set<String> RESUME_EXT = Set.of(
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".md", ".csv", ".rtf");
 
     /** 候选人简历，返回绝对路径，便于简历下载直接打开 */
     public Path saveHrResume(MultipartFile file) {
@@ -112,7 +113,7 @@ public class FileStorageService {
         String original = file.getOriginalFilename() == null ? "resume" : file.getOriginalFilename();
         String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')).toLowerCase(Locale.ROOT) : "";
         if (!RESUME_EXT.contains(ext)) {
-            throw new BusinessException("简历仅支持 pdf/doc/docx");
+            throw new BusinessException("简历支持 pdf/doc/docx/xls/xlsx/txt/csv/rtf");
         }
         try {
             Path dir = Path.of(uploadDir, "hr", "resume").toAbsolutePath().normalize();
@@ -125,6 +126,35 @@ public class FileStorageService {
             return dest;
         } catch (IOException e) {
             throw new BusinessException("简历保存失败: " + e.getMessage());
+        }
+    }
+
+    private static final Set<String> PORTFOLIO_EXT = Set.of(
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".zip", ".rar", ".7z",
+            ".txt", ".md", ".csv");
+
+    /** 候选人作品集附件，返回绝对路径 */
+    public Path saveHrPortfolio(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("请选择作品集文件");
+        }
+        String original = file.getOriginalFilename() == null ? "portfolio" : file.getOriginalFilename();
+        String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')).toLowerCase(Locale.ROOT) : "";
+        if (ext.length() > 16 || !PORTFOLIO_EXT.contains(ext)) {
+            throw new BusinessException("作品集支持常见办公/图片/压缩包格式");
+        }
+        try {
+            Path dir = Path.of(uploadDir, "hr", "portfolio").toAbsolutePath().normalize();
+            Files.createDirectories(dir);
+            String name = UUID.randomUUID().toString().replace("-", "") + ext;
+            Path dest = dir.resolve(name);
+            try (var in = file.getInputStream()) {
+                Files.copy(in, dest);
+            }
+            return dest;
+        } catch (IOException e) {
+            throw new BusinessException("作品集保存失败: " + e.getMessage());
         }
     }
 

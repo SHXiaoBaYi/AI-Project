@@ -268,10 +268,13 @@ public class HrMasterService {
     public List<Map<String, Object>> applications(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
         StringBuilder sql = new StringBuilder("""
-                SELECT a.id, c.display_name, c.phone, c.email, a.requisition_id, r.job_name, a.channel_code, ch.channel_name,
+                SELECT a.id, c.id candidate_id, c.display_name, c.phone, c.email, a.requisition_id, r.job_name, a.channel_code, ch.channel_name,
                        a.resume_status, a.current_stage, s.stage_name, a.submitter_user_id, a.submitter_name, a.submitted_at, f.file_name,
                        (SELECT ai.score FROM hr_application_ai ai WHERE ai.application_id = a.id AND ai.is_active = 1 ORDER BY ai.id DESC LIMIT 1) ai_score,
-                       (SELECT COUNT(1) FROM hr_application_ai ai WHERE ai.application_id = a.id AND ai.is_active = 1) ai_count
+                       (SELECT COUNT(1) FROM hr_application_ai ai WHERE ai.application_id = a.id AND ai.is_active = 1) ai_count,
+                       (SELECT COUNT(1) FROM hr_candidate_portfolio p WHERE p.candidate_id = c.id AND p.is_active = 1) portfolio_count,
+                       (SELECT GROUP_CONCAT(CONCAT(p.id, ':', p.file_name) ORDER BY p.id DESC SEPARATOR '||')
+                          FROM hr_candidate_portfolio p WHERE p.candidate_id = c.id AND p.is_active = 1) portfolio_files
                 FROM hr_application a
                 JOIN hr_candidate c ON c.id = a.candidate_id
                 LEFT JOIN hr_requisition r ON r.id = a.requisition_id
@@ -408,6 +411,83 @@ public class HrMasterService {
                     VALUES (?, ?, ?, ?, ?, 1)
                     """, applicationId, original, stored.toString(), ext, user);
         }
+    }
+
+    private Long requireCandidateIdByApplication(Long applicationId) {
+        Long candidateId = jdbc.query("""
+                SELECT candidate_id FROM hr_application WHERE id = ? AND is_active = 1
+                """, rs -> rs.next() ? rs.getLong(1) : null, applicationId);
+        if (candidateId == null) {
+            throw new BusinessException("候选人不存在");
+        }
+        return candidateId;
+    }
+
+    public List<com.base.admin.domain.vo.HrCandidatePortfolioVO> listPortfolios(Long applicationId) {
+        Long candidateId = requireCandidateIdByApplication(applicationId);
+        return jdbc.query("""
+                SELECT id, candidate_id, file_name, file_ext, file_size, create_time
+                FROM hr_candidate_portfolio
+                WHERE candidate_id = ? AND is_active = 1
+                ORDER BY id DESC
+                """, (rs, rowNum) -> {
+            com.base.admin.domain.vo.HrCandidatePortfolioVO vo = new com.base.admin.domain.vo.HrCandidatePortfolioVO();
+            vo.setId(rs.getLong("id"));
+            vo.setCandidateId(rs.getLong("candidate_id"));
+            vo.setFileName(rs.getString("file_name"));
+            vo.setFileExt(rs.getString("file_ext"));
+            vo.setFileSize(rs.getLong("file_size"));
+            java.sql.Timestamp ts = rs.getTimestamp("create_time");
+            vo.setCreateTime(ts == null ? null : ts.toLocalDateTime().toString().replace('T', ' '));
+            return vo;
+        }, candidateId);
+    }
+
+    @Transactional
+    public Long uploadPortfolio(Long applicationId, org.springframework.web.multipart.MultipartFile file) {
+        Long candidateId = requireCandidateIdByApplication(applicationId);
+        Path stored = fileStorage.saveHrPortfolio(file);
+        String original = file.getOriginalFilename() == null ? stored.getFileName().toString() : file.getOriginalFilename();
+        String ext = original.contains(".") ? original.substring(original.lastIndexOf('.') + 1) : null;
+        if (ext != null && ext.length() > 16) {
+            ext = ext.substring(0, 16);
+        }
+        String user = SecurityUtils.getCurrentUsername();
+        jdbc.update("""
+                INSERT INTO hr_candidate_portfolio (candidate_id, file_name, storage_path, file_ext, file_size, create_by, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
+                """, candidateId, original, stored.toString(), ext, file.getSize(), user);
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    @Transactional
+    public void deletePortfolio(Long portfolioId) {
+        int updated = jdbc.update(
+                "UPDATE hr_candidate_portfolio SET is_active = 0 WHERE id = ? AND is_active = 1", portfolioId);
+        if (updated == 0) {
+            throw new BusinessException("作品集附件不存在");
+        }
+    }
+
+    public Path portfolioFile(Long portfolioId) {
+        return jdbc.query("""
+                SELECT file_name, storage_path FROM hr_candidate_portfolio WHERE id = ? AND is_active = 1
+                """, rs -> {
+            if (!rs.next()) {
+                throw new BusinessException("作品集附件不存在");
+            }
+            Path path = Path.of(rs.getString("storage_path"));
+            if (!java.nio.file.Files.isRegularFile(path)) {
+                throw new BusinessException("作品集文件不在服务器上");
+            }
+            return path;
+        }, portfolioId);
+    }
+
+    public String portfolioDisplayName(Long portfolioId) {
+        return jdbc.query("""
+                SELECT file_name FROM hr_candidate_portfolio WHERE id = ? AND is_active = 1
+                """, rs -> rs.next() ? rs.getString(1) : "portfolio", portfolioId);
     }
 
     public void deleteApplication(Long id) {

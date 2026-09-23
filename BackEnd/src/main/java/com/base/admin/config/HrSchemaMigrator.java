@@ -41,7 +41,28 @@ public class HrSchemaMigrator implements ApplicationRunner {
         seedTaskType();
         ensureFailReasonColumn();
         ensureInviteCcEventColumn();
+        ensureCandidatePortfolioTable();
         log.info("招聘表结构、角色、用户和菜单已同步");
+    }
+
+    private void ensureCandidatePortfolioTable() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_candidate_portfolio (
+                  id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  candidate_id    BIGINT        NOT NULL                COMMENT '候选人',
+                  file_name       VARCHAR(512)  NOT NULL                COMMENT '文件名',
+                  storage_path    VARCHAR(512)  NOT NULL                COMMENT '本地路径',
+                  file_ext        VARCHAR(16)   NULL                    COMMENT '扩展名',
+                  file_size       BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
+                  create_by       VARCHAR(50)   DEFAULT ''              COMMENT '创建者',
+                  create_time     DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  update_by       VARCHAR(50)   DEFAULT ''              COMMENT '更新者',
+                  update_time     DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  is_active       TINYINT       NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+                  PRIMARY KEY (id),
+                  KEY idx_hr_portfolio_candidate (candidate_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='候选人作品集附件'
+                """);
     }
 
     private void seedRoles() {

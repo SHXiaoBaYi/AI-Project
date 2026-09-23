@@ -70,6 +70,7 @@ public class HrMasterController {
     private final HrInterviewRecordService recordService;
     private final HrApplicationImportService applicationImportService;
     private final HrApplicationAiService applicationAiService;
+    private final com.base.admin.service.HrResumeParseService resumeParseService;
 
     @Operation(summary = "需求列表")
     @PostMapping("/requisition/list")
@@ -185,6 +186,13 @@ public class HrMasterController {
         return Result.ok(masterService.saveApplication(dto));
     }
 
+    @Operation(summary = "解析简历（姓名/电话/邮箱，供新增时预填核对）")
+    @PostMapping(value = "/application/resume/parse", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @RequiresPermission({"hr:application:add", "hr:application:edit"})
+    public Result<com.base.admin.domain.vo.HrResumeParsePreviewVO> parseResume(@RequestParam("file") MultipartFile file) {
+        return Result.ok(resumeParseService.parse(file));
+    }
+
     @Operation(summary = "上传候选人简历")
     @PostMapping(value = "/application/{id}/resume", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RequiresPermission({"hr:application:add", "hr:application:edit"})
@@ -192,6 +200,43 @@ public class HrMasterController {
     public Result<Void> uploadResume(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
         masterService.uploadResume(id, file);
         return Result.ok();
+    }
+
+    @Operation(summary = "作品集列表")
+    @GetMapping("/application/{id}/portfolio")
+    @RequiresPermission("hr:application:list")
+    public Result<List<com.base.admin.domain.vo.HrCandidatePortfolioVO>> listPortfolio(@PathVariable Long id) {
+        return Result.ok(masterService.listPortfolios(id));
+    }
+
+    @Operation(summary = "上传作品集附件")
+    @PostMapping(value = "/application/{id}/portfolio", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @RequiresPermission({"hr:application:add", "hr:application:edit"})
+    @Log(title = "候选人作品集", businessType = 1)
+    public Result<Long> uploadPortfolio(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+        return Result.ok(masterService.uploadPortfolio(id, file));
+    }
+
+    @Operation(summary = "删除作品集附件")
+    @DeleteMapping("/application/portfolio/{portfolioId}")
+    @RequiresPermission("hr:application:edit")
+    @Log(title = "候选人作品集", businessType = 3)
+    public Result<Void> deletePortfolio(@PathVariable Long portfolioId) {
+        masterService.deletePortfolio(portfolioId);
+        return Result.ok();
+    }
+
+    @Operation(summary = "下载作品集附件")
+    @GetMapping("/application/portfolio/{portfolioId}/file")
+    @RequiresPermission("hr:application:list")
+    public ResponseEntity<Resource> downloadPortfolio(@PathVariable Long portfolioId) {
+        Path path = masterService.portfolioFile(portfolioId);
+        String displayName = masterService.portfolioDisplayName(portfolioId);
+        String encoded = URLEncoder.encode(displayName == null ? "portfolio" : displayName, StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encoded)
+                .body(new FileSystemResource(path));
     }
 
     @Operation(summary = "删除候选人")

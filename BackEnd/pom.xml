@@ -81,6 +81,17 @@
             <artifactId>easyexcel</artifactId>
             <version>4.0.3</version>
         </dependency>
+        <!-- 简历文本抽取：PDF / 老版 Word(.doc) -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-scratchpad</artifactId>
+            <version>5.2.5</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springdoc</groupId>

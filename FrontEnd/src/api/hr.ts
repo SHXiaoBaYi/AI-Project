@@ -197,6 +197,84 @@ export function uploadHrResumeApi(applicationId: number, file: File) {
   });
 }
 
+export type HrResumeParsePreview = {
+  displayName?: string;
+  phone?: string;
+  email?: string;
+  jobHint?: string;
+  cityHint?: string;
+  salaryHint?: string;
+  yearsHint?: string;
+  nameFound?: boolean;
+  phoneFound?: boolean;
+  emailFound?: boolean;
+  tip?: string;
+  fileName?: string;
+};
+
+/** 上传前解析简历中的姓名/电话/邮箱 */
+export function parseHrResumeApi(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post<unknown, HrResumeParsePreview>('/hr/application/resume/parse', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+}
+
+export type HrCandidatePortfolio = {
+  id: number;
+  candidateId?: number;
+  fileName: string;
+  fileExt?: string;
+  fileSize?: number;
+  createTime?: string;
+};
+
+export function listHrPortfolioApi(applicationId: number) {
+  return request.get<unknown, HrCandidatePortfolio[]>(`/hr/application/${applicationId}/portfolio`);
+}
+
+export function uploadHrPortfolioApi(applicationId: number, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post<unknown, number>(`/hr/application/${applicationId}/portfolio`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+}
+
+export function deleteHrPortfolioApi(portfolioId: number) {
+  return request.delete(`/hr/application/portfolio/${portfolioId}`);
+}
+
+export function downloadHrPortfolioUrl(portfolioId: number) {
+  return withBase(`/api/hr/application/portfolio/${portfolioId}/file`);
+}
+
+/** 下载作品集附件（带鉴权） */
+export async function downloadHrPortfolioApi(portfolioId: number, fileName?: string) {
+  const token = getToken();
+  const res = await fetch(downloadHrPortfolioUrl(portfolioId), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let msg = '作品集下载失败';
+    try {
+      const body = (await res.json()) as { msg?: string };
+      if (body?.msg) msg = body.msg;
+    } catch {
+      /* 非 JSON */
+    }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = fileName || `portfolio-${portfolioId}`;
+  a.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export function deleteHrApplicationApi(id: number) {
   return request.delete(`/hr/application/${id}`);
 }

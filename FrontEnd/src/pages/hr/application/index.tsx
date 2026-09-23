@@ -16,12 +16,18 @@ import ImportApplicationModal from './components/ImportApplicationModal';
 import {
   deleteHrApplicationApi,
   deleteHrApplicationBatchApi,
+  downloadHrPortfolioApi,
   getHrApplicationsApi,
   getHrChannelsApi,
   getHrRequisitionsApi,
   getHrStagesApi,
   getHrUsersApi,
 } from '@/api/hr';
+
+interface PortfolioItem {
+  id: number;
+  fileName: string;
+}
 
 interface AppRow {
   id: number;
@@ -38,6 +44,7 @@ interface AppRow {
   submitterName?: string;
   submittedAt?: string;
   resumeName?: string;
+  portfolios: PortfolioItem[];
   aiScore?: number;
   aiCount?: number;
 }
@@ -51,6 +58,22 @@ function dateOf(value: unknown) {
   if (value == null || value === '') return undefined;
   if (Array.isArray(value)) return dayjs(`${value[0]}-${value[1]}-${value[2]}`).format('YYYY-MM-DD');
   return String(value).slice(0, 10);
+}
+
+function parsePortfolios(raw: unknown): PortfolioItem[] {
+  const text = textOf(raw);
+  if (!text) return [];
+  return text
+    .split('||')
+    .map((part) => {
+      const idx = part.indexOf(':');
+      if (idx <= 0) return null;
+      const id = Number(part.slice(0, idx));
+      const fileName = part.slice(idx + 1).trim();
+      if (!id || !fileName) return null;
+      return { id, fileName };
+    })
+    .filter((item): item is PortfolioItem => item != null);
 }
 
 function mapRow(raw: Record<string, unknown>): AppRow {
@@ -69,6 +92,7 @@ function mapRow(raw: Record<string, unknown>): AppRow {
     submitterName: textOf(raw.submitter_name),
     submittedAt: dateOf(raw.submitted_at),
     resumeName: textOf(raw.file_name),
+    portfolios: parsePortfolios(raw.portfolio_files),
     aiScore: raw.ai_score == null || raw.ai_score === '' ? undefined : Number(raw.ai_score),
     aiCount: raw.ai_count == null ? 0 : Number(raw.ai_count),
   };
@@ -249,12 +273,42 @@ const ApplicationPage = memo(function ApplicationPage() {
         title: '简历',
         dataIndex: 'resumeName',
         search: false,
+        width: 100,
         render: (_, record) => (
           <ResumeViewButton
             applicationId={record.id}
             fileName={record.resumeName}
           />
         ),
+      },
+      {
+        title: '作品集',
+        dataIndex: 'portfolios',
+        search: false,
+        width: 220,
+        ellipsis: true,
+        render: (_, record) => {
+          if (!record.portfolios?.length) return <span className='text-black/45'>无</span>;
+          return (
+            <div className='flex max-w-[220px] flex-col gap-0.5'>
+              {record.portfolios.map((item) => (
+                <button
+                  key={item.id}
+                  type='button'
+                  title={item.fileName}
+                  className='cursor-pointer truncate border-0 bg-transparent p-0 text-left text-[#1677ff]'
+                  onClick={() => {
+                    void downloadHrPortfolioApi(item.id, item.fileName).catch((e) =>
+                      message.error(e instanceof Error ? e.message : '下载失败'),
+                    );
+                  }}
+                >
+                  {item.fileName}
+                </button>
+              ))}
+            </div>
+          );
+        },
       },
       {
         title: '渠道',
