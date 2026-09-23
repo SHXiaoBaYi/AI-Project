@@ -61,6 +61,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureCiteScreenshotColumn(connection);
             ensureItemPublishTimeDateTime(connection);
             ensureGeoStaffRoles(connection);
+            retireLegacyGeoRoles(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
@@ -72,6 +73,93 @@ public class GeoSchemaMigrator implements ApplicationRunner {
     private void ensureGeoStaffRoles(Connection connection) throws Exception {
         ensureRole(connection, "GEO运营录入", "geo_ops_entry", 40, "GEO日监测与内容投放录入");
         ensureRole(connection, "GEO管理复盘", "geo_mgmt_review", 41, "GEO复盘与管理选人");
+    }
+
+    /**
+     * 退役手工遗留角色 geo / geo1：用户迁到 geo_ops_entry，菜单并到两个正式角色后软删。
+     * 正式角色仅保留 geo_ops_entry、geo_mgmt_review。
+     */
+    private void retireLegacyGeoRoles(Connection connection) throws Exception {
+        Long opsId = roleIdByKey(connection, "geo_ops_entry");
+        Long mgmtId = roleIdByKey(connection, "geo_mgmt_review");
+        if (opsId == null || mgmtId == null) {
+            log.warn("正式 GEO 角色尚未就绪，跳过 geo/geo1 退役");
+            return;
+        }
+        java.util.List<Long> legacyIds = new java.util.ArrayList<>();
+        Long geoId = roleIdByKeyAny(connection, "geo");
+        Long geo1Id = roleIdByKeyAny(connection, "geo1");
+        if (geoId != null) {
+            legacyIds.add(geoId);
+        }
+        if (geo1Id != null) {
+            legacyIds.add(geo1Id);
+        }
+        if (legacyIds.isEmpty()) {
+            return;
+        }
+        String legacyIn = legacyIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+        try (Statement st = connection.createStatement()) {
+            // 仅有旧角色、尚无任一正式 GEO 角色的用户 → 挂上运营录入
+            int users = st.executeUpdate("""
+                    INSERT INTO sys_user_role (user_id, role_id, is_active)
+                    SELECT DISTINCT ur.user_id, %d, 1
+                    FROM sys_user_role ur
+                    WHERE ur.role_id IN (%s) AND ur.is_active = 1
+                      AND NOT EXISTS (
+                        SELECT 1 FROM sys_user_role x
+                        WHERE x.user_id = ur.user_id
+                          AND x.role_id IN (%d, %d)
+                          AND x.is_active = 1
+                      )
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """.formatted(opsId, legacyIn, opsId, mgmtId));
+            // 旧角色菜单并入两个正式角色
+            int menusOps = st.executeUpdate("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT %d, rm.menu_id, 1
+                    FROM sys_role_menu rm
+                    WHERE rm.role_id IN (%s) AND rm.is_active = 1
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """.formatted(opsId, legacyIn));
+            int menusMgmt = st.executeUpdate("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT %d, rm.menu_id, 1
+                    FROM sys_role_menu rm
+                    WHERE rm.role_id IN (%s) AND rm.is_active = 1
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """.formatted(mgmtId, legacyIn));
+            int unlinkUsers = st.executeUpdate(
+                    "UPDATE sys_user_role SET is_active = 0 WHERE role_id IN (" + legacyIn + ") AND is_active = 1");
+            int unlinkMenus = st.executeUpdate(
+                    "UPDATE sys_role_menu SET is_active = 0 WHERE role_id IN (" + legacyIn + ") AND is_active = 1");
+            int roles = st.executeUpdate("""
+                    UPDATE sys_role
+                    SET is_active = 0, status = 1, remark = CONCAT(IFNULL(remark, ''), ' [已退役→geo_ops_entry/geo_mgmt_review]')
+                    WHERE role_key IN ('geo', 'geo1') AND is_active = 1
+                    """);
+            log.info("已退役 geo/geo1：迁用户 {}，并菜单 ops/mgmt {}/{}，解绑用户/菜单 {}/{}，停用角色 {}",
+                    users, menusOps, menusMgmt, unlinkUsers, unlinkMenus, roles);
+        }
+    }
+
+    private Long roleIdByKey(Connection connection, String roleKey) throws Exception {
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT role_id FROM sys_role WHERE role_key = '" + roleKey.replace("'", "''")
+                             + "' AND is_active = 1 LIMIT 1")) {
+            return rs.next() ? rs.getLong(1) : null;
+        }
+    }
+
+    /** 含已软删，便于幂等清理仍挂在旧角色上的关联 */
+    private Long roleIdByKeyAny(Connection connection, String roleKey) throws Exception {
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT role_id FROM sys_role WHERE role_key = '" + roleKey.replace("'", "''")
+                             + "' ORDER BY is_active DESC, role_id LIMIT 1")) {
+            return rs.next() ? rs.getLong(1) : null;
+        }
     }
 
     private void ensureRole(Connection connection, String roleName, String roleKey, int sortOrder, String remark)
