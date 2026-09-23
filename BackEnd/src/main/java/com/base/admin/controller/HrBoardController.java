@@ -43,6 +43,14 @@ public class HrBoardController {
         return Result.ok(boardService.board(query));
     }
 
+    @Operation(summary = "岗位实时明细（日/周进展）")
+    @PostMapping("/job-details")
+    @RequiresPermission("hr:board:view")
+    public Result<List<com.base.admin.domain.vo.HrJobDetailVO>> jobDetails(
+            @RequestBody(required = false) HrBoardQueryDTO query) {
+        return Result.ok(boardService.jobDetails(query));
+    }
+
     @Operation(summary = "岗位类别选项")
     @GetMapping("/jobs")
     @RequiresPermission("hr:board:view")

@@ -3,9 +3,11 @@ package com.base.admin.service;
 import com.base.admin.domain.dto.HrBoardQueryDTO;
 import com.base.admin.domain.vo.HrBoardDrillVO;
 import com.base.admin.domain.vo.HrBoardVO;
+import com.base.admin.domain.vo.HrJobDetailVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -322,6 +324,175 @@ public class HrBoardService {
         sql.append(" ORDER BY r.received_date DESC, r.id DESC");
         LocalDateTime now = LocalDateTime.now();
         return jdbc.query(sql.toString(), (rs, row) -> mapProgress(rs, now), args.toArray());
+    }
+
+    /** 岗位实时明细：不分页，含日/周进展 */
+    public List<HrJobDetailVO> jobDetails(HrBoardQueryDTO query) {
+        HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
+        LocalDate today = LocalDate.now();
+        LocalDate weekStart = today.with(WeekFields.of(Locale.CHINA).dayOfWeek(), 1);
+        LocalDateTime dayFrom = today.atStartOfDay();
+        LocalDateTime dayTo = today.plusDays(1).atStartOfDay();
+        LocalDateTime weekFrom = weekStart.atStartOfDay();
+        LocalDateTime weekTo = dayTo;
+
+        Map<Long, String> dayMap = loadProgressText(dayFrom, dayTo);
+        Map<Long, String> weekMap = loadProgressText(weekFrom, weekTo);
+
+        StringBuilder sql = new StringBuilder("""
+                SELECT r.id, r.job_name, r.headcount, r.status, r.priority, r.target_text, r.received_date, r.onboard_date,
+                       r.location_code, d.name dept_name,
+                       (SELECT GROUP_CONCAT(DISTINCT u.nickname SEPARATOR '、')
+                          FROM hr_requisition_owner ro
+                          LEFT JOIN sys_user u ON u.user_id = ro.user_id
+                          WHERE ro.requisition_id = r.id AND ro.is_active = 1) owner_name
+                FROM hr_requisition r
+                LEFT JOIN hr_department d ON d.id = r.dept_id AND d.is_active = 1
+                WHERE r.is_active = 1
+                """);
+        List<Object> args = new ArrayList<>();
+        appendRequisitionFilter(sql, args, q, "r");
+        dataScope.apply(sql, args, "r", null);
+        sql.append(" ORDER BY FIELD(r.status,'OPEN','PAUSED','DONE','STOPPED','ARCHIVED'), r.priority ASC, r.received_date DESC, r.id DESC");
+
+        return jdbc.query(sql.toString(), (rs, i) -> {
+            HrJobDetailVO row = new HrJobDetailVO();
+            long id = rs.getLong("id");
+            row.setId(id);
+            row.setJobName(rs.getString("job_name"));
+            String status = rs.getString("status");
+            row.setStatus(status);
+            row.setStatusLabel(requisitionStatusLabel(status));
+            String loc = rs.getString("location_code");
+            row.setLocationCode(loc);
+            row.setLocation("XJ".equals(loc) ? "新疆" : "上海");
+            row.setDeptName(rs.getString("dept_name"));
+            row.setOwnerName(rs.getString("owner_name"));
+            int priorityValue = rs.getInt("priority");
+            Integer priority = rs.wasNull() ? null : priorityValue;
+            row.setPriority(priority);
+            row.setPriorityLabel(priorityLabel(priority));
+            row.setTargetText(rs.getString("target_text"));
+            row.setHeadcount(rs.getInt("headcount"));
+            LocalDate received = dateOf(rs, "received_date");
+            row.setReceivedDate(received == null ? null : received.toString());
+            LocalDate onboard = dateOf(rs, "onboard_date");
+            LocalDate end = today;
+            if (("DONE".equals(status) || "STOPPED".equals(status) || "ARCHIVED".equals(status)) && onboard != null) {
+                end = onboard;
+            }
+            if (received != null) {
+                row.setRecruitingDays((int) Math.max(0, ChronoUnit.DAYS.between(received, end)));
+            }
+            String day = dayMap.get(id);
+            String week = weekMap.get(id);
+            row.setDayProgress(StringUtils.hasText(day) ? day : "无");
+            row.setWeekProgress(StringUtils.hasText(week) ? week : "无");
+            return row;
+        }, args.toArray());
+    }
+
+    /**
+     * 按需求聚合时间窗内的阶段事件。
+     * 普通阶段：待初试1人；入职：已入职：张三(9.21)、李四(9.22)
+     */
+    private Map<Long, String> loadProgressText(LocalDateTime from, LocalDateTime to) {
+        String sql = """
+                SELECT a.requisition_id,
+                       e.stage_code,
+                       COALESCE(s.stage_name, e.stage_code) stage_name,
+                       DATE(e.event_at) event_day,
+                       c.display_name candidate_name,
+                       COALESCE(ob.onboard_date, DATE(e.event_at)) onboard_day,
+                       COALESCE(s.sort_no, 999) sort_no
+                FROM hr_stage_event e
+                JOIN hr_application a ON a.id = e.application_id AND a.is_active = 1
+                JOIN hr_candidate c ON c.id = a.candidate_id AND c.is_active = 1
+                LEFT JOIN hr_stage_def s ON s.stage_code = e.stage_code AND s.is_active = 1
+                LEFT JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
+                WHERE e.is_active = 1 AND e.event_at >= ? AND e.event_at < ?
+                ORDER BY a.requisition_id, COALESCE(s.sort_no, 999), e.stage_code, e.event_at, a.id
+                """;
+        Map<Long, LinkedHashMap<String, ProgressAgg>> byReq = new LinkedHashMap<>();
+        jdbc.query(sql, rs -> {
+            long reqId = rs.getLong("requisition_id");
+            String code = rs.getString("stage_code");
+            String stageName = displayStageName(code, rs.getString("stage_name"));
+            String candidate = rs.getString("candidate_name");
+            java.sql.Date eventDay = rs.getDate("event_day");
+            java.sql.Date onboardDay = rs.getDate("onboard_day");
+            LinkedHashMap<String, ProgressAgg> stages = byReq.computeIfAbsent(reqId, k -> new LinkedHashMap<>());
+            ProgressAgg agg = stages.computeIfAbsent(code, k -> new ProgressAgg(stageName));
+            agg.count += 1;
+            if ("ONBOARDED".equals(code)) {
+                LocalDate day = onboardDay != null ? onboardDay.toLocalDate()
+                        : (eventDay != null ? eventDay.toLocalDate() : null);
+                String person = candidate == null || candidate.isBlank() ? "未知" : candidate.trim();
+                String label = day == null
+                        ? person
+                        : person + "(" + day.getMonthValue() + "." + day.getDayOfMonth() + ")";
+                if (!agg.people.contains(label)) {
+                    agg.people.add(label);
+                }
+            }
+        }, from, to);
+
+        Map<Long, String> result = new HashMap<>();
+        for (Map.Entry<Long, LinkedHashMap<String, ProgressAgg>> e : byReq.entrySet()) {
+            List<String> parts = new ArrayList<>();
+            for (ProgressAgg agg : e.getValue().values()) {
+                if (agg.count <= 0) {
+                    continue;
+                }
+                if (!agg.people.isEmpty()) {
+                    // 已入职：姓名(日期)
+                    parts.add(agg.name + "：" + String.join("、", agg.people));
+                } else {
+                    parts.add(agg.name + agg.count + "人");
+                }
+            }
+            if (!parts.isEmpty()) {
+                result.put(e.getKey(), String.join("，", parts));
+            }
+        }
+        return result;
+    }
+
+    private static String displayStageName(String code, String stageName) {
+        if ("FIRST_PENDING".equals(code)) {
+            return "待初试";
+        }
+        if ("ONBOARDED".equals(code)) {
+            return "已入职";
+        }
+        if (stageName != null && !stageName.isBlank()) {
+            return stageName;
+        }
+        return code == null ? "" : code;
+    }
+
+    private static String requisitionStatusLabel(String status) {
+        if (status == null) {
+            return "";
+        }
+        return switch (status) {
+            case "OPEN" -> "招聘中";
+            case "DONE" -> "已完成";
+            case "STOPPED" -> "停止招聘";
+            case "PAUSED" -> "暂缓";
+            case "ARCHIVED" -> "已归档";
+            default -> status;
+        };
+    }
+
+    private static final class ProgressAgg {
+        final String name;
+        int count;
+        final List<String> people = new ArrayList<>();
+
+        ProgressAgg(String name) {
+            this.name = name;
+        }
     }
 
     private static HrBoardVO.ProgressRow mapProgress(ResultSet rs, LocalDateTime now) throws SQLException {

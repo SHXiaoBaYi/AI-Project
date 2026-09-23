@@ -159,6 +159,30 @@ export function getHrBoardJobsApi() {
   return request.get<unknown, string[]>('/hr/board/jobs');
 }
 
+export interface HrJobDetailRow {
+  id: number;
+  jobName?: string;
+  status?: string;
+  statusLabel?: string;
+  location?: string;
+  locationCode?: string;
+  deptName?: string;
+  ownerName?: string;
+  priority?: number;
+  priorityLabel?: string;
+  targetText?: string;
+  headcount?: number;
+  receivedDate?: string;
+  recruitingDays?: number;
+  dayProgress?: string;
+  weekProgress?: string;
+}
+
+/** 岗位实时明细（日/周进展，不分页） */
+export function getHrJobDetailsApi(data: HrBoardQuery = {}) {
+  return request.post<unknown, HrJobDetailRow[]>('/hr/board/job-details', data);
+}
+
 export function getHrDrillApi(data: HrBoardQuery) {
   return request.post<unknown, HrBoardDrill>('/hr/board/drill', data);
 }
