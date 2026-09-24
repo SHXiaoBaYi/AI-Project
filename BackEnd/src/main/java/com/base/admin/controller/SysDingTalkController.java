@@ -116,7 +116,7 @@ public class SysDingTalkController {
         return Result.ok(dingTalkAssistantService.createReport(dto));
     }
 
-    @Operation(summary = "助手日程列表（当前用户发起的）")
+    @Operation(summary = "助手日程列表（当前用户发起或作为对方）")
     @GetMapping("/assistant/schedules")
     @RequiresPermission({"system:dingtalk:schedule", "system:dingtalk:busy", "system:dingtalk:list"})
     public Result<List<DingTalkAssistantScheduleVO>> assistantSchedules(

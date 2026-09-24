@@ -209,9 +209,10 @@ public class DingTalkAssistantService {
                 FROM sys_dingtalk_assistant_event s
                 LEFT JOIN sys_user q ON q.user_id = s.querier_user_id
                 LEFT JOIN sys_user t ON t.user_id = s.target_user_id
-                WHERE s.is_active = 1 AND s.querier_user_id = ?
+                WHERE s.is_active = 1 AND (s.querier_user_id = ? OR s.target_user_id = ?)
                 """);
         List<Object> args = new ArrayList<>();
+        args.add(me);
         args.add(me);
         if (StringUtils.hasText(kind)) {
             sql.append(" AND s.kind = ? ");

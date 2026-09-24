@@ -2,6 +2,7 @@ import { memo, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App } from 'antd';
 import dayjs from 'dayjs';
+import { useSelector } from 'react-redux';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
 import ActionButtons from '@/components/Buttons/ActionButtons';
@@ -11,6 +12,7 @@ import {
   updateDingTalkAssistantScheduleApi,
   type DingTalkAssistantSchedule,
 } from '@/api/dingtalk';
+import type { RootState } from '@/store';
 
 const KIND_OPTIONS = [
   { value: 'MEETING', label: '会议' },
@@ -27,6 +29,7 @@ const DingTalkSchedulePage = memo(function DingTalkSchedulePage() {
   const actionRef = useRef<ActionType>(null);
   const [editing, setEditing] = useState<DingTalkAssistantSchedule | null>(null);
   const [open, setOpen] = useState(false);
+  const currentUserId = useSelector((state: RootState) => state.user.userInfo?.userId);
 
   const columns: ProColumnType<DingTalkAssistantSchedule>[] = useMemo(
     () => [
@@ -34,34 +37,37 @@ const DingTalkSchedulePage = memo(function DingTalkSchedulePage() {
         title: '操作',
         valueType: 'option',
         width: 160,
-        render: (_, record) => (
-          <ActionButtons
-            items={[
-              {
-                key: 'edit',
-                label: '编辑',
-                perm: 'system:dingtalk:schedule:edit',
-                disabled: record.status === 'CANCELLED',
-                onClick: () => {
-                  setEditing(record);
-                  setOpen(true);
+        render: (_, record) => {
+          const isCreator = currentUserId != null && record.querierUserId === currentUserId;
+          return (
+            <ActionButtons
+              items={[
+                {
+                  key: 'edit',
+                  label: '编辑',
+                  perm: 'system:dingtalk:schedule:edit',
+                  disabled: !isCreator || record.status === 'CANCELLED',
+                  onClick: () => {
+                    setEditing(record);
+                    setOpen(true);
+                  },
                 },
-              },
-              {
-                key: 'cancel',
-                label: '取消',
-                perm: 'system:dingtalk:schedule:cancel',
-                disabled: record.status === 'CANCELLED',
-                confirmTitle: `确认取消「${record.title}」？将同步取消钉钉日程。`,
-                onClick: async () => {
-                  const result = await cancelDingTalkAssistantScheduleApi(record.id);
-                  message.success(result?.message || '已取消');
-                  actionRef.current?.reload();
+                {
+                  key: 'cancel',
+                  label: '取消',
+                  perm: 'system:dingtalk:schedule:cancel',
+                  disabled: !isCreator || record.status === 'CANCELLED',
+                  confirmTitle: `确认取消「${record.title}」？将同步取消钉钉日程。`,
+                  onClick: async () => {
+                    const result = await cancelDingTalkAssistantScheduleApi(record.id);
+                    message.success(result?.message || '已取消');
+                    actionRef.current?.reload();
+                  },
                 },
-              },
-            ]}
-          />
-        ),
+              ]}
+            />
+          );
+        },
       },
       {
         title: '类型',
@@ -75,6 +81,13 @@ const DingTalkSchedulePage = memo(function DingTalkSchedulePage() {
         dataIndex: 'title',
         search: false,
         ellipsis: true,
+      },
+      {
+        title: '创建人',
+        dataIndex: 'querierNickname',
+        search: false,
+        width: 120,
+        render: (_, record) => record.querierNickname || '—',
       },
       {
         title: '对方',
@@ -122,7 +135,7 @@ const DingTalkSchedulePage = memo(function DingTalkSchedulePage() {
         render: (_, record) => (record.createTime ? String(record.createTime).replace('T', ' ').slice(0, 16) : '—'),
       },
     ],
-    [message],
+    [message, currentUserId],
   );
 
   return (

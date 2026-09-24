@@ -42,10 +42,10 @@ public class DingTalkAssistantScheduleVO {
     @Schema(description = "结束时间")
     private LocalDateTime endTime;
 
-    @Schema(description = "查询者用户ID", example = "1")
+    @Schema(description = "创建人用户ID（发起查询/建日程的人）", example = "1")
     private Long querierUserId;
 
-    @Schema(description = "查询者昵称")
+    @Schema(description = "创建人昵称")
     private String querierNickname;
 
     @Schema(description = "对方用户ID", example = "2")
