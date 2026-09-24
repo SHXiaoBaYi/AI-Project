@@ -4,12 +4,15 @@ import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.GeoBoardQueryDTO;
 import com.base.admin.domain.dto.GeoDailyBatchDTO;
 import com.base.admin.domain.dto.GeoDailyBulkSaveDTO;
+import com.base.admin.domain.dto.GeoDailyComboQueryDTO;
 import com.base.admin.domain.dto.GeoDailyDTO;
 import com.base.admin.domain.dto.GeoDailyQueryDTO;
 import com.base.admin.domain.dto.GeoYearTargetDTO;
 import com.base.admin.domain.entity.GeoYearTarget;
 import com.base.admin.domain.vo.GeoDailyBoardVO;
 import com.base.admin.domain.vo.GeoDailyBulkSaveResultVO;
+import com.base.admin.domain.vo.GeoDailyComboDetailVO;
+import com.base.admin.domain.vo.GeoDailyComboVO;
 import com.base.admin.domain.vo.GeoDailyGroupVO;
 import com.base.admin.domain.vo.GeoDailyVO;
 import com.base.admin.domain.vo.GeoTopicPlatformChartsVO;
@@ -27,6 +30,12 @@ import java.util.List;
 public interface GeoMonitorService {
 
     PageResult<GeoDailyVO> listDaily(GeoDailyQueryDTO query);
+
+    /** 话题×关键字×平台 唯一维度分页汇总 */
+    PageResult<GeoDailyComboVO> listDailyCombo(GeoDailyComboQueryDTO query);
+
+    /** 组合下的日期明细 + 折线序列 */
+    GeoDailyComboDetailVO dailyComboDetail(GeoDailyComboQueryDTO query);
 
     GeoDailyVO getDaily(Long id);
 

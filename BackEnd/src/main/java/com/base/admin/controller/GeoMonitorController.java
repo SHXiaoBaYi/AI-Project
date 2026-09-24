@@ -7,12 +7,15 @@ import com.base.admin.common.Result;
 import com.base.admin.domain.dto.GeoBoardQueryDTO;
 import com.base.admin.domain.dto.GeoDailyBatchDTO;
 import com.base.admin.domain.dto.GeoDailyBulkSaveDTO;
+import com.base.admin.domain.dto.GeoDailyComboQueryDTO;
 import com.base.admin.domain.dto.GeoDailyDTO;
 import com.base.admin.domain.dto.GeoDailyQueryDTO;
 import com.base.admin.domain.dto.GeoYearTargetDTO;
 import com.base.admin.domain.entity.GeoYearTarget;
 import com.base.admin.domain.vo.GeoDailyBoardVO;
 import com.base.admin.domain.vo.GeoDailyBulkSaveResultVO;
+import com.base.admin.domain.vo.GeoDailyComboDetailVO;
+import com.base.admin.domain.vo.GeoDailyComboVO;
 import com.base.admin.domain.vo.GeoDailyGroupVO;
 import com.base.admin.domain.vo.GeoDailyVO;
 import com.base.admin.domain.vo.GeoImportJobVO;
@@ -69,6 +72,20 @@ public class GeoMonitorController {
     @RequiresPermission("geo:daily:list")
     public Result<PageResult<GeoDailyVO>> listDaily(@RequestBody GeoDailyQueryDTO query) {
         return Result.ok(monitorService.listDaily(query));
+    }
+
+    @Operation(summary = "话题×关键字×平台 组合列表")
+    @PostMapping("/daily/combo/list")
+    @RequiresPermission("geo:daily:list")
+    public Result<PageResult<GeoDailyComboVO>> listDailyCombo(@RequestBody GeoDailyComboQueryDTO query) {
+        return Result.ok(monitorService.listDailyCombo(query));
+    }
+
+    @Operation(summary = "话题×关键字×平台 日期明细与折线")
+    @PostMapping("/daily/combo/detail")
+    @RequiresPermission("geo:daily:list")
+    public Result<GeoDailyComboDetailVO> dailyComboDetail(@RequestBody GeoDailyComboQueryDTO query) {
+        return Result.ok(monitorService.dailyComboDetail(query));
     }
 
     @Operation(summary = "日监测详情")

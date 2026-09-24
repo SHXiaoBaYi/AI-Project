@@ -860,6 +860,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 throw new BusinessException("引用与发布详情不匹配");
             }
         }
+        assertCiteUnique(dto.getPlacementId(), dto.getItemId(), dto.getAskQuestion(), dto.getAiPlatform(), null);
         GeoContentPlacementCite cite = new GeoContentPlacementCite();
         fillCite(cite, dto);
         if (cite.getSortOrder() == null) {
@@ -885,6 +886,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 throw new BusinessException("引用与发布详情不匹配");
             }
         }
+        Long itemId = dto.getItemId() != null ? dto.getItemId() : cite.getItemId();
+        assertCiteUnique(dto.getPlacementId(), itemId, dto.getAskQuestion(), dto.getAiPlatform(), dto.getId());
         fillCite(cite, dto);
         citeMapper.updateById(cite);
     }
@@ -1043,8 +1046,16 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                         if (!StringUtils.hasText(url)) {
                             continue;
                         }
-                        String citeKey = askQuestion.trim() + "\0" + header.platform() + "\0" + url.trim();
+                        // 同一发布明细下：提问问题 + AI 平台唯一（忽略链接差异）
+                        String citeKey = String.valueOf(lastItemId) + "\0" + askQuestion.trim() + "\0" + header.platform();
                         if (!dedupeCites.add(citeKey)) {
+                            continue;
+                        }
+                        Long existed = citeMapper.selectCount(new LambdaQueryWrapper<GeoContentPlacementCite>()
+                                .eq(GeoContentPlacementCite::getItemId, lastItemId)
+                                .eq(GeoContentPlacementCite::getAskQuestion, askQuestion.trim())
+                                .eq(GeoContentPlacementCite::getAiPlatform, header.platform()));
+                        if (existed != null && existed > 0) {
                             continue;
                         }
                         GeoContentPlacementCite cite = new GeoContentPlacementCite();
@@ -1280,6 +1291,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     }
 
     private void fillCite(GeoContentPlacementCite cite, GeoContentPlacementCiteDTO dto) {
+        if (!StringUtils.hasText(dto.getAskQuestion())) {
+            throw new BusinessException("请填写提问问题");
+        }
+        if (!StringUtils.hasText(dto.getAiPlatform())) {
+            throw new BusinessException("请选择AI平台");
+        }
         if (!StringUtils.hasText(dto.getCiteUrl()) && !StringUtils.hasText(dto.getScreenshotUrl())) {
             throw new BusinessException("请填写引用链接或上传截图");
         }
@@ -1292,6 +1309,33 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         cite.setScreenshotUrl(shot);
         cite.setSortOrder(dto.getSortOrder());
         cite.setRemark(dto.getRemark());
+    }
+
+    /**
+     * 同一发布明细（文章）下，提问问题 + AI 平台唯一；未挂明细时退化为同一投放主单下唯一。
+     */
+    private void assertCiteUnique(Long placementId, Long itemId, String askQuestion, String aiPlatform, Long excludeId) {
+        String question = nz(askQuestion);
+        String platform = nz(aiPlatform);
+        if (!StringUtils.hasText(question) || !StringUtils.hasText(platform)) {
+            throw new BusinessException("提问问题和AI平台不能为空");
+        }
+        LambdaQueryWrapper<GeoContentPlacementCite> wrapper = new LambdaQueryWrapper<GeoContentPlacementCite>()
+                .eq(GeoContentPlacementCite::getAskQuestion, question)
+                .eq(GeoContentPlacementCite::getAiPlatform, platform);
+        if (itemId != null) {
+            wrapper.eq(GeoContentPlacementCite::getItemId, itemId);
+        } else {
+            wrapper.eq(GeoContentPlacementCite::getPlacementId, placementId)
+                    .and(w -> w.isNull(GeoContentPlacementCite::getItemId));
+        }
+        if (excludeId != null) {
+            wrapper.ne(GeoContentPlacementCite::getId, excludeId);
+        }
+        Long count = citeMapper.selectCount(wrapper);
+        if (count != null && count > 0) {
+            throw new BusinessException("同一提问问题在同一AI平台下已有引用记录，请勿重复添加");
+        }
     }
 
     private void syncPlacementDerived(Long placementId) {

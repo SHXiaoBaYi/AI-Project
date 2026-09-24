@@ -36,9 +36,10 @@ public class MybatisPlusConfig {
 
             @Override
             public void updateFill(MetaObject metaObject) {
-                this.strictUpdateFill(metaObject, "updateTime", LocalDateTime::now, LocalDateTime.class);
+                // 不用 strictUpdateFill：updateById 时实体里已有旧 updateTime，strict 会跳过导致一直等于创建时间
+                this.setFieldValByName("updateTime", LocalDateTime.now(), metaObject);
                 String username = SecurityUtils.getCurrentUsername();
-                this.strictUpdateFill(metaObject, "updateBy", () -> username, String.class);
+                this.setFieldValByName("updateBy", username, metaObject);
             }
         };
     }

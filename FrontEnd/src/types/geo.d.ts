@@ -95,6 +95,37 @@ export interface GeoDailyVO {
   updateTime?: string;
 }
 
+export interface GeoDailyComboVO {
+  topicId: number;
+  topicName: string;
+  keyword: string;
+  platform: string;
+  dayCount: number;
+  mentionCount: number;
+  negativeCount: number;
+  avgRank?: number;
+  firstDate?: string;
+  lastDate?: string;
+  latestMentioned?: number;
+  latestRankNo?: number;
+  latestRecommendStatus?: string;
+}
+
+export interface GeoDailyComboPoint {
+  inspectDate: string;
+  dateLabel: string;
+  mentioned: number;
+  rankNo?: number;
+  hasNegative: number;
+  recommendStatus?: string;
+}
+
+export interface GeoDailyComboDetail {
+  summary?: GeoDailyComboVO;
+  days: GeoDailyVO[];
+  series: GeoDailyComboPoint[];
+}
+
 export interface GeoDailyDTO {
   id?: number;
   inspectDate: string;

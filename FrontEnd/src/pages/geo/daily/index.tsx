@@ -200,6 +200,14 @@ const DailyPage = memo(function DailyPage() {
       fieldProps: { placeholder: '竞品关键字' },
     },
     {
+      title: '负面/错误',
+      dataIndex: 'negativeContent',
+      ellipsis: true,
+      width: 180,
+      search: false,
+      render: (_, r) => r.negativeContent || '—',
+    },
+    {
       title: '统计标记',
       dataIndex: 'boardLocked',
       width: 100,

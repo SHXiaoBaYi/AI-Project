@@ -8,6 +8,7 @@ import com.base.admin.domain.dto.GeoBoardQueryDTO;
 import com.base.admin.domain.dto.GeoDailyBatchDTO;
 import com.base.admin.domain.dto.GeoDailyBulkGroupDTO;
 import com.base.admin.domain.dto.GeoDailyBulkSaveDTO;
+import com.base.admin.domain.dto.GeoDailyComboQueryDTO;
 import com.base.admin.domain.dto.GeoDailyDTO;
 import com.base.admin.domain.dto.GeoDailyPlatformItemDTO;
 import com.base.admin.domain.dto.GeoDailyQueryDTO;
@@ -25,6 +26,9 @@ import com.base.admin.domain.vo.GeoChartPointVO;
 import com.base.admin.domain.vo.GeoDailyBoardVO;
 import com.base.admin.domain.vo.GeoDailyBulkConflictVO;
 import com.base.admin.domain.vo.GeoDailyBulkSaveResultVO;
+import com.base.admin.domain.vo.GeoDailyComboDetailVO;
+import com.base.admin.domain.vo.GeoDailyComboPointVO;
+import com.base.admin.domain.vo.GeoDailyComboVO;
 import com.base.admin.domain.vo.GeoDailyGroupVO;
 import com.base.admin.domain.vo.GeoDailyVO;
 import com.base.admin.domain.vo.GeoBoardCompareSummaryVO;
@@ -122,6 +126,197 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         Map<Long, String> ownerNames = ownerDisplayMap(page.getRecords());
         List<GeoDailyVO> rows = page.getRecords().stream().map(e -> toVo(e, topicNames, ownerNames)).toList();
         return new PageResult<>(page.getTotal(), rows);
+    }
+
+    @Override
+    public PageResult<GeoDailyComboVO> listDailyCombo(GeoDailyComboQueryDTO query) {
+        GeoDailyComboQueryDTO q = query == null ? new GeoDailyComboQueryDTO() : query;
+        List<GeoMonitorDaily> records = dailyMapper.selectList(buildComboBaseWrapper(q)
+                .orderByDesc(GeoMonitorDaily::getInspectDate)
+                .orderByAsc(GeoMonitorDaily::getId));
+        Map<Long, String> topicNames = topicNameMap();
+        Map<String, List<GeoMonitorDaily>> grouped = new LinkedHashMap<>();
+        for (GeoMonitorDaily row : records) {
+            if (row.getTopicId() == null || !StringUtils.hasText(row.getKeyword()) || !StringUtils.hasText(row.getPlatform())) {
+                continue;
+            }
+            String key = comboKey(row.getTopicId(), row.getKeyword().trim(), row.getPlatform().trim());
+            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
+        }
+        List<GeoDailyComboVO> all = grouped.values().stream()
+                .map(list -> toComboVo(list, topicNames))
+                .sorted(Comparator
+                        .comparing(GeoDailyComboVO::getLastDate, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(GeoDailyComboVO::getTopicName, Comparator.nullsLast(String::compareTo))
+                        .thenComparing(GeoDailyComboVO::getKeyword, Comparator.nullsLast(String::compareTo))
+                        .thenComparing(GeoDailyComboVO::getPlatform, Comparator.nullsLast(String::compareTo)))
+                .toList();
+        int pageNum = q.getPageNum() == null || q.getPageNum() < 1 ? 1 : q.getPageNum();
+        int pageSize = q.getPageSize() == null || q.getPageSize() < 1 ? 10 : Math.min(q.getPageSize(), 200);
+        int from = Math.min((pageNum - 1) * pageSize, all.size());
+        int to = Math.min(from + pageSize, all.size());
+        return new PageResult<>((long) all.size(), all.subList(from, to));
+    }
+
+    @Override
+    public GeoDailyComboDetailVO dailyComboDetail(GeoDailyComboQueryDTO query) {
+        if (query == null || query.getTopicId() == null
+                || !StringUtils.hasText(query.getKeywordExact())
+                || !StringUtils.hasText(query.getPlatform())) {
+            throw new BusinessException("请指定话题、关键字与平台");
+        }
+        String keyword = query.getKeywordExact().trim();
+        String platform = query.getPlatform().trim();
+        LambdaQueryWrapper<GeoMonitorDaily> wrapper = buildComboBaseWrapper(query)
+                .eq(GeoMonitorDaily::getTopicId, query.getTopicId())
+                .eq(GeoMonitorDaily::getKeyword, keyword)
+                .eq(GeoMonitorDaily::getPlatform, platform)
+                .orderByAsc(GeoMonitorDaily::getInspectDate)
+                .orderByAsc(GeoMonitorDaily::getId);
+        List<GeoMonitorDaily> records = dailyMapper.selectList(wrapper);
+        Map<Long, String> topicNames = topicNameMap();
+        Map<Long, String> ownerNames = ownerDisplayMap(records);
+        // 同日多话题类型合并为一条展示点
+        Map<LocalDate, GeoMonitorDaily> byDate = new LinkedHashMap<>();
+        for (GeoMonitorDaily row : records) {
+            LocalDate day = row.getInspectDate();
+            if (day == null) {
+                continue;
+            }
+            GeoMonitorDaily prev = byDate.get(day);
+            if (prev == null || preferDailyRow(row, prev)) {
+                byDate.put(day, row);
+            }
+        }
+        List<GeoMonitorDaily> merged = new ArrayList<>(byDate.values());
+        GeoDailyComboDetailVO detail = new GeoDailyComboDetailVO();
+        detail.setSummary(toComboVo(records, topicNames));
+        List<GeoDailyVO> days = new ArrayList<>();
+        List<GeoDailyComboPointVO> series = new ArrayList<>();
+        for (GeoMonitorDaily row : merged) {
+            days.add(toVo(row, topicNames, ownerNames));
+            GeoDailyComboPointVO point = new GeoDailyComboPointVO();
+            point.setInspectDate(row.getInspectDate());
+            point.setDateLabel(row.getInspectDate() == null ? ""
+                    : String.format("%02d-%02d", row.getInspectDate().getMonthValue(), row.getInspectDate().getDayOfMonth()));
+            point.setMentioned(row.getMentioned() == null ? 0 : row.getMentioned());
+            point.setRankNo(row.getRankNo());
+            point.setHasNegative(StringUtils.hasText(row.getNegativeContent()) ? 1 : 0);
+            point.setRecommendStatus(row.getRecommendStatus());
+            series.add(point);
+        }
+        detail.setDays(days);
+        detail.setSeries(series);
+        return detail;
+    }
+
+    private LambdaQueryWrapper<GeoMonitorDaily> buildComboBaseWrapper(GeoDailyComboQueryDTO query) {
+        List<String> platformFilter = query.getPlatforms() == null ? List.of()
+                : query.getPlatforms().stream().filter(StringUtils::hasText).map(String::trim).toList();
+        String platformExact = StringUtils.hasText(query.getPlatform()) ? query.getPlatform().trim() : null;
+        String keywordLike = StringUtils.hasText(query.getKeyword()) && !StringUtils.hasText(query.getKeywordExact())
+                ? query.getKeyword().trim() : null;
+        LambdaQueryWrapper<GeoMonitorDaily> wrapper = new LambdaQueryWrapper<GeoMonitorDaily>()
+                .eq(GeoMonitorDaily::getIsActive, 1)
+                .ge(query.getStartDate() != null, GeoMonitorDaily::getInspectDate, query.getStartDate())
+                .le(query.getEndDate() != null, GeoMonitorDaily::getInspectDate, query.getEndDate())
+                .eq(query.getTopicId() != null, GeoMonitorDaily::getTopicId, query.getTopicId())
+                .like(keywordLike != null, GeoMonitorDaily::getKeyword, keywordLike)
+                .in(!platformFilter.isEmpty(), GeoMonitorDaily::getPlatform, platformFilter)
+                .eq(platformExact != null && platformFilter.isEmpty(), GeoMonitorDaily::getPlatform, platformExact);
+        dataScopeFilter.applyGeoDaily(wrapper);
+        return wrapper;
+    }
+
+    private static String comboKey(Long topicId, String keyword, String platform) {
+        return topicId + "\0" + keyword + "\0" + platform;
+    }
+
+    /** 同日合并时优先：露出 > 排名更靠前 > id 更大（更新倾向） */
+    private static boolean preferDailyRow(GeoMonitorDaily candidate, GeoMonitorDaily current) {
+        int cMention = candidate.getMentioned() == null ? 0 : candidate.getMentioned();
+        int pMention = current.getMentioned() == null ? 0 : current.getMentioned();
+        if (cMention != pMention) {
+            return cMention > pMention;
+        }
+        Integer cRank = candidate.getRankNo();
+        Integer pRank = current.getRankNo();
+        if (cRank != null && pRank != null && !cRank.equals(pRank)) {
+            return cRank < pRank;
+        }
+        if (cRank != null && pRank == null) {
+            return true;
+        }
+        if (cRank == null && pRank != null) {
+            return false;
+        }
+        Long cId = candidate.getId();
+        Long pId = current.getId();
+        if (cId == null) {
+            return false;
+        }
+        return pId == null || cId > pId;
+    }
+
+    private GeoDailyComboVO toComboVo(List<GeoMonitorDaily> rows, Map<Long, String> topicNames) {
+        GeoDailyComboVO vo = new GeoDailyComboVO();
+        if (rows == null || rows.isEmpty()) {
+            vo.setDayCount(0);
+            vo.setMentionCount(0);
+            vo.setNegativeCount(0);
+            return vo;
+        }
+        GeoMonitorDaily sample = rows.getFirst();
+        vo.setTopicId(sample.getTopicId());
+        vo.setTopicName(topicNames.getOrDefault(sample.getTopicId(), ""));
+        vo.setKeyword(sample.getKeyword());
+        vo.setPlatform(sample.getPlatform());
+
+        Map<LocalDate, GeoMonitorDaily> byDate = new LinkedHashMap<>();
+        for (GeoMonitorDaily row : rows) {
+            if (row.getInspectDate() == null) {
+                continue;
+            }
+            GeoMonitorDaily prev = byDate.get(row.getInspectDate());
+            if (prev == null || preferDailyRow(row, prev)) {
+                byDate.put(row.getInspectDate(), row);
+            }
+        }
+        List<GeoMonitorDaily> days = byDate.values().stream()
+                .sorted(Comparator.comparing(GeoMonitorDaily::getInspectDate))
+                .toList();
+        vo.setDayCount(days.size());
+        int mention = 0;
+        int negative = 0;
+        long rankSum = 0;
+        int rankCnt = 0;
+        for (GeoMonitorDaily day : days) {
+            if (Integer.valueOf(1).equals(day.getMentioned())) {
+                mention++;
+            }
+            if (StringUtils.hasText(day.getNegativeContent())) {
+                negative++;
+            }
+            if (day.getRankNo() != null) {
+                rankSum += day.getRankNo();
+                rankCnt++;
+            }
+        }
+        vo.setMentionCount(mention);
+        vo.setNegativeCount(negative);
+        if (rankCnt > 0) {
+            vo.setAvgRank(BigDecimal.valueOf(rankSum)
+                    .divide(BigDecimal.valueOf(rankCnt), 1, RoundingMode.HALF_UP));
+        }
+        if (!days.isEmpty()) {
+            vo.setFirstDate(days.getFirst().getInspectDate());
+            GeoMonitorDaily latest = days.getLast();
+            vo.setLastDate(latest.getInspectDate());
+            vo.setLatestMentioned(latest.getMentioned() == null ? 0 : latest.getMentioned());
+            vo.setLatestRankNo(latest.getRankNo());
+            vo.setLatestRecommendStatus(latest.getRecommendStatus());
+        }
+        return vo;
     }
 
     @Override

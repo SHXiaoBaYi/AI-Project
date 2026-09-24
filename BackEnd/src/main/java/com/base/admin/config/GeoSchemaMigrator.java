@@ -58,6 +58,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureDailyUniqueKeyWithTermType(connection);
             ensureGeoMenuRestructure(connection);
             ensurePublishedArticleMenu(connection);
+            ensureDailyComboMenu(connection);
             ensureCiteScreenshotColumn(connection);
             ensureItemPublishTimeDateTime(connection);
             ensureGeoStaffRoles(connection);
@@ -879,6 +880,51 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
         }
         log.info("已同步文章列表菜单 menu_id=170 path=geo/article");
+    }
+
+    /** 话题×关键字×平台 组合分析页（挂在 AI露出 下） */
+    private void ensureDailyComboMenu(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (174, '组合趋势', 131, 2, 'geo/daily-combo', '', 'C', 'geo:daily:list', 'LineChartOutlined', 0, 0,
+                     '按话题×关键字×平台查看日期明细与折线趋势', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = '组合趋势',
+                      parent_id = 131,
+                      sort_order = 2,
+                      path = 'geo/daily-combo',
+                      component = '',
+                      menu_type = 'C',
+                      perms = 'geo:daily:list',
+                      icon = 'LineChartOutlined',
+                      visible = 0,
+                      status = 0,
+                      remark = VALUES(remark),
+                      is_active = 1
+                    """);
+            // 露出看板 / 全年目标顺延
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET sort_order = 3 WHERE menu_id = 117 AND parent_id = 131
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET sort_order = 4 WHERE menu_id = 104 AND parent_id = 131
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT rm.role_id, 174, 1
+                    FROM sys_role_menu rm
+                    WHERE rm.menu_id = 102 AND rm.is_active = 1
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+            statement.execute("""
+                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, 174, 1 FROM DUAL
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """);
+        }
+        log.info("已同步组合趋势菜单 menu_id=174 path=geo/daily-combo");
     }
 
     private void ensureCiteScreenshotColumn(Connection connection) throws Exception {

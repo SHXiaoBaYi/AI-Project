@@ -8,6 +8,8 @@ import type {
   GeoDailyBoard,
   GeoDailyBulkSaveDTO,
   GeoDailyBulkSaveResult,
+  GeoDailyComboDetail,
+  GeoDailyComboVO,
   GeoDailyDTO,
   GeoDailyGroup,
   GeoDailyVO,
@@ -138,6 +140,28 @@ export function getGeoDailyListApi(
   },
 ) {
   return request.post<unknown, PageResult<GeoDailyVO>>('/geo/daily/list', data);
+}
+
+export function getGeoDailyComboListApi(
+  data: PageQuery & {
+    startDate?: string;
+    endDate?: string;
+    topicId?: number;
+    keyword?: string;
+    platforms?: string[];
+  },
+) {
+  return request.post<unknown, PageResult<GeoDailyComboVO>>('/geo/daily/combo/list', data);
+}
+
+export function getGeoDailyComboDetailApi(data: {
+  startDate?: string;
+  endDate?: string;
+  topicId: number;
+  keywordExact: string;
+  platform: string;
+}) {
+  return request.post<unknown, GeoDailyComboDetail>('/geo/daily/combo/detail', data);
 }
 
 export function createGeoDailyApi(data: GeoDailyDTO) {
