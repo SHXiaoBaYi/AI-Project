@@ -59,6 +59,7 @@ public class DingTalkAssistantService {
     private final HrMasterService hrMasterService;
     private final SysTaskService taskService;
     private final JdbcTemplate jdbc;
+    private final DingTalkScheduleRuleService dingTalkScheduleRuleService;
 
     public DingTalkAssistantSuggestVO suggest(DingTalkAssistantSuggestDTO dto) {
         if (dto.getTargetUserId() == null) {
@@ -111,6 +112,9 @@ public class DingTalkAssistantService {
         BoundUser querier = requireCurrentBound();
         BoundUser target = requireBound(dto.getTargetUserId(), "被邀请人");
         int duration = dto.getDurationMin() == null ? DEFAULT_DURATION : dto.getDurationMin();
+        // 普通会议不强制简历
+        dingTalkScheduleRuleService.assertBookable(
+                target.userId(), DingTalkScheduleRuleService.ACTION_MEETING, dto.getStartTime(), duration, false);
         String title = dto.getTitle().trim();
         String description = blankToEmpty(dto.getDescription());
         String location = blankToEmpty(dto.getLocation());
@@ -149,6 +153,8 @@ public class DingTalkAssistantService {
         BoundUser querier = requireCurrentBound();
         BoundUser target = requireBound(dto.getTargetUserId(), "汇报对象");
         int duration = dto.getDurationMin() == null ? DEFAULT_DURATION : dto.getDurationMin();
+        dingTalkScheduleRuleService.assertBookable(
+                target.userId(), DingTalkScheduleRuleService.ACTION_REPORT, dto.getStartTime(), duration, false);
         String title = StringUtils.hasText(dto.getTitle())
                 ? dto.getTitle().trim()
                 : "工作汇报 · " + querier.nickname() + " → " + target.nickname();

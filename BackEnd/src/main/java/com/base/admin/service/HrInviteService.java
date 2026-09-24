@@ -44,6 +44,7 @@ public class HrInviteService {
     private final HrMasterService hrMasterService;
     private final FileStorageService fileStorage;
     private final ObjectMapper objectMapper;
+    private final DingTalkScheduleRuleService dingTalkScheduleRuleService;
 
     @Transactional
     public HrInviteSaveVO create(HrInviteCreateDTO dto) {
@@ -806,6 +807,9 @@ public class HrInviteService {
         String title = "【" + ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面") + "】"
                 + basePerson.get("candidate_name") + " - " + basePerson.get("job_name");
         ResumeFile resume = loadResume(dto.getApplicationId());
+        if (resume == null) {
+            throw new BusinessException("面试日程必须附带简历，请先为候选人上传简历");
+        }
         String description = buildCalendarDescription(dto, basePerson, resume, organizerName);
 
         java.util.List<Long> boundInviteIds = new ArrayList<>();
@@ -820,6 +824,9 @@ public class HrInviteService {
             if (interviewerUserId == null) {
                 continue;
             }
+            dingTalkScheduleRuleService.assertBookable(
+                    interviewerUserId, DingTalkScheduleRuleService.ACTION_INTERVIEW,
+                    dto.getInterviewAt(), duration, true);
             Map<String, Object> person = loadInvitePerson(interviewerUserId, dto.getApplicationId());
             if (person == null) {
                 markNoCalendar(inviteId);
