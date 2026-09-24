@@ -667,9 +667,9 @@ public class DingTalkScheduleRuleService {
     private DingTalkScheduleRuleVO defaults(Long userId) {
         DingTalkScheduleRuleVO vo = new DingTalkScheduleRuleVO();
         vo.setUserId(userId);
-        vo.setEnabled(false);
+        vo.setEnabled(true);
         vo.setDenyHolidays(true);
-        vo.setBufferMin(0);
+        vo.setBufferMin(30);
         vo.setLookAheadDays(ChinaHoliday.BOOKING_MAX_DAYS);
         vo.setRecommendLimit(8);
         vo.setSecretaryEnabled(true);

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { App, Card, Form, Input, InputNumber, Switch, Typography } from 'antd';
+import { App, Card, Form, Input, InputNumber, Modal, Select, Switch, Typography } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { usePermission } from '@/hooks/usePermission';
 import {
@@ -26,8 +26,9 @@ const ACTION_META: { action: string; label: string }[] = [
   { action: 'report', label: '工作汇报' },
 ];
 
-/** 网格：行=星期，列=时间；09:30～18:00，每格 30 分钟 / 30px */
-const SLOT_MINUTES = 30;
+/** 间隔(分)=每格时长，默认 30 */
+const SLOT_MIN_OPTIONS = [10, 20, 30, 40, 50, 60] as const;
+const DEFAULT_SLOT_MIN = 30;
 const CELL_PX = 30;
 const DAY_LABEL_PX = 28;
 const GRID_START_MIN = 9 * 60 + 30;
@@ -49,6 +50,13 @@ type ActionPrefForm = {
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
+type FormInstance = ReturnType<typeof Form.useForm>[0];
+
+function normalizeSlotMin(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return (SLOT_MIN_OPTIONS as readonly number[]).includes(n) ? n : DEFAULT_SLOT_MIN;
+}
+
 function minsToDayjs(mins: number): Dayjs {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
@@ -66,7 +74,6 @@ function formatHm(mins: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-/** 表头短标签，如 9:30 / 10 */
 function formatHmShort(mins: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
@@ -82,13 +89,12 @@ function parseCellKey(key: string): { weekday: number; startMin: number } {
   return { weekday: Number(d), startMin: Number(t) };
 }
 
-function buildSlotStarts(): number[] {
+function buildSlotStarts(slotMinutes: number): number[] {
+  const step = Math.max(1, slotMinutes);
   const list: number[] = [];
-  for (let t = GRID_START_MIN; t < GRID_END_MIN; t += SLOT_MINUTES) list.push(t);
+  for (let t = GRID_START_MIN; t < GRID_END_MIN; t += step) list.push(t);
   return list;
 }
-
-const SLOT_STARTS = buildSlotStarts();
 
 function toWindowForms(windows?: ScheduleRuleWindow[]): WindowForm[] {
   if (!windows?.length) return [];
@@ -109,15 +115,34 @@ function fromWindowForms(windows: WindowForm[] | undefined): ScheduleRuleWindow[
     }));
 }
 
-/** 窗口列表 → 格子集合 */
-function windowsToCells(windows: WindowForm[] | undefined): Set<string> {
+function hasWindowData(windows: WindowForm[] | undefined): boolean {
+  return (windows || []).some((w) => w?.weekdays?.length && w.startTime && w.endTime);
+}
+
+function formHasAnySlotData(form: FormInstance): boolean {
+  if (hasWindowData(form.getFieldValue('blockedWindows') as WindowForm[])) return true;
+  const prefs = form.getFieldValue('actionPrefs') as ActionPrefForm[] | undefined;
+  return !!prefs?.some((p) => hasWindowData(p.windows));
+}
+
+function clearAllSlotData(form: FormInstance) {
+  form.setFieldValue('blockedWindows', []);
+  const prefs = (form.getFieldValue('actionPrefs') as ActionPrefForm[] | undefined) || [];
+  form.setFieldValue(
+    'actionPrefs',
+    prefs.map((p) => ({ ...p, windows: [] })),
+  );
+}
+
+function windowsToCells(windows: WindowForm[] | undefined, slotMinutes: number): Set<string> {
+  const step = Math.max(1, slotMinutes);
   const set = new Set<string>();
   for (const w of windows || []) {
     const start = dayjsToMins(w.startTime);
     const end = dayjsToMins(w.endTime);
     if (start == null || end == null || end <= start || !w.weekdays?.length) continue;
     for (const d of w.weekdays) {
-      for (let t = start; t < end; t += SLOT_MINUTES) {
+      for (let t = start; t < end; t += step) {
         if (t < GRID_START_MIN || t >= GRID_END_MIN) continue;
         set.add(cellKey(d, t));
       }
@@ -126,9 +151,9 @@ function windowsToCells(windows: WindowForm[] | undefined): Set<string> {
   return set;
 }
 
-/** 格子集合 → 合并后的窗口（同起止的星期合并） */
-function cellsToWindows(cells: Set<string>): WindowForm[] {
+function cellsToWindows(cells: Set<string>, slotMinutes: number): WindowForm[] {
   if (cells.size === 0) return [];
+  const step = Math.max(1, slotMinutes);
   const byDay = new Map<number, number[]>();
   for (const key of cells) {
     const { weekday, startMin } = parseCellKey(key);
@@ -142,10 +167,10 @@ function cellsToWindows(cells: Set<string>): WindowForm[] {
     let i = 0;
     while (i < sorted.length) {
       const start = sorted[i];
-      let end = start + SLOT_MINUTES;
+      let end = start + step;
       i += 1;
       while (i < sorted.length && sorted[i] === end) {
-        end += SLOT_MINUTES;
+        end += step;
         i += 1;
       }
       ranges.push({ start, end });
@@ -163,12 +188,10 @@ function cellsToWindows(cells: Set<string>): WindowForm[] {
   return [...bucket.entries()]
     .map(([k, days]) => {
       const [startStr, endStr] = k.split('-');
-      const start = Number(startStr);
-      const end = Number(endStr);
       return {
         weekdays: days.sort((a, b) => a - b),
-        startTime: minsToDayjs(start),
-        endTime: minsToDayjs(end),
+        startTime: minsToDayjs(Number(startStr)),
+        endTime: minsToDayjs(Number(endStr)),
       };
     })
     .sort((a, b) => {
@@ -193,22 +216,29 @@ function defaultActionPrefs(prefs?: ScheduleActionPref[]): ActionPrefForm[] {
 }
 
 function buildPayload(values: Record<string, unknown>): ScheduleRuleDTO {
-  const actionPrefs = ((values.actionPrefs || []) as ActionPrefForm[]).map((p) => ({
-    action: p.action,
-    enabled: !!p.enabled,
-    preferDurationMin: p.preferDurationMin,
-    maxDurationMin: p.maxDurationMin ?? null,
-    windows: fromWindowForms(p.windows),
-  }));
+  const slotMinutes = normalizeSlotMin(values.bufferMin);
+  const blockedWindows = fromWindowForms(values.blockedWindows as WindowForm[]);
+  const blockedCells = windowsToCells(toWindowForms(blockedWindows), slotMinutes);
+  const actionPrefs = ((values.actionPrefs || []) as ActionPrefForm[]).map((p) => {
+    const cells = windowsToCells(p.windows, slotMinutes);
+    for (const key of blockedCells) cells.delete(key);
+    return {
+      action: p.action,
+      enabled: !!p.enabled,
+      preferDurationMin: p.preferDurationMin,
+      maxDurationMin: p.maxDurationMin ?? null,
+      windows: fromWindowForms(cellsToWindows(cells, slotMinutes)),
+    };
+  });
   return {
     enabled: !!values.enabled,
     secretaryEnabled: values.secretaryEnabled !== false,
     denyHolidays: values.denyHolidays !== false,
-    bufferMin: (values.bufferMin as number) ?? 0,
+    bufferMin: slotMinutes,
     lookAheadDays: (values.lookAheadDays as number) ?? 14,
     recommendLimit: (values.recommendLimit as number) ?? 8,
     robotHint: (values.robotHint as string) || '',
-    blockedWindows: fromWindowForms(values.blockedWindows as WindowForm[]),
+    blockedWindows,
     actionPrefs,
   };
 }
@@ -237,24 +267,71 @@ const Tofu = memo(function Tofu({
   );
 });
 
+/** 间隔(分) 下拉：有时段数据时，确认清空后才切换 */
+const SlotMinSelect = memo(function SlotMinSelect({
+  value,
+  onChange,
+  disabled,
+  form,
+}: {
+  value?: number;
+  onChange?: (v: number) => void;
+  disabled?: boolean;
+  form: FormInstance;
+}) {
+  const current = normalizeSlotMin(value);
+  return (
+    <Select
+      className='w-full'
+      disabled={disabled}
+      value={current}
+      options={SLOT_MIN_OPTIONS.map((m) => ({ label: `${m} 分钟`, value: m }))}
+      onChange={(next: number) => {
+        const n = normalizeSlotMin(next);
+        if (n === current) return;
+        if (!formHasAnySlotData(form)) {
+          onChange?.(n);
+          return;
+        }
+        Modal.confirm({
+          title: '切换格子时长',
+          content: `已有框选时段。清空原时段后再改为 ${n} 分钟一格？不清空则取消本次切换。`,
+          okText: '清空并切换',
+          cancelText: '取消',
+          okButtonProps: { danger: true },
+          onOk: () => {
+            clearAllSlotData(form);
+            onChange?.(n);
+          },
+        });
+      }}
+    />
+  );
+});
+
+const EMPTY_CELL_SET = new Set<string>();
+
 type GridTone = 'prefer' | 'block';
 
-/**
- * 行=周一～周日，列=09:30～18:00（每格 30 分钟 / 30px）；拖拽框选，松手写入。
- * 起点已选 → 擦除；起点未选 → 涂选。
- */
 const WeekTimeGrid = memo(function WeekTimeGrid({
   value,
   onChange,
   disabled,
   tone = 'prefer',
+  lockedCells,
+  slotMinutes = DEFAULT_SLOT_MIN,
 }: {
   value?: WindowForm[];
   onChange?: (next: WindowForm[]) => void;
   disabled?: boolean;
   tone?: GridTone;
+  lockedCells?: Set<string>;
+  slotMinutes?: number;
 }) {
-  const committed = useMemo(() => windowsToCells(value), [value]);
+  const step = normalizeSlotMin(slotMinutes);
+  const slotStarts = useMemo(() => buildSlotStarts(step), [step]);
+  const committed = useMemo(() => windowsToCells(value, step), [value, step]);
+  const locked = lockedCells ?? EMPTY_CELL_SET;
   const [draft, setDraft] = useState<Set<string> | null>(null);
   const draftRef = useRef<Set<string> | null>(null);
   const dragRef = useRef<{
@@ -265,27 +342,33 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
   } | null>(null);
 
   const display = draft ?? committed;
-  const colCount = SLOT_STARTS.length;
+  const colCount = slotStarts.length;
 
-  const applyRect = useCallback((day1: number, slot1: number) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const dayMin = Math.min(drag.day0, day1);
-    const dayMax = Math.max(drag.day0, day1);
-    const slotMin = Math.min(drag.slot0, slot1);
-    const slotMax = Math.max(drag.slot0, slot1);
-    const next = new Set(drag.base);
-    for (let di = dayMin; di <= dayMax; di += 1) {
-      const weekday = WEEKDAYS[di].value;
-      for (let si = slotMin; si <= slotMax; si += 1) {
-        const key = cellKey(weekday, SLOT_STARTS[si]);
-        if (drag.paintOn) next.add(key);
-        else next.delete(key);
+  const applyRect = useCallback(
+    (day1: number, slot1: number) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const dayMin = Math.min(drag.day0, day1);
+      const dayMax = Math.max(drag.day0, day1);
+      const slotMinIdx = Math.min(drag.slot0, slot1);
+      const slotMaxIdx = Math.max(drag.slot0, slot1);
+      const next = new Set(drag.base);
+      for (let di = dayMin; di <= dayMax; di += 1) {
+        const weekday = WEEKDAYS[di].value;
+        for (let si = slotMinIdx; si <= slotMaxIdx; si += 1) {
+          const key = cellKey(weekday, slotStarts[si]);
+          if (drag.paintOn) {
+            if (!locked.has(key)) next.add(key);
+          } else {
+            next.delete(key);
+          }
+        }
       }
-    }
-    draftRef.current = next;
-    setDraft(next);
-  }, []);
+      draftRef.current = next;
+      setDraft(next);
+    },
+    [locked, slotStarts],
+  );
 
   const endDrag = useCallback(() => {
     if (!dragRef.current) return;
@@ -293,8 +376,8 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
     const cur = draftRef.current;
     draftRef.current = null;
     setDraft(null);
-    if (cur) onChange?.(cellsToWindows(cur));
-  }, [onChange]);
+    if (cur) onChange?.(cellsToWindows(cur, step));
+  }, [onChange, step]);
 
   useEffect(() => {
     const up = () => endDrag();
@@ -306,6 +389,12 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
     };
   }, [endDrag]);
 
+  useEffect(() => {
+    dragRef.current = null;
+    draftRef.current = null;
+    setDraft(null);
+  }, [step]);
+
   const selectedCls = tone === 'block' ? 'bg-rose-500/85 hover:bg-rose-500' : 'bg-sky-500/85 hover:bg-sky-500';
   const previewCls =
     tone === 'block'
@@ -315,10 +404,15 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
   return (
     <div className='w-full select-none'>
       <div className='mb-1 flex items-center justify-between gap-2 text-[11px] text-neutral-400'>
-        <span>{disabled ? '仅查看' : '拖拽框选，松手保存；再框已选可取消'}</span>
+        <span>
+          {disabled
+            ? '仅查看'
+            : tone === 'prefer'
+              ? `每格 ${step} 分钟；灰色为不安排，不可选`
+              : `每格 ${step} 分钟；拖拽框选，松手保存`}
+        </span>
         <span className='shrink-0 tabular-nums'>{display.size ? `${display.size} 格` : '未选'}</span>
       </div>
-      {/* 横向顶满豆腐块，底部贴齐卡片 */}
       <div className='-mx-3 -mb-2.5 overflow-hidden border-t border-neutral-200'>
         <div
           className='w-full'
@@ -327,22 +421,20 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
             gridTemplateColumns: `${DAY_LABEL_PX}px repeat(${colCount}, minmax(0, 1fr))`,
           }}
         >
-          {/* 表头：时间列 */}
           <div
             className='bg-neutral-50'
             style={{ height: CELL_PX }}
           />
-          {SLOT_STARTS.map((startMin) => (
+          {slotStarts.map((startMin) => (
             <div
               key={`h-${startMin}`}
               className='flex items-end justify-center border-b border-l border-neutral-100 bg-neutral-50 pb-0.5 text-[9px] leading-none text-neutral-500 tabular-nums'
               style={{ height: CELL_PX, minWidth: 0 }}
-              title={`${formatHm(startMin)}–${formatHm(startMin + SLOT_MINUTES)}`}
+              title={`${formatHm(startMin)}–${formatHm(startMin + step)}`}
             >
               {formatHmShort(startMin)}
             </div>
           ))}
-          {/* 行：星期 */}
           {WEEKDAYS.map((d, dayIdx) => (
             <div
               key={d.value}
@@ -354,24 +446,35 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
               >
                 {d.label}
               </div>
-              {SLOT_STARTS.map((startMin, slotIdx) => {
+              {slotStarts.map((startMin, slotIdx) => {
                 const key = cellKey(d.value, startMin);
-                const on = display.has(key);
+                const isLocked = tone === 'prefer' && locked.has(key);
+                const on = !isLocked && display.has(key);
                 const inDraft = draft?.has(key);
                 const committedOn = committed.has(key);
-                const isPreview = draft != null && inDraft !== committedOn;
+                const isPreview = !isLocked && draft != null && inDraft !== committedOn;
                 return (
                   <button
                     key={key}
                     type='button'
-                    disabled={disabled}
-                    title={`周${d.label} ${formatHm(startMin)}–${formatHm(startMin + SLOT_MINUTES)}`}
+                    disabled={disabled || isLocked}
+                    title={
+                      isLocked
+                        ? `周${d.label} ${formatHm(startMin)} 属不安排时段，不可选`
+                        : `周${d.label} ${formatHm(startMin)}–${formatHm(startMin + step)}`
+                    }
                     className={`min-w-0 border-t border-l border-neutral-100 p-0 transition-colors disabled:cursor-not-allowed ${
-                      on ? (isPreview ? previewCls : selectedCls) : 'bg-white hover:bg-neutral-100'
+                      isLocked
+                        ? 'bg-neutral-200/80 bg-[repeating-linear-gradient(-45deg,transparent,transparent_3px,rgba(0,0,0,0.06)_3px,rgba(0,0,0,0.06)_6px)]'
+                        : on
+                          ? isPreview
+                            ? previewCls
+                            : selectedCls
+                          : 'bg-white hover:bg-neutral-100'
                     }`}
                     style={{ height: CELL_PX }}
                     onMouseDown={(e) => {
-                      if (disabled || e.button !== 0) return;
+                      if (disabled || isLocked || e.button !== 0) return;
                       e.preventDefault();
                       const paintOn = !committed.has(key);
                       dragRef.current = {
@@ -408,16 +511,39 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seqRef = useRef(0);
 
+  const bufferMin = Form.useWatch('bufferMin', form);
+  const slotMinutes = normalizeSlotMin(bufferMin);
+  const blockedWindows = Form.useWatch('blockedWindows', form) as WindowForm[] | undefined;
+  const blockedCells = useMemo(() => windowsToCells(blockedWindows, slotMinutes), [blockedWindows, slotMinutes]);
+
+  useEffect(() => {
+    if (!readyRef.current || blockedCells.size === 0) return;
+    const prefs = form.getFieldValue('actionPrefs') as ActionPrefForm[] | undefined;
+    if (!prefs?.length) return;
+    let changed = false;
+    const next = prefs.map((p) => {
+      const cells = windowsToCells(p.windows, slotMinutes);
+      let dirty = false;
+      for (const key of blockedCells) {
+        if (cells.delete(key)) dirty = true;
+      }
+      if (!dirty) return p;
+      changed = true;
+      return { ...p, windows: cellsToWindows(cells, slotMinutes) };
+    });
+    if (changed) form.setFieldValue('actionPrefs', next);
+  }, [blockedCells, form, slotMinutes]);
+
   const load = useCallback(async () => {
     readyRef.current = false;
     setLoading(true);
     try {
       const data = await getMyScheduleRuleApi();
       form.setFieldsValue({
-        enabled: !!data.enabled,
+        enabled: data.enabled !== false,
         secretaryEnabled: data.secretaryEnabled !== false,
         denyHolidays: data.denyHolidays !== false,
-        bufferMin: data.bufferMin ?? 0,
+        bufferMin: normalizeSlotMin(data.bufferMin),
         lookAheadDays: data.lookAheadDays ?? 14,
         recommendLimit: data.recommendLimit ?? 8,
         robotHint: data.robotHint || '',
@@ -503,7 +629,7 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
             type='secondary'
             className='text-xs'
           >
-            仅本人可配。行=星期、列=09:30～18:00，拖拽框选后自动保存。
+            仅本人可配。间隔(分)控制格子时长；行=星期、列=09:30～18:00。
           </Typography.Text>
         </div>
         <Typography.Text
@@ -525,10 +651,10 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
         colon={false}
         onValuesChange={() => scheduleSave()}
         initialValues={{
-          enabled: false,
+          enabled: true,
           secretaryEnabled: true,
           denyHolidays: true,
-          bufferMin: 0,
+          bufferMin: DEFAULT_SLOT_MIN,
           lookAheadDays: 14,
           recommendLimit: 8,
           blockedWindows: [],
@@ -591,13 +717,9 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
                 labelCol={{ span: 24 }}
                 wrapperCol={{ span: 24 }}
                 className='!mb-0'
+                tooltip='控制不安排/动作时段表每一格的分钟数'
               >
-                <InputNumber
-                  min={0}
-                  max={240}
-                  step={5}
-                  className='w-full'
-                />
+                <SlotMinSelect form={form} />
               </Form.Item>
               <Form.Item
                 name='lookAheadDays'
@@ -650,7 +772,10 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
               name='blockedWindows'
               className='!mb-0'
             >
-              <WeekTimeGrid tone='block' />
+              <WeekTimeGrid
+                tone='block'
+                slotMinutes={slotMinutes}
+              />
             </Form.Item>
           </Tofu>
 
@@ -713,12 +838,16 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
                   />
                 </Form.Item>
               </div>
-              <div className='mb-1 text-xs text-neutral-500'>喜好可约时段（默认不选，拖拽框选）</div>
+              <div className='mb-1 text-xs text-neutral-500'>喜好可约时段（灰色格为不安排，不可选）</div>
               <Form.Item
                 name={['actionPrefs', index, 'windows']}
                 className='!mb-0'
               >
-                <WeekTimeGrid tone='prefer' />
+                <WeekTimeGrid
+                  tone='prefer'
+                  lockedCells={blockedCells}
+                  slotMinutes={slotMinutes}
+                />
               </Form.Item>
             </Tofu>
           ))}
