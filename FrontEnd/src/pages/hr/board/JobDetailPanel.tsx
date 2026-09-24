@@ -207,7 +207,7 @@ export default function JobDetailPanel() {
         dataIndex: 'headcount',
         key: 'headcount',
         width: w('headcount', 70),
-        align: 'right',
+        align: 'left',
         render: (_, r) => r.headcount ?? '—',
       },
       {
@@ -222,7 +222,7 @@ export default function JobDetailPanel() {
         dataIndex: 'recruitingDays',
         key: 'recruitingDays',
         width: w('recruitingDays', 90),
-        align: 'right',
+        align: 'left',
         render: (_, r) => (r.recruitingDays == null ? '—' : r.recruitingDays),
       },
       {

@@ -56,7 +56,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [configLoading, setConfigLoading] = useState(true);
   const [options, setOptions] = useState<LoginOptions | null>(null);
-  const [showQr, setShowQr] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [qrError, setQrError] = useState('');
   const [qrKey, setQrKey] = useState(0);
   const loggingRef = useRef(false);
@@ -142,6 +142,7 @@ export default function Login() {
     [afterToken, dispatch, handleConflict],
   );
 
+  // 进入登录页先拉取本项目钉钉应用配置（/auth/login-options）
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -152,7 +153,7 @@ export default function Login() {
       } catch {
         if (!cancelled) {
           setOptions({
-            passwordLoginEnabled: false,
+            passwordLoginEnabled: true,
             dingTalkEnabled: false,
             message: '无法获取登录配置',
           });
@@ -175,8 +176,9 @@ export default function Login() {
     }
   }, [completeDingLogin]);
 
+  // 配置就绪后内嵌钉钉扫码二维码（DTFrameLogin）
   useEffect(() => {
-    if (!options?.dingTalkEnabled || !options.clientId || loading || !showQr) return;
+    if (configLoading || !options?.dingTalkEnabled || !options.clientId || loading) return;
     let cancelled = false;
     (async () => {
       setQrError('');
@@ -218,7 +220,7 @@ export default function Login() {
     return () => {
       cancelled = true;
     };
-  }, [completeDingLogin, loading, options, qrKey, showQr]);
+  }, [completeDingLogin, configLoading, loading, options, qrKey]);
 
   const dingEnabled = !!options?.dingTalkEnabled && !!options.clientId;
   const passwordEnabled = options?.passwordLoginEnabled !== false;
@@ -267,85 +269,90 @@ export default function Login() {
             <span className='text-2xl font-bold text-white'>小</span>
           </div>
           <h1 className='text-2xl font-bold tracking-tight text-gray-800'>小巴依(上海)</h1>
-          <p className='mt-1.5 text-sm text-gray-400'>{options?.message || '请使用账号密码登录'}</p>
+          <p className='mt-1.5 text-sm text-gray-400'>
+            {options?.message || (dingEnabled ? '请使用钉钉扫码登录' : '请使用账号密码登录')}
+          </p>
         </div>
 
         <Spin spinning={configLoading || loading}>
-          {passwordEnabled ? (
-            <Form
-              form={form}
-              size='large'
-              onFinish={(values) => void completePasswordLogin(values.username, values.password)}
-            >
-              <Form.Item
-                name='username'
-                rules={[{ required: true, message: '请输入用户名' }]}
-              >
-                <Input
-                  prefix={<UserOutlined className='text-gray-400' />}
-                  placeholder='用户名'
-                  className='rounded-lg!'
-                />
-              </Form.Item>
-              <Form.Item
-                name='password'
-                rules={[{ required: true, message: '请输入密码' }]}
-              >
-                <Input.Password
-                  prefix={<LockOutlined className='text-gray-400' />}
-                  placeholder='密码'
-                  className='rounded-lg!'
-                />
-              </Form.Item>
-              <Form.Item className='mb-2!'>
-                <Button
-                  type='primary'
-                  htmlType='submit'
-                  loading={loading}
-                  block
-                  className='h-11! rounded-lg! text-base! font-medium!'
-                >
-                  登 录
-                </Button>
-              </Form.Item>
-            </Form>
-          ) : (
-            <div className='rounded-lg bg-amber-50 px-4 py-6 text-center text-sm text-amber-800'>
-              {options?.message || '登录方式未开放，请联系管理员'}
-            </div>
-          )}
-
           {dingEnabled ? (
-            <div className='mt-1'>
-              <Divider plain>
-                <Button
-                  type='link'
-                  size='small'
-                  onClick={() => setShowQr((v) => !v)}
-                >
-                  {showQr ? '收起钉钉扫码' : '钉钉扫码登录'}
-                </Button>
-              </Divider>
-              {showQr ? (
-                <div className='flex flex-col items-center gap-3'>
-                  <div
-                    id={QR_BOX_ID}
-                    key={qrKey}
-                    className='flex h-[300px] w-[300px] items-center justify-center overflow-hidden rounded-lg bg-white'
-                  />
-                  {qrError ? <p className='text-center text-sm text-red-500'>{qrError}</p> : null}
+            <div className='flex flex-col items-center gap-3'>
+              <div
+                id={QR_BOX_ID}
+                key={qrKey}
+                className='flex h-[300px] w-[300px] items-center justify-center overflow-hidden rounded-lg bg-white'
+              />
+              {qrError ? <p className='text-center text-sm text-red-500'>{qrError}</p> : null}
+              <Button
+                type='link'
+                icon={<ReloadOutlined />}
+                onClick={() => {
+                  loggingRef.current = false;
+                  setQrKey((k) => k + 1);
+                }}
+              >
+                刷新二维码
+              </Button>
+              <p className='text-center text-xs text-gray-400'>使用企业钉钉扫码；首次扫码将自动注册为普通账号</p>
+            </div>
+          ) : !configLoading && !passwordEnabled ? (
+            <div className='rounded-lg bg-amber-50 px-4 py-6 text-center text-sm text-amber-800'>
+              {options?.message || '钉钉扫码登录未配置，请联系管理员'}
+            </div>
+          ) : null}
+
+          {passwordEnabled ? (
+            <div className={dingEnabled ? 'mt-2' : undefined}>
+              {dingEnabled ? (
+                <Divider plain>
                   <Button
                     type='link'
-                    icon={<ReloadOutlined />}
-                    onClick={() => {
-                      loggingRef.current = false;
-                      setQrKey((k) => k + 1);
-                    }}
+                    size='small'
+                    onClick={() => setShowPassword((v) => !v)}
                   >
-                    刷新二维码
+                    {showPassword ? '收起账号密码' : '账号密码登录'}
                   </Button>
-                </div>
+                </Divider>
               ) : null}
+              {(showPassword || !dingEnabled) && (
+                <Form
+                  form={form}
+                  size='large'
+                  onFinish={(values) => void completePasswordLogin(values.username, values.password)}
+                >
+                  <Form.Item
+                    name='username'
+                    rules={[{ required: true, message: '请输入用户名' }]}
+                  >
+                    <Input
+                      prefix={<UserOutlined className='text-gray-400' />}
+                      placeholder='用户名'
+                      className='rounded-lg!'
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name='password'
+                    rules={[{ required: true, message: '请输入密码' }]}
+                  >
+                    <Input.Password
+                      prefix={<LockOutlined className='text-gray-400' />}
+                      placeholder='密码'
+                      className='rounded-lg!'
+                    />
+                  </Form.Item>
+                  <Form.Item className='mb-0!'>
+                    <Button
+                      type='primary'
+                      htmlType='submit'
+                      loading={loading}
+                      block
+                      className='h-11! rounded-lg! text-base! font-medium!'
+                    >
+                      登 录
+                    </Button>
+                  </Form.Item>
+                </Form>
+              )}
             </div>
           ) : null}
         </Spin>
