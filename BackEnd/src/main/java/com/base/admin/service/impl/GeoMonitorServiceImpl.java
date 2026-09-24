@@ -45,6 +45,7 @@ import com.base.admin.mapper.GeoYearTargetMapper;
 import com.base.admin.mapper.SysRoleMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.mapper.SysUserRoleMapper;
+import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoMonitorService;
 import com.base.admin.service.GeoPlatformService;
@@ -108,6 +109,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private final SysRoleMapper roleMapper;
     private final SysUserRoleMapper userRoleMapper;
     private final FileStorageService fileStorageService;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public PageResult<GeoDailyVO> listDaily(GeoDailyQueryDTO query) {
@@ -491,7 +493,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             option.setDisplayName(userDisplayName(user));
             options.add(option);
         }
-        return options;
+        return dataScopeFilter.filterGeoOwners(options, GeoOwnerOptionVO::getUserId);
     }
 
     @Override
@@ -1729,6 +1731,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, GeoMonitorDaily::getCreateTime);
         applyHasTextFilter(wrapper, query.getHasScreenshot(), GeoMonitorDaily::getScreenshotUrl);
         applyHasTextFilter(wrapper, query.getHasThirdPartyUrl(), GeoMonitorDaily::getThirdPartyUrl);
+        dataScopeFilter.applyGeoDaily(wrapper);
         return wrapper;
     }
 
@@ -1751,7 +1754,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         List<String> platformFilter = platforms == null ? List.of()
                 : platforms.stream().filter(StringUtils::hasText).toList();
         // 统计/看板统一只取有效数据；逻辑删除字段再显式约束，防止自定义路径漏过滤
-        return new LambdaQueryWrapper<GeoMonitorDaily>()
+        LambdaQueryWrapper<GeoMonitorDaily> wrapper = new LambdaQueryWrapper<GeoMonitorDaily>()
                 .eq(GeoMonitorDaily::getIsActive, 1)
                 .ge(start != null, GeoMonitorDaily::getInspectDate, start)
                 .le(end != null, GeoMonitorDaily::getInspectDate, end)
@@ -1759,6 +1762,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .eq(StringUtils.hasText(termType), GeoMonitorDaily::getTermType, termType)
                 .like(StringUtils.hasText(keyword), GeoMonitorDaily::getKeyword, keyword)
                 .in(!platformFilter.isEmpty(), GeoMonitorDaily::getPlatform, platformFilter);
+        dataScopeFilter.applyGeoDaily(wrapper);
+        return wrapper;
     }
 
     private List<GeoMonitorDaily> loadActiveDaily(LocalDate start, LocalDate end, Long topicId,

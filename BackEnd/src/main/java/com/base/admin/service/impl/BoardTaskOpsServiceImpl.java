@@ -12,6 +12,7 @@ import com.base.admin.domain.vo.BoardTaskOpsSummaryVO;
 import com.base.admin.mapper.SysTaskAssigneeMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.service.BoardTaskOpsService;
+import com.base.admin.service.DataScopeFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -41,6 +42,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
 
     private final SysTaskMapper taskMapper;
     private final SysTaskAssigneeMapper assigneeMapper;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public BoardTaskOpsSummaryVO summary(BoardTaskOpsQueryDTO query) {
@@ -240,6 +242,7 @@ public class BoardTaskOpsServiceImpl implements BoardTaskOpsService {
                 .ne(SysTask::getStatus, "已取消")
                 .in(!types.isEmpty(), SysTask::getTaskType, types)
                 .orderByDesc(SysTask::getId);
+        dataScopeFilter.applyTask(w);
         List<SysTask> tasks = taskMapper.selectList(w);
         if (userIds.isEmpty()) {
             return tasks;

@@ -21,10 +21,13 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -230,39 +233,169 @@ public class UserDataScopeService {
 
     /** 供招聘数据范围过滤：无覆盖返回 null；SELF/PERSON 返回目标人集合 */
     public Set<Long> resolveVisibleUserIds(Long viewerUserId) {
-        if (viewerUserId == null) {
+        UserDataScopeSnapshot snap = resolveSnapshot(viewerUserId);
+        if (snap.globalAll() || !snap.hrEnabled()) {
             return null;
         }
+        if (!StringUtils.hasText(snap.hrPersonMode()) || MODE_DEFAULT.equalsIgnoreCase(snap.hrPersonMode())) {
+            return null;
+        }
+        if (MODE_SELF.equalsIgnoreCase(snap.hrPersonMode())) {
+            return Set.of(viewerUserId);
+        }
+        if (MODE_PERSON.equalsIgnoreCase(snap.hrPersonMode())) {
+            return snap.hrVisibleUserIds() == null ? Set.of() : snap.hrVisibleUserIds();
+        }
+        return null;
+    }
+
+    /** 当前登录用户的数据权限快照（业务查询强制过滤用，不做暗门校验）。 */
+    public UserDataScopeSnapshot currentSnapshot() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            return UserDataScopeSnapshot.defaults();
+        }
+        return resolveSnapshot(userId);
+    }
+
+    public UserDataScopeSnapshot resolveSnapshot(Long userId) {
+        if (userId == null) {
+            return UserDataScopeSnapshot.defaults();
+        }
         return jdbc.query("""
-                SELECT mode, global_all, hr_config FROM sys_user_data_scope
-                WHERE user_id = ? AND is_active = 1
+                SELECT COALESCE(global_all, 0) AS global_all, mode, geo_config, hr_config, task_config
+                FROM sys_user_data_scope WHERE user_id = ? AND is_active = 1
                 """, rs -> {
             if (!rs.next()) {
-                return null;
+                return UserDataScopeSnapshot.defaults();
             }
             if (rs.getInt("global_all") == 1) {
-                return null;
+                return UserDataScopeSnapshot.unrestricted();
             }
-            UserDataScopeHrVO hr = readJson(rs.getString("hr_config"), UserDataScopeHrVO.class, null);
-            String mode = rs.getString("mode");
-            if (hr != null && Boolean.TRUE.equals(hr.getEnabled()) && StringUtils.hasText(hr.getPersonMode())) {
-                mode = hr.getPersonMode();
+            UserDataScopeGeoVO geo = readJson(rs.getString("geo_config"), UserDataScopeGeoVO.class, new UserDataScopeGeoVO());
+            UserDataScopeHrVO hr = readJson(rs.getString("hr_config"), UserDataScopeHrVO.class, new UserDataScopeHrVO());
+            UserDataScopeTaskVO task = readJson(rs.getString("task_config"), UserDataScopeTaskVO.class, new UserDataScopeTaskVO());
+            if (hr == null) {
+                hr = new UserDataScopeHrVO();
             }
-            if (!StringUtils.hasText(mode) || MODE_DEFAULT.equalsIgnoreCase(mode)) {
-                return null;
+            if (!StringUtils.hasText(hr.getPersonMode())) {
+                hr.setPersonMode(StringUtils.hasText(rs.getString("mode")) ? rs.getString("mode") : MODE_DEFAULT);
             }
-            if (MODE_SELF.equalsIgnoreCase(mode)) {
-                return Set.of(viewerUserId);
-            }
-            if (MODE_PERSON.equalsIgnoreCase(mode)) {
+            Set<Long> personTargets = null;
+            String personMode = normalizeMode(hr.getPersonMode());
+            if (Boolean.TRUE.equals(hr.getEnabled()) && MODE_PERSON.equals(personMode)) {
                 List<Long> targets = jdbc.query("""
                         SELECT target_user_id FROM sys_user_data_scope_target
                         WHERE user_id = ? AND is_active = 1
-                        """, (r, i) -> r.getLong(1), viewerUserId);
-                return new LinkedHashSet<>(targets == null ? List.of() : targets);
+                        """, (r, i) -> r.getLong(1), userId);
+                personTargets = UserDataScopeSnapshot.copyLongs(targets);
+            } else if (Boolean.TRUE.equals(hr.getEnabled()) && MODE_SELF.equals(personMode)) {
+                personTargets = Set.of(userId);
             }
-            return null;
-        }, viewerUserId);
+
+            Set<String> platformNames = Set.of();
+            if (geo != null && Boolean.TRUE.equals(geo.getEnabled())
+                    && geo.getPlatformIds() != null && !geo.getPlatformIds().isEmpty()) {
+                platformNames = loadPlatformNames(geo.getPlatformIds());
+                if (platformNames.isEmpty()) {
+                    platformNames = Set.of("\u0000");
+                }
+            }
+            Set<String> taskTypeNames = Set.of();
+            if (task != null && Boolean.TRUE.equals(task.getEnabled())
+                    && task.getTaskTypeIds() != null && !task.getTaskTypeIds().isEmpty()) {
+                taskTypeNames = loadTaskTypeNames(task.getTaskTypeIds());
+                if (taskTypeNames.isEmpty()) {
+                    taskTypeNames = Set.of("\u0000");
+                }
+            }
+            Set<Long> deptIds = Set.of();
+            if (hr != null && Boolean.TRUE.equals(hr.getEnabled())
+                    && hr.getDeptIds() != null && !hr.getDeptIds().isEmpty()) {
+                deptIds = expandDeptIds(hr.getDeptIds());
+            }
+
+            return new UserDataScopeSnapshot(
+                    false,
+                    geo != null && Boolean.TRUE.equals(geo.getEnabled()),
+                    geo == null ? Set.of() : UserDataScopeSnapshot.copyLongs(geo.getTopicIds()),
+                    platformNames,
+                    geo != null && Boolean.TRUE.equals(geo.getSelfOwnerOnly()),
+                    geo != null && Boolean.TRUE.equals(geo.getSelfWriterOnly()),
+                    geo != null && Boolean.TRUE.equals(geo.getSelfPublisherOnly()),
+                    Boolean.TRUE.equals(hr.getEnabled()),
+                    deptIds,
+                    personMode,
+                    personTargets,
+                    task != null && Boolean.TRUE.equals(task.getEnabled()),
+                    taskTypeNames,
+                    task != null && Boolean.TRUE.equals(task.getOwnerOnly()),
+                    task != null && Boolean.TRUE.equals(task.getAssigneeOnly()));
+        }, userId);
+    }
+
+    private Set<String> loadPlatformNames(List<Long> platformIds) {
+        List<Long> ids = cleanIds(platformIds);
+        if (ids.isEmpty()) {
+            return Set.of();
+        }
+        String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
+        List<String> names = jdbc.query(
+                "SELECT platform_name FROM geo_platform WHERE is_active = 1 AND id IN (" + placeholders + ")",
+                ids.toArray(),
+                (rs, i) -> rs.getString(1));
+        return UserDataScopeSnapshot.copyStrings(names);
+    }
+
+    private Set<String> loadTaskTypeNames(List<Long> typeIds) {
+        List<Long> ids = cleanIds(typeIds);
+        if (ids.isEmpty()) {
+            return Set.of();
+        }
+        String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
+        List<String> names = jdbc.query(
+                "SELECT type_name FROM sys_task_type WHERE is_active = 1 AND id IN (" + placeholders + ")",
+                ids.toArray(),
+                (rs, i) -> rs.getString(1));
+        return UserDataScopeSnapshot.copyStrings(names);
+    }
+
+    /** 勾选部门含下级（ancestors 路径匹配）。 */
+    private Set<Long> expandDeptIds(List<Long> deptIds) {
+        List<Long> roots = cleanIds(deptIds);
+        if (roots.isEmpty()) {
+            return Set.of();
+        }
+        Set<Long> expanded = new LinkedHashSet<>(roots);
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT id, ancestors FROM hr_department WHERE is_active = 1");
+        for (Long root : roots) {
+            String needle = "," + root + ",";
+            for (Map<String, Object> row : rows) {
+                Object idObj = row.get("id");
+                if (idObj == null) {
+                    continue;
+                }
+                long id = ((Number) idObj).longValue();
+                String ancestors = row.get("ancestors") == null ? "" : String.valueOf(row.get("ancestors"));
+                String path = "," + ancestors + ",";
+                if (path.contains(needle) || id == root) {
+                    expanded.add(id);
+                }
+            }
+        }
+        return Collections.unmodifiableSet(expanded);
+    }
+
+    private static String normalizeMode(String mode) {
+        if (!StringUtils.hasText(mode)) {
+            return MODE_DEFAULT;
+        }
+        String m = mode.trim().toUpperCase(Locale.ROOT);
+        if (MODE_DEFAULT.equals(m) || MODE_PERSON.equals(m) || MODE_SELF.equals(m)) {
+            return m;
+        }
+        throw new BusinessException("不支持的人员可见模式");
     }
 
     private static void syncLegacyFromHr(UserDataScopeVO vo) {
@@ -304,17 +437,6 @@ public class UserDataScopeService {
             }
         }
         return new ArrayList<>(set);
-    }
-
-    private static String normalizeMode(String mode) {
-        if (!StringUtils.hasText(mode)) {
-            return MODE_DEFAULT;
-        }
-        String m = mode.trim().toUpperCase(Locale.ROOT);
-        if (MODE_DEFAULT.equals(m) || MODE_PERSON.equals(m) || MODE_SELF.equals(m)) {
-            return m;
-        }
-        throw new BusinessException("不支持的人员可见模式");
     }
 
     private <T> T readJson(String json, Class<T> type, T fallback) {

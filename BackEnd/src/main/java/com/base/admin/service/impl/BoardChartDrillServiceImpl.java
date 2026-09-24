@@ -21,6 +21,7 @@ import com.base.admin.mapper.GeoTopicMapper;
 import com.base.admin.mapper.SysTaskAssigneeMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.service.BoardChartDrillService;
+import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.SysTaskTypeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -51,6 +52,7 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
     private final SysTaskMapper taskMapper;
     private final SysTaskAssigneeMapper assigneeMapper;
     private final SysTaskTypeService taskTypeService;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public BoardChartDrillVO drill(BoardChartDrillQueryDTO query) {
@@ -137,12 +139,18 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         return vo;
     }
 
+    private List<GeoMonitorDaily> loadScopedDailies(LocalDate start, LocalDate end) {
+        LambdaQueryWrapper<GeoMonitorDaily> w = new LambdaQueryWrapper<GeoMonitorDaily>()
+                .ge(GeoMonitorDaily::getInspectDate, start)
+                .le(GeoMonitorDaily::getInspectDate, end);
+        dataScopeFilter.applyGeoDaily(w);
+        return dailyMapper.selectList(w);
+    }
+
     private Map<String, Agg> aggregateGeo(String axis, String primaryDim, String personRole,
                                           LocalDate start, LocalDate end,
                                           List<BoardChartStackItemDTO> stack) {
-        List<GeoMonitorDaily> dailies = dailyMapper.selectList(new LambdaQueryWrapper<GeoMonitorDaily>()
-                .ge(GeoMonitorDaily::getInspectDate, start)
-                .le(GeoMonitorDaily::getInspectDate, end));
+        List<GeoMonitorDaily> dailies = loadScopedDailies(start, end);
         Map<Long, String> topicNames = loadTopicNames();
         Map<Long, PersonRef> topicPerson = buildTopicPersonIndex(personRole);
 
@@ -202,8 +210,10 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
     }
 
     private List<BizTask> loadBizTasks() {
-        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
-                .ne(SysTask::getStatus, "已取消"));
+        LambdaQueryWrapper<SysTask> tw = new LambdaQueryWrapper<SysTask>()
+                .ne(SysTask::getStatus, "已取消");
+        dataScopeFilter.applyTask(tw);
+        List<SysTask> tasks = taskMapper.selectList(tw);
         Map<Long, List<SysTaskAssignee>> assignees = loadAssignees(tasks.stream().map(SysTask::getId).toList());
         Map<String, SysTaskType> types = taskTypeService.listOptions().stream()
                 .collect(Collectors.toMap(SysTaskType::getTypeName, t -> t, (a, b) -> a));
@@ -445,9 +455,7 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
                                                        String grain, LocalDate start, LocalDate end,
                                                        List<BoardChartStackItemDTO> stack, boolean rateMetric,
                                                        boolean canDrillMore) {
-        List<GeoMonitorDaily> dailies = dailyMapper.selectList(new LambdaQueryWrapper<GeoMonitorDaily>()
-                .ge(GeoMonitorDaily::getInspectDate, start)
-                .le(GeoMonitorDaily::getInspectDate, end));
+        List<GeoMonitorDaily> dailies = loadScopedDailies(start, end);
         Map<Long, String> topicNames = loadTopicNames();
         Map<Long, PersonRef> topicPerson = buildTopicPersonIndex(personRole);
         Map<String, Agg> cells = new LinkedHashMap<>();

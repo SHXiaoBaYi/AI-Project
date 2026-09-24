@@ -35,6 +35,7 @@ public class HrMasterService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final HrDataScope dataScope;
+    private final DataScopeFilter dataScopeFilter;
     private final DingTalkCalendarClient dingTalk;
     private final FileStorageService fileStorage;
 
@@ -778,7 +779,7 @@ public class HrMasterService {
                 SELECT id, parent_id, name, leader_user_id, sort_order, status, ancestors
                 FROM hr_department WHERE is_active = 1 ORDER BY sort_order, id
                 """);
-        return buildTree(flat, 0L);
+        return buildTree(dataScopeFilter.filterHrDepartmentsFlat(flat), 0L);
     }
 
     @Transactional
@@ -802,8 +803,9 @@ public class HrMasterService {
     }
 
     public List<Map<String, Object>> users(String scope) {
+        List<Map<String, Object>> list;
         if ("owner".equals(scope)) {
-            return jdbc.queryForList("""
+            list = jdbc.queryForList("""
                     SELECT DISTINCT u.user_id, u.username, u.nickname, u.phone,
                            CASE WHEN d.user_id IS NULL THEN 0 ELSE 1 END dingtalk_bound
                     FROM sys_user u
@@ -813,9 +815,8 @@ public class HrMasterService {
                     WHERE u.is_active = 1 AND u.status = 0
                     ORDER BY u.user_id
                     """);
-        }
-        if ("interviewer".equals(scope)) {
-            return jdbc.queryForList("""
+        } else if ("interviewer".equals(scope)) {
+            list = jdbc.queryForList("""
                     SELECT DISTINCT u.user_id, u.username, u.nickname, u.phone,
                            CASE WHEN d.user_id IS NULL THEN 0 ELSE 1 END dingtalk_bound
                     FROM sys_user u
@@ -825,15 +826,17 @@ public class HrMasterService {
                     WHERE u.is_active = 1 AND u.status = 0
                     ORDER BY u.user_id
                     """);
+        } else {
+            list = jdbc.queryForList("""
+                    SELECT u.user_id, u.username, u.nickname, u.phone,
+                           CASE WHEN d.user_id IS NULL THEN 0 ELSE 1 END dingtalk_bound
+                    FROM sys_user u
+                    LEFT JOIN hr_user_dingtalk d ON d.user_id = u.user_id AND d.is_active = 1
+                    WHERE u.is_active = 1 AND u.status = 0
+                    ORDER BY u.user_id
+                    """);
         }
-        return jdbc.queryForList("""
-                SELECT u.user_id, u.username, u.nickname, u.phone,
-                       CASE WHEN d.user_id IS NULL THEN 0 ELSE 1 END dingtalk_bound
-                FROM sys_user u
-                LEFT JOIN hr_user_dingtalk d ON d.user_id = u.user_id AND d.is_active = 1
-                WHERE u.is_active = 1 AND u.status = 0
-                ORDER BY u.user_id
-                """);
+        return dataScopeFilter.filterHrUsers(list);
     }
 
     public PageResult<HrSchoolVO> schools(HrSchoolQueryDTO query) {

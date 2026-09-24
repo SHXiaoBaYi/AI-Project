@@ -21,16 +21,22 @@ public class HrDataScope {
             sql.append(" AND 1 = 0 ");
             return;
         }
+        UserDataScopeSnapshot snap = userDataScopeService.resolveSnapshot(user.getUserId());
+        if (snap.globalAll()) {
+            return;
+        }
         Set<String> permissions = user.getPermissions();
         if (permissions.contains("*:*:*") || permissions.contains("hr:scope:all")) {
-            applyPersonOverride(sql, args, user.getUserId(), requisitionAlias, applicationAlias);
+            applyDeptOverride(sql, args, snap, requisitionAlias);
+            applyPersonOverride(sql, args, snap, requisitionAlias, applicationAlias);
             return;
         }
         if (permissions.contains("hr:scope:owner")) {
             sql.append(" AND ").append(requisitionAlias)
                     .append(".id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
             args.add(user.getUserId());
-            applyPersonOverride(sql, args, user.getUserId(), requisitionAlias, applicationAlias);
+            applyDeptOverride(sql, args, snap, requisitionAlias);
+            applyPersonOverride(sql, args, snap, requisitionAlias, applicationAlias);
             return;
         }
         if (permissions.contains("hr:scope:interviewer")) {
@@ -47,17 +53,27 @@ public class HrDataScope {
                 args.add(user.getUserId());
             }
         }
-        applyPersonOverride(sql, args, user.getUserId(), requisitionAlias, applicationAlias);
+        applyDeptOverride(sql, args, snap, requisitionAlias);
+        applyPersonOverride(sql, args, snap, requisitionAlias, applicationAlias);
     }
 
-    /**
-     * Bella 配置的「按人」覆盖：在角色范围之上再收窄为与目标人员相关的数据。
-     * 相关：需求负责人 / 面试官 / 邀约面试官。
-     */
-    private void applyPersonOverride(StringBuilder sql, List<Object> args, Long viewerUserId,
+    private void applyDeptOverride(StringBuilder sql, List<Object> args, UserDataScopeSnapshot snap, String requisitionAlias) {
+        if (!snap.hrEnabled() || snap.hrDeptIds() == null || snap.hrDeptIds().isEmpty()) {
+            return;
+        }
+        String placeholders = snap.hrDeptIds().stream().map(id -> "?").collect(Collectors.joining(","));
+        sql.append(" AND ").append(requisitionAlias).append(".dept_id IN (").append(placeholders).append(") ");
+        args.addAll(snap.hrDeptIds());
+    }
+
+    private void applyPersonOverride(StringBuilder sql, List<Object> args, UserDataScopeSnapshot snap,
                                      String requisitionAlias, String applicationAlias) {
-        Set<Long> visible = userDataScopeService.resolveVisibleUserIds(viewerUserId);
+        if (!snap.hrEnabled()) {
+            return;
+        }
+        Set<Long> visible = snap.hrVisibleUserIds();
         if (visible == null) {
+            // DEFAULT person mode
             return;
         }
         if (visible.isEmpty()) {
@@ -82,7 +98,6 @@ public class HrDataScope {
                     .append(" UNION SELECT application_id FROM hr_interview_invite WHERE is_active = 1 AND interviewer_user_id IN (")
                     .append(placeholders).append(")")
                     .append(")) ");
-            // relatedRequisition uses visible 3 times; application uses 2 more
             for (int i = 0; i < 5; i++) {
                 args.addAll(visible);
             }

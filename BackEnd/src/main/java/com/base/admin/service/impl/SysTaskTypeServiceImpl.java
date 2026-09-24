@@ -11,6 +11,7 @@ import com.base.admin.domain.entity.SysTaskType;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysTaskTypeMapper;
+import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.SysTaskTypeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ public class SysTaskTypeServiceImpl implements SysTaskTypeService {
 
     private final SysTaskTypeMapper taskTypeMapper;
     private final SysTaskMapper taskMapper;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public PageResult<SysTaskType> list(SysTaskTypeQueryDTO query) {
@@ -39,9 +41,10 @@ public class SysTaskTypeServiceImpl implements SysTaskTypeService {
 
     @Override
     public List<SysTaskType> listOptions() {
-        return taskTypeMapper.selectList(new LambdaQueryWrapper<SysTaskType>()
+        List<SysTaskType> list = taskTypeMapper.selectList(new LambdaQueryWrapper<SysTaskType>()
                 .orderByAsc(SysTaskType::getSortOrder)
                 .orderByAsc(SysTaskType::getId));
+        return dataScopeFilter.filterTaskTypes(list, SysTaskType::getTypeName);
     }
 
     @Override

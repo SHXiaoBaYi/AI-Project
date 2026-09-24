@@ -28,6 +28,7 @@ import com.base.admin.mapper.SysTaskAssigneeMapper;
 import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
+import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.FileStorageService;
 import com.base.admin.service.HrHirePipelineService;
 import com.base.admin.service.PlacementTaskSyncService;
@@ -74,6 +75,7 @@ public class SysTaskServiceImpl implements SysTaskService {
     /** 避免自调用导致 @Transactional 失效（批量分配需逐条独立提交并回写业务） */
     private final ObjectProvider<SysTaskService> selfProvider;
     private final FileStorageService fileStorageService;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public PageResult<SysTaskVO> list(SysTaskQueryDTO query) {
@@ -141,6 +143,7 @@ public class SysTaskServiceImpl implements SysTaskService {
                     .lt(SysTask::getPlanEndTime, LocalDateTime.now());
         }
 
+        dataScopeFilter.applyTask(wrapper);
         wrapper.orderByDesc(SysTask::getId);
         Page<SysTask> page = taskMapper.selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         List<SysTaskVO> rows = toVoList(page.getRecords());

@@ -10,6 +10,7 @@ import com.base.admin.domain.entity.GeoTopic;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoMonitorDailyMapper;
 import com.base.admin.mapper.GeoTopicMapper;
+import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.GeoTopicService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,7 @@ public class GeoTopicServiceImpl implements GeoTopicService {
 
     private final GeoTopicMapper topicMapper;
     private final GeoMonitorDailyMapper dailyMapper;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public PageResult<GeoTopic> list(GeoTopicQueryDTO query) {
@@ -37,7 +39,8 @@ public class GeoTopicServiceImpl implements GeoTopicService {
 
     @Override
     public List<GeoTopic> listAll() {
-        return topicMapper.selectList(new LambdaQueryWrapper<GeoTopic>().orderByAsc(GeoTopic::getTopicName));
+        List<GeoTopic> list = topicMapper.selectList(new LambdaQueryWrapper<GeoTopic>().orderByAsc(GeoTopic::getTopicName));
+        return dataScopeFilter.filterGeoTopics(list, GeoTopic::getId);
     }
 
     @Override

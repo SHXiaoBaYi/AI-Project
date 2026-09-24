@@ -14,6 +14,7 @@ import com.base.admin.mapper.GeoContentPlacementCiteMapper;
 import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
 import com.base.admin.service.BoardTaskTofuService;
+import com.base.admin.service.DataScopeFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -43,6 +44,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentPlacementItemMapper itemMapper;
     private final GeoContentPlacementCiteMapper citeMapper;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public BoardTaskTofuChartVO chart(BoardTaskTofuQueryDTO query) {
@@ -454,6 +456,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         if (StringUtils.hasText(q.getPublisherName()) && q.getPublisherUserId() == null) {
             pw.eq(GeoContentPlacement::getPublisherName, q.getPublisherName().trim());
         }
+        dataScopeFilter.applyGeoPlacement(pw);
         List<GeoContentPlacement> placements = placementMapper.selectList(pw);
         Map<Long, GeoContentPlacement> placementMap = placements.stream()
                 .collect(Collectors.toMap(GeoContentPlacement::getId, p -> p, (a, b) -> a));
@@ -474,6 +477,10 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                 .lt(GeoContentPlacementItem::getPublishTime, end.plusDays(1).atStartOfDay());
         if (StringUtils.hasText(q.getContentPlatform())) {
             iw.eq(GeoContentPlacementItem::getPlatformName, q.getContentPlatform().trim());
+        }
+        var snap = dataScopeFilter.snapshot();
+        if (!snap.globalAll() && snap.geoEnabled() && !snap.geoPlatformNames().isEmpty()) {
+            iw.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames());
         }
         List<ItemRow> items = new ArrayList<>();
         for (GeoContentPlacementItem item : itemMapper.selectList(iw)) {

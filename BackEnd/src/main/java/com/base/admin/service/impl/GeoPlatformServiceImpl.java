@@ -11,6 +11,7 @@ import com.base.admin.domain.entity.GeoPlatform;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoMonitorDailyMapper;
 import com.base.admin.mapper.GeoPlatformMapper;
+import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.GeoPlatformService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
 
     private final GeoPlatformMapper platformMapper;
     private final GeoMonitorDailyMapper dailyMapper;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public PageResult<GeoPlatform> list(GeoPlatformQueryDTO query) {
@@ -40,18 +42,20 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
 
     @Override
     public List<GeoPlatform> listAll() {
-        return platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
+        List<GeoPlatform> list = platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
                 .orderByAsc(GeoPlatform::getSortOrder)
                 .orderByAsc(GeoPlatform::getId));
+        return dataScopeFilter.filterGeoPlatforms(list, GeoPlatform::getPlatformName);
     }
 
     @Override
     public List<GeoPlatform> listByType(String platformType) {
         String type = normalizeType(platformType);
-        return platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
+        List<GeoPlatform> list = platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
                 .eq(GeoPlatform::getPlatformType, type)
                 .orderByAsc(GeoPlatform::getSortOrder)
                 .orderByAsc(GeoPlatform::getId));
+        return dataScopeFilter.filterGeoPlatforms(list, GeoPlatform::getPlatformName);
     }
 
     @Override

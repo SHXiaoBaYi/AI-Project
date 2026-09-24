@@ -52,6 +52,7 @@ import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.AiChatService;
+import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoTopicService;
@@ -118,6 +119,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final SysTaskMapper taskMapper;
     private final SysTaskFileMapper taskFileMapper;
     private final FileStorageService fileStorageService;
+    private final DataScopeFilter dataScopeFilter;
 
     @Override
     public PageResult<GeoContentPlacementListVO> list(GeoContentPlacementQueryDTO query) {
@@ -142,6 +144,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         wrapper.orderByDesc(GeoContentPlacement::getId);
         com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, GeoContentPlacement::getCreateTime);
+        dataScopeFilter.applyGeoPlacement(wrapper);
 
         int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
         int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 10 : query.getPageSize();
@@ -194,35 +197,33 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
 
     @Override
     public PageResult<GeoContentPlacementArticleListVO> listArticles(GeoContentPlacementArticleQueryDTO query) {
-        boolean needPlacementFilter = query.getPublisherUserId() != null
-                || query.getOwnerUserId() != null
-                || query.getTopicId() != null
-                || StringUtils.hasText(query.getTargetQuestion());
-        List<Long> placementIds = null;
-        Map<Long, GeoContentPlacement> placementMap = Map.of();
-        if (needPlacementFilter) {
-            LambdaQueryWrapper<GeoContentPlacement> pw = new LambdaQueryWrapper<GeoContentPlacement>()
-                    .eq(query.getPublisherUserId() != null, GeoContentPlacement::getPublisherUserId, query.getPublisherUserId())
-                    .eq(query.getOwnerUserId() != null, GeoContentPlacement::getOwnerUserId, query.getOwnerUserId())
-                    .eq(query.getTopicId() != null, GeoContentPlacement::getTopicId, query.getTopicId())
-                    .like(StringUtils.hasText(query.getTargetQuestion()), GeoContentPlacement::getTargetQuestion, query.getTargetQuestion())
-                    .select(GeoContentPlacement::getId);
-            List<GeoContentPlacement> placements = placementMapper.selectList(pw);
-            if (placements.isEmpty()) {
-                return new PageResult<>(0, List.of());
-            }
-            placementIds = placements.stream().map(GeoContentPlacement::getId).toList();
+        LambdaQueryWrapper<GeoContentPlacement> pw = new LambdaQueryWrapper<GeoContentPlacement>()
+                .eq(query.getPublisherUserId() != null, GeoContentPlacement::getPublisherUserId, query.getPublisherUserId())
+                .eq(query.getOwnerUserId() != null, GeoContentPlacement::getOwnerUserId, query.getOwnerUserId())
+                .eq(query.getTopicId() != null, GeoContentPlacement::getTopicId, query.getTopicId())
+                .like(StringUtils.hasText(query.getTargetQuestion()), GeoContentPlacement::getTargetQuestion, query.getTargetQuestion())
+                .select(GeoContentPlacement::getId);
+        dataScopeFilter.applyGeoPlacement(pw);
+        List<GeoContentPlacement> placements = placementMapper.selectList(pw);
+        if (placements.isEmpty()) {
+            return new PageResult<>(0, List.of());
         }
+        List<Long> placementIds = placements.stream().map(GeoContentPlacement::getId).toList();
+        Map<Long, GeoContentPlacement> placementMap = Map.of();
 
         String statusFilter = StringUtils.hasText(query.getPublishStatus())
                 ? normalizePublishStatus(query.getPublishStatus())
                 : null;
         String platformName = StringUtils.hasText(query.getPlatformName()) ? query.getPlatformName().trim() : null;
         LambdaQueryWrapper<GeoContentPlacementItem> iw = new LambdaQueryWrapper<GeoContentPlacementItem>()
-                .in(placementIds != null, GeoContentPlacementItem::getPlacementId, placementIds)
+                .in(GeoContentPlacementItem::getPlacementId, placementIds)
                 .like(StringUtils.hasText(query.getTitle()), GeoContentPlacementItem::getTitle, query.getTitle())
                 .eq(platformName != null, GeoContentPlacementItem::getPlatformName, platformName)
                 .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter);
+        var snap = dataScopeFilter.snapshot();
+        if (!snap.globalAll() && snap.geoEnabled() && !snap.geoPlatformNames().isEmpty()) {
+            iw.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames());
+        }
         if (query.getPublishTimeStart() != null) {
             iw.ge(GeoContentPlacementItem::getPublishTime, query.getPublishTimeStart().atStartOfDay());
         }
@@ -290,12 +291,14 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         if (topicId == null) {
             return List.of();
         }
-        return placementMapper.selectList(new LambdaQueryWrapper<GeoContentPlacement>()
-                        .eq(GeoContentPlacement::getTopicId, topicId)
-                        .isNotNull(GeoContentPlacement::getTargetQuestion)
-                        .ne(GeoContentPlacement::getTargetQuestion, "")
-                        .orderByDesc(GeoContentPlacement::getId)
-                        .select(GeoContentPlacement::getId, GeoContentPlacement::getTargetQuestion))
+        LambdaQueryWrapper<GeoContentPlacement> w = new LambdaQueryWrapper<GeoContentPlacement>()
+                .eq(GeoContentPlacement::getTopicId, topicId)
+                .isNotNull(GeoContentPlacement::getTargetQuestion)
+                .ne(GeoContentPlacement::getTargetQuestion, "")
+                .orderByDesc(GeoContentPlacement::getId)
+                .select(GeoContentPlacement::getId, GeoContentPlacement::getTargetQuestion);
+        dataScopeFilter.applyGeoPlacement(w);
+        return placementMapper.selectList(w)
                 .stream()
                 .map(p -> {
                     GeoTargetQuestionOptionVO vo = new GeoTargetQuestionOptionVO();

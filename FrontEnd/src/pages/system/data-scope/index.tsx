@@ -264,7 +264,7 @@ const DataScopePage = memo(function DataScopePage() {
                 type='info'
                 showIcon
                 message='按模块配置可见数据切片。同模块内多条件为「且」；未开启的模块沿用系统默认（角色 / 我的）。'
-                description='本版先实现配置页与落库；招聘「指定可见人」仍会收窄招聘列表，GEO/任务强制过滤后续接入。'
+                description='保存后立即对列表与看板生效：GEO（话题∩平台等）、招聘（部门+人员）、任务（类型+负责人/办理人）；全局全量则不收窄。'
               />
 
               <div className='flex items-center justify-between rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3'>
