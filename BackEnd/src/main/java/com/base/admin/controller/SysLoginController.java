@@ -25,13 +25,13 @@ public class SysLoginController {
 
     private final SysLoginService loginService;
 
-    @Operation(summary = "登录页公开选项")
+    @Operation(summary = "登录页公开选项（本机是否开放密码登录等）")
     @GetMapping("/auth/login-options")
     public Result<LoginOptionsVO> loginOptions(HttpServletRequest request) {
         return Result.ok(loginService.loginOptions(request));
     }
 
-    @Operation(summary = "用户名密码登录")
+    @Operation(summary = "用户名密码登录（仅本机 localhost）")
     @PostMapping("/auth/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginDTO dto, HttpServletRequest request) {
         LoginVO vo = loginService.login(dto, IpUtils.getClientIp(request), request.getHeader("User-Agent"), request);

@@ -223,7 +223,7 @@ export default function Login() {
   }, [completeDingLogin, configLoading, loading, options, qrKey]);
 
   const dingEnabled = !!options?.dingTalkEnabled && !!options.clientId;
-  const passwordEnabled = options?.passwordLoginEnabled !== false;
+  const passwordEnabled = !!options?.passwordLoginEnabled;
 
   return (
     <div
@@ -310,7 +310,7 @@ export default function Login() {
                     size='small'
                     onClick={() => setShowPassword((v) => !v)}
                   >
-                    {showPassword ? '收起账号密码' : '账号密码登录'}
+                    {showPassword ? '收起账号密码' : '本机账号密码登录'}
                   </Button>
                 </Divider>
               ) : null}

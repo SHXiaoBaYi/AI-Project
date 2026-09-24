@@ -24,6 +24,7 @@ import com.base.admin.service.DingTalkAuthService;
 import com.base.admin.service.DingTalkCalendarClient;
 import com.base.admin.service.OnlineSessionService;
 import com.base.admin.service.SysLoginService;
+import com.base.admin.util.LocalhostAccess;
 import com.base.admin.util.TreeUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -61,6 +62,9 @@ public class SysLoginServiceImpl implements SysLoginService {
 
     @Override
     public LoginVO login(LoginDTO dto, String ip, String userAgent, HttpServletRequest request) {
+        if (!LocalhostAccess.isLocalhostRequest(request)) {
+            throw new BusinessException("账号密码登录仅限本机 localhost 访问，请使用钉钉扫码登录");
+        }
         SysUser user = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, dto.getUsername()));
         if (user == null) {
@@ -85,16 +89,21 @@ public class SysLoginServiceImpl implements SysLoginService {
     @Override
     public LoginOptionsVO loginOptions(HttpServletRequest request) {
         LoginOptionsVO vo = new LoginOptionsVO();
-        vo.setPasswordLoginEnabled(true);
+        boolean local = LocalhostAccess.isLocalhostRequest(request);
+        vo.setPasswordLoginEnabled(local);
         DingTalkLoginConfigVO ding = dingTalkAppService.loginConfig();
         vo.setDingTalkEnabled(ding.getEnabled() != null && ding.getEnabled() == 1);
         vo.setClientId(ding.getClientId());
         vo.setCorpId(ding.getCorpId());
         vo.setExclusiveLogin(ding.getExclusiveLogin());
-        if (Boolean.TRUE.equals(vo.getDingTalkEnabled())) {
-            vo.setMessage("可使用账号密码或钉钉扫码登录");
+        if (Boolean.TRUE.equals(vo.getDingTalkEnabled()) && local) {
+            vo.setMessage("可使用钉钉扫码或本机账号密码登录");
+        } else if (Boolean.TRUE.equals(vo.getDingTalkEnabled())) {
+            vo.setMessage("请使用钉钉扫码登录");
+        } else if (local) {
+            vo.setMessage("本机调试：请使用账号密码登录");
         } else {
-            vo.setMessage("请使用账号密码登录");
+            vo.setMessage("钉钉扫码登录未配置，请联系管理员");
         }
         return vo;
     }

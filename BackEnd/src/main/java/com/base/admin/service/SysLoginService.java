@@ -10,7 +10,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 public interface SysLoginService {
 
-    /** 账号密码登录（已开放） */
+    /** 仅本机 localhost / 127.0.0.1 允许账号密码登录。 */
     LoginVO login(LoginDTO dto, String ip, String userAgent, HttpServletRequest request);
 
     LoginOptionsVO loginOptions(HttpServletRequest request);

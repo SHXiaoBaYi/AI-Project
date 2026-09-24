@@ -18,10 +18,14 @@ public final class LocalhostAccess {
         if (request == null) {
             return false;
         }
+        // 浏览器访问以页面 Origin/Referer 为准，避免前端代理到本机后端时误开暗门
+        String origin = request.getHeader("Origin");
+        String referer = request.getHeader("Referer");
+        if (StringUtils.hasText(origin) || StringUtils.hasText(referer)) {
+            return isLocalOrigin(origin) || isLocalOrigin(referer);
+        }
         return isLocalHostValue(request.getHeader("Host"))
                 || isLocalHostValue(request.getHeader("X-Forwarded-Host"))
-                || isLocalOrigin(request.getHeader("Origin"))
-                || isLocalOrigin(request.getHeader("Referer"))
                 || isLocalHostValue(request.getServerName());
     }
 
