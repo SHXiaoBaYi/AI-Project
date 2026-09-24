@@ -10,6 +10,18 @@ import java.time.LocalDateTime;
 @Schema(description = "候选人面试评价")
 public class HrInterviewReviewVO {
 
+    @Schema(description = "面试官评价记录 ID；联合评价为空")
+    private Long id;
+
+    @Schema(description = "投递 ID")
+    private Long applicationId;
+
+    @Schema(description = "面试官用户 ID；联合评价为空")
+    private Long interviewerUserId;
+
+    @Schema(description = "关联邀约 ID，可空")
+    private Long inviteId;
+
     @Schema(description = "INTERVIEW面试官评价 JOINT联合评价")
     private String kind;
 

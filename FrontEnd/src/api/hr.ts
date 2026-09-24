@@ -505,11 +505,16 @@ export function listHrInterviewReviewsApi(applicationId: number) {
   return request.get<
     unknown,
     {
+      id?: number;
+      applicationId?: number;
+      interviewerUserId?: number;
+      inviteId?: number;
       kind: string;
       roundNo: number;
       roundName?: string;
       interviewerName?: string;
       conclusion?: string;
+      failReason?: string;
       comment?: string;
       interviewedAt?: string;
     }[]

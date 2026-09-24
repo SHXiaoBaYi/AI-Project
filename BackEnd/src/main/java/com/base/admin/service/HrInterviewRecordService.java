@@ -128,13 +128,18 @@ public class HrInterviewRecordService {
     public List<HrInterviewReviewVO> reviews(Long applicationId) {
         List<HrInterviewReviewVO> rows = new ArrayList<>();
         jdbc.query("""
-                SELECT rec.round_no, u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment, rec.interviewed_at
+                SELECT rec.id, rec.application_id, rec.interviewer_user_id, rec.invite_id, rec.round_no,
+                       u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment, rec.interviewed_at
                 FROM hr_interview_record rec
                 LEFT JOIN sys_user u ON u.user_id = rec.interviewer_user_id
                 WHERE rec.application_id = ? AND rec.is_active = 1
                 ORDER BY rec.round_no, rec.id
                 """, rs -> {
             HrInterviewReviewVO vo = new HrInterviewReviewVO();
+            vo.setId(rs.getLong("id"));
+            vo.setApplicationId(rs.getLong("application_id"));
+            vo.setInterviewerUserId(rs.getObject("interviewer_user_id") == null ? null : rs.getLong("interviewer_user_id"));
+            vo.setInviteId(rs.getObject("invite_id") == null ? null : rs.getLong("invite_id"));
             vo.setKind("INTERVIEW");
             vo.setRoundNo(rs.getInt("round_no"));
             vo.setRoundName(ROUND_NAME.getOrDefault(vo.getRoundNo(), vo.getRoundNo() + "面"));
@@ -153,6 +158,7 @@ public class HrInterviewRecordService {
                 ORDER BY v.round_no
                 """, rs -> {
             HrInterviewReviewVO vo = new HrInterviewReviewVO();
+            vo.setApplicationId(applicationId);
             vo.setKind("JOINT");
             vo.setRoundNo(rs.getInt("round_no"));
             vo.setRoundName(ROUND_NAME.getOrDefault(vo.getRoundNo(), vo.getRoundNo() + "面"));
