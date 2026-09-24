@@ -49,35 +49,23 @@ public class HrInviteService {
     public HrInviteSaveVO create(HrInviteCreateDTO dto) {
         validateInterviewAt(dto.getInterviewAt());
         java.util.List<Long> ids = interviewerIds(dto);
-        java.util.List<String> unbound = new ArrayList<>();
-        Long last = null;
-        boolean calendarOk = false;
+        int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
+        java.util.List<Long> inviteIds = new ArrayList<>();
         for (Long interviewerUserId : ids) {
-            HrInviteCreateDTO one = new HrInviteCreateDTO();
-            one.setApplicationId(dto.getApplicationId());
-            one.setRoundNo(dto.getRoundNo());
-            one.setInterviewerUserId(interviewerUserId);
-            one.setInterviewAt(dto.getInterviewAt());
-            one.setDurationMin(dto.getDurationMin());
-            one.setLocation(dto.getLocation());
-            one.setCcUserIds(dto.getCcUserIds());
-            InviteWrite written = createOne(one);
-            last = written.id();
-            if (written.unboundName() != null) {
-                unbound.add(written.unboundName());
-            } else {
-                calendarOk = true;
-            }
+            HrInviteCreateDTO one = copyDto(dto, interviewerUserId);
+            inviteIds.add(createOneRecord(one, duration));
         }
+        java.util.List<String> unbound = attachSessionCalendars(inviteIds, dto, duration);
+        Long last = inviteIds.isEmpty() ? null : inviteIds.get(inviteIds.size() - 1);
+        boolean calendarOk = unbound.size() < ids.size();
         if (calendarOk && last != null) {
             notifyRoundCc(last, dto);
         }
         return saveResult(last, unboundMessage(unbound));
     }
 
-    @Transactional
-    private InviteWrite createOne(HrInviteCreateDTO dto) {
-        int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
+    /** 只写邀约行，不建钉钉日程（同场多面试官统一由 attachSessionCalendars 建一条）。 */
+    private long createOneRecord(HrInviteCreateDTO dto, int duration) {
         Integer open = jdbc.queryForObject("""
                 SELECT COUNT(1) FROM hr_interview_invite
                 WHERE application_id = ? AND round_no = ? AND interviewer_user_id = ? AND status IN ('SUCCESS', 'NO_CALENDAR') AND is_active = 1
@@ -85,38 +73,28 @@ public class HrInviteService {
         if (open != null && open > 0) {
             throw new BusinessException("该面试官这一轮已有成功邀约，请先取消再重新发起");
         }
-        Map<String, Object> person = jdbc.query("""
-                SELECT c.display_name candidate_name, COALESCE(r.job_name, '') job_name, c.phone, c.email, u.nickname, u.phone interviewer_phone
-                FROM hr_application a
-                JOIN hr_candidate c ON c.id = a.candidate_id
-                LEFT JOIN hr_requisition r ON r.id = a.requisition_id
-                JOIN sys_user u ON u.user_id = ?
-                WHERE a.id = ? AND a.is_active = 1
-                """, rs -> {
-            if (!rs.next()) {
-                return null;
-            }
-            Map<String, Object> row = new java.util.HashMap<>();
-            row.put("candidate_name", rs.getString("candidate_name"));
-            row.put("job_name", rs.getString("job_name"));
-            row.put("phone", rs.getString("phone"));
-            row.put("email", rs.getString("email"));
-            row.put("nickname", rs.getString("nickname"));
-            row.put("interviewer_phone", rs.getString("interviewer_phone"));
-            return row;
-        }, dto.getInterviewerUserId(), dto.getApplicationId());
+        Map<String, Object> person = loadInvitePerson(dto.getInterviewerUserId(), dto.getApplicationId());
         if (person == null) {
             throw new BusinessException("投递或面试官不存在");
         }
         long inviteId = insertInvite(dto, duration);
         replaceInviteCc(inviteId, resolveCcUserIds(dto));
-        return new InviteWrite(inviteId, attachCalendar(inviteId, dto, duration));
+        return inviteId;
+    }
+
+    @Transactional
+    private InviteWrite createOne(HrInviteCreateDTO dto) {
+        int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
+        long inviteId = createOneRecord(dto, duration);
+        java.util.List<String> unbound = attachSessionCalendars(List.of(inviteId), dto, duration);
+        return new InviteWrite(inviteId, unbound.isEmpty() ? null : unbound.getFirst());
     }
 
     @Transactional
     public void cancel(Long inviteId) {
         Map<String, Object> invite = jdbc.query("""
-                SELECT id, application_id, round_no, interviewer_user_id, interview_at, status, dingtalk_event_id
+                SELECT id, application_id, round_no, interviewer_user_id, interview_at, status, dingtalk_event_id,
+                       invited_by, dingtalk_calendar_id
                 FROM hr_interview_invite WHERE id = ? AND is_active = 1
                 """, rs -> {
             if (!rs.next()) {
@@ -130,6 +108,8 @@ public class HrInviteService {
             row.put("interviewAt", rs.getObject("interview_at", LocalDateTime.class));
             row.put("status", rs.getString("status"));
             row.put("eventId", rs.getString("dingtalk_event_id"));
+            row.put("invitedBy", rs.getObject("invited_by") == null ? null : rs.getLong("invited_by"));
+            row.put("calendarId", rs.getString("dingtalk_calendar_id"));
             return row;
         }, inviteId);
         if (invite == null) {
@@ -139,19 +119,19 @@ public class HrInviteService {
         if (!"SUCCESS".equals(status) && !"CANCEL_FAILED".equals(status)) {
             throw new BusinessException("只有已建成日程的邀约可以取消");
         }
-        String unionId = jdbc.query("SELECT dingtalk_union_id FROM hr_user_dingtalk WHERE user_id = ? AND is_active = 1",
-                rs -> rs.next() ? rs.getString(1) : null, invite.get("interviewerUserId"));
-        DingTalkCalendarClient.CalendarCall call = dingTalk.deleteEvent(unionId, (String) invite.get("eventId"));
-        writeLog(inviteId, "CANCEL_CALENDAR", call, SecurityUtils.getCurrentUserId(), (String) invite.get("eventId"),
-                Map.of("eventId", blank(invite.get("eventId"))));
-        if (!call.success()) {
+        String eventId = (String) invite.get("eventId");
+        DingTalkCalendarClient.CalendarCall call = releaseSharedCalendarEvent(invite, true);
+        writeLog(inviteId, "CANCEL_CALENDAR", call, SecurityUtils.getCurrentUserId(), eventId,
+                Map.of("eventId", blank(eventId)));
+        if (call != null && !call.success()) {
             jdbc.update("UPDATE hr_interview_invite SET status = 'CANCEL_FAILED', fail_reason = ? WHERE id = ?",
                     cut(call.message()), inviteId);
             throw new BusinessException(call.message());
         }
         jdbc.update("""
                 UPDATE hr_interview_invite
-                SET status = 'CANCELLED', cancelled_by = ?, cancelled_at = ?, fail_reason = NULL
+                SET status = 'CANCELLED', cancelled_by = ?, cancelled_at = ?, fail_reason = NULL,
+                    dingtalk_event_id = NULL, dingtalk_calendar_id = NULL
                 WHERE id = ?
                 """, SecurityUtils.getCurrentUserId(), LocalDateTime.now(), inviteId);
         Long applicationId = (Long) invite.get("applicationId");
@@ -248,64 +228,74 @@ public class HrInviteService {
         releaseCcCalendarsForSession((Long) anchor.get("applicationId"),
                 ((Number) anchor.get("roundNo")).intValue(),
                 (LocalDateTime) anchor.get("interviewAt"));
+        releaseSessionCalendars((Long) anchor.get("applicationId"),
+                ((Number) anchor.get("roundNo")).intValue(),
+                (LocalDateTime) anchor.get("interviewAt"));
         java.util.List<Map<String, Object>> peers = loadSession(anchor);
         java.util.Map<Long, Map<String, Object>> byInterviewer = new java.util.HashMap<>();
         for (Map<String, Object> peer : peers) {
             byInterviewer.putIfAbsent((Long) peer.get("interviewerUserId"), peer);
         }
-        java.util.List<String> unbound = new ArrayList<>();
         java.util.List<String> cancelMisses = new ArrayList<>();
-        java.util.Set<Long> kept = new java.util.HashSet<>();
-        boolean calendarOk = false;
+        java.util.List<Long> keepInviteIds = new ArrayList<>();
+        int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
         for (Long interviewerId : desired) {
             Map<String, Object> existing = byInterviewer.get(interviewerId);
             if (existing == null) {
-                HrInviteCreateDTO one = new HrInviteCreateDTO();
-                one.setApplicationId(dto.getApplicationId());
-                one.setRoundNo(dto.getRoundNo());
-                one.setInterviewerUserId(interviewerId);
-                one.setInterviewAt(dto.getInterviewAt());
-                one.setDurationMin(dto.getDurationMin());
-                one.setLocation(dto.getLocation());
-                one.setCcUserIds(dto.getCcUserIds());
-                InviteWrite written = createOne(one);
-                if (written.unboundName() != null) {
-                    unbound.add(written.unboundName());
-                } else {
-                    calendarOk = true;
-                }
+                keepInviteIds.add(createOneRecord(copyDto(dto, interviewerId), duration));
                 continue;
             }
-            kept.add((Long) existing.get("id"));
-            String[] rewritten = rewriteInvite((Long) existing.get("id"), (Long) existing.get("interviewerUserId"),
-                    (String) existing.get("eventId"), dto, interviewerId);
-            replaceInviteCc((Long) existing.get("id"), resolveCcUserIds(dto));
-            if (StringUtils.hasText(rewritten[0])) {
-                cancelMisses.add("保存面试邀约记录成功，但是由于面试官" + rewritten[0] + "没有绑定钉钉，原钉钉日程未能取消");
-            }
-            if (StringUtils.hasText(rewritten[1])) {
-                unbound.add(rewritten[1]);
-            } else {
-                calendarOk = true;
-            }
+            Long inviteId = (Long) existing.get("id");
+            assertNoInterviewRecord(inviteId, "修改");
+            jdbc.update("""
+                    UPDATE hr_interview_invite
+                    SET application_id = ?, round_no = ?, interviewer_user_id = ?, interview_at = ?, duration_min = ?, location = ?,
+                        status = 'FAILED', fail_reason = NULL, dingtalk_event_id = NULL, dingtalk_calendar_id = NULL
+                    WHERE id = ? AND is_active = 1
+                    """, dto.getApplicationId(), dto.getRoundNo(), interviewerId, dto.getInterviewAt(),
+                    duration, dto.getLocation(), inviteId);
+            replaceInviteCc(inviteId, resolveCcUserIds(dto));
+            keepInviteIds.add(inviteId);
         }
+        java.util.Set<Long> kept = new java.util.HashSet<>(keepInviteIds);
         for (Map<String, Object> peer : peers) {
             Long peerId = (Long) peer.get("id");
             if (!kept.contains(peerId)) {
-                HrInviteSaveVO removed = remove(peerId);
+                HrInviteSaveVO removed = removeWithoutCalendarRelease(peerId);
                 if (StringUtils.hasText(removed.getWarning())) {
                     cancelMisses.add(removed.getWarning());
                 }
             }
         }
-        if (calendarOk) {
-            notifyRoundCc(id, dto);
+        java.util.List<String> unbound = attachSessionCalendars(keepInviteIds, dto, duration);
+        boolean calendarOk = unbound.size() < desired.size();
+        if (calendarOk && !keepInviteIds.isEmpty()) {
+            notifyRoundCc(keepInviteIds.getFirst(), dto);
         }
         String warning = unboundMessage(unbound);
         if (!cancelMisses.isEmpty()) {
             warning = joinWarning(String.join("；", cancelMisses), warning);
         }
         return saveResult(id, warning);
+    }
+
+    /** 删除邀约行（日历已在外层按场次释放）。 */
+    private HrInviteSaveVO removeWithoutCalendarRelease(Long id) {
+        assertNoInterviewRecord(id, "删除");
+        Map<String, Object> invite = loadInvite(id);
+        Long applicationId = (Long) invite.get("applicationId");
+        int roundNo = ((Number) invite.get("roundNo")).intValue();
+        LocalDateTime interviewAt = (LocalDateTime) invite.get("interviewAt");
+        jdbc.update("UPDATE hr_interview_invite SET is_active = 0, status = 'CANCELLED' WHERE id = ?", id);
+        jdbc.update("UPDATE hr_interview_invite_cc SET is_active = 0 WHERE invite_id = ?", id);
+        Integer peersLeft = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_interview_invite
+                WHERE application_id = ? AND round_no = ? AND is_active = 1 AND interview_at <=> ?
+                """, Integer.class, applicationId, roundNo, interviewAt);
+        if (peersLeft == null || peersLeft == 0) {
+            releaseCcCalendarsForSession(applicationId, roundNo, interviewAt);
+        }
+        return saveResult(id, null);
     }
 
     private java.util.List<Map<String, Object>> loadSession(Map<String, Object> anchor) {
@@ -320,26 +310,6 @@ public class HrInviteService {
             row.put("eventId", rs.getString("dingtalk_event_id"));
             return row;
         }, anchor.get("applicationId"), anchor.get("roundNo"), anchor.get("interviewAt"));
-    }
-
-    private String[] rewriteInvite(Long inviteId, Long oldInterviewerId, String eventId, HrInviteCreateDTO dto, Long interviewerId) {
-        assertNoInterviewRecord(inviteId, "修改");
-        String released = releaseCalendar(inviteId, oldInterviewerId, eventId);
-        int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
-        jdbc.update("""
-                UPDATE hr_interview_invite
-                SET application_id = ?, round_no = ?, interviewer_user_id = ?, interview_at = ?, duration_min = ?, location = ?, status = 'FAILED', fail_reason = NULL, dingtalk_event_id = NULL
-                WHERE id = ? AND is_active = 1
-                """, dto.getApplicationId(), dto.getRoundNo(), interviewerId, dto.getInterviewAt(),
-                duration, dto.getLocation(), inviteId);
-        HrInviteCreateDTO one = new HrInviteCreateDTO();
-        one.setApplicationId(dto.getApplicationId());
-        one.setRoundNo(dto.getRoundNo());
-        one.setInterviewerUserId(interviewerId);
-        one.setInterviewAt(dto.getInterviewAt());
-        one.setDurationMin(dto.getDurationMin());
-        one.setLocation(dto.getLocation());
-        return new String[]{released, attachCalendar(inviteId, one, duration)};
     }
 
     @Transactional
@@ -406,15 +376,29 @@ public class HrInviteService {
         if (!StringUtils.hasText(findUnionId(interviewerUserId))) {
             throw new BusinessException("面试官" + interviewerName(interviewerUserId) + "没有绑定钉钉，不能创建钉钉日程，请联系行政绑定");
         }
+        // 同场未建日程的邀约一并挂到同一条创建人日程上，避免创建人收到多份
+        java.util.List<Long> sessionIds = jdbc.query("""
+                SELECT id FROM hr_interview_invite
+                WHERE application_id = ? AND round_no = ? AND is_active = 1 AND interview_at <=> ?
+                  AND status IN ('FAILED', 'NO_CALENDAR') AND (dingtalk_event_id IS NULL OR dingtalk_event_id = '')
+                ORDER BY id
+                """, (rs, rowNum) -> rs.getLong(1),
+                invite.get("applicationId"), invite.get("roundNo"), invite.get("interviewAt"));
+        if (sessionIds.isEmpty()) {
+            sessionIds = List.of(id);
+        } else if (!sessionIds.contains(id)) {
+            sessionIds = new ArrayList<>(sessionIds);
+            sessionIds.add(0, id);
+        }
         HrInviteCreateDTO dto = copyInvite(invite, interviewerUserId);
         int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
-        String skipped = attachCalendar(id, dto, duration);
-        if (skipped != null) {
-            throw new BusinessException("面试官" + skipped + "没有绑定钉钉，不能创建钉钉日程，请联系行政绑定");
-        }
+        java.util.List<String> unbound = attachSessionCalendars(sessionIds, dto, duration);
         String status = jdbc.query("SELECT status FROM hr_interview_invite WHERE id = ?",
                 rs -> rs.next() ? rs.getString(1) : null, id);
         if (!"SUCCESS".equals(status)) {
+            if (!unbound.isEmpty()) {
+                throw new BusinessException("面试官" + unbound.getFirst() + "没有绑定钉钉，不能创建钉钉日程，请联系行政绑定");
+            }
             String reason = jdbc.query("SELECT fail_reason FROM hr_interview_invite WHERE id = ?",
                     rs -> rs.next() ? rs.getString(1) : null, id);
             throw new BusinessException(StringUtils.hasText(reason) ? reason : "钉钉日程创建失败");
@@ -433,7 +417,9 @@ public class HrInviteService {
         int skipped = 0;
         java.util.List<String> problems = new ArrayList<>();
         java.util.List<String> unbound = new ArrayList<>();
+        java.util.Set<String> handledSessions = new java.util.HashSet<>();
         java.util.Set<String> ccSessions = new java.util.HashSet<>();
+        java.util.Set<Long> countedCreated = new java.util.HashSet<>();
         for (Long id : ids) {
             if (id == null) {
                 continue;
@@ -453,16 +439,41 @@ public class HrInviteService {
                 skipped++;
                 continue;
             }
-            Long interviewerUserId = (Long) invite.get("interviewerUserId");
-            if (!StringUtils.hasText(findUnionId(interviewerUserId))) {
-                unbound.add(interviewerName(interviewerUserId));
+            String sessionKey = invite.get("applicationId") + "|" + invite.get("roundNo") + "|" + invite.get("interviewAt");
+            if (!handledSessions.add(sessionKey)) {
+                String after = jdbc.query("SELECT status FROM hr_interview_invite WHERE id = ?",
+                        rs -> rs.next() ? rs.getString(1) : null, id);
+                if ("SUCCESS".equals(after) && countedCreated.add(id)) {
+                    created++;
+                } else if ("NO_CALENDAR".equals(after)) {
+                    unbound.add(interviewerName((Long) invite.get("interviewerUserId")));
+                }
                 continue;
             }
+            Long interviewerUserId = (Long) invite.get("interviewerUserId");
             try {
                 createCalendar(id, false);
-                created++;
+                List<Long> successIds = jdbc.query("""
+                        SELECT id FROM hr_interview_invite
+                        WHERE application_id = ? AND round_no = ? AND is_active = 1 AND interview_at <=> ?
+                          AND status = 'SUCCESS' AND dingtalk_event_id IS NOT NULL AND dingtalk_event_id <> ''
+                        """, (rs, rowNum) -> rs.getLong(1),
+                        invite.get("applicationId"), invite.get("roundNo"), invite.get("interviewAt"));
+                for (Long sid : successIds) {
+                    if (countedCreated.add(sid)) {
+                        created++;
+                    }
+                }
+                List<String> sessionUnbound = jdbc.query("""
+                        SELECT COALESCE(NULLIF(u.nickname, ''), u.username)
+                        FROM hr_interview_invite i
+                        JOIN sys_user u ON u.user_id = i.interviewer_user_id
+                        WHERE i.application_id = ? AND i.round_no = ? AND i.is_active = 1 AND i.interview_at <=> ?
+                          AND i.status = 'NO_CALENDAR'
+                        """, (rs, rowNum) -> rs.getString(1),
+                        invite.get("applicationId"), invite.get("roundNo"), invite.get("interviewAt"));
+                unbound.addAll(sessionUnbound);
                 HrInviteCreateDTO dto = copyInvite(invite, interviewerUserId);
-                String sessionKey = dto.getApplicationId() + "|" + dto.getRoundNo() + "|" + dto.getInterviewAt();
                 if (ccSessions.add(sessionKey)) {
                     notifyRoundCc(id, dto);
                 }
@@ -476,7 +487,7 @@ public class HrInviteService {
             }
         }
         int requested = (int) ids.stream().filter(java.util.Objects::nonNull).count();
-        java.util.List<String> unboundNames = unbound.stream().distinct().toList();
+        java.util.List<String> unboundNames = unbound.stream().filter(StringUtils::hasText).distinct().toList();
         if (created == 0 && skipped == requested && problems.isEmpty() && unboundNames.isEmpty()) {
             throw new BusinessException("所选邀约都已经有钉钉日程");
         }
@@ -596,7 +607,7 @@ public class HrInviteService {
     private Map<String, Object> loadInvite(Long inviteId) {
         Map<String, Object> invite = jdbc.query("""
                 SELECT i.id, i.application_id, i.round_no, i.interviewer_user_id, i.status, i.dingtalk_event_id,
-                       i.interview_at, i.duration_min, i.location, a.requisition_id
+                       i.dingtalk_calendar_id, i.invited_by, i.interview_at, i.duration_min, i.location, a.requisition_id
                 FROM hr_interview_invite i
                 JOIN hr_application a ON a.id = i.application_id
                 WHERE i.id = ? AND i.is_active = 1
@@ -611,6 +622,8 @@ public class HrInviteService {
             row.put("interviewerUserId", rs.getLong("interviewer_user_id"));
             row.put("status", rs.getString("status"));
             row.put("eventId", rs.getString("dingtalk_event_id"));
+            row.put("calendarId", rs.getString("dingtalk_calendar_id"));
+            row.put("invitedBy", rs.getObject("invited_by") == null ? null : rs.getLong("invited_by"));
             row.put("interviewAt", rs.getTimestamp("interview_at") == null ? null : rs.getTimestamp("interview_at").toLocalDateTime());
             row.put("durationMin", rs.getObject("duration_min") == null ? null : rs.getInt("duration_min"));
             row.put("location", rs.getString("location"));
@@ -624,22 +637,309 @@ public class HrInviteService {
     }
 
     private String releaseCalendar(Long inviteId, Long interviewerUserId, String eventId) {
-        if (eventId == null || eventId.isBlank() || interviewerUserId == null) {
+        if (eventId == null || eventId.isBlank()) {
             return null;
         }
-        String unionId = findUnionId(interviewerUserId);
-        if (!StringUtils.hasText(unionId)) {
-            writeLog(inviteId, "CANCEL_CALENDAR", DingTalkCalendarClient.CalendarCall.fail("面试官未绑定钉钉，未取消日程"),
-                    SecurityUtils.getCurrentUserId(), eventId, Map.of("eventId", eventId));
-            return interviewerName(interviewerUserId);
+        Map<String, Object> invite = jdbc.query("""
+                SELECT id, interviewer_user_id, invited_by, dingtalk_event_id, dingtalk_calendar_id,
+                       application_id, round_no, interview_at, duration_min, location, status
+                FROM hr_interview_invite WHERE id = ? AND is_active = 1
+                """, rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            Map<String, Object> row = new java.util.HashMap<>();
+            row.put("id", rs.getLong("id"));
+            row.put("interviewerUserId", rs.getLong("interviewer_user_id"));
+            row.put("invitedBy", rs.getObject("invited_by") == null ? null : rs.getLong("invited_by"));
+            row.put("eventId", rs.getString("dingtalk_event_id"));
+            row.put("calendarId", rs.getString("dingtalk_calendar_id"));
+            row.put("applicationId", rs.getLong("application_id"));
+            row.put("roundNo", rs.getInt("round_no"));
+            row.put("interviewAt", rs.getTimestamp("interview_at") == null ? null : rs.getTimestamp("interview_at").toLocalDateTime());
+            row.put("durationMin", rs.getObject("duration_min") == null ? 60 : rs.getInt("duration_min"));
+            row.put("location", rs.getString("location"));
+            row.put("status", rs.getString("status"));
+            return row;
+        }, inviteId);
+        if (invite == null) {
+            invite = new java.util.HashMap<>();
+            invite.put("id", inviteId);
+            invite.put("interviewerUserId", interviewerUserId);
+            invite.put("eventId", eventId);
+            invite.put("calendarId", "primary");
         }
-        DingTalkCalendarClient.CalendarCall call = dingTalk.deleteEvent(unionId, eventId);
-        writeLog(inviteId, "CANCEL_CALENDAR", call, SecurityUtils.getCurrentUserId(), eventId, Map.of("eventId", eventId));
+        DingTalkCalendarClient.CalendarCall call = releaseSharedCalendarEvent(invite, false);
+        writeLog(inviteId, "CANCEL_CALENDAR", call == null
+                        ? DingTalkCalendarClient.CalendarCall.ok(eventId, "shared-keep")
+                        : call,
+                SecurityUtils.getCurrentUserId(), eventId, Map.of("eventId", eventId));
+        if (call != null && !call.success()) {
+            Long ownerInterviewer = invite.get("interviewerUserId") == null
+                    ? interviewerUserId : (Long) invite.get("interviewerUserId");
+            return interviewerName(ownerInterviewer);
+        }
         return null;
     }
 
-    private String attachCalendar(Long inviteId, HrInviteCreateDTO dto, int duration) {
-        Map<String, Object> person = jdbc.query("""
+    /**
+     * 释放共享日程：同 eventId 还有其它有效邀约时只摘掉当前人并刷新参与人；最后一条才真正删钉钉日程。
+     * @return null 表示无需删除或已跳过；否则返回删除调用结果
+     */
+    private DingTalkCalendarClient.CalendarCall releaseSharedCalendarEvent(Map<String, Object> invite, boolean refreshAttendees) {
+        String eventId = (String) invite.get("eventId");
+        if (!StringUtils.hasText(eventId)) {
+            return DingTalkCalendarClient.CalendarCall.ok(null, "no-event");
+        }
+        Long inviteId = ((Number) invite.get("id")).longValue();
+        Integer siblings = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_interview_invite
+                WHERE dingtalk_event_id = ? AND is_active = 1 AND status = 'SUCCESS' AND id <> ?
+                """, Integer.class, eventId, inviteId);
+        String ownerUnionId = resolveCalendarOwnerUnionId(invite);
+        if (siblings != null && siblings > 0) {
+            if (refreshAttendees && StringUtils.hasText(ownerUnionId)) {
+                refreshSharedEventAttendees(invite, ownerUnionId, eventId, inviteId);
+            }
+            return DingTalkCalendarClient.CalendarCall.ok(eventId, "shared-keep");
+        }
+        if (!StringUtils.hasText(ownerUnionId)) {
+            return DingTalkCalendarClient.CalendarCall.fail("日程所有者未绑定钉钉，未取消日程");
+        }
+        return dingTalk.deleteEvent(ownerUnionId, eventId);
+    }
+
+    private void refreshSharedEventAttendees(Map<String, Object> invite, String ownerUnionId, String eventId, Long excludeInviteId) {
+        java.util.LinkedHashSet<String> attendees = new java.util.LinkedHashSet<>();
+        List<String> interviewers = jdbc.query("""
+                SELECT d.dingtalk_union_id
+                FROM hr_interview_invite i
+                JOIN hr_user_dingtalk d ON d.user_id = i.interviewer_user_id AND d.is_active = 1
+                WHERE i.dingtalk_event_id = ? AND i.is_active = 1 AND i.status = 'SUCCESS' AND i.id <> ?
+                  AND d.dingtalk_union_id IS NOT NULL AND d.dingtalk_union_id <> ''
+                """, (rs, rowNum) -> rs.getString(1), eventId, excludeInviteId);
+        attendees.addAll(interviewers);
+        List<String> ccs = jdbc.query("""
+                SELECT DISTINCT d.dingtalk_union_id
+                FROM hr_interview_invite_cc cc
+                JOIN hr_interview_invite i ON i.id = cc.invite_id AND i.is_active = 1
+                JOIN hr_user_dingtalk d ON d.user_id = cc.cc_user_id AND d.is_active = 1
+                WHERE i.dingtalk_event_id = ? AND cc.is_active = 1
+                  AND d.dingtalk_union_id IS NOT NULL AND d.dingtalk_union_id <> ''
+                """, (rs, rowNum) -> rs.getString(1), eventId);
+        attendees.addAll(ccs);
+        attendees.remove(ownerUnionId);
+        LocalDateTime start = (LocalDateTime) invite.get("interviewAt");
+        int duration = invite.get("durationMin") == null ? 60 : ((Number) invite.get("durationMin")).intValue();
+        String location = blank(invite.get("location"));
+        String title = "面试邀约";
+        dingTalk.updateEvent(ownerUnionId, eventId, title, "", start == null ? LocalDateTime.now() : start,
+                duration, location, new ArrayList<>(attendees), false);
+    }
+
+    private String resolveCalendarOwnerUnionId(Map<String, Object> invite) {
+        String calendarId = (String) invite.get("calendarId");
+        if ("organizer".equals(calendarId)) {
+            Long invitedBy = invite.get("invitedBy") == null ? SecurityUtils.getCurrentUserId() : (Long) invite.get("invitedBy");
+            return findUnionId(invitedBy);
+        }
+        Long interviewerUserId = (Long) invite.get("interviewerUserId");
+        return findUnionId(interviewerUserId);
+    }
+
+    /** 释放同场全部钉钉日程（按 eventId 去重删除一次）。 */
+    private void releaseSessionCalendars(Long applicationId, Integer roundNo, LocalDateTime interviewAt) {
+        if (applicationId == null || roundNo == null) {
+            return;
+        }
+        List<Map<String, Object>> rows = jdbc.query("""
+                SELECT id, interviewer_user_id, invited_by, dingtalk_event_id, dingtalk_calendar_id,
+                       interview_at, duration_min, location
+                FROM hr_interview_invite
+                WHERE application_id = ? AND round_no = ? AND is_active = 1 AND interview_at <=> ?
+                  AND dingtalk_event_id IS NOT NULL AND dingtalk_event_id <> ''
+                """, (rs, rowNum) -> {
+            Map<String, Object> row = new java.util.HashMap<>();
+            row.put("id", rs.getLong("id"));
+            row.put("interviewerUserId", rs.getLong("interviewer_user_id"));
+            row.put("invitedBy", rs.getObject("invited_by") == null ? null : rs.getLong("invited_by"));
+            row.put("eventId", rs.getString("dingtalk_event_id"));
+            row.put("calendarId", rs.getString("dingtalk_calendar_id"));
+            row.put("interviewAt", rs.getTimestamp("interview_at") == null ? null : rs.getTimestamp("interview_at").toLocalDateTime());
+            row.put("durationMin", rs.getObject("duration_min") == null ? 60 : rs.getInt("duration_min"));
+            row.put("location", rs.getString("location"));
+            return row;
+        }, applicationId, roundNo, interviewAt);
+        java.util.Set<String> deleted = new java.util.HashSet<>();
+        for (Map<String, Object> row : rows) {
+            String eventId = (String) row.get("eventId");
+            if (!StringUtils.hasText(eventId) || !deleted.add(eventId)) {
+                continue;
+            }
+            String ownerUnionId = resolveCalendarOwnerUnionId(row);
+            if (StringUtils.hasText(ownerUnionId)) {
+                dingTalk.deleteEvent(ownerUnionId, eventId);
+            }
+        }
+        jdbc.update("""
+                UPDATE hr_interview_invite
+                SET dingtalk_event_id = NULL, dingtalk_calendar_id = NULL
+                WHERE application_id = ? AND round_no = ? AND is_active = 1 AND interview_at <=> ?
+                """, applicationId, roundNo, interviewAt);
+    }
+
+    /**
+     * 同场多面试官：优先在创建人主日历建一条日程，所有面试官作为参与人，避免创建人收到 N 份相同日程。
+     * 创建人未绑钉钉时回退为每人各自日历建一条（不再把创建人加为参与人）。
+     * @return 未绑定钉钉的面试官姓名列表
+     */
+    private java.util.List<String> attachSessionCalendars(java.util.List<Long> inviteIds, HrInviteCreateDTO dto, int duration) {
+        java.util.List<String> unbound = new ArrayList<>();
+        if (inviteIds == null || inviteIds.isEmpty()) {
+            return unbound;
+        }
+        Map<String, Object> basePerson = loadInvitePerson(null, dto.getApplicationId());
+        if (basePerson == null) {
+            throw new BusinessException("投递不存在");
+        }
+        String organizerName = currentOrganizerName();
+        String title = "【" + ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面") + "】"
+                + basePerson.get("candidate_name") + " - " + basePerson.get("job_name");
+        ResumeFile resume = loadResume(dto.getApplicationId());
+        String description = buildCalendarDescription(dto, basePerson, resume, organizerName);
+
+        java.util.List<Long> boundInviteIds = new ArrayList<>();
+        java.util.List<String> attendeeUnionIds = new ArrayList<>();
+        java.util.LinkedHashMap<Long, Map<String, Object>> personByInvite = new java.util.LinkedHashMap<>();
+        for (Long inviteId : inviteIds) {
+            if (inviteId == null) {
+                continue;
+            }
+            Long interviewerUserId = jdbc.query("SELECT interviewer_user_id FROM hr_interview_invite WHERE id = ?",
+                    rs -> rs.next() ? rs.getLong(1) : null, inviteId);
+            if (interviewerUserId == null) {
+                continue;
+            }
+            Map<String, Object> person = loadInvitePerson(interviewerUserId, dto.getApplicationId());
+            if (person == null) {
+                markNoCalendar(inviteId);
+                unbound.add(interviewerName(interviewerUserId));
+                continue;
+            }
+            personByInvite.put(inviteId, person);
+            String unionId = findUnionId(interviewerUserId);
+            if (!StringUtils.hasText(unionId)) {
+                markNoCalendar(inviteId);
+                writeRoundAndStage(copyDto(dto, interviewerUserId), person);
+                unbound.add(interviewerName(interviewerUserId));
+                continue;
+            }
+            boundInviteIds.add(inviteId);
+            if (!attendeeUnionIds.contains(unionId)) {
+                attendeeUnionIds.add(unionId);
+            }
+        }
+        // 抄送人并入同一条日程的参与人，不再单独建抄送日程
+        java.util.Set<Long> interviewerSet = new java.util.HashSet<>();
+        for (Long inviteId : boundInviteIds) {
+            Long uid = jdbc.query("SELECT interviewer_user_id FROM hr_interview_invite WHERE id = ?",
+                    rs -> rs.next() ? rs.getLong(1) : null, inviteId);
+            if (uid != null) {
+                interviewerSet.add(uid);
+            }
+        }
+        for (String ccUnionId : resolveCcAttendeeUnionIds(dto, boundInviteIds.isEmpty() ? null : boundInviteIds.getFirst(), interviewerSet)) {
+            if (!attendeeUnionIds.contains(ccUnionId)) {
+                attendeeUnionIds.add(ccUnionId);
+            }
+        }
+        if (boundInviteIds.isEmpty()) {
+            return unbound;
+        }
+
+        Long organizerUserId = SecurityUtils.getCurrentUserId();
+        String organizerUnionId = findUnionId(organizerUserId);
+        // 优先创建人日历；创建人未绑定时用第一位面试官日历。参与人 = 其余面试官 + 抄送人
+        String ownerUnionId = StringUtils.hasText(organizerUnionId) ? organizerUnionId : attendeeUnionIds.getFirst();
+        String calendarMode = StringUtils.hasText(organizerUnionId) ? "organizer" : "primary";
+        List<String> attendees = attendeeUnionIds.stream()
+                .filter(id -> !id.equals(ownerUnionId))
+                .toList();
+        DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
+                ownerUnionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees, false);
+        Long logInviteId = boundInviteIds.getFirst();
+        writeLog(logInviteId, "CREATE_CALENDAR", call, organizerUserId, call.eventId(),
+                Map.of("title", title, "start", String.valueOf(dto.getInterviewAt()), "unionId", blank(ownerUnionId),
+                        "organizer", organizerName, "attendees", String.valueOf(attendees.size()), "mode", "shared-" + calendarMode));
+        if (!call.success()) {
+            for (Long inviteId : boundInviteIds) {
+                jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
+                        cut(call.message()), inviteId);
+            }
+            return unbound;
+        }
+        for (Long inviteId : boundInviteIds) {
+            jdbc.update("""
+                    UPDATE hr_interview_invite
+                    SET status = 'SUCCESS', dingtalk_event_id = ?, dingtalk_calendar_id = ?, fail_reason = NULL
+                    WHERE id = ?
+                    """, call.eventId(), calendarMode, inviteId);
+            Map<String, Object> person = personByInvite.get(inviteId);
+            Long interviewerUserId = jdbc.query("SELECT interviewer_user_id FROM hr_interview_invite WHERE id = ?",
+                    rs -> rs.next() ? rs.getLong(1) : null, inviteId);
+            HrInviteCreateDTO one = copyDto(dto, interviewerUserId);
+            writeRoundAndStage(one, person);
+            notifyInterviewer(inviteId, one, person, resume);
+        }
+        return unbound;
+    }
+
+    /** 抄送人钉钉 unionId（排除面试官）；未绑定的抄送人跳过，仅影响日程参与人。 */
+    private List<String> resolveCcAttendeeUnionIds(HrInviteCreateDTO dto, Long inviteId, java.util.Set<Long> interviewerIds) {
+        List<Long> ccIds = resolveCcUserIds(dto);
+        if (ccIds.isEmpty() && inviteId != null && dto.getCcUserIds() == null) {
+            ccIds = loadInviteCcIds(inviteId);
+        }
+        if (ccIds.isEmpty()) {
+            return List.of();
+        }
+        java.util.LinkedHashSet<String> unions = new java.util.LinkedHashSet<>();
+        for (Long ccUserId : ccIds) {
+            if (ccUserId == null || (interviewerIds != null && interviewerIds.contains(ccUserId))) {
+                continue;
+            }
+            String unionId = findUnionId(ccUserId);
+            if (StringUtils.hasText(unionId)) {
+                unions.add(unionId);
+            }
+        }
+        return new ArrayList<>(unions);
+    }
+
+    private Map<String, Object> loadInvitePerson(Long interviewerUserId, Long applicationId) {
+        if (interviewerUserId == null) {
+            return jdbc.query("""
+                    SELECT c.display_name candidate_name, COALESCE(r.job_name, '') job_name, c.phone, c.email,
+                           '' nickname, '' interviewer_phone
+                    FROM hr_application a
+                    JOIN hr_candidate c ON c.id = a.candidate_id
+                    LEFT JOIN hr_requisition r ON r.id = a.requisition_id
+                    WHERE a.id = ? AND a.is_active = 1
+                    """, rs -> {
+                if (!rs.next()) {
+                    return null;
+                }
+                Map<String, Object> row = new java.util.HashMap<>();
+                row.put("candidate_name", rs.getString("candidate_name"));
+                row.put("job_name", rs.getString("job_name"));
+                row.put("phone", rs.getString("phone"));
+                row.put("email", rs.getString("email"));
+                row.put("nickname", rs.getString("nickname"));
+                row.put("interviewer_phone", rs.getString("interviewer_phone"));
+                return row;
+            }, applicationId);
+        }
+        return jdbc.query("""
                 SELECT c.display_name candidate_name, COALESCE(r.job_name, '') job_name, c.phone, c.email, u.nickname, u.phone interviewer_phone
                 FROM hr_application a
                 JOIN hr_candidate c ON c.id = a.candidate_id
@@ -658,44 +958,24 @@ public class HrInviteService {
             row.put("nickname", rs.getString("nickname"));
             row.put("interviewer_phone", rs.getString("interviewer_phone"));
             return row;
-        }, dto.getInterviewerUserId(), dto.getApplicationId());
-        if (person == null) {
-            throw new BusinessException("投递或面试官不存在");
-        }
-        String unionId = findUnionId(dto.getInterviewerUserId());
-        if (!StringUtils.hasText(unionId)) {
-            markNoCalendar(inviteId);
-            writeRoundAndStage(dto, person);
-            return interviewerName(dto.getInterviewerUserId());
-        }
-        String organizerName = currentOrganizerName();
-        String title = "【" + ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面") + "】"
-                + person.get("candidate_name") + " - " + person.get("job_name");
-        ResumeFile resume = loadResume(dto.getApplicationId());
-        String description = buildCalendarDescription(dto, person, resume, organizerName);
-        // 组织人（当前登录用户）作为参与人写入，便于在钉钉日程参与人列表中看到
-        List<String> attendees = new ArrayList<>();
-        String organizerUnionId = findUnionId(SecurityUtils.getCurrentUserId());
-        if (StringUtils.hasText(organizerUnionId) && !organizerUnionId.equals(unionId)) {
-            attendees.add(organizerUnionId);
-        }
-        DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
-                unionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees, false);
-        writeLog(inviteId, "CREATE_CALENDAR", call, SecurityUtils.getCurrentUserId(), call.eventId(),
-                Map.of("title", title, "start", String.valueOf(dto.getInterviewAt()), "unionId", blank(unionId),
-                        "organizer", organizerName));
-        if (!call.success()) {
-            jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?", cut(call.message()), inviteId);
-            return null;
-        }
-        jdbc.update("""
-                UPDATE hr_interview_invite
-                SET status = 'SUCCESS', dingtalk_event_id = ?, dingtalk_calendar_id = 'primary', fail_reason = NULL
-                WHERE id = ?
-                """, call.eventId(), inviteId);
-        writeRoundAndStage(dto, person);
-        notifyInterviewer(inviteId, dto, person, resume);
-        return null;
+        }, interviewerUserId, applicationId);
+    }
+
+    private HrInviteCreateDTO copyDto(HrInviteCreateDTO dto, Long interviewerUserId) {
+        HrInviteCreateDTO one = new HrInviteCreateDTO();
+        one.setApplicationId(dto.getApplicationId());
+        one.setRoundNo(dto.getRoundNo());
+        one.setInterviewerUserId(interviewerUserId);
+        one.setInterviewAt(dto.getInterviewAt());
+        one.setDurationMin(dto.getDurationMin());
+        one.setLocation(dto.getLocation());
+        one.setCcUserIds(dto.getCcUserIds());
+        return one;
+    }
+
+    private String attachCalendar(Long inviteId, HrInviteCreateDTO dto, int duration) {
+        java.util.List<String> unbound = attachSessionCalendars(List.of(inviteId), dto, duration);
+        return unbound.isEmpty() ? null : unbound.getFirst();
     }
 
     private void notifyInterviewer(Long inviteId, HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume) {
@@ -703,7 +983,7 @@ public class HrInviteService {
                 currentOrganizerName());
     }
 
-    /** 给抄送人创建钉钉日程并发送工作通知；跳过已作为面试官的人 */
+    /** 抄送人只发工作通知，并回写共享日程 eventId；不再单独建抄送日程。 */
     private void notifyRoundCc(Long inviteId, HrInviteCreateDTO dto) {
         if (inviteId == null || dto.getApplicationId() == null || dto.getRoundNo() == null) {
             return;
@@ -739,44 +1019,32 @@ public class HrInviteService {
             return;
         }
         ResumeFile resume = loadResume(dto.getApplicationId());
-        int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
         String organizerName = currentOrganizerName();
-        String title = "【抄送】【" + ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面") + "】"
-                + person.get("candidate_name") + " - " + person.get("job_name");
-        String description = buildCalendarDescription(dto, person, resume, organizerName);
-        // 同场多面试官时只建一套抄送日程：先清旧再按人建
+        // 清理历史「每人一条抄送日程」；与面试共享的 eventId 不会被误删
         releaseCcCalendarsForSession(dto.getApplicationId(), dto.getRoundNo(), dto.getInterviewAt());
+        String sharedEventId = jdbc.query("""
+                SELECT dingtalk_event_id FROM hr_interview_invite
+                WHERE id = ? AND is_active = 1 AND status = 'SUCCESS'
+                  AND dingtalk_event_id IS NOT NULL AND dingtalk_event_id <> ''
+                """, rs -> rs.next() ? rs.getString(1) : null, inviteId);
         for (Long ccUserId : ccIds) {
             if (ccUserId == null || interviewers.contains(ccUserId)) {
                 continue;
             }
-            String eventId = attachCcCalendar(inviteId, ccUserId, title, description, dto, duration);
-            saveCcEventIdForSession(dto.getApplicationId(), dto.getRoundNo(), dto.getInterviewAt(), ccUserId, eventId);
+            if (StringUtils.hasText(sharedEventId)) {
+                saveCcEventIdForSession(dto.getApplicationId(), dto.getRoundNo(), dto.getInterviewAt(), ccUserId, sharedEventId);
+                writeLog(inviteId, "LINK_CC_CALENDAR",
+                        DingTalkCalendarClient.CalendarCall.ok(sharedEventId, "shared-attendee"),
+                        SecurityUtils.getCurrentUserId(), sharedEventId,
+                        Map.of("ccUserId", String.valueOf(ccUserId), "mode", "shared-attendee"));
+            } else if (!StringUtils.hasText(findUnionId(ccUserId))) {
+                writeLog(inviteId, "LINK_CC_CALENDAR",
+                        DingTalkCalendarClient.CalendarCall.fail("抄送人未绑定钉钉，未加入共享日程"),
+                        SecurityUtils.getCurrentUserId(), null,
+                        Map.of("ccUserId", String.valueOf(ccUserId)));
+            }
             notifyWorkNotice(inviteId, ccUserId, person, dto, resume, "NOTIFY_CC", organizerName);
         }
-    }
-
-    private String attachCcCalendar(Long inviteId, Long ccUserId, String title, String description,
-                                    HrInviteCreateDTO dto, int duration) {
-        String unionId = findUnionId(ccUserId);
-        if (!StringUtils.hasText(unionId)) {
-            writeLog(inviteId, "CREATE_CC_CALENDAR",
-                    DingTalkCalendarClient.CalendarCall.fail("抄送人未绑定钉钉，未创建日程"),
-                    SecurityUtils.getCurrentUserId(), null,
-                    Map.of("ccUserId", String.valueOf(ccUserId)));
-            return null;
-        }
-        List<String> attendees = new ArrayList<>();
-        String organizerUnionId = findUnionId(SecurityUtils.getCurrentUserId());
-        if (StringUtils.hasText(organizerUnionId) && !organizerUnionId.equals(unionId)) {
-            attendees.add(organizerUnionId);
-        }
-        DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
-                unionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees, false);
-        writeLog(inviteId, "CREATE_CC_CALENDAR", call, SecurityUtils.getCurrentUserId(), call.eventId(),
-                Map.of("title", title, "ccUserId", String.valueOf(ccUserId), "unionId", blank(unionId),
-                        "start", String.valueOf(dto.getInterviewAt())));
-        return call.success() ? call.eventId() : null;
     }
 
     private void saveCcEventIdForSession(Long applicationId, Integer roundNo, LocalDateTime interviewAt,
@@ -793,10 +1061,20 @@ public class HrInviteService {
                 """, eventId, applicationId, roundNo, interviewAt, ccUserId);
     }
 
+    /**
+     * 清理抄送人侧历史独立日程。
+     * 若 eventId 与同场面试共享日程相同，只清空字段，不调用删除（由面试日程释放路径统一处理）。
+     */
     private void releaseCcCalendarsForSession(Long applicationId, Integer roundNo, LocalDateTime interviewAt) {
         if (applicationId == null || roundNo == null) {
             return;
         }
+        java.util.Set<String> sharedInviteEventIds = new java.util.HashSet<>(jdbc.query("""
+                SELECT DISTINCT dingtalk_event_id FROM hr_interview_invite
+                WHERE application_id = ? AND round_no = ? AND interview_at <=> ?
+                  AND dingtalk_event_id IS NOT NULL AND dingtalk_event_id <> ''
+                  AND status IN ('SUCCESS', 'CANCEL_FAILED')
+                """, (rs, rowNum) -> rs.getString(1), applicationId, roundNo, interviewAt));
         List<Map<String, Object>> rows = jdbc.query("""
                 SELECT DISTINCT cc.cc_user_id, cc.dingtalk_event_id, cc.invite_id
                 FROM hr_interview_invite_cc cc
@@ -814,6 +1092,9 @@ public class HrInviteService {
         for (Map<String, Object> row : rows) {
             String eventId = (String) row.get("eventId");
             if (!StringUtils.hasText(eventId) || !done.add(eventId)) {
+                continue;
+            }
+            if (sharedInviteEventIds.contains(eventId)) {
                 continue;
             }
             Long ccUserId = (Long) row.get("ccUserId");
