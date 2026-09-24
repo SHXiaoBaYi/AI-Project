@@ -48,4 +48,7 @@ public class HrInterviewRecordDTO {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     @Schema(description = "面试时间")
     private LocalDateTime interviewedAt;
+
+    @Schema(description = "是否同步更新候选人阶段，默认 true；候选人列表补录评价传 false")
+    private Boolean updateStage;
 }

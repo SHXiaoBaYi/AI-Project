@@ -87,7 +87,6 @@ public class HrInterviewRecordService {
         java.util.LinkedHashSet<Long> inviteIds = new java.util.LinkedHashSet<>();
         Long applicationId = dto.getApplicationId();
         Integer roundNo = dto.getRoundNo();
-        assertRoundOpen(applicationId, roundNo);
         for (int i = 0; i < ids.size(); i++) {
             Integer userOk = jdbc.queryForObject(
                     "SELECT COUNT(1) FROM sys_user WHERE user_id = ? AND is_active = 1 AND status = 0",
@@ -113,6 +112,11 @@ public class HrInterviewRecordService {
                 inviteIds.add(one.getInviteId());
             }
         }
+        String prefix = ids.size() == 1 ? "" : "已为 " + ids.size() + " 名面试官保存面试评价。";
+        // 候选人列表补录评价：只落记录，不改阶段
+        if (Boolean.FALSE.equals(dto.getUpdateStage())) {
+            return prefix.isEmpty() ? "已保存" : prefix.substring(0, prefix.length() - 1);
+        }
         String outcome = "NONE";
         if (inviteIds.isEmpty()) {
             outcome = applyConsensus(applicationId, requisitionIdOf(applicationId), roundNo, dto.getConclusion().trim().toUpperCase(), "");
@@ -121,7 +125,6 @@ public class HrInterviewRecordService {
                 outcome = stronger(outcome, syncStage(applicationId, roundNo, inviteId));
             }
         }
-        String prefix = ids.size() == 1 ? "" : "已为 " + ids.size() + " 名面试官保存面试评价。";
         return outcomeMessage(prefix, outcome, roundNo);
     }
 
@@ -129,7 +132,8 @@ public class HrInterviewRecordService {
         List<HrInterviewReviewVO> rows = new ArrayList<>();
         jdbc.query("""
                 SELECT rec.id, rec.application_id, rec.interviewer_user_id, rec.invite_id, rec.round_no,
-                       u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment, rec.interviewed_at
+                       u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment,
+                       COALESCE(rec.interviewed_at, rec.update_time, rec.create_time) interviewed_at
                 FROM hr_interview_record rec
                 LEFT JOIN sys_user u ON u.user_id = rec.interviewer_user_id
                 WHERE rec.application_id = ? AND rec.is_active = 1
@@ -258,7 +262,6 @@ public class HrInterviewRecordService {
             throw new BusinessException("面试结论只能是通过、未通过或待定");
         }
         String failReason = resolveFailReason(conclusion, dto.getFailReason());
-        assertInterviewEnded(dto.getInviteId());
         Long requisitionId = dto.getRequisitionId();
         if (requisitionId == null) {
             requisitionId = jdbc.query("SELECT requisition_id FROM hr_application WHERE id = ? AND is_active = 1",
@@ -267,14 +270,24 @@ public class HrInterviewRecordService {
         if (requisitionId == null) {
             throw new BusinessException("候选人还没有对应的招聘需求");
         }
+        LocalDateTime interviewedAt = dto.getInterviewedAt();
+        if (interviewedAt == null && dto.getInviteId() != null) {
+            interviewedAt = jdbc.query("SELECT interview_at FROM hr_interview_invite WHERE id = ? AND is_active = 1",
+                    rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null,
+                    dto.getInviteId());
+        }
+        if (interviewedAt == null) {
+            interviewedAt = LocalDateTime.now().withNano(0);
+        }
         if (dto.getId() == null) {
             jdbc.update("""
                     INSERT INTO hr_interview_record (application_id, requisition_id, invite_id, round_no, interviewer_user_id, conclusion, fail_reason, comment, interviewed_at, create_by, is_active)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     ON DUPLICATE KEY UPDATE requisition_id = VALUES(requisition_id), invite_id = VALUES(invite_id),
-                      conclusion = VALUES(conclusion), fail_reason = VALUES(fail_reason), comment = VALUES(comment), interviewed_at = VALUES(interviewed_at), is_active = 1
+                      conclusion = VALUES(conclusion), fail_reason = VALUES(fail_reason), comment = VALUES(comment),
+                      interviewed_at = COALESCE(VALUES(interviewed_at), interviewed_at), is_active = 1
                     """, dto.getApplicationId(), requisitionId, dto.getInviteId(), dto.getRoundNo(), dto.getInterviewerUserId(),
-                    conclusion, failReason, empty(dto.getComment()), dto.getInterviewedAt(), SecurityUtils.getCurrentUsername());
+                    conclusion, failReason, empty(dto.getComment()), interviewedAt, SecurityUtils.getCurrentUsername());
         } else {
             int updated = jdbc.update("""
                     UPDATE hr_interview_record
@@ -282,7 +295,7 @@ public class HrInterviewRecordService {
                         conclusion = ?, fail_reason = ?, comment = ?, interviewed_at = ?
                     WHERE id = ? AND is_active = 1
                     """, dto.getApplicationId(), requisitionId, dto.getInviteId(), dto.getRoundNo(), dto.getInterviewerUserId(),
-                    conclusion, failReason, empty(dto.getComment()), dto.getInterviewedAt(), dto.getId());
+                    conclusion, failReason, empty(dto.getComment()), interviewedAt, dto.getId());
             if (updated == 0) {
                 throw new BusinessException("面试记录不存在");
             }
@@ -333,7 +346,6 @@ public class HrInterviewRecordService {
         if (!SecurityUtils.getCurrentUserId().equals(record.get("interviewerUserId"))) {
             throw new BusinessException("只能删除自己的面试评价");
         }
-        assertRoundOpen((Long) record.get("applicationId"), (Integer) record.get("roundNo"));
         delete(id);
     }
 
@@ -363,17 +375,6 @@ public class HrInterviewRecordService {
             default -> 0;
         };
         return concluded >= roundNo;
-    }
-
-    private void assertRoundOpen(Long applicationId, Integer roundNo) {
-        if (applicationId == null || roundNo == null) {
-            return;
-        }
-        String stage = jdbc.query("SELECT current_stage FROM hr_application WHERE id = ? AND is_active = 1",
-                rs -> rs.next() ? rs.getString(1) : null, applicationId);
-        if (roundConcluded(stage, roundNo)) {
-            throw new BusinessException("候选人已进入下一阶段，不能再修改或删除评价");
-        }
     }
 
     private String syncStage(Long applicationId, Integer roundNo, Long inviteId) {
@@ -476,17 +477,6 @@ public class HrInterviewRecordService {
             return prefix + "评价已保存，候选人阶段已更新为" + stageName(code);
         }
         return prefix.isEmpty() ? "已保存" : prefix.substring(0, prefix.length() - 1);
-    }
-
-    private void assertInterviewEnded(Long inviteId) {
-        if (inviteId == null) {
-            return;
-        }
-        LocalDateTime at = jdbc.query("SELECT interview_at FROM hr_interview_invite WHERE id = ? AND is_active = 1",
-                rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null, inviteId);
-        if (at != null && at.isAfter(LocalDateTime.now())) {
-            throw new BusinessException("面试尚未结束，不能评价");
-        }
     }
 
     private void applyStage(Long applicationId, String stageCode) {

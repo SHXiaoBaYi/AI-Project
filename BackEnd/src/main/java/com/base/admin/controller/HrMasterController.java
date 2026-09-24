@@ -333,7 +333,7 @@ public class HrMasterController {
 
     @Operation(summary = "可选用户")
     @GetMapping("/user/options")
-    @RequiresPermission({"hr:invite:add", "hr:dept:edit", "hr:board:view", "hr:requisition:list"})
+    @RequiresPermission("hr:*")
     public Result<List<Map<String, Object>>> users(@RequestParam(required = false) String scope) {
         return Result.ok(masterService.users(scope));
     }
@@ -375,7 +375,7 @@ public class HrMasterController {
 
     @Operation(summary = "未通过原因选项")
     @GetMapping("/fail-reason/options")
-    @RequiresPermission({"hr:fail-reason:list", "hr:interview:mine", "hr:record:list", "hr:record:add", "hr:application:list"})
+    @RequiresPermission("hr:*")
     public Result<List<Map<String, Object>>> failReasonOptions() {
         return Result.ok(masterService.failReasonOptions());
     }
@@ -553,7 +553,7 @@ public class HrMasterController {
 
     @Operation(summary = "保存面试记录")
     @PostMapping("/interview-record")
-    @RequiresPermission({"hr:record:add", "hr:record:edit", "hr:interview:mine"})
+    @RequiresPermission("hr:*")
     @Log(title = "面试记录", businessType = 1)
     public Result<String> saveRecord(@Valid @RequestBody HrInterviewRecordDTO dto) {
         return Result.ok(recordService.save(dto));
@@ -561,14 +561,14 @@ public class HrMasterController {
 
     @Operation(summary = "候选人的全部面试评价")
     @GetMapping("/application/{id:\\d+}/reviews")
-    @RequiresPermission({"hr:application:list", "hr:record:list", "hr:interview:mine"})
+    @RequiresPermission("hr:*")
     public Result<List<HrInterviewReviewVO>> reviews(@PathVariable Long id) {
         return Result.ok(recordService.reviews(id));
     }
 
     @Operation(summary = "同一轮次结论不一致时提交联合评价")
     @PostMapping("/application/verdict")
-    @RequiresPermission({"hr:application:edit", "hr:record:edit"})
+    @RequiresPermission("hr:*")
     @Log(title = "面试联合评价", businessType = 1)
     public Result<String> saveVerdict(@Valid @RequestBody HrInterviewVerdictDTO dto) {
         return Result.ok(recordService.saveVerdict(dto));
@@ -576,7 +576,7 @@ public class HrMasterController {
 
     @Operation(summary = "删除自己的面试评价")
     @DeleteMapping("/interview-record/mine/{id:\\d+}")
-    @RequiresPermission("hr:interview:mine")
+    @RequiresPermission("hr:*")
     @Log(title = "面试记录", businessType = 3)
     public Result<Void> deleteOwnRecord(@PathVariable Long id) {
         recordService.deleteOwn(id);
@@ -585,7 +585,7 @@ public class HrMasterController {
 
     @Operation(summary = "删除面试记录")
     @DeleteMapping("/interview-record/{id:\\d+}")
-    @RequiresPermission("hr:record:delete")
+    @RequiresPermission("hr:*")
     @Log(title = "面试记录", businessType = 3)
     public Result<Void> deleteRecord(@PathVariable Long id) {
         recordService.delete(id);
@@ -594,7 +594,7 @@ public class HrMasterController {
 
     @Operation(summary = "批量删除面试记录")
     @DeleteMapping("/interview-record/batch")
-    @RequiresPermission("hr:record:delete")
+    @RequiresPermission("hr:*")
     @Log(title = "面试记录-批量删除", businessType = 3)
     public Result<Void> deleteRecordBatch(@RequestBody List<Long> ids) {
         recordService.deleteBatch(ids);

@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { App, Button, Drawer, Form, Input, Modal, Select, Space, Table } from 'antd';
+import dayjs from 'dayjs';
 import ActionButtons from '@/components/Buttons/ActionButtons';
-import { usePermission } from '@/hooks/usePermission';
 import type { RootState } from '@/store';
+import { hasAnyHrPermission } from '@/utils/permission';
 import {
+  deleteHrInterviewRecordApi,
   getHrFailReasonOptionsApi,
   getHrUsersApi,
   listHrInterviewReviewsApi,
@@ -48,6 +50,17 @@ type ReviewRow = {
 
 type EditState = { mode: 'add' } | { mode: 'edit'; row: ReviewRow };
 
+function formatReviewTime(value: unknown): string {
+  if (value == null || value === '') return '—';
+  if (Array.isArray(value) && value.length >= 5) {
+    const [y, m, d, h = 0, min = 0, s = 0] = value as number[];
+    const t = dayjs(new Date(y, m - 1, d, h, min, s));
+    return t.isValid() ? t.format('YYYY-MM-DD HH:mm:ss') : '—';
+  }
+  const t = dayjs(String(value).replace('T', ' '));
+  return t.isValid() ? t.format('YYYY-MM-DD HH:mm:ss') : '—';
+}
+
 export default function InterviewReviewDrawer({
   applicationId,
   candidateName,
@@ -60,11 +73,11 @@ export default function InterviewReviewDrawer({
   onClose: () => void;
 }) {
   const { message } = App.useApp();
-  const { has } = usePermission();
-  const currentUserId = useSelector((state: RootState) => state.user.userInfo?.userId);
-  const canManage = has('hr:record:add') || has('hr:record:edit');
-  const canMine = has('hr:interview:mine');
-  const canAdd = canManage || canMine;
+  const permissions = useSelector((state: RootState) => {
+    if (state.user.permissions?.length) return state.user.permissions;
+    return state.user.userInfo?.permissions ?? [];
+  });
+  const canWrite = useMemo(() => hasAnyHrPermission(permissions), [permissions]);
 
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,15 +86,6 @@ export default function InterviewReviewDrawer({
   const [editing, setEditing] = useState<EditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
-
-  const mineOnly = canMine && !canManage && !has('hr:record:edit');
-
-  const canEditRow = (row: ReviewRow) => {
-    if (row.kind !== 'INTERVIEW' || !row.id) return false;
-    if (has('hr:record:edit')) return true;
-    if (canMine && currentUserId != null && row.interviewerUserId === currentUserId) return true;
-    return false;
-  };
 
   const reload = useCallback(async () => {
     if (!applicationId) return;
@@ -131,21 +135,21 @@ export default function InterviewReviewDrawer({
     }
     form.setFieldsValue({
       roundNo: 1,
-      interviewerUserId: mineOnly ? currentUserId : undefined,
+      interviewerUserId: undefined,
       conclusion: undefined,
       failReason: undefined,
       comment: undefined,
     });
-  }, [editing, form, mineOnly, currentUserId]);
+  }, [editing, form]);
 
   return (
     <Drawer
       title={candidateName ? `${candidateName}的面试评价` : '面试评价'}
       open={open}
-      size='large'
+      size={1200}
       onClose={onClose}
       extra={
-        canAdd ? (
+        canWrite ? (
           <Button
             type='primary'
             size='small'
@@ -165,23 +169,33 @@ export default function InterviewReviewDrawer({
         loading={loading}
         dataSource={rows}
         pagination={false}
-        scroll={{ x: 900 }}
+        scroll={{ x: 1100 }}
         locale={{ emptyText: '还没有面试评价' }}
         columns={[
           {
             title: '操作',
             key: 'option',
-            width: 88,
+            width: 140,
             fixed: 'left',
             render: (_, row) =>
-              canEditRow(row) ? (
+              canWrite && row.kind === 'INTERVIEW' && row.id ? (
                 <ActionButtons
-                  maxVisible={2}
+                  maxVisible={3}
                   items={[
                     {
                       key: 'edit',
                       label: '修改',
                       onClick: () => setEditing({ mode: 'edit', row }),
+                    },
+                    {
+                      key: 'delete',
+                      label: '删除',
+                      confirmTitle: '确认删除这条面试评价？',
+                      onClick: async () => {
+                        await deleteHrInterviewRecordApi(row.id!);
+                        message.success('已删除');
+                        await reload();
+                      },
                     },
                   ]}
                 />
@@ -224,7 +238,7 @@ export default function InterviewReviewDrawer({
             title: '时间',
             dataIndex: 'interviewedAt',
             width: 170,
-            render: (value: string) => (value ? String(value).replace('T', ' ').slice(0, 19) : '—'),
+            render: (value: unknown) => formatReviewTime(value),
           },
         ]}
       />
@@ -234,6 +248,7 @@ export default function InterviewReviewDrawer({
         open={!!editing}
         confirmLoading={saving}
         okText='保存'
+        width={560}
         destroyOnHidden
         onCancel={() => setEditing(null)}
         onOk={async () => {
@@ -241,6 +256,11 @@ export default function InterviewReviewDrawer({
           const values = await form.validateFields();
           setSaving(true);
           try {
+            const existingAt =
+              editing.mode === 'edit' && editing.row.interviewedAt
+                ? dayjs(String(editing.row.interviewedAt).replace('T', ' '))
+                : null;
+            const interviewedAt = (existingAt?.isValid() ? existingAt : dayjs()).format('YYYY-MM-DD HH:mm:ss');
             const payload: Record<string, unknown> = {
               applicationId,
               roundNo: values.roundNo,
@@ -248,13 +268,12 @@ export default function InterviewReviewDrawer({
               conclusion: values.conclusion,
               failReason: values.conclusion === 'FAIL' ? values.failReason : undefined,
               comment: values.comment,
+              interviewedAt,
+              updateStage: false,
             };
             if (editing.mode === 'edit') {
               payload.id = editing.row.id;
               payload.inviteId = editing.row.inviteId;
-              if (editing.row.interviewedAt) {
-                payload.interviewedAt = String(editing.row.interviewedAt).replace('T', ' ').slice(0, 19);
-              }
             }
             const msg = await saveHrInterviewRecordApi(payload);
             message.success(msg || '已保存');
@@ -293,7 +312,7 @@ export default function InterviewReviewDrawer({
             >
               <Select
                 options={users}
-                disabled={editing?.mode === 'edit' || mineOnly}
+                disabled={editing?.mode === 'edit'}
                 showSearch
                 optionFilterProp='label'
                 placeholder='请选择面试官'
