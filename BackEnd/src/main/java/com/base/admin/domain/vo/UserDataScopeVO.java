@@ -19,9 +19,24 @@ public class UserDataScopeVO {
     @Schema(description = "昵称")
     private String nickname;
 
-    @Schema(description = "DEFAULT / PERSON / SELF", example = "PERSON")
+    @Schema(description = "全局全量业务数据", example = "false")
+    private Boolean globalAll = false;
+
+    @Schema(description = "摘要（列表展示）")
+    private String summary;
+
+    @Schema(description = "兼容旧字段：DEFAULT / PERSON / SELF", example = "DEFAULT")
     private String mode;
 
-    @Schema(description = "可见人员用户ID")
+    @Schema(description = "兼容旧字段：可见人员用户ID")
     private List<Long> targetUserIds = new ArrayList<>();
+
+    @Schema(description = "GEO 切片")
+    private UserDataScopeGeoVO geo = new UserDataScopeGeoVO();
+
+    @Schema(description = "招聘切片")
+    private UserDataScopeHrVO hr = new UserDataScopeHrVO();
+
+    @Schema(description = "任务切片")
+    private UserDataScopeTaskVO task = new UserDataScopeTaskVO();
 }

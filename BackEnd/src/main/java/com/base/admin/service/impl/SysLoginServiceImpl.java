@@ -22,6 +22,7 @@ import com.base.admin.security.LoginUser;
 import com.base.admin.service.DingTalkAppService;
 import com.base.admin.service.DingTalkAuthService;
 import com.base.admin.service.DingTalkCalendarClient;
+import com.base.admin.service.DingTalkForceLoginTicketStore;
 import com.base.admin.service.OnlineSessionService;
 import com.base.admin.service.SysLoginService;
 import com.base.admin.util.LocalhostAccess;
@@ -39,6 +40,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -59,6 +61,7 @@ public class SysLoginServiceImpl implements SysLoginService {
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
+    private final DingTalkForceLoginTicketStore forceLoginTicketStore;
 
     @Override
     public LoginVO login(LoginDTO dto, String ip, String userAgent, HttpServletRequest request) {
@@ -116,22 +119,46 @@ public class SysLoginServiceImpl implements SysLoginService {
     @Override
     @Transactional
     public LoginVO loginByDingTalk(DingTalkLoginDTO dto, String ip, String userAgent) {
-        DingTalkAuthService.UserProfile profile = dingTalkAuthService.resolveByAuthCode(dto.getAuthCode());
-        BoundUser bound = resolveSystemUser(profile);
-        SysUser user = userMapper.selectById(bound.userId());
+        boolean force = Boolean.TRUE.equals(dto.getForce());
+        Long userId;
+        String username;
+
+        if (force && StringUtils.hasText(dto.getForceTicket())) {
+            DingTalkForceLoginTicketStore.Entry pending = forceLoginTicketStore.consume(dto.getForceTicket());
+            if (pending == null) {
+                throw new BusinessException("强制登录已失效，请重新扫码");
+            }
+            userId = pending.userId();
+            username = pending.username();
+        } else {
+            if (!StringUtils.hasText(dto.getAuthCode())) {
+                throw new BusinessException("缺少钉钉授权码");
+            }
+            DingTalkAuthService.UserProfile profile = dingTalkAuthService.resolveByAuthCode(dto.getAuthCode());
+            BoundUser bound = resolveSystemUser(profile);
+            userId = bound.userId();
+            username = bound.username();
+            if (!force && onlineSessionService.hasActiveSession(userId)) {
+                String ticket = forceLoginTicketStore.issue(userId, username);
+                throw new BusinessException(
+                        Constants.CODE_LOGIN_CONFLICT,
+                        "该账号已在其他设备登录，是否强制对方下线？",
+                        Map.of("forceTicket", ticket));
+            }
+        }
+
+        SysUser user = userMapper.selectById(userId);
         if (user == null || (user.getIsActive() != null && user.getIsActive() == 0)) {
             throw new BusinessException("系统账号不存在或已删除");
         }
         if (Integer.valueOf(Constants.STATUS_DISABLED).equals(user.getStatus())) {
             throw new BusinessException("该账户已被禁用，请联系管理员");
         }
-        boolean force = Boolean.TRUE.equals(dto.getForce());
-        if (!force && onlineSessionService.hasActiveSession(user.getUserId())) {
-            throw new BusinessException(Constants.CODE_LOGIN_CONFLICT, "该账号已在其他设备登录，是否强制对方下线？");
-        }
+        username = user.getUsername();
+
         String tokenId = UUID.randomUUID().toString().replace("-", "");
-        String token = jwtUtils.generateToken(user.getUserId(), user.getUsername(), tokenId);
-        onlineSessionService.saveSession(user.getUserId(), user.getUsername(), tokenId, ip, userAgent);
+        String token = jwtUtils.generateToken(userId, username, tokenId);
+        onlineSessionService.saveSession(userId, username, tokenId, ip, userAgent);
         return LoginVO.builder().token(token).build();
     }
 

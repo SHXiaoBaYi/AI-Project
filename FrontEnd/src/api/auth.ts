@@ -27,8 +27,12 @@ export function getDingTalkLoginConfigApi() {
   return request.get<unknown, DingTalkLoginConfig>('/auth/dingtalk/config');
 }
 
-export function dingTalkLoginApi(authCode: string, force = false) {
-  return request.post<unknown, { token: string }>('/auth/dingtalk/login', { authCode, force });
+export function dingTalkLoginApi(authCode: string, force = false, forceTicket?: string) {
+  return request.post<unknown, { token: string }>('/auth/dingtalk/login', {
+    authCode: forceTicket ? undefined : authCode,
+    force,
+    forceTicket,
+  });
 }
 
 export function loginApi(username: string, password: string, force = false) {

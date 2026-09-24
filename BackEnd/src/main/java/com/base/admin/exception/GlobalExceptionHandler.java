@@ -15,9 +15,9 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
-    public Result<Void> handleBusinessException(BusinessException e) {
+    public Result<?> handleBusinessException(BusinessException e) {
         log.warn("Business exception: {}", e.getMessage());
-        return Result.fail(e.getCode(), e.getMessage());
+        return Result.fail(e.getCode(), e.getMessage(), e.getData());
     }
 
     @ExceptionHandler(BadCredentialsException.class)

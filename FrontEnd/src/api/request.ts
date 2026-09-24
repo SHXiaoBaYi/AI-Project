@@ -69,8 +69,12 @@ service.interceptors.response.use(
     const res = response.data as ApiResult<unknown>;
 
     if (res.code === CODE_LOGIN_CONFLICT) {
-      const err = new Error(res.msg || '账号已在其他设备登录') as Error & { code: number };
+      const err = new Error(res.msg || '账号已在其他设备登录') as Error & {
+        code: number;
+        data?: unknown;
+      };
       err.code = CODE_LOGIN_CONFLICT;
+      err.data = res.data;
       return Promise.reject(err);
     }
 
@@ -92,8 +96,12 @@ service.interceptors.response.use(
       body?.code === CODE_LOGIN_CONFLICT
     ) {
       if (body.code === CODE_LOGIN_CONFLICT) {
-        const err = new Error(body.msg || '账号已在其他设备登录') as Error & { code: number };
+        const err = new Error(body.msg || '账号已在其他设备登录') as Error & {
+          code: number;
+          data?: unknown;
+        };
         err.code = CODE_LOGIN_CONFLICT;
+        err.data = body.data;
         return Promise.reject(err);
       }
       handleAuthError(body.code, body.msg);

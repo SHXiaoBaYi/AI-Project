@@ -98,17 +98,19 @@ export default function Login() {
   }, []);
 
   const completeDingLogin = useCallback(
-    async (authCode: string, force = false) => {
+    async (authCode: string, force = false, forceTicket?: string) => {
       if (loggingRef.current) return;
       loggingRef.current = true;
       setLoading(true);
       try {
-        await dispatch(loginByDingTalk({ authCode, force })).unwrap();
+        await dispatch(loginByDingTalk({ authCode, force, forceTicket })).unwrap();
         await afterToken();
       } catch (err) {
-        const code = Number((err as { code?: number | string })?.code);
+        const payload = err as { code?: number | string; data?: { forceTicket?: string } };
+        const code = Number(payload?.code);
         if (code === CODE_LOGIN_CONFLICT) {
-          handleConflict(() => completeDingLogin(authCode, true));
+          const ticket = payload?.data?.forceTicket;
+          handleConflict(() => completeDingLogin(authCode, true, ticket));
           return;
         }
         loggingRef.current = false;

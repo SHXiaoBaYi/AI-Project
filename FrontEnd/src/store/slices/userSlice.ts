@@ -14,6 +14,7 @@ interface UserState {
 export interface LoginRejectPayload {
   code?: number;
   message?: string;
+  data?: unknown;
 }
 
 const initialState: UserState = {
@@ -45,16 +46,20 @@ export const login = createAsyncThunk(
 
 export const loginByDingTalk = createAsyncThunk(
   'user/loginByDingTalk',
-  async ({ authCode, force = false }: { authCode: string; force?: boolean }, { rejectWithValue }) => {
+  async (
+    { authCode, force = false, forceTicket }: { authCode: string; force?: boolean; forceTicket?: string },
+    { rejectWithValue },
+  ) => {
     try {
-      const res = await dingTalkLoginApi(authCode, force);
+      const res = await dingTalkLoginApi(authCode, force, forceTicket);
       setToken(res.token);
       return res.token;
     } catch (err) {
-      const e = err as Error & { code?: number };
+      const e = err as Error & { code?: number; data?: unknown };
       return rejectWithValue({
         code: e.code,
         message: e.message || '登录失败',
+        data: e.data,
       } satisfies LoginRejectPayload);
     }
   },
