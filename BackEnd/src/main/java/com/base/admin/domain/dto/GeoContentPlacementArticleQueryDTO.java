@@ -22,6 +22,9 @@ public class GeoContentPlacementArticleQueryDTO extends PageQuery {
     @Schema(description = "话题ID", example = "1")
     private Long topicId;
 
+    @Schema(description = "投放主表ID（精确过滤）", example = "12")
+    private Long placementId;
+
     @Schema(description = "目标问题")
     private String targetQuestion;
 

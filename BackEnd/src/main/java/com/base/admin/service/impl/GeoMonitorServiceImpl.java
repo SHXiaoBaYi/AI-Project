@@ -201,7 +201,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                     : String.format("%02d-%02d", row.getInspectDate().getMonthValue(), row.getInspectDate().getDayOfMonth()));
             point.setMentioned(row.getMentioned() == null ? 0 : row.getMentioned());
             point.setRankNo(row.getRankNo());
-            point.setHasNegative(StringUtils.hasText(row.getNegativeContent()) ? 1 : 0);
+            point.setHasNegative(hasMeaningfulNegative(row.getNegativeContent()) ? 1 : 0);
             point.setRecommendStatus(row.getRecommendStatus());
             series.add(point);
         }
@@ -294,7 +294,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             if (Integer.valueOf(1).equals(day.getMentioned())) {
                 mention++;
             }
-            if (StringUtils.hasText(day.getNegativeContent())) {
+            if (hasMeaningfulNegative(day.getNegativeContent())) {
                 negative++;
             }
             if (day.getRankNo() != null) {
@@ -798,7 +798,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         Map<Long, String> topicNames = topicNameMap();
         Map<Long, String> ownerNames = ownerDisplayMap(records);
         return records.stream()
-                .filter(r -> StringUtils.hasText(r.getNegativeContent()))
+                .filter(r -> hasMeaningfulNegative(r.getNegativeContent()))
                 .sorted(Comparator.comparing(GeoMonitorDaily::getInspectDate).reversed()
                         .thenComparing(GeoMonitorDaily::getPlatform))
                 .map(r -> toVo(r, topicNames, ownerNames))
@@ -1889,9 +1889,9 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         if (dto.getScreenshotUrl() != null) {
             entity.setScreenshotUrl(fileStorageService.normalizeStoragePath(dto.getScreenshotUrl()));
         }
-        entity.setThirdPartyUrl(dto.getThirdPartyUrl());
-        entity.setNegativeContent(dto.getNegativeContent());
-        entity.setCompetitors(dto.getCompetitors());
+        entity.setThirdPartyUrl(normalizeOptionalText(dto.getThirdPartyUrl()));
+        entity.setNegativeContent(normalizeOptionalText(dto.getNegativeContent()));
+        entity.setCompetitors(normalizeOptionalText(dto.getCompetitors()));
     }
 
     private GeoMonitorDaily requireDaily(Long id) {
@@ -1992,9 +1992,9 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         vo.setRankNo(e.getRankNo());
         vo.setRecommendStatus(e.getRecommendStatus());
         vo.setScreenshotUrl(fileStorageService.toPublicUrl(e.getScreenshotUrl()));
-        vo.setThirdPartyUrl(e.getThirdPartyUrl());
-        vo.setNegativeContent(e.getNegativeContent());
-        vo.setCompetitors(e.getCompetitors());
+        vo.setThirdPartyUrl(normalizeOptionalText(e.getThirdPartyUrl()));
+        vo.setNegativeContent(normalizeOptionalText(e.getNegativeContent()));
+        vo.setCompetitors(normalizeOptionalText(e.getCompetitors()));
         vo.setBoardLocked(e.getBoardLocked() == null ? 0 : e.getBoardLocked());
         vo.setCreateTime(e.getCreateTime());
         vo.setUpdateTime(e.getUpdateTime());
@@ -2142,8 +2142,8 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                                 dto.setScreenshotUrl(url);
                             }
                         }
-                        dto.setNegativeContent(negative);
-                        dto.setCompetitors(competitors);
+                        dto.setNegativeContent(normalizeOptionalText(negative));
+                        dto.setCompetitors(normalizeOptionalText(competitors));
                         boolean inserted = upsertDaily(dto, true);
                         if (inserted) {
                             result.setInsertCount(result.getInsertCount() + 1);
@@ -2587,7 +2587,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
 
             sampleCnt.merge(cell, 1, Integer::sum);
             sampleQuestions.computeIfAbsent(cell, k -> new LinkedHashSet<>()).add(kw);
-            if (StringUtils.hasText(r.getNegativeContent())) {
+            if (hasMeaningfulNegative(r.getNegativeContent())) {
                 negativeCnt.merge(cell, 1, Integer::sum);
             }
             if (Objects.equals(r.getMentioned(), 1) && r.getRankNo() != null && r.getRankNo() > 0) {
@@ -2658,7 +2658,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         Map<String, GeoNegativeSummaryRowVO> map = new LinkedHashMap<>();
         int total = 0;
         for (GeoMonitorDaily r : records) {
-            if (!StringUtils.hasText(r.getNegativeContent())) {
+            if (!hasMeaningfulNegative(r.getNegativeContent())) {
                 continue;
             }
             total++;
@@ -2896,12 +2896,12 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     private static String topN(List<String> values, int n) {
         Map<String, Integer> count = new HashMap<>();
         for (String raw : values) {
-            if (!StringUtils.hasText(raw) || "无".equals(raw) || "-".equals(raw)) {
+            if (isBlankPlaceholder(raw)) {
                 continue;
             }
             for (String part : raw.split("[,，、;/]")) {
                 String item = part.trim();
-                if (StringUtils.hasText(item)) {
+                if (!isBlankPlaceholder(item)) {
                     count.merge(item, 1, Integer::sum);
                 }
             }
@@ -2911,6 +2911,23 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 .limit(n)
                 .map(e -> e.getKey() + "(" + e.getValue() + ")")
                 .collect(Collectors.joining("、"));
+    }
+
+    /** 空串 / 「无」 / 「-」等占位视为无有效内容 */
+    private static boolean isBlankPlaceholder(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return true;
+        }
+        String t = raw.trim();
+        return "-".equals(t) || "—".equals(t) || "－".equals(t) || "无".equals(t);
+    }
+
+    private static String normalizeOptionalText(String raw) {
+        return isBlankPlaceholder(raw) ? "" : raw.trim();
+    }
+
+    private static boolean hasMeaningfulNegative(String raw) {
+        return !isBlankPlaceholder(raw);
     }
 
     private static class DailyBlock {

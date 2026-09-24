@@ -445,6 +445,7 @@ export function getGeoContentPlacementArticleListApi(
     publisherUserId?: number;
     ownerUserId?: number;
     topicId?: number;
+    placementId?: number;
     targetQuestion?: string;
     publishStatus?: string;
     title?: string;

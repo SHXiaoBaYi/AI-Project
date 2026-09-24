@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Button, DatePicker, Form, Input, Modal, Select, Table, Tag } from 'antd';
 import dayjs from 'dayjs';
+import { useSearchParams } from 'react-router-dom';
 import BaseProTable from '@/components/BaseProTable';
 import BaseModalForm from '@/components/BaseModalForm/index';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -45,6 +46,8 @@ const ArticlePage = memo(function ArticlePage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
   const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [searchParams] = useSearchParams();
+  const filterPlacementId = Number(searchParams.get('placementId') || '') || undefined;
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
@@ -342,7 +345,8 @@ const ArticlePage = memo(function ArticlePage() {
         rowKey='id'
         actionRef={actionRef}
         columns={columns}
-        headerTitle='文章列表（按平台发布明细）'
+        headerTitle={filterPlacementId ? `文章列表（投放 #${filterPlacementId}）` : '文章列表（按平台发布明细）'}
+        params={{ placementId: filterPlacementId }}
         scroll={{ x: 1600 }}
         request={async (params, sort) => {
           const citedRaw = params.cited;
@@ -354,6 +358,7 @@ const ArticlePage = memo(function ArticlePage() {
             publisherUserId: params.publisherUserId,
             ownerUserId: params.ownerUserId,
             topicId: params.topicId,
+            placementId: filterPlacementId ?? params.placementId,
             targetQuestion: params.targetQuestion,
             title: params.title,
             platformName: params.platformName,

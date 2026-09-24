@@ -16,6 +16,15 @@ import { GEO_TERM_TYPES, GEO_TERM_TYPE_DEFAULT } from '@/constants/geo';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
 
+/** 空 / 「无」 / 「-」等占位保存为空，不当作有效内容 */
+function normalizeOptionalText(value?: string | null) {
+  const text = (value ?? '').trim();
+  if (!text || text === '-' || text === '—' || text === '－' || text === '无') {
+    return '';
+  }
+  return text;
+}
+
 interface EditDailyModalProps {
   open: boolean;
   record: GeoDailyVO | null;
@@ -57,6 +66,9 @@ const EditDailyModal = memo(function EditDailyModal({
               ...record,
               inspectDate: dayjs(record.inspectDate),
               termType: record.termType || GEO_TERM_TYPE_DEFAULT,
+              thirdPartyUrl: normalizeOptionalText(record.thirdPartyUrl),
+              competitors: normalizeOptionalText(record.competitors),
+              negativeContent: normalizeOptionalText(record.negativeContent),
             }
           : undefined
       }
@@ -74,9 +86,9 @@ const EditDailyModal = memo(function EditDailyModal({
           rankNo: values.rankNo,
           recommendStatus: values.recommendStatus,
           screenshotUrl: screenshotUrl,
-          thirdPartyUrl: values.thirdPartyUrl,
-          negativeContent: values.negativeContent,
-          competitors: values.competitors,
+          thirdPartyUrl: normalizeOptionalText(values.thirdPartyUrl),
+          negativeContent: normalizeOptionalText(values.negativeContent),
+          competitors: normalizeOptionalText(values.competitors),
         });
         message.success('已更新');
         onSuccess();

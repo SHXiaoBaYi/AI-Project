@@ -63,11 +63,50 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureItemPublishTimeDateTime(connection);
             ensureGeoStaffRoles(connection);
             retireLegacyGeoRoles(connection);
+            cleanupEmptyUninspectedDailyBeforeToday(connection);
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
         }
         log.info("GEO 平台主数据、看板落库与菜单已同步");
+    }
+
+    /**
+     * 清洗「未实际巡查」的空壳日监测：排名/推荐状态/截图/第三方链接/竞品/负面均为空（含 -、无 等占位），
+     * 且巡查日期早于今天。逻辑删除（is_active=0），可重复执行。
+     */
+    private void cleanupEmptyUninspectedDailyBeforeToday(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_monitor_daily")) {
+            return;
+        }
+        String blank = """
+                (col IS NULL OR TRIM(col) = '' OR TRIM(col) IN ('-', '—', '－', '无'))
+                """.trim();
+        String sql = """
+                UPDATE geo_monitor_daily
+                SET is_active = 0, update_time = NOW()
+                WHERE is_active = 1
+                  AND inspect_date < CURDATE()
+                  AND rank_no IS NULL
+                  AND %s
+                  AND %s
+                  AND %s
+                  AND %s
+                  AND %s
+                """.formatted(
+                blank.replace("col", "recommend_status"),
+                blank.replace("col", "screenshot_url"),
+                blank.replace("col", "third_party_url"),
+                blank.replace("col", "competitors"),
+                blank.replace("col", "negative_content"));
+        try (Statement statement = connection.createStatement()) {
+            int n = statement.executeUpdate(sql);
+            if (n > 0) {
+                log.info("已清洗今日之前未巡查空壳日监测 {} 条", n);
+            } else {
+                log.info("今日之前未巡查空壳日监测无需清洗");
+            }
+        }
     }
 
     /** GEO 选人角色：运营录入 / 管理复盘（不存在则创建） */

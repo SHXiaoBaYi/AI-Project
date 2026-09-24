@@ -327,6 +327,39 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       search: false,
     },
     {
+      title: '完成时间',
+      dataIndex: 'actualEndTime',
+      width: 170,
+      valueType: 'dateTime',
+      search: false,
+      hideInForm: true,
+      render: (_, r) => r.actualEndTime || '-',
+    },
+    {
+      title: '完成情况',
+      dataIndex: 'remark',
+      width: 180,
+      search: false,
+      hideInForm: true,
+      ellipsis: true,
+      render: (_, r) => {
+        if (r.taskType === '文章发布' && r.bizId) {
+          return (
+            <a
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(`/geo/article?placementId=${r.bizId}`);
+              }}
+            >
+              查看文章
+            </a>
+          );
+        }
+        const text = r.remark?.trim();
+        return text || '-';
+      },
+    },
+    {
       title: '计划开始',
       dataIndex: 'planStartTime',
       width: 170,

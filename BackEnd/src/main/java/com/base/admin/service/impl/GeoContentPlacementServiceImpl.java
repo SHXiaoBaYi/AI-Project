@@ -198,6 +198,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     @Override
     public PageResult<GeoContentPlacementArticleListVO> listArticles(GeoContentPlacementArticleQueryDTO query) {
         LambdaQueryWrapper<GeoContentPlacement> pw = new LambdaQueryWrapper<GeoContentPlacement>()
+                .eq(query.getPlacementId() != null, GeoContentPlacement::getId, query.getPlacementId())
                 .eq(query.getPublisherUserId() != null, GeoContentPlacement::getPublisherUserId, query.getPublisherUserId())
                 .eq(query.getOwnerUserId() != null, GeoContentPlacement::getOwnerUserId, query.getOwnerUserId())
                 .eq(query.getTopicId() != null, GeoContentPlacement::getTopicId, query.getTopicId())
