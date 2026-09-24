@@ -34,6 +34,13 @@ import java.util.Map;
 public class HrInviteService {
 
     private static final String NO_CALENDAR_REASON = "面试官未绑定钉钉，未创建钉钉日程";
+    /** 临时关闭自动建钉钉日程时的状态说明（列表「创建钉钉日程」入口也已关闭） */
+    private static final String CALENDAR_SKIPPED_REASON = "暂未自动创建钉钉日程";
+    /**
+     * 临时开关：创建/修改面试邀约时是否自动创建钉钉日程。
+     * false = 只落邀约记录（状态 NO_CALENDAR），不调钉钉；恢复时改回 true。
+     */
+    private static final boolean AUTO_CREATE_DINGTALK_CALENDAR = false;
     private static final Map<Integer, String> ROUND_NAME = Map.of(1, "一面", 2, "二面", 3, "三面", 4, "四面", 5, "五面");
     /** 面试开始时间：每天 09:30～17:30，半小时整点 */
     private static final LocalTime INTERVIEW_START = LocalTime.of(9, 30);
@@ -56,8 +63,12 @@ public class HrInviteService {
             HrInviteCreateDTO one = copyDto(dto, interviewerUserId);
             inviteIds.add(createOneRecord(one, duration));
         }
-        java.util.List<String> unbound = attachSessionCalendars(inviteIds, dto, duration);
         Long last = inviteIds.isEmpty() ? null : inviteIds.get(inviteIds.size() - 1);
+        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+            finalizeInviteWithoutCalendar(inviteIds, dto);
+            return saveResult(last, null);
+        }
+        java.util.List<String> unbound = attachSessionCalendars(inviteIds, dto, duration);
         boolean calendarOk = unbound.size() < ids.size();
         if (calendarOk && last != null) {
             notifyRoundCc(last, dto);
@@ -87,8 +98,35 @@ public class HrInviteService {
     private InviteWrite createOne(HrInviteCreateDTO dto) {
         int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
         long inviteId = createOneRecord(dto, duration);
+        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+            finalizeInviteWithoutCalendar(List.of(inviteId), dto);
+            return new InviteWrite(inviteId, null);
+        }
         java.util.List<String> unbound = attachSessionCalendars(List.of(inviteId), dto, duration);
         return new InviteWrite(inviteId, unbound.isEmpty() ? null : unbound.getFirst());
+    }
+
+    /** 不调钉钉：标记未建日程，并写入轮次/阶段。 */
+    private void finalizeInviteWithoutCalendar(java.util.List<Long> inviteIds, HrInviteCreateDTO dto) {
+        if (inviteIds == null || inviteIds.isEmpty()) {
+            return;
+        }
+        for (Long inviteId : inviteIds) {
+            if (inviteId == null) {
+                continue;
+            }
+            Long interviewerUserId = jdbc.query("SELECT interviewer_user_id FROM hr_interview_invite WHERE id = ?",
+                    rs -> rs.next() ? rs.getLong(1) : null, inviteId);
+            Map<String, Object> person = loadInvitePerson(interviewerUserId, dto.getApplicationId());
+            jdbc.update("""
+                    UPDATE hr_interview_invite
+                    SET status = 'NO_CALENDAR', dingtalk_event_id = NULL, dingtalk_calendar_id = NULL, fail_reason = ?
+                    WHERE id = ?
+                    """, CALENDAR_SKIPPED_REASON, inviteId);
+            if (person != null) {
+                writeRoundAndStage(copyDto(dto, interviewerUserId), person);
+            }
+        }
     }
 
     @Transactional
@@ -268,12 +306,18 @@ public class HrInviteService {
                 }
             }
         }
-        java.util.List<String> unbound = attachSessionCalendars(keepInviteIds, dto, duration);
-        boolean calendarOk = unbound.size() < desired.size();
-        if (calendarOk && !keepInviteIds.isEmpty()) {
-            notifyRoundCc(keepInviteIds.getFirst(), dto);
+        String warning;
+        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+            finalizeInviteWithoutCalendar(keepInviteIds, dto);
+            warning = null;
+        } else {
+            java.util.List<String> unbound = attachSessionCalendars(keepInviteIds, dto, duration);
+            boolean calendarOk = unbound.size() < desired.size();
+            if (calendarOk && !keepInviteIds.isEmpty()) {
+                notifyRoundCc(keepInviteIds.getFirst(), dto);
+            }
+            warning = unboundMessage(unbound);
         }
-        String warning = unboundMessage(unbound);
         if (!cancelMisses.isEmpty()) {
             warning = joinWarning(String.join("；", cancelMisses), warning);
         }

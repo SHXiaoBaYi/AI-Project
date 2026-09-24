@@ -321,7 +321,7 @@ export default function InviteFormModal({
           } else {
             const saved = await createHrInviteApi(payload);
             if (saved?.warning) message.warning(saved.warning, 8);
-            else message.success(`已为 ${ids.length} 名面试官发起邀约，钉钉日程已创建`);
+            else message.success(`已为 ${ids.length} 名面试官发起邀约`);
           }
           onOpenChange(false);
           onSuccess?.();

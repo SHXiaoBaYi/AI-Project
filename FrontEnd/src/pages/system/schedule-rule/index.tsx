@@ -26,10 +26,12 @@ const ACTION_META: { action: string; label: string }[] = [
   { action: 'report', label: '工作汇报' },
 ];
 
-/** 网格：30 分钟一格，08:00～21:00 */
+/** 网格：行=星期，列=时间；09:30～18:00，每格 30 分钟 / 30px */
 const SLOT_MINUTES = 30;
-const GRID_START_MIN = 8 * 60;
-const GRID_END_MIN = 21 * 60;
+const CELL_PX = 30;
+const DAY_LABEL_PX = 28;
+const GRID_START_MIN = 9 * 60 + 30;
+const GRID_END_MIN = 18 * 60;
 
 type WindowForm = {
   weekdays: number[];
@@ -46,8 +48,6 @@ type ActionPrefForm = {
 };
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
-
-const ACTION_SLOT_START = '09:30';
 
 function minsToDayjs(mins: number): Dayjs {
   const h = Math.floor(mins / 60);
@@ -66,6 +66,13 @@ function formatHm(mins: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+/** 表头短标签，如 9:30 / 10 */
+function formatHmShort(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? String(h) : `${h}:${String(m).padStart(2, '0')}`;
+}
+
 function cellKey(weekday: number, startMin: number): string {
   return `${weekday}:${startMin}`;
 }
@@ -82,15 +89,6 @@ function buildSlotStarts(): number[] {
 }
 
 const SLOT_STARTS = buildSlotStarts();
-
-function makeDefaultWindow(durationMin = SLOT_MINUTES): WindowForm {
-  const startTime = dayjs(ACTION_SLOT_START, 'HH:mm');
-  return {
-    weekdays: [1, 2, 3, 4, 5],
-    startTime,
-    endTime: startTime.add(durationMin, 'minute'),
-  };
-}
 
 function toWindowForms(windows?: ScheduleRuleWindow[]): WindowForm[] {
   if (!windows?.length) return [];
@@ -131,14 +129,12 @@ function windowsToCells(windows: WindowForm[] | undefined): Set<string> {
 /** 格子集合 → 合并后的窗口（同起止的星期合并） */
 function cellsToWindows(cells: Set<string>): WindowForm[] {
   if (cells.size === 0) return [];
-  // weekday -> sorted start mins
   const byDay = new Map<number, number[]>();
   for (const key of cells) {
     const { weekday, startMin } = parseCellKey(key);
     if (!byDay.has(weekday)) byDay.set(weekday, []);
     byDay.get(weekday)!.push(startMin);
   }
-  // weekday -> list of [start, end)
   const rangesByDay = new Map<number, { start: number; end: number }[]>();
   for (const [day, mins] of byDay) {
     const sorted = [...new Set(mins)].sort((a, b) => a - b);
@@ -156,7 +152,6 @@ function cellsToWindows(cells: Set<string>): WindowForm[] {
     }
     rangesByDay.set(day, ranges);
   }
-  // merge identical ranges across days
   const bucket = new Map<string, number[]>();
   for (const [day, ranges] of rangesByDay) {
     for (const r of ranges) {
@@ -187,13 +182,12 @@ function cellsToWindows(cells: Set<string>): WindowForm[] {
 function defaultActionPrefs(prefs?: ScheduleActionPref[]): ActionPrefForm[] {
   return ACTION_META.map((meta) => {
     const found = prefs?.find((p) => p.action === meta.action);
-    const windows = found?.windows?.length ? toWindowForms(found.windows) : [makeDefaultWindow()];
     return {
       action: meta.action,
       enabled: found ? !!found.enabled : true,
       preferDurationMin: found?.preferDurationMin ?? (meta.action === 'interview' ? 60 : 30),
       maxDurationMin: found?.maxDurationMin ?? undefined,
-      windows,
+      windows: found?.windows?.length ? toWindowForms(found.windows) : [],
     };
   });
 }
@@ -246,8 +240,8 @@ const Tofu = memo(function Tofu({
 type GridTone = 'prefer' | 'block';
 
 /**
- * 周一～周日平铺 × 半小时格子；按下拖拽框选，松手写入。
- * 起点已选 → 本次为擦除；起点未选 → 本次为涂选。
+ * 行=周一～周日，列=09:30～18:00（每格 30 分钟 / 30px）；拖拽框选，松手写入。
+ * 起点已选 → 擦除；起点未选 → 涂选。
  */
 const WeekTimeGrid = memo(function WeekTimeGrid({
   value,
@@ -271,6 +265,7 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
   } | null>(null);
 
   const display = draft ?? committed;
+  const colCount = SLOT_STARTS.length;
 
   const applyRect = useCallback((day1: number, slot1: number) => {
     const drag = dragRef.current;
@@ -312,47 +307,54 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
   }, [endDrag]);
 
   const selectedCls = tone === 'block' ? 'bg-rose-500/85 hover:bg-rose-500' : 'bg-sky-500/85 hover:bg-sky-500';
-  const previewCls = tone === 'block' ? 'bg-rose-400/50 ring-1 ring-rose-300' : 'bg-sky-400/50 ring-1 ring-sky-300';
+  const previewCls =
+    tone === 'block'
+      ? 'bg-rose-400/50 ring-1 ring-inset ring-rose-300'
+      : 'bg-sky-400/50 ring-1 ring-inset ring-sky-300';
 
   return (
-    <div className='select-none'>
+    <div className='w-full select-none'>
       <div className='mb-1 flex items-center justify-between gap-2 text-[11px] text-neutral-400'>
-        <span>{disabled ? '仅查看' : '拖拽框选格子，松手即保存；再框已选区域可取消'}</span>
+        <span>{disabled ? '仅查看' : '拖拽框选，松手保存；再框已选可取消'}</span>
         <span className='shrink-0 tabular-nums'>{display.size ? `${display.size} 格` : '未选'}</span>
       </div>
-      <div
-        className='overflow-auto rounded border border-neutral-200'
-        style={{ maxHeight: 280 }}
-      >
+      {/* 横向顶满豆腐块，底部贴齐卡片 */}
+      <div className='-mx-3 -mb-2.5 overflow-hidden border-t border-neutral-200'>
         <div
-          className='grid min-w-[260px]'
-          style={{ gridTemplateColumns: `36px repeat(7, minmax(0, 1fr))` }}
-          onMouseLeave={() => {
-            /* 保持拖拽，由 window mouseup 结束 */
+          className='w-full'
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${DAY_LABEL_PX}px repeat(${colCount}, minmax(0, 1fr))`,
           }}
         >
-          <div className='sticky top-0 z-[1] bg-neutral-50' />
-          {WEEKDAYS.map((d) => (
+          {/* 表头：时间列 */}
+          <div
+            className='bg-neutral-50'
+            style={{ height: CELL_PX }}
+          />
+          {SLOT_STARTS.map((startMin) => (
             <div
-              key={d.value}
-              className='sticky top-0 z-[1] border-b border-l border-neutral-100 bg-neutral-50 py-1 text-center text-[11px] font-medium text-neutral-600'
+              key={`h-${startMin}`}
+              className='flex items-end justify-center border-b border-l border-neutral-100 bg-neutral-50 pb-0.5 text-[9px] leading-none text-neutral-500 tabular-nums'
+              style={{ height: CELL_PX, minWidth: 0 }}
+              title={`${formatHm(startMin)}–${formatHm(startMin + SLOT_MINUTES)}`}
             >
-              {d.label}
+              {formatHmShort(startMin)}
             </div>
           ))}
-          {SLOT_STARTS.map((startMin, slotIdx) => (
+          {/* 行：星期 */}
+          {WEEKDAYS.map((d, dayIdx) => (
             <div
-              key={startMin}
+              key={d.value}
               className='contents'
             >
               <div
-                className={`border-t border-neutral-100 pr-1 text-right text-[10px] leading-4 text-neutral-400 tabular-nums ${
-                  startMin % 60 === 0 ? 'font-medium text-neutral-500' : ''
-                }`}
+                className='flex items-center justify-center border-t border-neutral-100 text-[11px] font-medium text-neutral-600'
+                style={{ height: CELL_PX }}
               >
-                {startMin % 60 === 0 ? formatHm(startMin) : ''}
+                {d.label}
               </div>
-              {WEEKDAYS.map((d, dayIdx) => {
+              {SLOT_STARTS.map((startMin, slotIdx) => {
                 const key = cellKey(d.value, startMin);
                 const on = display.has(key);
                 const inDraft = draft?.has(key);
@@ -363,10 +365,11 @@ const WeekTimeGrid = memo(function WeekTimeGrid({
                     key={key}
                     type='button'
                     disabled={disabled}
-                    title={`${WEEKDAYS[dayIdx].label} ${formatHm(startMin)}–${formatHm(startMin + SLOT_MINUTES)}`}
-                    className={`h-4 border-t border-l border-neutral-100 transition-colors disabled:cursor-not-allowed ${
+                    title={`周${d.label} ${formatHm(startMin)}–${formatHm(startMin + SLOT_MINUTES)}`}
+                    className={`min-w-0 border-t border-l border-neutral-100 p-0 transition-colors disabled:cursor-not-allowed ${
                       on ? (isPreview ? previewCls : selectedCls) : 'bg-white hover:bg-neutral-100'
                     }`}
+                    style={{ height: CELL_PX }}
                     onMouseDown={(e) => {
                       if (disabled || e.button !== 0) return;
                       e.preventDefault();
@@ -500,7 +503,7 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
             type='secondary'
             className='text-xs'
           >
-            仅本人可配。拖拽框选周一～周日时段，松手后自动保存。
+            仅本人可配。行=星期、列=09:30～18:00，拖拽框选后自动保存。
           </Typography.Text>
         </div>
         <Typography.Text
@@ -676,13 +679,15 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
               >
                 <Input />
               </Form.Item>
-              <div className='mb-2 grid grid-cols-2 gap-1'>
+              <div className='mb-2 grid grid-cols-2 gap-x-3 gap-y-1'>
                 <Form.Item
                   name={['actionPrefs', index, 'preferDurationMin']}
                   label='默认分'
                   rules={[{ required: true, message: '必填' }]}
+                  layout='vertical'
+                  labelCol={{ span: 24 }}
+                  wrapperCol={{ span: 24 }}
                   className='!mb-0'
-                  labelCol={{ flex: '0 0 48px' }}
                 >
                   <InputNumber
                     min={15}
@@ -694,8 +699,10 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
                 <Form.Item
                   name={['actionPrefs', index, 'maxDurationMin']}
                   label='最长'
+                  layout='vertical'
+                  labelCol={{ span: 24 }}
+                  wrapperCol={{ span: 24 }}
                   className='!mb-0'
-                  labelCol={{ flex: '0 0 36px' }}
                 >
                   <InputNumber
                     min={15}
@@ -706,7 +713,7 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
                   />
                 </Form.Item>
               </div>
-              <div className='mb-1 text-xs text-neutral-500'>喜好可约时段（30 分钟一格，拖拽框选）</div>
+              <div className='mb-1 text-xs text-neutral-500'>喜好可约时段（默认不选，拖拽框选）</div>
               <Form.Item
                 name={['actionPrefs', index, 'windows']}
                 className='!mb-0'

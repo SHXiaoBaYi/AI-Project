@@ -9,7 +9,6 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import {
   createHrInviteApi,
-  createHrInviteCalendarBatchApi,
   deleteHrInviteBatchApi,
   getHrApplicationsApi,
   getHrRequisitionsApi,
@@ -160,45 +159,6 @@ function RoundPeopleSelect({
       allowClear
     />
   );
-}
-
-function notifyCalendarResult(
-  saved: { warning?: string; created?: number; unboundInterviewers?: string[] } | undefined,
-  messageApi: { warning: (content: string, duration?: number) => void; success: (content: string) => void },
-) {
-  const names = saved?.unboundInterviewers?.filter(Boolean) ?? [];
-  if (names.length) {
-    Modal.warning({
-      title: '以下面试官没有绑定钉钉',
-      okText: '关闭',
-      width: 480,
-      maskClosable: false,
-      content: (
-        <div>
-          <p className='mb-2'>
-            {saved?.created ? `已创建 ${saved.created} 条钉钉日程。` : '未能创建钉钉日程。'}
-            请联系行政绑定后再创建。
-          </p>
-          <ul className='max-h-60 overflow-auto rounded border border-neutral-200'>
-            {names.map((name) => (
-              <li
-                key={name}
-                className='border-b border-neutral-100 px-3 py-2 last:border-b-0'
-              >
-                {name}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ),
-    });
-    return;
-  }
-  if (saved?.warning) {
-    messageApi.warning(saved.warning, 8);
-    return;
-  }
-  messageApi.success(`已创建 ${saved?.created ?? 0} 条钉钉日程`);
 }
 
 function textOf(value: unknown) {
@@ -371,21 +331,6 @@ const InvitePage = memo(function InvitePage() {
                   setOpen(true);
                 },
               },
-              ...(record.pendingInviteIds.length
-                ? [
-                    {
-                      key: 'calendar',
-                      label: '创建钉钉日程',
-                      perm: 'hr:invite:edit',
-                      confirmTitle: `确认为「${record.displayName}」这场邀约创建钉钉日程？面试官需已绑定钉钉。`,
-                      onClick: async () => {
-                        const saved = await createHrInviteCalendarBatchApi(record.pendingInviteIds);
-                        notifyCalendarResult(saved, message);
-                        actionRef.current?.reload();
-                      },
-                    },
-                  ]
-                : []),
               {
                 key: 'delete',
                 label: '删除',
@@ -629,41 +574,6 @@ const InvitePage = memo(function InvitePage() {
         }}
         toolBarRender={() => [
           <PermissionButton
-            key='calendar'
-            perm='hr:invite:edit'
-            onClick={() => {
-              if (selectedRowKeys.length === 0) {
-                message.warning('请先选择要创建钉钉日程的面试邀约');
-                return;
-              }
-              const selected = groupedRef.current.filter((row) => selectedRowKeys.map(Number).includes(row.id));
-              if (selected.every((row) => row.hasRecord)) {
-                message.warning('所选场次都已有面试记录，不能创建钉钉日程');
-                return;
-              }
-              const inviteIds = selected.filter((row) => !row.hasRecord).flatMap((row) => row.pendingInviteIds);
-              if (inviteIds.length === 0) {
-                message.warning('所选场次都已经有钉钉日程，或已有面试记录');
-                return;
-              }
-              Modal.confirm({
-                title: '批量创建钉钉日程',
-                content: `将为选中场次里尚未建日程的 ${inviteIds.length} 条面试官邀约创建钉钉日程。面试官未绑定钉钉的不能创建。`,
-                okText: '创建',
-                cancelText: '取消',
-                onOk: async () => {
-                  const saved = await createHrInviteCalendarBatchApi(inviteIds);
-                  notifyCalendarResult(saved, message);
-                  setSelectedRowKeys([]);
-                  currentPageKeysRef.current = new Set();
-                  actionRef.current?.reload();
-                },
-              });
-            }}
-          >
-            批量创建钉钉日程
-          </PermissionButton>,
-          <PermissionButton
             key='del'
             color='danger'
             variant='filled'
@@ -755,14 +665,12 @@ const InvitePage = memo(function InvitePage() {
             if (saved?.warning) {
               message.warning(saved.warning, 8);
             } else {
-              message.success(
-                ids.length > 1 ? `已保存这场邀约，共 ${ids.length} 名面试官` : '已保存，钉钉日程已按新时间重建',
-              );
+              message.success(ids.length > 1 ? `已保存这场邀约，共 ${ids.length} 名面试官` : '已保存邀约');
             }
           } else {
             const saved = await createHrInviteApi(payload);
             if (saved?.warning) message.warning(saved.warning, 8);
-            else message.success(`已为 ${ids.length} 名面试官发起邀约，钉钉日程已创建`);
+            else message.success(`已为 ${ids.length} 名面试官发起邀约`);
           }
           actionRef.current?.reload();
           return true;
