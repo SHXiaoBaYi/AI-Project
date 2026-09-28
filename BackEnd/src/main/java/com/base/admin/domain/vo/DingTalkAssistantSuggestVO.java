@@ -56,6 +56,15 @@ public class DingTalkAssistantSuggestVO {
     @Schema(description = "步骤3：建议的下一个动作说明（聊天展示）")
     private String nextStepText;
 
+    @Schema(description = "解析出的意图动作", example = "interview")
+    private String intentAction;
+
+    @Schema(description = "解析/匹配到的岗位名", example = "品牌总监")
+    private String jobName;
+
+    @Schema(description = "岗位与面试频次规则匹配说明")
+    private String jobMatchNote;
+
     @Schema(description = "按天分组的推荐时段（每段=期望时长）")
     private List<DayGroup> dayGroups = new ArrayList<>();
 

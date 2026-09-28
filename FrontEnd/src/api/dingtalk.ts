@@ -116,12 +116,15 @@ export type DingTalkAssistantSuggest = {
   bufferMin?: number;
   error?: string;
   adviceText?: string;
-  /** 步骤1：日程规则摘要 */
+  /** 日程规则摘要 */
   ruleSummary?: string;
-  /** 步骤2：钉钉闲忙摘要 */
+  /** 钉钉闲忙摘要 */
   busySummary?: string;
-  /** 步骤3：建议的下一个动作 */
+  /** 建议的下一个动作 */
   nextStepText?: string;
+  intentAction?: string;
+  jobName?: string;
+  jobMatchNote?: string;
   dayGroups?: DingTalkAssistantDayGroup[];
   freeWindows: DingTalkAssistantFreeWindow[];
   actions: DingTalkAssistantAction[];
@@ -129,9 +132,12 @@ export type DingTalkAssistantSuggest = {
 
 export function suggestDingTalkAssistantApi(data: {
   targetUserId: number;
-  startTime: string;
-  endTime: string;
+  message?: string;
+  startTime?: string;
+  endTime?: string;
   durationMin?: number;
+  action?: string;
+  jobName?: string;
 }) {
   return request.post<unknown, DingTalkAssistantSuggest>('/system/dingtalk/assistant/suggest', data);
 }

@@ -60,8 +60,10 @@ type ActionTarget = {
 
 type ParsedAsk = {
   user: DingTalkBusyUserOption;
-  durationMin: number;
-  range: [Dayjs, Dayjs];
+  /** 仅当用户口头点名时长时才有 */
+  durationMin?: number;
+  /** 仅当用户口头点名日期时才有 */
+  range?: [Dayjs, Dayjs];
 };
 
 function msgId() {
@@ -102,14 +104,7 @@ function workHoursLabel(suggest?: DingTalkAssistantSuggest | null) {
   return `每天 ${ws}～${we}`;
 }
 
-function defaultAskRange(): [Dayjs, Dayjs] {
-  const { min, max } = bookingWindow();
-  let end = min.add(4, 'day');
-  if (end.isAfter(max, 'day')) end = max.startOf('day');
-  return toAskDateRange(min, end);
-}
-
-function parseDurationMin(text: string): number {
+function parseDurationMin(text: string): number | undefined {
   if (/半\s*小时/.test(text)) return 30;
   if (/一个半\s*小时|1\.5\s*小时/.test(text)) return 90;
   if (/两\s*小时|2\s*小时/.test(text)) return 120;
@@ -124,10 +119,10 @@ function parseDurationMin(text: string): number {
     const n = Math.round(Number(hourHit[1]) * 60);
     if (Number.isFinite(n) && n >= 15 && n <= 240) return n;
   }
-  return 60;
+  return undefined;
 }
 
-function parseAskRange(text: string): [Dayjs, Dayjs] {
+function parseAskRange(text: string): [Dayjs, Dayjs] | undefined {
   const { min, max } = bookingWindow();
   const today = min.startOf('day');
 
@@ -161,7 +156,7 @@ function parseAskRange(text: string): [Dayjs, Dayjs] {
     const y = today.year();
     let start = dayjs(`${y}-${rangeHit[1].padStart(2, '0')}-${rangeHit[2].padStart(2, '0')}`);
     let end = dayjs(`${y}-${rangeHit[3].padStart(2, '0')}-${rangeHit[4].padStart(2, '0')}`);
-    if (!start.isValid() || !end.isValid()) return defaultAskRange();
+    if (!start.isValid() || !end.isValid()) return undefined;
     if (start.isBefore(today, 'day')) start = start.add(1, 'year');
     if (end.isBefore(start, 'day')) end = end.add(1, 'year');
     return toAskDateRange(start, end);
@@ -171,12 +166,12 @@ function parseAskRange(text: string): [Dayjs, Dayjs] {
   if (singleHit && !/分钟|小时/.test(text.slice(Math.max(0, (singleHit.index ?? 0) - 2), (singleHit.index ?? 0) + 8))) {
     const y = today.year();
     let d = dayjs(`${y}-${singleHit[1].padStart(2, '0')}-${singleHit[2].padStart(2, '0')}`);
-    if (!d.isValid()) return defaultAskRange();
+    if (!d.isValid()) return undefined;
     if (d.isBefore(today, 'day')) d = d.add(1, 'year');
     return toAskDateRange(d, d);
   }
 
-  return defaultAskRange();
+  return undefined;
 }
 
 function matchUserByToken(token: string, users: DingTalkBusyUserOption[]): DingTalkBusyUserOption | null {
@@ -214,15 +209,17 @@ function resolveMentionedUser(text: string, users: DingTalkBusyUserOption[]): Di
 function parseAsk(text: string, users: DingTalkBusyUserOption[]): ParsedAsk | { error: string } {
   const user = resolveMentionedUser(text, users);
   if (!user) {
-    return { error: '请先 @同事，例如：@张三 这周有没有 60 分钟空闲？' };
+    return { error: '请先 @同事，例如：@张三 这周有没有空可以面试一个品牌总监？' };
   }
   if (user.dingtalkBound !== 1) {
     return { error: `「${user.nickname || user.username}」还未绑定钉钉，暂时查不了闲忙` };
   }
   const durationMin = parseDurationMin(text);
   const range = parseAskRange(text);
-  const rangeErr = bookingRangeError(range[0], range[1]);
-  if (rangeErr) return { error: rangeErr };
+  if (range) {
+    const rangeErr = bookingRangeError(range[0], range[1]);
+    if (rangeErr) return { error: rangeErr };
+  }
   return { user, durationMin, range };
 }
 
@@ -333,24 +330,30 @@ function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
     }
     const { user, durationMin, range } = parsed;
     const nickname = user.nickname || user.username;
-    const [askStart, askEnd] = toAskDateRange(range[0], range[1]);
-    if (!askStart.isBefore(askEnd) && !askStart.isSame(askEnd, 'day')) {
-      message.warning('请说清楚要查的日期范围');
-      return;
-    }
 
     push({ role: 'user', text: trimmed });
     setDraft('');
     setQuerying(true);
     try {
-      const data = filterSuggestHolidays(
-        await suggestDingTalkAssistantApi({
-          targetUserId: user.userId,
-          startTime: askStart.format('YYYY-MM-DD HH:mm:ss'),
-          endTime: askEnd.format('YYYY-MM-DD HH:mm:ss'),
-          durationMin,
-        }),
-      );
+      const payload: {
+        targetUserId: number;
+        message: string;
+        startTime?: string;
+        endTime?: string;
+        durationMin?: number;
+      } = {
+        targetUserId: user.userId,
+        message: trimmed,
+      };
+      if (durationMin != null) payload.durationMin = durationMin;
+      // 相对日期（今天/明天等）只传原话，由后端按服务器日历解析，避免前后端日期被 AI/时区盖成过去
+      const relativeDay = /今天|明天|后天|本周|这周|下周|(?:近|未来|接下来)\s*\d+\s*天/.test(trimmed);
+      if (!relativeDay && range?.[0] && range?.[1]) {
+        const [askStart, askEnd] = toAskDateRange(range[0], range[1]);
+        payload.startTime = askStart.format('YYYY-MM-DD HH:mm:ss');
+        payload.endTime = askEnd.format('YYYY-MM-DD HH:mm:ss');
+      }
+      const data = filterSuggestHolidays(await suggestDingTalkAssistantApi(payload));
       const displayName = data.targetNickname || nickname;
       const firstDay = data.dayGroups?.find((d) => (d.slots?.length ?? 0) > 0) ?? data.dayGroups?.[0];
       const firstSlot = firstDay?.slots?.[0];
@@ -366,7 +369,7 @@ function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
         context: {
           targetUserId: user.userId,
           targetNickname: displayName,
-          durationMin: data.durationMin || durationMin,
+          durationMin: data.durationMin || durationMin || 60,
         },
       });
     } catch (err) {

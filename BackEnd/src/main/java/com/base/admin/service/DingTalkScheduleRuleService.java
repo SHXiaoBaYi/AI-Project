@@ -373,6 +373,19 @@ public class DingTalkScheduleRuleService {
         return ACTION_INTERVIEW.equals(normalizeAction(action));
     }
 
+    /** 助手：判断候选时段是否落在指定动作的喜好窗内（含节假日/不安排） */
+    public boolean isSlotAllowed(DingTalkScheduleRuleVO rule, String action, LocalDateTime start, LocalDateTime end) {
+        if (rule == null || start == null || end == null) {
+            return false;
+        }
+        String act = normalizeAction(action);
+        DingTalkScheduleRuleVO.ActionPref pref = findAction(rule, act);
+        if (pref == null || !pref.isEnabled()) {
+            return false;
+        }
+        return fitsPreference(start, end, rule, pref);
+    }
+
     private void collectSlots(List<DingTalkScheduleRecommendVO.Slot> out, LocalDateTime freeStart, LocalDateTime freeEnd,
                               int durationMin, DingTalkScheduleRuleVO rule, DingTalkScheduleRuleVO.ActionPref pref) {
         LocalDateTime cursor = ceilToStep(freeStart);
