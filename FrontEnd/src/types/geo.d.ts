@@ -377,15 +377,18 @@ export interface GeoDailyBoard {
 }
 
 export interface GeoTopicPlatformCharts {
-  level: 'topic' | 'question' | 'platform' | string;
-  seriesField?: 'topic' | 'question' | 'platform' | string;
+  level: 'topic' | 'platform' | 'keyword' | string;
+  seriesField?: 'topic' | 'platform' | 'keyword' | string;
   grain?: string;
   topicId?: number;
   topicName?: string;
   keyword?: string;
+  platform?: string;
   rankChart?: GeoChartPoint[];
   sampleChart?: GeoChartPoint[];
   negativeChart?: GeoChartPoint[];
+  firstRecommendChart?: GeoChartPoint[];
+  top3RecommendChart?: GeoChartPoint[];
 }
 
 export interface GeoNegativeSummaryRow {
@@ -458,6 +461,10 @@ export interface GeoBoardQuery {
   keyword?: string;
   termType?: string;
   platforms?: string[];
+  /** 露出排名下钻选中的单个平台 */
+  platform?: string;
+  /** 豆腐块指标：rank / sample / negative / firstRecommend / top3Recommend */
+  chartMetric?: 'rank' | 'sample' | 'negative' | 'firstRecommend' | 'top3Recommend' | string;
   grain?: 'day' | 'week' | 'month' | 'year' | string;
 }
 

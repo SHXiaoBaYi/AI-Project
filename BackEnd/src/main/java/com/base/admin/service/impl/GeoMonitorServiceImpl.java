@@ -741,7 +741,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             board.getRows().add(vo);
         }
         fillChartsFromTrend(topicRows, board.getMentionChart(), board.getFirstMentionChart(), board.getRecommendChart());
-        GeoTopicPlatformChartsVO tofu = buildTopicPlatformCharts(records, topicNames, null, null, "day");
+        GeoTopicPlatformChartsVO tofu = buildTopicPlatformCharts(records, topicNames, null, null, null, null, "day");
         board.setRankChart(tofu.getRankChart());
         board.setSampleChart(tofu.getSampleChart());
         board.setNegativeChart(tofu.getNegativeChart());
@@ -778,15 +778,21 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         LocalDate[] range = dayRange(q);
         Long drillTopicId = q.getTopicId();
         String keyword = StringUtils.hasText(q.getKeyword()) ? q.getKeyword().trim() : null;
+        String drillPlatform = StringUtils.hasText(q.getPlatform()) ? q.getPlatform().trim() : null;
+        String chartMetric = StringUtils.hasText(q.getChartMetric()) ? q.getChartMetric().trim().toLowerCase() : null;
         String grain = StringUtils.hasText(q.getGrain()) ? q.getGrain().trim().toLowerCase() : "day";
         if (!List.of("day", "week", "month", "year").contains(grain)) {
             grain = "day";
         }
-        // 下钻时按话题过滤；关键字在聚合内再筛，便于同请求返回问题列表
+        // 下钻时按话题过滤；关键字/平台在聚合内再筛，便于同请求返回下级系列
+        List<String> platformFilter = q.getPlatforms();
+        if ("rank".equals(chartMetric) && StringUtils.hasText(drillPlatform)) {
+            platformFilter = List.of(drillPlatform);
+        }
         List<GeoMonitorDaily> records = loadActiveDaily(
-                range[0], range[1], drillTopicId, null, q.getPlatforms(), q.getTermType());
+                range[0], range[1], drillTopicId, null, platformFilter, q.getTermType());
         Map<Long, String> topicNames = topicNameMap();
-        return buildTopicPlatformCharts(records, topicNames, drillTopicId, keyword, grain);
+        return buildTopicPlatformCharts(records, topicNames, drillTopicId, keyword, drillPlatform, chartMetric, grain);
     }
 
     @Override
@@ -2512,13 +2518,20 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     }
 
     /**
-     * 三级下钻分组柱：横轴始终=日期。
-     * topic：系列=话题；question：系列=目标问题；platform：系列=平台。
+     * 三级下钻分组柱：横轴始终=日期；路径统一为 topic → platform → keyword。
+     * <ul>
+     *   <li>sample：测试问题数；同一问题跨两平台计 2（按 keyword×platform 去重）</li>
+     *   <li>negative：负面问题数；L3 系列=负面内容</li>
+     *   <li>rank：平均排名=提及排名之和/提及次数</li>
+     *   <li>firstRecommend / top3Recommend：推荐次数÷提及次数；话题层=各平台率均值</li>
+     * </ul>
      */
     private GeoTopicPlatformChartsVO buildTopicPlatformCharts(List<GeoMonitorDaily> records,
                                                               Map<Long, String> topicNames,
                                                               Long drillTopicId,
                                                               String keyword,
+                                                              String drillPlatform,
+                                                              String chartMetric,
                                                               String grain) {
         GeoTopicPlatformChartsVO vo = new GeoTopicPlatformChartsVO();
         vo.setGrain(grain);
@@ -2527,43 +2540,53 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             vo.setTopicName(topicNames.getOrDefault(drillTopicId, "话题#" + drillTopicId));
         }
         vo.setKeyword(keyword);
+        vo.setPlatform(drillPlatform);
 
         String seriesMode;
         if (drillTopicId == null) {
             seriesMode = "topic";
             vo.setLevel("topic");
-        } else if (!StringUtils.hasText(keyword)) {
-            seriesMode = "question";
-            vo.setLevel("question");
-        } else {
+        } else if (!StringUtils.hasText(drillPlatform)) {
             seriesMode = "platform";
             vo.setLevel("platform");
+        } else {
+            seriesMode = "keyword";
+            vo.setLevel("keyword");
         }
         vo.setSeriesField(seriesMode);
 
-        Map<String, RankBag> rankBags = new LinkedHashMap<>();
-        Map<String, Integer> sampleCnt = new LinkedHashMap<>();
-        Map<String, Set<String>> sampleQuestions = new LinkedHashMap<>();
-        Map<String, Integer> negativeCnt = new LinkedHashMap<>();
+        // cellKey = axis\0seriesKey
         Map<String, String> seriesLabel = new LinkedHashMap<>();
+        Map<String, Set<String>> samplePairs = new LinkedHashMap<>(); // keyword|platform or keyword
+        Map<String, Integer> sampleRaw = new LinkedHashMap<>();
+        Map<String, Set<String>> negativePairs = new LinkedHashMap<>();
+        Map<String, Integer> negativeRaw = new LinkedHashMap<>();
+        Map<String, Integer> negativeContentCnt = new LinkedHashMap<>(); // axis\0content -> cnt
+        Map<String, RankBag> rankBags = new LinkedHashMap<>();
+        // rate: for topic level keep per-platform bags then average; else direct bags
+        Map<String, Map<String, RateBag>> topicPlatformRates = new LinkedHashMap<>();
+        Map<String, RateBag> directRates = new LinkedHashMap<>();
 
         for (GeoMonitorDaily r : records) {
             if (drillTopicId != null && !Objects.equals(r.getTopicId(), drillTopicId)) {
                 continue;
             }
-            String kw = StringUtils.hasText(r.getKeyword()) ? r.getKeyword().trim() : "未填目标问题";
+            String kw = StringUtils.hasText(r.getKeyword()) ? r.getKeyword().trim() : "未填测试词";
             if (StringUtils.hasText(keyword) && !keyword.equals(kw)) {
+                continue;
+            }
+            String platform = StringUtils.hasText(r.getPlatform()) ? r.getPlatform().trim() : "未知平台";
+            if (StringUtils.hasText(drillPlatform) && !drillPlatform.equals(platform)) {
                 continue;
             }
             if (r.getInspectDate() == null) {
                 continue;
             }
             String axis = timeBucket(r.getInspectDate(), grain);
-            String platform = StringUtils.hasText(r.getPlatform()) ? r.getPlatform().trim() : "未知平台";
             String seriesKey;
             String seriesName;
             switch (seriesMode) {
-                case "question" -> {
+                case "keyword" -> {
                     seriesKey = kw;
                     seriesName = kw;
                 }
@@ -2585,51 +2608,161 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             String cell = axis + "\0" + seriesKey;
             seriesLabel.put(seriesKey, seriesName);
 
-            sampleCnt.merge(cell, 1, Integer::sum);
-            sampleQuestions.computeIfAbsent(cell, k -> new LinkedHashSet<>()).add(kw);
-            if (hasMeaningfulNegative(r.getNegativeContent())) {
-                negativeCnt.merge(cell, 1, Integer::sum);
+            // 测试问题：跨平台同一问题计 2 → keyword×platform 去重；平台层按 keyword 去重；词层计次数
+            if ("topic".equals(seriesMode)) {
+                samplePairs.computeIfAbsent(cell, k -> new LinkedHashSet<>()).add(kw + "\0" + platform);
+            } else if ("platform".equals(seriesMode)) {
+                samplePairs.computeIfAbsent(cell, k -> new LinkedHashSet<>()).add(kw);
+            } else {
+                sampleRaw.merge(cell, 1, Integer::sum);
             }
+
+            boolean neg = hasMeaningfulNegative(r.getNegativeContent());
+            if (neg) {
+                if ("topic".equals(seriesMode)) {
+                    negativePairs.computeIfAbsent(cell, k -> new LinkedHashSet<>()).add(kw + "\0" + platform);
+                } else if ("platform".equals(seriesMode)) {
+                    negativeRaw.merge(cell, 1, Integer::sum);
+                } else {
+                    String content = r.getNegativeContent().trim();
+                    negativeContentCnt.merge(axis + "\0" + content, 1, Integer::sum);
+                }
+            }
+
             if (Objects.equals(r.getMentioned(), 1) && r.getRankNo() != null && r.getRankNo() > 0) {
                 RankBag bag = rankBags.computeIfAbsent(cell, k -> new RankBag());
                 bag.sum += r.getRankNo();
                 bag.n++;
             }
+
+            if (Objects.equals(r.getMentioned(), 1)) {
+                if ("topic".equals(seriesMode)) {
+                    RateBag rb = topicPlatformRates
+                            .computeIfAbsent(cell, k -> new LinkedHashMap<>())
+                            .computeIfAbsent(platform, k -> new RateBag());
+                    rb.mention++;
+                    if (r.getRankNo() != null && r.getRankNo() == 1) {
+                        rb.first++;
+                    }
+                    if (r.getRankNo() != null && r.getRankNo() > 0 && r.getRankNo() <= 3) {
+                        rb.top3++;
+                    }
+                } else {
+                    RateBag rb = directRates.computeIfAbsent(cell, k -> new RateBag());
+                    rb.mention++;
+                    if (r.getRankNo() != null && r.getRankNo() == 1) {
+                        rb.first++;
+                    }
+                    if (r.getRankNo() != null && r.getRankNo() > 0 && r.getRankNo() <= 3) {
+                        rb.top3++;
+                    }
+                }
+            }
         }
 
         Set<String> cells = new LinkedHashSet<>();
-        cells.addAll(sampleCnt.keySet());
-        cells.addAll(negativeCnt.keySet());
+        cells.addAll(samplePairs.keySet());
+        cells.addAll(sampleRaw.keySet());
+        cells.addAll(negativePairs.keySet());
+        cells.addAll(negativeRaw.keySet());
         cells.addAll(rankBags.keySet());
+        cells.addAll(topicPlatformRates.keySet());
+        cells.addAll(directRates.keySet());
+
         for (String cell : cells) {
             String[] parts = cell.split("\0", 2);
             String axis = parts[0];
             String sKey = parts.length > 1 ? parts[1] : "-";
             String series = seriesLabel.getOrDefault(sKey, sKey);
+
             RankBag rb = rankBags.get(cell);
             if (rb != null && rb.n > 0) {
-                addChart(vo.getRankChart(), axis, series, (double) rb.sum / rb.n, sKey);
+                double avgRank = (double) rb.sum / rb.n;
+                addChart(vo.getRankChart(), axis, series,
+                        BigDecimal.valueOf(avgRank).setScale(1, RoundingMode.HALF_UP).doubleValue(), sKey);
             }
-            if ("platform".equals(seriesMode)) {
-                Integer sc = sampleCnt.get(cell);
+
+            if ("keyword".equals(seriesMode)) {
+                Integer sc = sampleRaw.get(cell);
                 if (sc != null && sc > 0) {
                     addChart(vo.getSampleChart(), axis, series, sc, sKey);
                 }
             } else {
-                Set<String> qs = sampleQuestions.get(cell);
-                if (qs != null && !qs.isEmpty()) {
-                    addChart(vo.getSampleChart(), axis, series, qs.size(), sKey);
+                Set<String> pairs = samplePairs.get(cell);
+                if (pairs != null && !pairs.isEmpty()) {
+                    addChart(vo.getSampleChart(), axis, series, pairs.size(), sKey);
+                }
+                Set<String> negPairs = negativePairs.get(cell);
+                if (negPairs != null && !negPairs.isEmpty()) {
+                    addChart(vo.getNegativeChart(), axis, series, negPairs.size(), sKey);
+                }
+                Integer negCnt = negativeRaw.get(cell);
+                if (negCnt != null && negCnt > 0) {
+                    addChart(vo.getNegativeChart(), axis, series, negCnt, sKey);
                 }
             }
-            Integer nc = negativeCnt.get(cell);
-            if (nc != null && nc > 0) {
-                addChart(vo.getNegativeChart(), axis, series, nc, sKey);
+
+            if ("topic".equals(seriesMode)) {
+                Map<String, RateBag> byPlat = topicPlatformRates.get(cell);
+                if (byPlat != null && !byPlat.isEmpty()) {
+                    List<Double> firstRates = new ArrayList<>();
+                    List<Double> top3Rates = new ArrayList<>();
+                    for (RateBag rate : byPlat.values()) {
+                        if (rate.mention <= 0) {
+                            continue;
+                        }
+                        firstRates.add(rate.first * 100.0 / rate.mention);
+                        top3Rates.add(rate.top3 * 100.0 / rate.mention);
+                    }
+                    if (!firstRates.isEmpty()) {
+                        addChart(vo.getFirstRecommendChart(), axis, series, avgOf(firstRates), sKey);
+                    }
+                    if (!top3Rates.isEmpty()) {
+                        addChart(vo.getTop3RecommendChart(), axis, series, avgOf(top3Rates), sKey);
+                    }
+                }
+            } else {
+                RateBag rate = directRates.get(cell);
+                if (rate != null && rate.mention > 0) {
+                    addChart(vo.getFirstRecommendChart(), axis, series, rate.first * 100.0 / rate.mention, sKey);
+                    addChart(vo.getTop3RecommendChart(), axis, series, rate.top3 * 100.0 / rate.mention, sKey);
+                }
             }
         }
+
+        if ("keyword".equals(seriesMode)) {
+            for (Map.Entry<String, Integer> e : negativeContentCnt.entrySet()) {
+                String[] parts = e.getKey().split("\0", 2);
+                if (parts.length < 2) {
+                    continue;
+                }
+                addChart(vo.getNegativeChart(), parts[0], parts[1], e.getValue(), parts[1]);
+            }
+        }
+
         sortChart(vo.getRankChart());
         sortChart(vo.getSampleChart());
         sortChart(vo.getNegativeChart());
+        sortChart(vo.getFirstRecommendChart());
+        sortChart(vo.getTop3RecommendChart());
         return vo;
+    }
+
+    private static double avgOf(List<Double> values) {
+        if (values == null || values.isEmpty()) {
+            return 0;
+        }
+        double sum = 0;
+        for (Double v : values) {
+            sum += v == null ? 0 : v;
+        }
+        return BigDecimal.valueOf(sum / values.size()).setScale(1, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private static final class RateBag {
+        int mention;
+        int first;
+        int top3;
     }
 
     private static String timeBucket(LocalDate date, String grain) {

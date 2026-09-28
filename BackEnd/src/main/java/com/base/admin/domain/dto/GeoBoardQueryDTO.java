@@ -19,7 +19,7 @@ public class GeoBoardQueryDTO {
     @Schema(description = "话题ID", example = "1")
     private Long topicId;
 
-    @Schema(description = "关键字")
+    @Schema(description = "关键字 / 测试词（下钻）")
     private String keyword;
 
     @Schema(description = "话题类型（日巡查/周巡查）", example = "日巡查")
@@ -27,6 +27,12 @@ public class GeoBoardQueryDTO {
 
     @Schema(description = "平台（多选）")
     private List<String> platforms;
+
+    @Schema(description = "露出排名下钻选中的单个平台", example = "豆包")
+    private String platform;
+
+    @Schema(description = "豆腐块指标：rank / sample / negative / firstRecommend / top3Recommend", example = "rank")
+    private String chartMetric;
 
     @Schema(description = "时间粒度：day/week/month/year", example = "week")
     private String grain;

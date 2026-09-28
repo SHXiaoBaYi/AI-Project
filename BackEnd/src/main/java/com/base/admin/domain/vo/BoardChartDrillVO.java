@@ -52,6 +52,9 @@ public class BoardChartDrillVO {
     @Schema(description = "日期范围折线（横轴=时间粒度，系列=主题/人等）")
     private List<BoardChartTrendPointVO> trend = new ArrayList<>();
 
+    @Schema(description = "同比环比表格（话题×平台）")
+    private List<BoardChartCompareRowVO> compareRows = new ArrayList<>();
+
     @Schema(description = "本层是否仍可下钻（若 false 则柱均不可点）")
     private boolean chartDrillable;
 }

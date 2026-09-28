@@ -6,7 +6,7 @@ import type { Dayjs } from 'dayjs';
 import { getGeoNegativeDailyApi, getGeoTopicPlatformChartsApi } from '@/api/geo';
 import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
-import type { GeoBoardQuery, GeoChartPoint, GeoDailyVO } from '@/types/geo';
+import type { GeoBoardQuery, GeoChartPoint, GeoDailyVO, GeoTopicPlatformCharts } from '@/types/geo';
 import type { DemoBoardGrain } from '@/constants/demoData';
 
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
@@ -34,71 +34,83 @@ function formatAxis(raw: string): string {
   return raw;
 }
 
-type MetricKind = 'rank' | 'sample' | 'negative';
-type DrillLevel = 'topic' | 'question' | 'platform';
+type MetricKind = 'rank' | 'sample' | 'negative' | 'firstRecommend' | 'top3Recommend';
+type DrillLevel = 'topic' | 'platform' | 'keyword';
 
-function pickChart(
-  data: { rankChart?: GeoChartPoint[]; sampleChart?: GeoChartPoint[]; negativeChart?: GeoChartPoint[] } | null,
-  metric: MetricKind,
-): GeoChartPoint[] {
+function pickChart(data: GeoTopicPlatformCharts | null, metric: MetricKind): GeoChartPoint[] {
   if (!data) return [];
   if (metric === 'rank') return data.rankChart || [];
   if (metric === 'sample') return data.sampleChart || [];
-  return data.negativeChart || [];
+  if (metric === 'negative') return data.negativeChart || [];
+  if (metric === 'firstRecommend') return data.firstRecommendChart || [];
+  return data.top3RecommendChart || [];
 }
 
-function seriesHint(level: DrillLevel, isNegative: boolean): string {
-  if (level === 'topic') return '横轴=日期，系列=话题；点击柱体下钻到目标问题';
-  if (level === 'question') return '横轴=日期，系列=目标问题；点击柱体下钻到各平台';
-  if (isNegative) return '横轴=日期，系列=平台；点击柱体查看该平台负面/错误明细';
-  return '横轴=日期，系列=平台（已到最细层级）';
+function seriesHint(metric: MetricKind, level: DrillLevel): string {
+  if (metric === 'sample') {
+    if (level === 'topic') return '横轴=日期，系列=话题；同一问题跨两平台计 2；点击下钻各平台';
+    if (level === 'platform') return '横轴=日期，系列=平台；点击查看该平台测了哪些问题';
+    return '横轴=日期，系列=测试问题（已到最细）';
+  }
+  if (metric === 'negative') {
+    if (level === 'topic') return '横轴=日期，系列=话题；负面问题总数（跨平台计 2）；点击下钻各平台';
+    if (level === 'platform') return '横轴=日期，系列=平台；负面出现次数；点击查看负面内容';
+    return '横轴=日期，系列=负面/错误内容；可点击查看明细';
+  }
+  if (metric === 'firstRecommend' || metric === 'top3Recommend') {
+    const name = metric === 'firstRecommend' ? '首位' : '前三位';
+    if (level === 'topic') return `横轴=日期，系列=话题；平均${name}推荐率=各平台率均值；点击下钻各平台`;
+    if (level === 'platform') return `横轴=日期，系列=平台；${name}推荐率=推荐次数÷提及次数；点击下钻测试词`;
+    return `横轴=日期，系列=测试词；${name}推荐率=推荐次数÷提及次数`;
+  }
+  if (level === 'topic') return '横轴=日期，系列=话题（全平台平均排名）；点击下钻到各平台';
+  if (level === 'platform') return '横轴=日期，系列=平台；点击下钻到各测试词';
+  return '横轴=日期，系列=测试词；平均排名=提及排名之和÷提及次数';
 }
 
-/** 单个独立豆腐块看板：话题 → 目标问题 → 平台 */
 function IndependentTofuCard({
   title,
   hint,
   metric,
   grain,
   range,
-  enablePlatformDetail,
+  enableNegativeDetail,
 }: {
   title: string;
   hint: string;
   metric: MetricKind;
   grain: DemoBoardGrain;
   range: [Dayjs, Dayjs];
-  /** 负面看板：平台级点击打开明细 */
-  enablePlatformDetail?: boolean;
+  enableNegativeDetail?: boolean;
 }) {
   const [level, setLevel] = useState<DrillLevel>('topic');
   const [topicId, setTopicId] = useState<number>();
   const [topicName, setTopicName] = useState<string>();
-  const [keyword, setKeyword] = useState<string>();
+  const [platform, setPlatform] = useState<string>();
   const [charts, setCharts] = useState<GeoChartPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerPlatform, setDrawerPlatform] = useState<string>();
+  const [drawerTitle, setDrawerTitle] = useState('');
   const [negatives, setNegatives] = useState<GeoDailyVO[]>([]);
   const [negLoading, setNegLoading] = useState(false);
 
   const load = useCallback(
-    async (next: { topicId?: number; topicName?: string; keyword?: string }) => {
+    async (next: { topicId?: number; topicName?: string; platform?: string }) => {
       setLoading(true);
       try {
         const query: GeoBoardQuery = {
           startDate: range[0].format('YYYY-MM-DD'),
           endDate: range[1].format('YYYY-MM-DD'),
           grain,
+          chartMetric: metric,
           topicId: next.topicId,
-          keyword: next.keyword,
+          platform: next.platform,
         };
         const data = await getGeoTopicPlatformChartsApi(query);
-        const nextLevel = (data?.level as DrillLevel) || 'topic';
-        setLevel(nextLevel);
+        setLevel(((data?.level as DrillLevel) || 'topic') as DrillLevel);
         setTopicId(data?.topicId ?? next.topicId);
         setTopicName(data?.topicName || next.topicName);
-        setKeyword(data?.keyword || next.keyword);
+        setPlatform(data?.platform || next.platform);
         setCharts(pickChart(data, metric));
       } catch (e: any) {
         message.error(e?.message || `${title}加载失败`);
@@ -113,15 +125,15 @@ function IndependentTofuCard({
     setLevel('topic');
     setTopicId(undefined);
     setTopicName(undefined);
-    setKeyword(undefined);
+    setPlatform(undefined);
     void load({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grain, range]);
 
-  const openPlatformDrawer = useCallback(
-    async (platform: string) => {
-      if (!topicId || !keyword) return;
-      setDrawerPlatform(platform);
+  const openNegativeDrawer = useCallback(
+    async (contentOrPlatform: string) => {
+      if (!topicId || !platform) return;
+      setDrawerTitle(`负面明细 · ${topicName || ''} · ${platform}`);
       setDrawerOpen(true);
       setNegLoading(true);
       try {
@@ -129,10 +141,13 @@ function IndependentTofuCard({
           startDate: range[0].format('YYYY-MM-DD'),
           endDate: range[1].format('YYYY-MM-DD'),
           topicId,
-          keyword,
           platforms: [platform],
         });
-        setNegatives(rows || []);
+        const filtered = (rows || []).filter((r) => {
+          if (!contentOrPlatform) return true;
+          return (r.negativeContent || '').includes(contentOrPlatform) || r.negativeContent === contentOrPlatform;
+        });
+        setNegatives(filtered.length ? filtered : rows || []);
       } catch (e: any) {
         message.error(e?.message || '加载负面明细失败');
         setNegatives([]);
@@ -140,7 +155,7 @@ function IndependentTofuCard({
         setNegLoading(false);
       }
     },
-    [keyword, range, topicId],
+    [platform, range, topicId, topicName],
   );
 
   const onSeriesClick = useCallback(
@@ -156,15 +171,15 @@ function IndependentTofuCard({
         void load({ topicId: id, topicName: series || key });
         return;
       }
-      if (level === 'question') {
-        void load({ topicId, topicName, keyword: key });
+      if (level === 'platform') {
+        void load({ topicId, topicName, platform: key });
         return;
       }
-      if (level === 'platform' && enablePlatformDetail) {
-        void openPlatformDrawer(key);
+      if (level === 'keyword' && enableNegativeDetail) {
+        void openNegativeDrawer(series || key);
       }
     },
-    [enablePlatformDetail, level, load, openPlatformDrawer, topicId, topicName],
+    [enableNegativeDetail, level, load, openNegativeDrawer, topicId, topicName],
   );
 
   const drillRef = useRef(onSeriesClick);
@@ -187,16 +202,15 @@ function IndependentTofuCard({
   );
 
   const onBack = () => {
-    if (level === 'platform') {
-      void load({ topicId, topicName, keyword: undefined });
+    if (level === 'keyword') {
+      void load({ topicId, topicName, platform: undefined });
       return;
     }
-    if (level === 'question') {
+    if (level === 'platform') {
       void load({});
     }
   };
 
-  // 系列必须用完整原文做 colorField，截断会导致「【演示】2015年第1/10/11…题」撞名合并
   const chartData = (charts || []).map((p) => ({
     axis: formatAxis(p.axis),
     series: p.series,
@@ -208,7 +222,7 @@ function IndependentTofuCard({
   const negColumns: ColumnsType<GeoDailyVO> = [
     { title: '日期', dataIndex: 'inspectDate', width: 110 },
     { title: '平台', dataIndex: 'platform', width: 100 },
-    { title: '目标问题', dataIndex: 'keyword', ellipsis: true },
+    { title: '测试问题', dataIndex: 'keyword', ellipsis: true },
     { title: '排名', dataIndex: 'rankNo', width: 70, render: (v) => v ?? '-' },
     { title: '负面/错误内容', dataIndex: 'negativeContent', ellipsis: true },
   ];
@@ -239,15 +253,17 @@ function IndependentTofuCard({
         items={[
           { title: '话题' },
           ...(topicName ? [{ title: topicName }] : []),
-          ...(keyword ? [{ title: keyword.length > 16 ? `${keyword.slice(0, 15)}…` : keyword }] : []),
-          ...(level === 'platform' ? [{ title: '各平台' }] : []),
+          ...(platform ? [{ title: platform }] : []),
+          ...(level === 'keyword'
+            ? [{ title: metric === 'negative' ? '负面内容' : metric === 'sample' ? '测试问题' : '测试词' }]
+            : []),
         ]}
       />
       <div className='mb-2 text-xs text-neutral-400'>{hint}</div>
       <Suspense fallback={<ChartFallback />}>
         <BoardColumnScrollArea data={chartData}>
           <Column
-            key={`${metric}-${level}-${topicId || 'root'}-${keyword || ''}-${chartData.length}`}
+            key={`${metric}-${level}-${topicId || 'root'}-${platform || ''}-${chartData.length}`}
             data={chartData}
             xField='axis'
             yField='value'
@@ -269,10 +285,10 @@ function IndependentTofuCard({
           />
         </BoardColumnScrollArea>
       </Suspense>
-      <div className='mt-1 text-xs text-neutral-400'>{seriesHint(level, !!enablePlatformDetail)}</div>
+      <div className='mt-1 text-xs text-neutral-400'>{seriesHint(metric, level)}</div>
 
       <Drawer
-        title={`负面/错误明细 · ${keyword || ''} · ${drawerPlatform || ''}`}
+        title={drawerTitle}
         width={720}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -292,11 +308,13 @@ function IndependentTofuCard({
   );
 }
 
-/** GEO：三个互相独立的豆腐块（共用父级日期筛选） */
+/** GEO：五个互相独立的豆腐块（共用父级日期筛选） */
 export function GeoTopicPlatformTofuBoard({ grain, range }: { grain: DemoBoardGrain; range: [Dayjs, Dayjs] }) {
   return (
     <div className='flex flex-col gap-3'>
-      <div className='text-xs text-neutral-400'>三个看板相互独立：首屏=各话题 → 点击下钻目标问题 → 再点击看各平台</div>
+      <div className='text-xs text-neutral-400'>
+        统一下钻：话题 → AI平台 → 测试词/问题/负面内容；露出率类话题层取各平台率算术平均
+      </div>
       <Row gutter={[12, 12]}>
         <Col
           xs={24}
@@ -304,7 +322,7 @@ export function GeoTopicPlatformTofuBoard({ grain, range }: { grain: DemoBoardGr
         >
           <IndependentTofuCard
             title='露出排名'
-            hint='纵轴=平均排名（越低越好）'
+            hint='纵轴=平均排名（越低越好；avg=提及排名之和÷提及次数）'
             metric='rank'
             grain={grain}
             range={range}
@@ -315,8 +333,32 @@ export function GeoTopicPlatformTofuBoard({ grain, range }: { grain: DemoBoardGr
           lg={8}
         >
           <IndependentTofuCard
+            title='首位推荐率'
+            hint='纵轴=首位推荐率%（首位次数÷提及次数；话题层=各平台均值）'
+            metric='firstRecommend'
+            grain={grain}
+            range={range}
+          />
+        </Col>
+        <Col
+          xs={24}
+          lg={8}
+        >
+          <IndependentTofuCard
+            title='前三位推荐率'
+            hint='纵轴=前三位推荐率%（前三次数÷提及次数；话题层=各平台均值）'
+            metric='top3Recommend'
+            grain={grain}
+            range={range}
+          />
+        </Col>
+        <Col
+          xs={24}
+          lg={8}
+        >
+          <IndependentTofuCard
             title='测试问题数'
-            hint='纵轴=测试问题数量'
+            hint='纵轴=测试问题数（同一问题跨两平台计 2）'
             metric='sample'
             grain={grain}
             range={range}
@@ -328,11 +370,11 @@ export function GeoTopicPlatformTofuBoard({ grain, range }: { grain: DemoBoardGr
         >
           <IndependentTofuCard
             title='负面/错误'
-            hint='纵轴=负面条数；平台级可点开明细'
+            hint='纵轴=负面问题数；最细层可点开内容明细'
             metric='negative'
             grain={grain}
             range={range}
-            enablePlatformDetail
+            enableNegativeDetail
           />
         </Col>
       </Row>

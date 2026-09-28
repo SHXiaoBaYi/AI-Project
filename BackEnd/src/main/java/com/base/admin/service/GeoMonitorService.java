@@ -70,7 +70,9 @@ public interface GeoMonitorService {
     GeoDailyBoardVO dailyBoard(GeoBoardQueryDTO query);
 
     /**
-     * 话题×平台分组柱状图：不传 topicId 为话题级；传 topicId 下钻到该话题下的目标问题。
+     * 话题×平台分组柱状图。
+     * sample/negative：话题 → 目标问题 → 平台；
+     * rank：话题 → 平台 → 测试词（avg=提及排名之和/提及次数）。
      */
     GeoTopicPlatformChartsVO topicPlatformCharts(GeoBoardQueryDTO query);
 

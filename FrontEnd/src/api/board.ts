@@ -17,6 +17,15 @@ export type BoardChartBar = {
   drillable: boolean;
 };
 
+export type BoardChartCompareRow = {
+  topic: string;
+  platform: string;
+  value: number;
+  mom?: number | null;
+  yoy?: number | null;
+  sampleCount?: number;
+};
+
 export type BoardChartDrill = {
   title: string;
   domain: string;
@@ -32,6 +41,7 @@ export type BoardChartDrill = {
   yoy?: number | null;
   bars: BoardChartBar[];
   trend?: BoardChartTrendPoint[];
+  compareRows?: BoardChartCompareRow[];
   chartDrillable: boolean;
 };
 

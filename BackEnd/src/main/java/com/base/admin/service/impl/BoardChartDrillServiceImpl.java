@@ -11,6 +11,7 @@ import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysTaskAssignee;
 import com.base.admin.domain.entity.SysTaskType;
 import com.base.admin.domain.vo.BoardChartBarVO;
+import com.base.admin.domain.vo.BoardChartCompareRowVO;
 import com.base.admin.domain.vo.BoardChartDrillVO;
 import com.base.admin.domain.vo.BoardChartStackItemVO;
 import com.base.admin.domain.vo.BoardChartTrendPointVO;
@@ -114,6 +115,7 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         vo.setTrend(buildGeoTrend(axis, dim, personRole, grain, start, end, stack, true, canDrillMore));
         vo.setChartDrillable(canDrillMore && vo.getBars().stream().anyMatch(BoardChartBarVO::isDrillable));
         fillKpi(vo, cur, momMap, yoyMap, true);
+        vo.setCompareRows(buildGeoCompareRows(personRole, start, end, stack));
         vo.setTitle(geoTitle(dim, personRole, axis, stack));
         return vo;
     }
@@ -154,6 +156,48 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         Map<Long, String> topicNames = loadTopicNames();
         Map<Long, PersonRef> topicPerson = buildTopicPersonIndex(personRole);
 
+        if ("topic".equals(axis)) {
+            // 话题层：先按话题×平台算露出率，再对各平台率取均值
+            Map<String, Map<String, Agg>> byTopicPlatform = new LinkedHashMap<>();
+            for (GeoMonitorDaily d : dailies) {
+                String topicKey = topicNameKey(d, topicNames);
+                String questionKey = questionKey(d);
+                PersonRef person = resolveGeoPerson(d, personRole, topicPerson);
+                String personKey = person == null ? "未分配" : person.label();
+                String platform = StringUtils.hasText(d.getPlatform()) ? d.getPlatform().trim() : "未知平台";
+                if (!matchStackGeo(stack, topicKey, questionKey, personKey, platform)) {
+                    continue;
+                }
+                Agg agg = byTopicPlatform
+                        .computeIfAbsent(topicKey, k -> new LinkedHashMap<>())
+                        .computeIfAbsent(platform, k -> new Agg());
+                agg.sample++;
+                if (d.getMentioned() != null && d.getMentioned() == 1) {
+                    agg.hit++;
+                }
+            }
+            Map<String, Agg> map = new LinkedHashMap<>();
+            for (Map.Entry<String, Map<String, Agg>> e : byTopicPlatform.entrySet()) {
+                List<Double> rates = new ArrayList<>();
+                long sampleSum = 0;
+                for (Agg a : e.getValue().values()) {
+                    if (a.sample <= 0) {
+                        continue;
+                    }
+                    rates.add(a.hit * 100.0 / a.sample);
+                    sampleSum += a.sample;
+                }
+                if (rates.isEmpty()) {
+                    continue;
+                }
+                Agg out = new Agg();
+                out.sample = sampleSum;
+                out.rateOverride = rates.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                map.put(e.getKey(), out);
+            }
+            return map;
+        }
+
         Map<String, Agg> map = new LinkedHashMap<>();
         for (GeoMonitorDaily d : dailies) {
             String topicKey = topicNameKey(d, topicNames);
@@ -166,13 +210,64 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
                 continue;
             }
             String bucket = switch (axis) {
-                case "topic" -> topicKey;
                 case "question" -> questionKey;
                 case "person" -> personKey;
                 case "platform" -> platform;
                 default -> topicKey;
             };
             Agg agg = map.computeIfAbsent(bucket, k -> new Agg());
+            agg.sample++;
+            if (d.getMentioned() != null && d.getMentioned() == 1) {
+                agg.hit++;
+            }
+        }
+        return map;
+    }
+
+    /** 底部表格：话题×平台露出率及同比环比 */
+    private List<BoardChartCompareRowVO> buildGeoCompareRows(String personRole, LocalDate start, LocalDate end,
+                                                             List<BoardChartStackItemDTO> stack) {
+        long days = Math.max(1, ChronoUnit.DAYS.between(start, end) + 1);
+        Map<String, Agg> cur = aggregateGeoPlatformPairs(personRole, start, end, stack);
+        Map<String, Agg> mom = aggregateGeoPlatformPairs(personRole, start.minusDays(days), end.minusDays(days), stack);
+        Map<String, Agg> yoy = aggregateGeoPlatformPairs(personRole, start.minusYears(1), end.minusYears(1), stack);
+        List<BoardChartCompareRowVO> rows = new ArrayList<>();
+        cur.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(e -> {
+                    String[] parts = e.getKey().split("\0", 2);
+                    String topic = parts[0];
+                    String platform = parts.length > 1 ? parts[1] : "-";
+                    double v = valueOf(e.getValue(), true);
+                    BoardChartCompareRowVO row = new BoardChartCompareRowVO();
+                    row.setTopic(topic);
+                    row.setPlatform(platform);
+                    row.setValue(round2(v));
+                    row.setMom(delta(v, valueOf(mom.get(e.getKey()), true), true));
+                    row.setYoy(delta(v, valueOf(yoy.get(e.getKey()), true), true));
+                    row.setSampleCount(e.getValue() == null ? 0 : e.getValue().sample);
+                    rows.add(row);
+                });
+        return rows;
+    }
+
+    private Map<String, Agg> aggregateGeoPlatformPairs(String personRole, LocalDate start, LocalDate end,
+                                                       List<BoardChartStackItemDTO> stack) {
+        List<GeoMonitorDaily> dailies = loadScopedDailies(start, end);
+        Map<Long, String> topicNames = loadTopicNames();
+        Map<Long, PersonRef> topicPerson = buildTopicPersonIndex(personRole);
+        Map<String, Agg> map = new LinkedHashMap<>();
+        for (GeoMonitorDaily d : dailies) {
+            String topicKey = topicNameKey(d, topicNames);
+            String questionKey = questionKey(d);
+            PersonRef person = resolveGeoPerson(d, personRole, topicPerson);
+            String personKey = person == null ? "未分配" : person.label();
+            String platform = StringUtils.hasText(d.getPlatform()) ? d.getPlatform().trim() : "未知平台";
+            if (!matchStackGeo(stack, topicKey, questionKey, personKey, platform)) {
+                continue;
+            }
+            String key = topicKey + "\0" + platform;
+            Agg agg = map.computeIfAbsent(key, k -> new Agg());
             agg.sample++;
             if (d.getMentioned() != null && d.getMentioned() == 1) {
                 agg.hit++;
@@ -400,8 +495,8 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
 
     private List<String> drillPath(String domain, String primaryDim) {
         if ("geo".equals(domain)) {
-            // GEO：话题 → 目标问题 → 平台（无人维）
-            return List.of("topic", "question", "platform");
+            // GEO：话题 → 平台 → 测试问题
+            return List.of("topic", "platform", "question");
         }
         if ("person".equals(primaryDim)) {
             return List.of("person", "theme", "stage");
@@ -436,7 +531,7 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
                 String raw = shortLabel(StringUtils.hasText(s.getKey()) ? s.getKey() : s.getLabel());
                 String fieldTag = switch (nz(s.getField(), "")) {
                     case "topic" -> "话题";
-                    case "question" -> "目标问题";
+                    case "question" -> "测试问题";
                     case "person" -> "人";
                     case "platform" -> "平台";
                     case "theme" -> "主题";
@@ -458,6 +553,50 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         List<GeoMonitorDaily> dailies = loadScopedDailies(start, end);
         Map<Long, String> topicNames = loadTopicNames();
         Map<Long, PersonRef> topicPerson = buildTopicPersonIndex(personRole);
+
+        if ("topic".equals(axis)) {
+            // time\0topic\0platform -> Agg，再压成 time\0topic 的平台均值
+            Map<String, Map<String, Agg>> nested = new LinkedHashMap<>();
+            for (GeoMonitorDaily d : dailies) {
+                String topicKey = topicNameKey(d, topicNames);
+                String questionKey = questionKey(d);
+                PersonRef person = resolveGeoPerson(d, personRole, topicPerson);
+                String personKey = person == null ? "未分配" : person.label();
+                String platform = StringUtils.hasText(d.getPlatform()) ? d.getPlatform().trim() : "未知平台";
+                if (!matchStackGeo(stack, topicKey, questionKey, personKey, platform)) {
+                    continue;
+                }
+                String time = timeBucket(d.getInspectDate(), grain);
+                String cell = time + "\0" + topicKey;
+                Agg agg = nested.computeIfAbsent(cell, k -> new LinkedHashMap<>())
+                        .computeIfAbsent(platform, k -> new Agg());
+                agg.sample++;
+                if (d.getMentioned() != null && d.getMentioned() == 1) {
+                    agg.hit++;
+                }
+            }
+            Map<String, Agg> cells = new LinkedHashMap<>();
+            for (Map.Entry<String, Map<String, Agg>> e : nested.entrySet()) {
+                List<Double> rates = new ArrayList<>();
+                long sampleSum = 0;
+                for (Agg a : e.getValue().values()) {
+                    if (a.sample <= 0) {
+                        continue;
+                    }
+                    rates.add(a.hit * 100.0 / a.sample);
+                    sampleSum += a.sample;
+                }
+                if (rates.isEmpty()) {
+                    continue;
+                }
+                Agg out = new Agg();
+                out.sample = sampleSum;
+                out.rateOverride = rates.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                cells.put(e.getKey(), out);
+            }
+            return toTrendPoints(cells, rateMetric, canDrillMore);
+        }
+
         Map<String, Agg> cells = new LinkedHashMap<>();
         for (GeoMonitorDaily d : dailies) {
             String topicKey = topicNameKey(d, topicNames);
@@ -469,7 +608,6 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
                 continue;
             }
             String series = switch (axis) {
-                case "topic" -> topicKey;
                 case "question" -> questionKey;
                 case "person" -> personKey;
                 case "platform" -> platform;
@@ -583,6 +721,13 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
 
     private void fillKpi(BoardChartDrillVO vo, Map<String, Agg> cur, Map<String, Agg> mom, Map<String, Agg> yoy,
                          boolean rateMetric) {
+        if (rateMetric && cur != null && cur.values().stream().anyMatch(a -> a != null && a.rateOverride != null)) {
+            double cv = averageOverride(cur);
+            vo.setCurrentValue(round2(cv));
+            vo.setMom(delta(cv, averageOverride(mom), rateMetric));
+            vo.setYoy(delta(cv, averageOverride(yoy), rateMetric));
+            return;
+        }
         Agg c = sum(cur);
         Agg m = sum(mom);
         Agg y = sum(yoy);
@@ -590,6 +735,27 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         vo.setCurrentValue(round2(cv));
         vo.setMom(delta(cv, valueOf(m, rateMetric), rateMetric));
         vo.setYoy(delta(cv, valueOf(y, rateMetric), rateMetric));
+    }
+
+    private static double averageOverride(Map<String, Agg> map) {
+        if (map == null || map.isEmpty()) {
+            return 0;
+        }
+        List<Double> rates = new ArrayList<>();
+        for (Agg a : map.values()) {
+            if (a == null) {
+                continue;
+            }
+            if (a.rateOverride != null) {
+                rates.add(a.rateOverride);
+            } else if (a.sample > 0) {
+                rates.add(a.hit * 100.0 / a.sample);
+            }
+        }
+        if (rates.isEmpty()) {
+            return 0;
+        }
+        return rates.stream().mapToDouble(Double::doubleValue).average().orElse(0);
     }
 
     private static Agg sum(Map<String, Agg> map) {
@@ -605,7 +771,13 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
     }
 
     private static double valueOf(Agg a, boolean rate) {
-        if (a == null || a.sample <= 0) {
+        if (a == null) {
+            return 0;
+        }
+        if (a.rateOverride != null) {
+            return a.rateOverride;
+        }
+        if (a.sample <= 0) {
             return 0;
         }
         if (rate) {
@@ -647,12 +819,12 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
 
     private String geoTitle(String dim, String role, String axis, List<BoardChartStackItemDTO> stack) {
         String axisLabel = switch (axis) {
-            case "topic" -> "话题";
-            case "question" -> "目标问题";
-            case "platform" -> "平台";
+            case "topic" -> "话题平均露出率";
+            case "question" -> "测试问题露出率";
+            case "platform" -> "各AI平台露出率";
             default -> "话题";
         };
-        return "GEO · 话题维 · 按" + axisLabel + (stack == null || stack.isEmpty() ? "" : "（已下钻）");
+        return "GEO · 露出率 · 按" + axisLabel + (stack == null || stack.isEmpty() ? "" : "（已下钻）");
     }
 
     private String taskTitle(String dim, String axis, List<BoardChartStackItemDTO> stack) {
@@ -767,6 +939,8 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
     private static final class Agg {
         long sample;
         long hit;
+        /** 话题层：各平台露出率的算术平均（%） */
+        Double rateOverride;
     }
 
     private static final class PersonRef {

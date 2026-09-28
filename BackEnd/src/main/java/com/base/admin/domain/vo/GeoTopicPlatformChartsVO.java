@@ -7,13 +7,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Data
-@Schema(description = "GEO 话题×平台分组柱状图（横轴=日期，系列=平台；可下钻话题/目标问题）")
+@Schema(description = "GEO 话题×平台分组柱状图（横轴=日期；可下钻话题/平台/测试词）")
 public class GeoTopicPlatformChartsVO {
 
-    @Schema(description = "层级：topic / question / platform", example = "topic")
+    @Schema(description = "层级：topic / platform / keyword", example = "topic")
     private String level;
 
-    @Schema(description = "当前系列维度：topic / question / platform", example = "topic")
+    @Schema(description = "当前系列维度：topic / platform / keyword", example = "topic")
     private String seriesField;
 
     @Schema(description = "时间粒度", example = "week")
@@ -25,15 +25,24 @@ public class GeoTopicPlatformChartsVO {
     @Schema(description = "当前话题名称")
     private String topicName;
 
-    @Schema(description = "当前目标问题")
+    @Schema(description = "当前目标问题 / 测试词")
     private String keyword;
 
-    @Schema(description = "露出平均排名（横轴=日期；系列随 level 变化）")
+    @Schema(description = "下钻当前平台")
+    private String platform;
+
+    @Schema(description = "露出平均排名（avg=提及排名之和/提及次数）")
     private List<GeoChartPointVO> rankChart = new ArrayList<>();
 
-    @Schema(description = "测试问题数量（横轴=日期；系列随 level 变化）")
+    @Schema(description = "测试问题数（跨平台同一问题计 2）")
     private List<GeoChartPointVO> sampleChart = new ArrayList<>();
 
-    @Schema(description = "负面/错误内容数量（横轴=日期；系列随 level 变化）")
+    @Schema(description = "负面/错误问题数")
     private List<GeoChartPointVO> negativeChart = new ArrayList<>();
+
+    @Schema(description = "首位推荐率%（首位推荐次数÷提及次数；话题层=各平台均值）")
+    private List<GeoChartPointVO> firstRecommendChart = new ArrayList<>();
+
+    @Schema(description = "前三位推荐率%（前三推荐次数÷提及次数；话题层=各平台均值）")
+    private List<GeoChartPointVO> top3RecommendChart = new ArrayList<>();
 }

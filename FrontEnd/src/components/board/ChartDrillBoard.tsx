@@ -1,8 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Space, Statistic, Tag, message } from 'antd';
+import { Breadcrumb, Button, Card, Col, DatePicker, Radio, Row, Space, Statistic, Table, Tag, message } from 'antd';
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowUpOutlined } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
-import { boardChartDrillApi, type BoardChartDrill, type BoardChartStackItem } from '@/api/board';
+import {
+  boardChartDrillApi,
+  type BoardChartCompareRow,
+  type BoardChartDrill,
+  type BoardChartStackItem,
+} from '@/api/board';
 import {
   BoardChartLegend,
   boardColorScale,
@@ -77,7 +83,7 @@ function axisFieldLabel(field?: string): string {
     case 'topic':
       return '话题';
     case 'question':
-      return '目标问题';
+      return '测试问题';
     case 'person':
       return '人';
     case 'platform':
@@ -314,7 +320,7 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
             ) : null}
             <span className='text-xs text-neutral-400'>
               {domain === 'geo'
-                ? '三级：话题 → 目标问题 → 平台'
+                ? '三级：话题平均露出率 → 各AI平台 → 测试问题；底部表格分平台同比环比'
                 : dim === 'person'
                   ? '路径：人 → 主题 → 状态'
                   : '路径：主题 → 人 → 状态'}
@@ -343,7 +349,9 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
               }))}
             />
             <span className='text-sm font-medium text-neutral-700'>{data?.title || '—'}</span>
-            {!showFilterBar ? <span className='text-xs text-neutral-400'>三级：话题 → 目标问题 → 平台</span> : null}
+            {!showFilterBar ? (
+              <span className='text-xs text-neutral-400'>三级：话题平均露出率 → 各AI平台 → 测试问题</span>
+            ) : null}
           </div>
         }
       >
@@ -430,26 +438,73 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
           </BoardColumnScrollArea>
         </Suspense>
 
-        <div className='mt-3 flex flex-wrap gap-2'>
-          {(data?.bars || []).map((b) => (
-            <Tag
-              key={b.key}
-              color={b.drillable && data?.chartDrillable ? 'processing' : 'default'}
-              className={b.drillable && data?.chartDrillable ? 'cursor-pointer' : 'cursor-default'}
-              onClick={() => onSeriesDrill({ seriesKey: b.key, series: b.label, drillable: b.drillable })}
-            >
-              {b.label}: {b.value}
-              {b.mom != null ? ` 环比${b.mom > 0 ? '+' : ''}${b.mom}` : ''}
-              {b.yoy != null ? ` 同比${b.yoy > 0 ? '+' : ''}${b.yoy}` : ''}
-            </Tag>
-          ))}
+        <div className='mt-6 mb-2 text-sm font-medium text-neutral-700'>
+          {domain === 'geo' ? '同比 / 环比（按话题 × AI平台）' : '系列摘要'}
         </div>
+        {domain === 'geo' ? (
+          <Table<BoardChartCompareRow>
+            size='small'
+            rowKey={(r) => `${r.topic}||${r.platform}`}
+            pagination={{ pageSize: 10, hideOnSinglePage: true }}
+            dataSource={data?.compareRows || []}
+            columns={
+              [
+                { title: '话题', dataIndex: 'topic', ellipsis: true },
+                { title: 'AI平台', dataIndex: 'platform', width: 120 },
+                {
+                  title: '露出率%',
+                  dataIndex: 'value',
+                  width: 100,
+                  render: (v: number) => (v == null ? '-' : Number(v).toFixed(1)),
+                },
+                {
+                  title: '环比',
+                  dataIndex: 'mom',
+                  width: 120,
+                  render: (v: number | null | undefined) => (
+                    <DeltaTag
+                      value={v}
+                      suffix='pp'
+                    />
+                  ),
+                },
+                {
+                  title: '同比',
+                  dataIndex: 'yoy',
+                  width: 120,
+                  render: (v: number | null | undefined) => (
+                    <DeltaTag
+                      value={v}
+                      suffix='pp'
+                    />
+                  ),
+                },
+                { title: '样本', dataIndex: 'sampleCount', width: 80 },
+              ] as ColumnsType<BoardChartCompareRow>
+            }
+          />
+        ) : (
+          <div className='mt-3 flex flex-wrap gap-2'>
+            {(data?.bars || []).map((b) => (
+              <Tag
+                key={b.key}
+                color={b.drillable && data?.chartDrillable ? 'processing' : 'default'}
+                className={b.drillable && data?.chartDrillable ? 'cursor-pointer' : 'cursor-default'}
+                onClick={() => onSeriesDrill({ seriesKey: b.key, series: b.label, drillable: b.drillable })}
+              >
+                {b.label}: {b.value}
+                {b.mom != null ? ` 环比${b.mom > 0 ? '+' : ''}${b.mom}` : ''}
+                {b.yoy != null ? ` 同比${b.yoy > 0 ? '+' : ''}${b.yoy}` : ''}
+              </Tag>
+            ))}
+          </div>
+        )}
 
         {!data?.chartDrillable ? (
           <div className='mt-2 text-xs text-neutral-400'>当前已到最细层级，折线/柱状均不可再下钻</div>
         ) : (
           <div className='mt-2 text-xs text-neutral-400'>
-            点中分组里的某一根柱（或某条折线）只下钻该主题；日期范围保持不变
+            点中分组里的某一根柱（或某条折线）只下钻该系列；日期范围保持不变
           </div>
         )}
       </Card>

@@ -1,6 +1,6 @@
-/** 看板分组柱状图：柱宽固定 20px，组内柱紧挨，组间多留白，数值白字常显在柱内；宽度按类目撑开，可横向滚动 */
+/** 看板分组柱状图：柱宽固定 30px，组内柱紧挨，组间多留白，数值白字常显在柱内（保留 1 位小数）；宽度按类目撑开，可横向滚动 */
 
-export const BOARD_COLUMN_WIDTH = 20;
+export const BOARD_COLUMN_WIDTH = 30;
 
 /** 与 scale.x.paddingInner 保持一致：组间留白占比 */
 const BOARD_COLUMN_PADDING_INNER = 0.5;
@@ -11,9 +11,11 @@ const BOARD_COLUMN_CHART_PAD = 80;
 function formatColumnValue(datum: Record<string, unknown>) {
   const raw = datum?.value;
   if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return Number.isInteger(raw) ? String(raw) : String(Math.round(raw * 100) / 100);
+    return raw.toFixed(1);
   }
   if (raw == null) return '';
+  const n = Number(raw);
+  if (Number.isFinite(n)) return n.toFixed(1);
   return String(raw);
 }
 
@@ -47,7 +49,7 @@ export const boardColumnChartProps = {
       paddingOuter: 0.12,
     },
   },
-  /** 固定柱宽 20px，组内不再额外 inset 拉开 */
+  /** 固定柱宽 30px，组内不再额外 inset 拉开 */
   style: {
     maxWidth: BOARD_COLUMN_WIDTH,
     minWidth: BOARD_COLUMN_WIDTH,
