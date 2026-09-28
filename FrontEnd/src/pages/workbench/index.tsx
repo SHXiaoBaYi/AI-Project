@@ -23,8 +23,8 @@ import { getGeoContentPlacementListApi, getGeoDailyBoardApi } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoDailyBoard } from '@/types/geo';
 import { AGG_COLOR } from '@/components/geo/content-placement/constants';
 import { demoRangeByGrain } from '@/constants/demoData';
-import DingTalkBusyModal from '@/pages/workbench/DingTalkBusyModal';
-import DingTalkAssistantModal from '@/pages/workbench/DingTalkAssistantModal';
+import DingTalkBusyModal from './DingTalkBusyModal';
+import DingTalkAssistantModal from './DingTalkAssistantModal';
 
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Line })));
 

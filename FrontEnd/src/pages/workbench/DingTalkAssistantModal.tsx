@@ -28,12 +28,6 @@ import {
 
 const ASSISTANT_NAME = '日程助手';
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -251,7 +245,7 @@ function initialOf(name: string) {
   return t ? t.slice(0, 1) : '?';
 }
 
-const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
+function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
   const { message } = App.useApp();
   const { has } = usePermission();
   const userInfo = useSelector((state: RootState) => state.user.userInfo);
@@ -307,7 +301,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
             '· @张三 这周有没有 60 分钟空闲？\n' +
             '· @李四 明天帮我看看半小时空档\n' +
             '· @王五 下周一到周五有没有一小时能约？\n' +
-            '我会先读对方日程规则，再查钉钉闲忙，最后给你可约时段和下一步建议。',
+            '发给我后，我会结合对方日程规则和钉钉闲忙，直接回复可约时段和下一步建议。',
           time: dayjs().format('HH:mm'),
         },
       ]);
@@ -349,7 +343,6 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
     setDraft('');
     setQuerying(true);
     try {
-      push({ role: 'system', text: `正在读取「${nickname}」的日程规则…` });
       const data = filterSuggestHolidays(
         await suggestDingTalkAssistantApi({
           targetUserId: user.userId,
@@ -359,24 +352,14 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
         }),
       );
       const displayName = data.targetNickname || nickname;
-      await sleep(280);
-      push({
-        role: 'assistant',
-        text: data.ruleSummary || `已读取「${displayName}」的日程规则。`,
-      });
-      push({ role: 'system', text: `正在查询「${displayName}」的钉钉闲忙…` });
-      await sleep(280);
-      push({
-        role: 'assistant',
-        text: data.busySummary || `已查询「${displayName}」的钉钉闲忙。`,
-      });
-      await sleep(200);
       const firstDay = data.dayGroups?.find((d) => (d.slots?.length ?? 0) > 0) ?? data.dayGroups?.[0];
       const firstSlot = firstDay?.slots?.[0];
-      const advice = [data.adviceText, data.nextStepText].filter(Boolean).join('\n\n');
+      const replyText = [data.ruleSummary, data.busySummary, data.adviceText, data.nextStepText]
+        .filter(Boolean)
+        .join('\n\n');
       push({
         role: 'assistant',
-        text: advice || '暂无建议',
+        text: replyText || '暂无建议',
         suggest: data,
         activeDay: firstDay?.day,
         selectedKey: firstSlot ? `${firstSlot.start}|${firstSlot.end}` : undefined,
@@ -907,6 +890,6 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       </Modal>
     </>
   );
-});
+}
 
-export default DingTalkAssistantModal;
+export default memo(DingTalkAssistantModal);
