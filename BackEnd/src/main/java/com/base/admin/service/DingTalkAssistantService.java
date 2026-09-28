@@ -127,7 +127,7 @@ public class DingTalkAssistantService {
             vo.setBusySummary("查询「" + vo.getTargetNickname() + "」钉钉闲忙失败：" + user.getError());
             vo.setAdviceText(vo.getTargetNickname() + "：" + user.getError());
             vo.setNextStepText("请确认对方已绑定钉钉并可查询闲忙后重试，或改约其他人。");
-            vo.setActions(baseActions(vo, null, duration, intent.action()));
+            vo.setActions(List.of());
             return vo;
         }
 
@@ -135,14 +135,57 @@ public class DingTalkAssistantService {
         List<DingTalkAssistantSuggestVO.FreeWindow> windows = findFreeWindows(slots, duration, hours);
         List<DingTalkAssistantSuggestVO.DayGroup> dayGroups = buildDayGroups(
                 rangeStart, rangeEnd, windows, duration, rule, hours, intent.action());
+
+        int lookAhead = resolveLookAheadDays(rule);
+        boolean expanded = false;
+        boolean searchedLookAhead = false;
+        LocalDate displayStart = startDay;
+        LocalDate displayEnd = endDay;
+        if (countSlots(dayGroups) == 0) {
+            LocalDate today = LocalDate.now();
+            LocalDate expandEnd = today.plusDays(lookAhead - 1L);
+            boolean askedCoversLookAhead = !startDay.isAfter(today) && !endDay.isBefore(expandEnd);
+            searchedLookAhead = askedCoversLookAhead;
+            if (!askedCoversLookAhead) {
+                LocalDateTime expandRangeStart = today.atTime(hours.workStart());
+                LocalDateTime expandRangeEnd = expandEnd.atTime(hours.workEnd());
+                DingTalkBusyQueryDTO expandQuery = new DingTalkBusyQueryDTO();
+                expandQuery.setUserIds(List.of(dto.getTargetUserId()));
+                expandQuery.setStartTime(expandRangeStart);
+                expandQuery.setEndTime(expandRangeEnd);
+                List<DingTalkBusyUserVO> expandRows = busyService.query(
+                        expandQuery, hours.workStart(), hours.workEnd());
+                DingTalkBusyUserVO expandUser = expandRows.isEmpty() ? null : expandRows.getFirst();
+                if (expandUser != null && !StringUtils.hasText(expandUser.getError())) {
+                    slots = applyRuleToBusySlots(expandUser.getSlots(), rule, hours);
+                    windows = findFreeWindows(slots, duration, hours);
+                    dayGroups = keepDaysWithSlots(buildDayGroups(
+                            expandRangeStart, expandRangeEnd, windows, duration, rule, hours, intent.action()));
+                    expanded = countSlots(dayGroups) > 0;
+                    searchedLookAhead = true;
+                    displayStart = today;
+                    displayEnd = expandEnd;
+                }
+            } else {
+                dayGroups = List.of();
+            }
+        }
+
         vo.setFreeWindows(windows);
         vo.setDayGroups(dayGroups);
         vo.setBusySummary(buildBusySummary(vo.getTargetNickname(), slots, windows, duration,
-                startDay, endDay, intent));
-        vo.setAdviceText(buildAdvice(vo.getTargetNickname(), duration, dayGroups, hours, intent));
+                displayStart, displayEnd, intent));
         SlotPick pick = firstSlot(dayGroups, duration);
-        vo.setActions(baseActions(vo, pick, duration, intent.action()));
-        vo.setNextStepText(buildNextStepText(vo.getTargetNickname(), duration, dayGroups, pick, intent));
+        boolean hasSlot = pick != null && pick.start() != null;
+        if (!hasSlot) {
+            dayGroups = List.of();
+            vo.setDayGroups(dayGroups);
+        }
+        vo.setAdviceText(buildAdvice(vo.getTargetNickname(), duration, dayGroups, hours, intent,
+                startDay, endDay, lookAhead, expanded, hasSlot, searchedLookAhead));
+        vo.setActions(hasSlot ? baseActions(vo, pick, duration, intent.action()) : List.of());
+        vo.setNextStepText(buildNextStepText(vo.getTargetNickname(), duration, dayGroups, pick, intent,
+                startDay, endDay, lookAhead, expanded, searchedLookAhead));
         return vo;
     }
 
@@ -812,9 +855,9 @@ public class DingTalkAssistantService {
     }
 
     private static String buildAdvice(String name, int durationMin, List<DingTalkAssistantSuggestVO.DayGroup> dayGroups,
-                                      RuleDayHours hours, ParsedIntent intent) {
-        int slotCount = dayGroups == null ? 0 : dayGroups.stream().mapToInt(d -> d.getSlots() == null ? 0 : d.getSlots().size()).sum();
-        int freeDays = dayGroups == null ? 0 : (int) dayGroups.stream().filter(d -> d.getSlots() != null && !d.getSlots().isEmpty()).count();
+                                      RuleDayHours hours, ParsedIntent intent,
+                                      LocalDate askedStart, LocalDate askedEnd, int lookAhead,
+                                      boolean expanded, boolean hasSlot, boolean searchedLookAhead) {
         String workLabel = "每天 " + hours.workStartLabel() + "～" + hours.workEndLabel();
         String lunchBit = hours.lunchStart().isBefore(hours.lunchEnd())
                 ? "，已避开午休 " + hours.lunchStartLabel() + "～" + hours.lunchEndLabel()
@@ -822,9 +865,26 @@ public class DingTalkAssistantService {
         String bufferBit = hours.bufferMin() > 0 ? "，日程缓存 " + hours.bufferMin() + " 分钟" : "";
         String intentBit = intentActionLabel(intent.action());
         String jobBit = StringUtils.hasText(intent.jobName()) ? "（岗位「" + intent.jobName() + "」）" : "";
-        if (slotCount == 0) {
-            return "按「" + intentBit + "」" + jobBit + "意图，结合规则与闲忙后，所选范围内没有连续 "
-                    + durationMin + " 分钟可用空档（依据：" + workLabel + lunchBit + bufferBit + "）。";
+        String asked = askedStart.equals(askedEnd) ? askedStart.toString() : askedStart + "～" + askedEnd;
+        if (!hasSlot) {
+            if (searchedLookAhead) {
+                return "抱歉，「" + name + "」在你关心的时间（" + asked + "）没有连续 "
+                        + durationMin + " 分钟可用空档；按对方日程配置向前看 " + lookAhead
+                        + " 天内也暂无可约时段（依据：" + workLabel + lunchBit + bufferBit
+                        + "）。建议换一天再问，或缩短时长后重试。";
+            }
+            return "抱歉，「" + name + "」在你关心的时间（" + asked + "）没有连续 "
+                    + durationMin + " 分钟可用空档（依据：" + workLabel + lunchBit + bufferBit
+                    + "）。建议换一天再问，或缩短时长后重试。";
+        }
+        int slotCount = countSlots(dayGroups);
+        int freeDays = dayGroups == null ? 0
+                : (int) dayGroups.stream().filter(d -> d.getSlots() != null && !d.getSlots().isEmpty()).count();
+        if (expanded) {
+            return "「" + name + "」在你问的时间（" + asked + "）没有空档；已按对方日程配置扩查最近 "
+                    + lookAhead + " 天，找到 " + freeDays + " 天共 " + slotCount
+                    + " 个可约时段（每段 " + durationMin + " 分钟，「" + intentBit + "」" + jobBit
+                    + "）。请选一个时段，再点下方动作继续。";
         }
         return "按「" + intentBit + "」" + jobBit + "意图，综合规则与闲忙后，共有 " + freeDays + " 天有空、" + slotCount
                 + " 个可约时段（每段 " + durationMin + " 分钟）。请选一个时段，再点下方动作继续。";
@@ -841,6 +901,8 @@ public class DingTalkAssistantService {
         if (hours.bufferMin() > 0) {
             sb.append("\n· 日程缓存 ").append(hours.bufferMin()).append(" 分钟");
         }
+        int lookAhead = resolveLookAheadDays(rule);
+        sb.append("\n· 向前推荐 ").append(lookAhead).append(" 天");
         sb.append("\n· 格子步长 ").append(hours.slotStepMin()).append(" 分钟");
         if (hours.denyHolidays()) {
             sb.append("\n· 法定节假日不安排");
@@ -885,32 +947,61 @@ public class DingTalkAssistantService {
 
     private static String buildNextStepText(String name, int durationMin,
                                             List<DingTalkAssistantSuggestVO.DayGroup> dayGroups, SlotPick pick,
-                                            ParsedIntent intent) {
-        int slotCount = dayGroups == null ? 0
-                : dayGroups.stream().mapToInt(d -> d.getSlots() == null ? 0 : d.getSlots().size()).sum();
+                                            ParsedIntent intent, LocalDate askedStart, LocalDate askedEnd,
+                                            int lookAhead, boolean expanded, boolean searchedLookAhead) {
+        int slotCount = countSlots(dayGroups);
         if (slotCount <= 0 || pick == null || pick.start() == null) {
-            return "建议下一步：扩大日期范围、缩短时长（当前 " + durationMin
-                    + " 分钟），或打开完整闲忙表核对「" + name + "」的日程。";
+            String asked = askedStart.equals(askedEnd) ? askedStart.toString() : askedStart + "～" + askedEnd;
+            if (searchedLookAhead) {
+                return "当前没有可执行的下一步动作。你问的时间（" + asked + "）以及对方配置的最近 "
+                        + lookAhead + " 天内都暂无可约空档；可换日期、缩短时长或改约其他人后再问。";
+            }
+            return "当前没有可执行的下一步动作。你问的时间（" + asked
+                    + "）暂无可约空档；可换日期、缩短时长或改约其他人后再问。";
+        }
+        String nearest = pick.start().format(LABEL_DAY) + "–" + pick.end().format(LABEL_TIME);
+        if (expanded) {
+            return "建议下一步：原问时间无空，已给出最近可约时段（优先 " + nearest
+                    + "）。选中后可继续发起相应动作。";
         }
         if (DingTalkScheduleRuleService.ACTION_INTERVIEW.equals(intent.action())) {
-            return "建议下一步：先选中推荐时段（优先 "
-                    + pick.start().format(LABEL_DAY) + "–" + pick.end().format(LABEL_TIME)
-                    + "），再发起面试邀约"
+            return "建议下一步：先选中推荐时段（优先 " + nearest + "），再发起面试邀约"
                     + (StringUtils.hasText(intent.jobName()) ? "（「" + intent.jobName() + "」）" : "") + "。";
         }
         if (DingTalkScheduleRuleService.ACTION_MEETING.equals(intent.action())) {
-            return "建议下一步：先选中推荐时段（优先 "
-                    + pick.start().format(LABEL_DAY) + "–" + pick.end().format(LABEL_TIME)
-                    + "），再邀请开会。";
+            return "建议下一步：先选中推荐时段（优先 " + nearest + "），再邀请开会。";
         }
         if (DingTalkScheduleRuleService.ACTION_REPORT.equals(intent.action())) {
-            return "建议下一步：先选中推荐时段（优先 "
-                    + pick.start().format(LABEL_DAY) + "–" + pick.end().format(LABEL_TIME)
-                    + "），再安排工作汇报。";
+            return "建议下一步：先选中推荐时段（优先 " + nearest + "），再安排工作汇报。";
         }
-        return "建议下一步：先选中一个推荐时段（优先 "
-                + pick.start().format(LABEL_DAY) + "–" + pick.end().format(LABEL_TIME)
+        return "建议下一步：先选中一个推荐时段（优先 " + nearest
                 + "），再发起面试邀约 / 邀请开会 / 安排工作汇报。";
+    }
+
+    private static int resolveLookAheadDays(DingTalkScheduleRuleVO rule) {
+        int look = rule != null && rule.getLookAheadDays() > 0 ? rule.getLookAheadDays() : 7;
+        return Math.min(Math.max(look, 1), ChinaHoliday.BOOKING_MAX_DAYS);
+    }
+
+    private static int countSlots(List<DingTalkAssistantSuggestVO.DayGroup> dayGroups) {
+        if (dayGroups == null || dayGroups.isEmpty()) {
+            return 0;
+        }
+        return dayGroups.stream().mapToInt(d -> d.getSlots() == null ? 0 : d.getSlots().size()).sum();
+    }
+
+    private static List<DingTalkAssistantSuggestVO.DayGroup> keepDaysWithSlots(
+            List<DingTalkAssistantSuggestVO.DayGroup> dayGroups) {
+        if (dayGroups == null || dayGroups.isEmpty()) {
+            return dayGroups == null ? List.of() : dayGroups;
+        }
+        List<DingTalkAssistantSuggestVO.DayGroup> kept = new ArrayList<>();
+        for (DingTalkAssistantSuggestVO.DayGroup g : dayGroups) {
+            if (g != null && g.getSlots() != null && !g.getSlots().isEmpty()) {
+                kept.add(g);
+            }
+        }
+        return kept;
     }
 
     private static String intentActionLabel(String action) {
