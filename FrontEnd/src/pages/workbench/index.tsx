@@ -113,7 +113,7 @@ const SHORTCUTS: Shortcut[] = [
   {
     key: 'dingtalk-assistant',
     label: '日程助手',
-    desc: '问闲忙并建议约谈',
+    desc: '机器人式：规则→闲忙→建议动作',
     perms: ['system:dingtalk:busy', 'hr:invite:list', 'system:dingtalk:list'],
     icon: <CommentOutlined />,
   },

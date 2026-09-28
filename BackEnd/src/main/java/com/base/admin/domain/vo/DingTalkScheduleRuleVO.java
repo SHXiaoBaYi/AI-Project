@@ -32,7 +32,7 @@ public class DingTalkScheduleRuleVO {
     @Schema(description = "单次推荐条数上限")
     private int recommendLimit = 8;
 
-    @Schema(description = "是否允许秘书机器人读取并推荐")
+    @Schema(description = "是否允许秘书机器人读取并推荐（定数：永远为 true）")
     private boolean secretaryEnabled = true;
 
     @Schema(description = "机器人提示")

@@ -124,7 +124,8 @@ public class DingTalkScheduleRuleService {
             vo.setLookAheadDays(look <= 0 ? ChinaHoliday.BOOKING_MAX_DAYS : Math.min(look, ChinaHoliday.BOOKING_MAX_DAYS));
             int limit = rs.getInt("recommend_limit");
             vo.setRecommendLimit(limit <= 0 ? 8 : Math.min(limit, 30));
-            vo.setSecretaryEnabled(rs.getInt("secretary_enabled") == 1);
+            // 秘书代答空闲：定数永远开启
+            vo.setSecretaryEnabled(true);
             vo.setRobotHint(rs.getString("robot_hint") == null ? "" : rs.getString("robot_hint"));
             vo.setBlockedWindows(parseWindows(rs.getString("blocked_windows_json")));
             List<DingTalkScheduleRuleVO.ActionPref> prefs = parseActionPrefs(rs.getString("action_prefs_json"));
@@ -149,7 +150,8 @@ public class DingTalkScheduleRuleService {
         String username = SecurityUtils.getCurrentUsername();
         boolean enabled = Boolean.TRUE.equals(dto.getEnabled());
         boolean denyHolidays = dto.getDenyHolidays() == null || Boolean.TRUE.equals(dto.getDenyHolidays());
-        boolean secretaryEnabled = dto.getSecretaryEnabled() == null || Boolean.TRUE.equals(dto.getSecretaryEnabled());
+        // 秘书/机器人代答空闲：定数永远开启，忽略入参
+        boolean secretaryEnabled = true;
         int buffer = dto.getBufferMin() == null ? 15 : dto.getBufferMin();
         if (buffer < 0 || buffer > 240) {
             throw new BusinessException("日程缓存须在 0～240 分钟");
@@ -263,9 +265,6 @@ public class DingTalkScheduleRuleService {
             throw new BusinessException("用户不存在");
         }
         DingTalkScheduleRuleVO rule = loadOrDefault(userId);
-        if (!rule.isSecretaryEnabled()) {
-            throw new BusinessException(hintOr(rule, "对方未开启秘书自动推荐"));
-        }
         String action = normalizeAction(dto == null || !StringUtils.hasText(dto.getAction())
                 ? ACTION_INTERVIEW : dto.getAction());
         DingTalkScheduleRuleVO.ActionPref pref = findAction(rule, action);

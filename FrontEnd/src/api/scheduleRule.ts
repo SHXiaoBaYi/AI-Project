@@ -66,6 +66,7 @@ export type ScheduleRule = {
   slotMin?: number;
   lookAheadDays?: number;
   recommendLimit?: number;
+  /** 定数：永远 true，后端忽略关闭 */
   secretaryEnabled?: boolean;
   robotHint?: string;
   workStart?: string;
@@ -89,6 +90,7 @@ export type ScheduleRuleDTO = {
   slotMin?: number;
   lookAheadDays?: number;
   recommendLimit?: number;
+  /** 定数：永远 true，后端忽略关闭 */
   secretaryEnabled?: boolean;
   robotHint?: string;
   workStart?: string;

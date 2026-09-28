@@ -116,6 +116,12 @@ export type DingTalkAssistantSuggest = {
   bufferMin?: number;
   error?: string;
   adviceText?: string;
+  /** 步骤1：日程规则摘要 */
+  ruleSummary?: string;
+  /** 步骤2：钉钉闲忙摘要 */
+  busySummary?: string;
+  /** 步骤3：建议的下一个动作 */
+  nextStepText?: string;
   dayGroups?: DingTalkAssistantDayGroup[];
   freeWindows: DingTalkAssistantFreeWindow[];
   actions: DingTalkAssistantAction[];

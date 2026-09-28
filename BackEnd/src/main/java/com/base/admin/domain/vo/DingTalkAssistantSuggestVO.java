@@ -47,6 +47,15 @@ public class DingTalkAssistantSuggestVO {
     @Schema(description = "给用户看的建议文案")
     private String adviceText;
 
+    @Schema(description = "步骤1：已读取的被咨询人日程规则摘要（聊天展示）")
+    private String ruleSummary;
+
+    @Schema(description = "步骤2：钉钉闲忙摘要（聊天展示）")
+    private String busySummary;
+
+    @Schema(description = "步骤3：建议的下一个动作说明（聊天展示）")
+    private String nextStepText;
+
     @Schema(description = "按天分组的推荐时段（每段=期望时长）")
     private List<DayGroup> dayGroups = new ArrayList<>();
 

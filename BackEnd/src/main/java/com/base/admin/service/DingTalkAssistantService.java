@@ -102,17 +102,23 @@ public class DingTalkAssistantService {
         vo.setLunchStart(hours.lunchStartLabel());
         vo.setLunchEnd(hours.lunchEndLabel());
         vo.setBufferMin(hours.bufferMin());
+        vo.setRuleSummary(buildRuleSummary(null, hours, rule));
         if (user == null) {
             vo.setTargetNickname("未知用户");
             vo.setError("未查到该用户");
+            vo.setBusySummary("未能查询到该用户的钉钉闲忙。");
             vo.setAdviceText("未查到该用户，请换人再试。");
+            vo.setNextStepText("请换一位已绑定钉钉的同事再问一次。");
             return vo;
         }
         vo.setTargetUsername(user.getUsername());
         vo.setTargetNickname(StringUtils.hasText(user.getNickname()) ? user.getNickname() : user.getUsername());
+        vo.setRuleSummary(buildRuleSummary(vo.getTargetNickname(), hours, rule));
         if (StringUtils.hasText(user.getError())) {
             vo.setError(user.getError());
+            vo.setBusySummary("查询「" + vo.getTargetNickname() + "」钉钉闲忙失败：" + user.getError());
             vo.setAdviceText(vo.getTargetNickname() + "：" + user.getError());
+            vo.setNextStepText("请确认对方已绑定钉钉并可查询闲忙后重试，或改约其他人。");
             vo.setActions(baseActions(vo, null, duration));
             return vo;
         }
@@ -123,9 +129,12 @@ public class DingTalkAssistantService {
                 rangeStart, rangeEnd, windows, duration, rule, hours);
         vo.setFreeWindows(windows);
         vo.setDayGroups(dayGroups);
+        vo.setBusySummary(buildBusySummary(vo.getTargetNickname(), slots, windows, duration,
+                startDay, endDay));
         vo.setAdviceText(buildAdvice(vo.getTargetNickname(), duration, dayGroups, hours));
         SlotPick pick = firstSlot(dayGroups, duration);
         vo.setActions(baseActions(vo, pick, duration));
+        vo.setNextStepText(buildNextStepText(vo.getTargetNickname(), duration, dayGroups, pick));
         return vo;
     }
 
@@ -795,12 +804,73 @@ public class DingTalkAssistantService {
                 : "";
         String bufferBit = hours.bufferMin() > 0 ? "，日程缓存 " + hours.bufferMin() + " 分钟" : "";
         if (slotCount == 0) {
-            return "按「" + name + "」的日程规则（" + workLabel + lunchBit + bufferBit + "）与钉钉闲忙，所选范围内没有连续 "
-                    + durationMin + " 分钟空闲。";
+            return "综合规则与闲忙后，所选范围内没有连续 "
+                    + durationMin + " 分钟空闲（依据：" + workLabel + lunchBit + bufferBit + "）。";
         }
-        return "按「" + name + "」的日程规则（" + workLabel + lunchBit + bufferBit + "）与钉钉闲忙，共有 "
-                + freeDays + " 天有空、" + slotCount + " 个可约时段（每段 " + durationMin
-                + " 分钟）。请按天切换查看后再发起面试/会议/汇报。";
+        return "综合规则与闲忙后，共有 " + freeDays + " 天有空、" + slotCount
+                + " 个可约时段（每段 " + durationMin + " 分钟）。请选一个时段，再点下方动作继续。";
+    }
+
+    private static String buildRuleSummary(String name, RuleDayHours hours, DingTalkScheduleRuleVO rule) {
+        String who = StringUtils.hasText(name) ? "「" + name + "」" : "对方";
+        StringBuilder sb = new StringBuilder();
+        sb.append("已读取").append(who).append("的日程规则：\n");
+        sb.append("· 工作时间 ").append(hours.workStartLabel()).append("～").append(hours.workEndLabel());
+        if (hours.lunchStart().isBefore(hours.lunchEnd())) {
+            sb.append("\n· 午休 ").append(hours.lunchStartLabel()).append("～").append(hours.lunchEndLabel());
+        }
+        if (hours.bufferMin() > 0) {
+            sb.append("\n· 日程缓存 ").append(hours.bufferMin()).append(" 分钟");
+        }
+        sb.append("\n· 格子步长 ").append(hours.slotStepMin()).append(" 分钟");
+        if (hours.denyHolidays()) {
+            sb.append("\n· 法定节假日不安排");
+        }
+        int blocked = rule == null || rule.getBlockedWindows() == null ? 0 : rule.getBlockedWindows().size();
+        if (blocked > 0) {
+            sb.append("\n· 另有 ").append(blocked).append(" 段「不安排」窗口");
+        }
+        return sb.toString();
+    }
+
+    private static String buildBusySummary(String name, List<DingTalkBusySlotVO> slots,
+                                           List<DingTalkAssistantSuggestVO.FreeWindow> windows,
+                                           int durationMin, LocalDate startDay, LocalDate endDay) {
+        int busy = 0;
+        int free = 0;
+        if (slots != null) {
+            for (DingTalkBusySlotVO slot : slots) {
+                if (slot == null || !StringUtils.hasText(slot.getStatus())) {
+                    continue;
+                }
+                if ("FREE".equalsIgnoreCase(slot.getStatus())) {
+                    free++;
+                } else {
+                    busy++;
+                }
+            }
+        }
+        int windowCount = windows == null ? 0 : windows.size();
+        String range = startDay.equals(endDay)
+                ? startDay.toString()
+                : startDay + "～" + endDay;
+        return "已查询「" + name + "」钉钉闲忙（" + range + "）：\n"
+                + "· 忙段 " + busy + "，闲段 " + free + "\n"
+                + "· 按规则合并后，可容纳 " + durationMin + " 分钟的连续空闲窗 "
+                + windowCount + " 段";
+    }
+
+    private static String buildNextStepText(String name, int durationMin,
+                                            List<DingTalkAssistantSuggestVO.DayGroup> dayGroups, SlotPick pick) {
+        int slotCount = dayGroups == null ? 0
+                : dayGroups.stream().mapToInt(d -> d.getSlots() == null ? 0 : d.getSlots().size()).sum();
+        if (slotCount <= 0 || pick == null || pick.start() == null) {
+            return "建议下一步：扩大日期范围、缩短时长（当前 " + durationMin
+                    + " 分钟），或打开完整闲忙表核对「" + name + "」的日程。";
+        }
+        return "建议下一步：先选中一个推荐时段（优先 "
+                + pick.start().format(LABEL_DAY) + "–" + pick.end().format(LABEL_TIME)
+                + "），再发起面试邀约 / 邀请开会 / 安排工作汇报。";
     }
 
     /** 将午休、不安排时段标为忙，供后续合并空闲窗 */

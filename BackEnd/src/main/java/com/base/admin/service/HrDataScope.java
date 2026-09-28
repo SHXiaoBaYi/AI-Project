@@ -4,11 +4,16 @@ import com.base.admin.security.LoginUser;
 import com.base.admin.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * 招聘数据权限。切片开启时，默认额外可见 create_by = 当前用户名 的需求/候选人。
+ */
 @Component
 @RequiredArgsConstructor
 public class HrDataScope {
@@ -25,39 +30,65 @@ public class HrDataScope {
         if (snap.globalAll()) {
             return;
         }
+
+        StringBuilder scoped = new StringBuilder();
+        List<Object> scopedArgs = new ArrayList<>();
         Set<String> permissions = user.getPermissions();
+
         if (permissions.contains("*:*:*") || permissions.contains("hr:scope:all")) {
-            applyDeptOverride(sql, args, snap, requisitionAlias);
-            applyPersonOverride(sql, args, snap, requisitionAlias, applicationAlias);
-            return;
-        }
-        if (permissions.contains("hr:scope:owner")) {
-            sql.append(" AND ").append(requisitionAlias)
+            appendDeptOverride(scoped, scopedArgs, snap, requisitionAlias);
+            appendPersonOverride(scoped, scopedArgs, snap, requisitionAlias, applicationAlias);
+        } else if (permissions.contains("hr:scope:owner")) {
+            scoped.append(" AND ").append(requisitionAlias)
                     .append(".id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(user.getUserId());
-            applyDeptOverride(sql, args, snap, requisitionAlias);
-            applyPersonOverride(sql, args, snap, requisitionAlias, applicationAlias);
-            return;
-        }
-        if (permissions.contains("hr:scope:interviewer")) {
+            scopedArgs.add(user.getUserId());
+            appendDeptOverride(scoped, scopedArgs, snap, requisitionAlias);
+            appendPersonOverride(scoped, scopedArgs, snap, requisitionAlias, applicationAlias);
+        } else if (permissions.contains("hr:scope:interviewer")) {
             if (applicationAlias != null) {
-                sql.append(" AND ").append(applicationAlias)
+                scoped.append(" AND ").append(applicationAlias)
                         .append(".id IN (SELECT application_id FROM hr_interview_round WHERE interviewer_user_id = ? AND is_active = 1")
                         .append(" UNION SELECT application_id FROM hr_interview_invite WHERE interviewer_user_id = ? AND is_active = 1) ");
-                args.add(user.getUserId());
-                args.add(user.getUserId());
+                scopedArgs.add(user.getUserId());
+                scopedArgs.add(user.getUserId());
             } else {
-                sql.append(" AND ").append(requisitionAlias)
+                scoped.append(" AND ").append(requisitionAlias)
                         .append(".id IN (SELECT a.requisition_id FROM hr_application a JOIN hr_interview_round rd ON rd.application_id = a.id")
                         .append(" WHERE rd.interviewer_user_id = ? AND rd.is_active = 1 AND a.is_active = 1) ");
-                args.add(user.getUserId());
+                scopedArgs.add(user.getUserId());
             }
+            appendDeptOverride(scoped, scopedArgs, snap, requisitionAlias);
+            appendPersonOverride(scoped, scopedArgs, snap, requisitionAlias, applicationAlias);
+        } else {
+            appendDeptOverride(scoped, scopedArgs, snap, requisitionAlias);
+            appendPersonOverride(scoped, scopedArgs, snap, requisitionAlias, applicationAlias);
         }
-        applyDeptOverride(sql, args, snap, requisitionAlias);
-        applyPersonOverride(sql, args, snap, requisitionAlias, applicationAlias);
+
+        if (scoped.isEmpty()) {
+            return;
+        }
+
+        String scopedBody = stripLeadingAnd(scoped.toString());
+        String username = user.getUsername();
+        boolean creatorOr = snap.hrEnabled() && StringUtils.hasText(username);
+
+        if (creatorOr) {
+            sql.append(" AND ((").append(scopedBody).append(") OR ")
+                    .append(requisitionAlias).append(".create_by = ?");
+            args.addAll(scopedArgs);
+            args.add(username);
+            if (applicationAlias != null) {
+                sql.append(" OR ").append(applicationAlias).append(".create_by = ?");
+                args.add(username);
+            }
+            sql.append(") ");
+        } else {
+            sql.append(" AND (").append(scopedBody).append(") ");
+            args.addAll(scopedArgs);
+        }
     }
 
-    private void applyDeptOverride(StringBuilder sql, List<Object> args, UserDataScopeSnapshot snap, String requisitionAlias) {
+    private void appendDeptOverride(StringBuilder sql, List<Object> args, UserDataScopeSnapshot snap, String requisitionAlias) {
         if (!snap.hrEnabled() || snap.hrDeptIds() == null || snap.hrDeptIds().isEmpty()) {
             return;
         }
@@ -66,8 +97,8 @@ public class HrDataScope {
         args.addAll(snap.hrDeptIds());
     }
 
-    private void applyPersonOverride(StringBuilder sql, List<Object> args, UserDataScopeSnapshot snap,
-                                     String requisitionAlias, String applicationAlias) {
+    private void appendPersonOverride(StringBuilder sql, List<Object> args, UserDataScopeSnapshot snap,
+                                      String requisitionAlias, String applicationAlias) {
         if (!snap.hrEnabled()) {
             return;
         }
@@ -107,5 +138,13 @@ public class HrDataScope {
                 args.addAll(visible);
             }
         }
+    }
+
+    private static String stripLeadingAnd(String sql) {
+        String t = sql.trim();
+        if (t.regionMatches(true, 0, "AND ", 0, 4)) {
+            return t.substring(4).trim();
+        }
+        return t;
     }
 }

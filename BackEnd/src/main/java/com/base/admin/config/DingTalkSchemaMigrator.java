@@ -83,7 +83,7 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                   buffer_min        INT          NOT NULL DEFAULT 0      COMMENT '场次间隔缓冲分钟',
                   look_ahead_days   INT          NOT NULL DEFAULT 14     COMMENT '向前推荐天数',
                   recommend_limit   INT          NOT NULL DEFAULT 8      COMMENT '单次推荐条数上限',
-                  secretary_enabled TINYINT      NOT NULL DEFAULT 1      COMMENT '是否允许秘书/机器人按本规则自动推荐',
+                  secretary_enabled TINYINT      NOT NULL DEFAULT 1      COMMENT '秘书/机器人代答空闲（定数永远开启）',
                   windows_json      TEXT         NULL                    COMMENT '可约时间窗 JSON',
                   actions_json      VARCHAR(500) NOT NULL DEFAULT '["interview","meeting","report"]' COMMENT '允许动作',
                   robot_hint        VARCHAR(500) DEFAULT ''              COMMENT '机器人拒约提示',
@@ -176,7 +176,9 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
         addColumnIfMissing("sys_dingtalk_schedule_rule", "recommend_limit",
                 "ADD COLUMN recommend_limit INT NOT NULL DEFAULT 8 COMMENT '单次推荐条数上限' AFTER look_ahead_days");
         addColumnIfMissing("sys_dingtalk_schedule_rule", "secretary_enabled",
-                "ADD COLUMN secretary_enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否允许秘书/机器人按本规则自动推荐' AFTER recommend_limit");
+                "ADD COLUMN secretary_enabled TINYINT NOT NULL DEFAULT 1 COMMENT '秘书/机器人代答空闲（定数永远开启）' AFTER recommend_limit");
+        // 历史若被关过，统一刷回开启
+        jdbc.update("UPDATE sys_dingtalk_schedule_rule SET secretary_enabled = 1 WHERE secretary_enabled <> 1");
         addColumnIfMissing("sys_dingtalk_schedule_rule", "action_prefs_json",
                 "ADD COLUMN action_prefs_json TEXT NULL COMMENT '各动作卡片偏好 JSON' AFTER windows_json");
         addColumnIfMissing("sys_dingtalk_schedule_rule", "blocked_windows_json",

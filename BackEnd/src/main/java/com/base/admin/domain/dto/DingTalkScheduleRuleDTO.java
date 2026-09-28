@@ -33,7 +33,7 @@ public class DingTalkScheduleRuleDTO {
     private Integer recommendLimit;
 
     @NotNull
-    @Schema(description = "是否允许秘书机器人读取本规则并推荐", example = "true")
+    @Schema(description = "是否允许秘书机器人读取本规则并推荐（定数：永远 true，入参忽略）", example = "true")
     private Boolean secretaryEnabled;
 
     @Schema(description = "机器人拒约/无空档提示")

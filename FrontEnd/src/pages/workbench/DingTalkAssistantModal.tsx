@@ -1,5 +1,5 @@
-import { memo, useEffect, useRef, useState } from 'react';
-import { App, Avatar, Button, DatePicker, Form, Input, InputNumber, Modal, Radio, Select, Switch, Tabs } from 'antd';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { App, Avatar, Button, DatePicker, Form, Input, InputNumber, Mentions, Modal, Radio, Switch, Tabs } from 'antd';
 import { useSelector } from 'react-redux';
 import dayjs, { type Dayjs } from 'dayjs';
 import { usePermission } from '@/hooks/usePermission';
@@ -28,6 +28,12 @@ import {
 
 const ASSISTANT_NAME = '日程助手';
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -47,11 +53,8 @@ type ChatMessage = {
   role: ChatRole;
   text?: string;
   suggest?: DingTalkAssistantSuggest;
-  /** 本条建议当前选中的天 */
   activeDay?: string;
-  /** 本条建议当前选中的时段 */
   selectedKey?: string;
-  /** 本条建议对应的同事上下文（不受底部输入栏后续改动影响） */
   context?: MessageContext;
   time: string;
 };
@@ -59,6 +62,12 @@ type ChatMessage = {
 type ActionTarget = {
   targetUserId: number;
   targetNickname: string;
+};
+
+type ParsedAsk = {
+  user: DingTalkBusyUserOption;
+  durationMin: number;
+  range: [Dayjs, Dayjs];
 };
 
 function msgId() {
@@ -106,6 +115,123 @@ function defaultAskRange(): [Dayjs, Dayjs] {
   return toAskDateRange(min, end);
 }
 
+function parseDurationMin(text: string): number {
+  if (/半\s*小时/.test(text)) return 30;
+  if (/一个半\s*小时|1\.5\s*小时/.test(text)) return 90;
+  if (/两\s*小时|2\s*小时/.test(text)) return 120;
+  if (/一\s*小时|1\s*小时/.test(text)) return 60;
+  const minHit = text.match(/(\d+)\s*分钟/);
+  if (minHit) {
+    const n = Number(minHit[1]);
+    if (Number.isFinite(n) && n >= 15 && n <= 240) return n;
+  }
+  const hourHit = text.match(/(\d+(?:\.\d+)?)\s*小时/);
+  if (hourHit) {
+    const n = Math.round(Number(hourHit[1]) * 60);
+    if (Number.isFinite(n) && n >= 15 && n <= 240) return n;
+  }
+  return 60;
+}
+
+function parseAskRange(text: string): [Dayjs, Dayjs] {
+  const { min, max } = bookingWindow();
+  const today = min.startOf('day');
+
+  if (/今天/.test(text)) return toAskDateRange(today, today);
+  if (/明天/.test(text)) {
+    const d = today.add(1, 'day');
+    return toAskDateRange(d, d);
+  }
+  if (/后天/.test(text)) {
+    const d = today.add(2, 'day');
+    return toAskDateRange(d, d);
+  }
+  if (/下周/.test(text)) {
+    const start = today.add(1, 'week').startOf('week').add(1, 'day'); // 下周一
+    const end = start.add(4, 'day');
+    return toAskDateRange(start, end);
+  }
+  if (/本周|这周/.test(text)) {
+    const end = today.add(4, 'day');
+    return toAskDateRange(today, end.isAfter(max, 'day') ? max : end);
+  }
+
+  const nearHit = text.match(/(?:近|未来|接下来)\s*(\d+)\s*天/);
+  if (nearHit) {
+    const days = Math.min(Math.max(Number(nearHit[1]) || 5, 1), BOOKING_MAX_DAYS);
+    return toAskDateRange(today, today.add(days - 1, 'day'));
+  }
+
+  const rangeHit = text.match(/(\d{1,2})[./-](\d{1,2})\s*[~～\-到至]\s*(\d{1,2})[./-](\d{1,2})/);
+  if (rangeHit) {
+    const y = today.year();
+    let start = dayjs(`${y}-${rangeHit[1].padStart(2, '0')}-${rangeHit[2].padStart(2, '0')}`);
+    let end = dayjs(`${y}-${rangeHit[3].padStart(2, '0')}-${rangeHit[4].padStart(2, '0')}`);
+    if (!start.isValid() || !end.isValid()) return defaultAskRange();
+    if (start.isBefore(today, 'day')) start = start.add(1, 'year');
+    if (end.isBefore(start, 'day')) end = end.add(1, 'year');
+    return toAskDateRange(start, end);
+  }
+
+  const singleHit = text.match(/(?:在|到)?\s*(\d{1,2})[./-](\d{1,2})(?:\s*这?\s*天)?/);
+  if (singleHit && !/分钟|小时/.test(text.slice(Math.max(0, (singleHit.index ?? 0) - 2), (singleHit.index ?? 0) + 8))) {
+    const y = today.year();
+    let d = dayjs(`${y}-${singleHit[1].padStart(2, '0')}-${singleHit[2].padStart(2, '0')}`);
+    if (!d.isValid()) return defaultAskRange();
+    if (d.isBefore(today, 'day')) d = d.add(1, 'year');
+    return toAskDateRange(d, d);
+  }
+
+  return defaultAskRange();
+}
+
+function matchUserByToken(token: string, users: DingTalkBusyUserOption[]): DingTalkBusyUserOption | null {
+  const t = token.trim().replace(/[的地得]$/, '');
+  if (!t) return null;
+  const exact = users.find((u) => u.nickname === t || u.username === t);
+  if (exact) return exact;
+  const starts = users.filter(
+    (u) =>
+      (u.nickname && (u.nickname.startsWith(t) || t.startsWith(u.nickname))) ||
+      (u.username && u.username.startsWith(t)),
+  );
+  if (starts.length === 1) return starts[0];
+  const includes = users.filter(
+    (u) => (u.nickname && u.nickname.includes(t)) || (u.username && u.username.includes(t)),
+  );
+  if (includes.length === 1) return includes[0];
+  return null;
+}
+
+function resolveMentionedUser(text: string, users: DingTalkBusyUserOption[]): DingTalkBusyUserOption | null {
+  const mentions = [...text.matchAll(/@([^\s@，,。！!？?\n]+)/g)];
+  for (let i = mentions.length - 1; i >= 0; i -= 1) {
+    const found = matchUserByToken(mentions[i][1], users);
+    if (found) return found;
+  }
+  const quoted = text.match(/「([^」]+)」/);
+  if (quoted) {
+    const found = matchUserByToken(quoted[1], users);
+    if (found) return found;
+  }
+  return null;
+}
+
+function parseAsk(text: string, users: DingTalkBusyUserOption[]): ParsedAsk | { error: string } {
+  const user = resolveMentionedUser(text, users);
+  if (!user) {
+    return { error: '请先 @同事，例如：@张三 这周有没有 60 分钟空闲？' };
+  }
+  if (user.dingtalkBound !== 1) {
+    return { error: `「${user.nickname || user.username}」还未绑定钉钉，暂时查不了闲忙` };
+  }
+  const durationMin = parseDurationMin(text);
+  const range = parseAskRange(text);
+  const rangeErr = bookingRangeError(range[0], range[1]);
+  if (rangeErr) return { error: rangeErr };
+  return { user, durationMin, range };
+}
+
 /** 去掉法定节假日天、假日上的推荐时段，以及已经过去的时段 */
 function filterSuggestHolidays(data: DingTalkAssistantSuggest): DingTalkAssistantSuggest {
   const now = dayjs();
@@ -134,11 +260,9 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
   const listRef = useRef<HTMLDivElement>(null);
   const [users, setUsers] = useState<DingTalkBusyUserOption[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [targetUserId, setTargetUserId] = useState<number>();
-  const [durationMin, setDurationMin] = useState(60);
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => defaultAskRange());
   const [querying, setQuerying] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [draft, setDraft] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteSeed, setInviteSeed] = useState<InviteFormValues | null>(null);
   const [actionSaving, setActionSaving] = useState(false);
@@ -147,6 +271,19 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
   const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
   const [meetingForm] = Form.useForm();
   const [reportForm] = Form.useForm();
+
+  const mentionOptions = useMemo(
+    () =>
+      users.map((user) => ({
+        key: String(user.userId),
+        value: user.nickname || user.username,
+        label: `${user.nickname || user.username}${user.username ? `（${user.username}）` : ''}${
+          user.dingtalkBound === 1 ? '' : ' · 未绑定钉钉'
+        }`,
+        disabled: user.dingtalkBound !== 1,
+      })),
+    [users],
+  );
 
   const patchMessage = (id: string, patch: Partial<ChatMessage>) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
@@ -164,7 +301,13 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
         {
           id: msgId(),
           role: 'assistant',
-          text: '你好，我是日程助手。选一位同事和日期范围，我会按对方设置的日程规则（工作时间、午休、不安排时段、日程缓存）结合钉钉闲忙给出空闲建议，也可帮你发起面试邀约、邀请开会或安排工作汇报。',
+          text:
+            '你好，我是日程助手。\n' +
+            '像钉钉聊天一样直接说就行，例如：\n' +
+            '· @张三 这周有没有 60 分钟空闲？\n' +
+            '· @李四 明天帮我看看半小时空档\n' +
+            '· @王五 下周一到周五有没有一小时能约？\n' +
+            '我会先读对方日程规则，再查钉钉闲忙，最后给你可约时段和下一步建议。',
           time: dayjs().format('HH:mm'),
         },
       ]);
@@ -177,11 +320,6 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, open]);
 
-  const composerTargetLabel = (() => {
-    const user = users.find((u) => u.userId === targetUserId);
-    return user ? user.nickname || user.username : '';
-  })();
-
   const push = (msg: Omit<ChatMessage, 'id' | 'time'> & { time?: string }) => {
     const next: ChatMessage = { ...msg, id: msgId(), time: msg.time || dayjs().format('HH:mm') };
     setMessages((prev) => [...prev, next]);
@@ -189,51 +327,63 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
   };
 
   const handleAsk = async () => {
-    if (!targetUserId) {
-      message.warning('请选择同事');
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      message.warning('先说一句吧，记得 @同事');
       return;
     }
-    if (!range?.[0] || !range?.[1] || range[0].isAfter(range[1], 'day')) {
-      message.warning('请选择有效的日期范围');
+    const parsed = parseAsk(trimmed, users);
+    if ('error' in parsed) {
+      message.warning(parsed.error);
       return;
     }
-    const rangeErr = bookingRangeError(range[0], range[1]);
-    if (rangeErr) {
-      message.warning(rangeErr);
-      return;
-    }
-    const nickname = composerTargetLabel;
-    const askedDuration = durationMin;
-    const askedUserId = targetUserId;
+    const { user, durationMin, range } = parsed;
+    const nickname = user.nickname || user.username;
     const [askStart, askEnd] = toAskDateRange(range[0], range[1]);
-    if (!askStart.isBefore(askEnd)) {
-      message.warning('请选择有效的日期范围');
+    if (!askStart.isBefore(askEnd) && !askStart.isSame(askEnd, 'day')) {
+      message.warning('请说清楚要查的日期范围');
       return;
     }
-    const userText = `查一下「${nickname}」在 ${askStart.format('MM-DD')} ~ ${askEnd.format('MM-DD')}（按对方日程规则）是否有连续 ${askedDuration} 分钟空闲？`;
-    push({ role: 'user', text: userText });
+
+    push({ role: 'user', text: trimmed });
+    setDraft('');
     setQuerying(true);
     try {
+      push({ role: 'system', text: `正在读取「${nickname}」的日程规则…` });
       const data = filterSuggestHolidays(
         await suggestDingTalkAssistantApi({
-          targetUserId: askedUserId,
+          targetUserId: user.userId,
           startTime: askStart.format('YYYY-MM-DD HH:mm:ss'),
           endTime: askEnd.format('YYYY-MM-DD HH:mm:ss'),
-          durationMin: askedDuration,
+          durationMin,
         }),
       );
-      const firstDay = data.dayGroups?.find((d) => (d.slots?.length ?? 0) > 0) ?? data.dayGroups?.[0];
-      const firstSlot = firstDay?.slots?.[0];
+      const displayName = data.targetNickname || nickname;
+      await sleep(280);
       push({
         role: 'assistant',
-        text: data.adviceText || '暂无建议',
+        text: data.ruleSummary || `已读取「${displayName}」的日程规则。`,
+      });
+      push({ role: 'system', text: `正在查询「${displayName}」的钉钉闲忙…` });
+      await sleep(280);
+      push({
+        role: 'assistant',
+        text: data.busySummary || `已查询「${displayName}」的钉钉闲忙。`,
+      });
+      await sleep(200);
+      const firstDay = data.dayGroups?.find((d) => (d.slots?.length ?? 0) > 0) ?? data.dayGroups?.[0];
+      const firstSlot = firstDay?.slots?.[0];
+      const advice = [data.adviceText, data.nextStepText].filter(Boolean).join('\n\n');
+      push({
+        role: 'assistant',
+        text: advice || '暂无建议',
         suggest: data,
         activeDay: firstDay?.day,
         selectedKey: firstSlot ? `${firstSlot.start}|${firstSlot.end}` : undefined,
         context: {
-          targetUserId: askedUserId,
-          targetNickname: data.targetNickname || nickname,
-          durationMin: data.durationMin || askedDuration,
+          targetUserId: user.userId,
+          targetNickname: displayName,
+          durationMin: data.durationMin || durationMin,
         },
       });
     } catch (err) {
@@ -249,13 +399,13 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
   const openMeetingModal = (msg: ChatMessage) => {
     const slot = findSlot(msg.suggest, msg.selectedKey);
     const start = slotStart(slot);
-    const nickname = msg.context?.targetNickname || composerTargetLabel;
-    const userId = msg.context?.targetUserId ?? targetUserId;
+    const nickname = msg.context?.targetNickname || '';
+    const userId = msg.context?.targetUserId;
     if (!userId) {
-      message.warning('请先选择同事');
+      message.warning('这条消息里没有同事信息，请重新 @ 询问');
       return;
     }
-    const minutes = msg.context?.durationMin || durationMin || 60;
+    const minutes = msg.context?.durationMin || 60;
     meetingForm.setFieldsValue({
       title: nickname ? `与${nickname}的会议` : '会议',
       startTime: start ? dayjs(start) : dayjs().add(1, 'hour').minute(0).second(0),
@@ -264,20 +414,20 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       description: '',
       onlineMeeting: true,
     });
-    setActionTarget({ targetUserId: userId, targetNickname: nickname || '' });
+    setActionTarget({ targetUserId: userId, targetNickname: nickname });
     setMeetingOpen(true);
   };
 
   const openReportModal = (msg: ChatMessage) => {
     const slot = findSlot(msg.suggest, msg.selectedKey);
     const start = slotStart(slot);
-    const nickname = msg.context?.targetNickname || composerTargetLabel;
-    const userId = msg.context?.targetUserId ?? targetUserId;
+    const nickname = msg.context?.targetNickname || '';
+    const userId = msg.context?.targetUserId;
     if (!userId) {
-      message.warning('请先选择同事');
+      message.warning('这条消息里没有同事信息，请重新 @ 询问');
       return;
     }
-    const minutes = msg.context?.durationMin || durationMin || 60;
+    const minutes = msg.context?.durationMin || 60;
     reportForm.setFieldsValue({
       title: nickname ? `工作汇报 · ${nickname}` : '工作汇报',
       startTime: start ? dayjs(start) : dayjs().add(1, 'hour').minute(0).second(0),
@@ -285,15 +435,15 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       location: '',
       content: '',
     });
-    setActionTarget({ targetUserId: userId, targetNickname: nickname || '' });
+    setActionTarget({ targetUserId: userId, targetNickname: nickname });
     setReportOpen(true);
   };
 
   const runAction = (msg: ChatMessage, action: DingTalkAssistantAction) => {
     const payload = action.payload ?? {};
     const ctx = msg.context;
-    const userId = Number(payload.targetUserId ?? ctx?.targetUserId ?? targetUserId);
-    const minutes = Number(payload.durationMin ?? ctx?.durationMin ?? durationMin) || 60;
+    const userId = Number(payload.targetUserId ?? ctx?.targetUserId);
+    const minutes = Number(payload.durationMin ?? ctx?.durationMin) || 60;
     const slot = findSlot(msg.suggest, msg.selectedKey);
     const suggestedStart = slot ? slotStart(slot) : payload.suggestedStart ? String(payload.suggestedStart) : undefined;
 
@@ -331,7 +481,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
 
   const submitMeeting = async () => {
     if (!actionTarget?.targetUserId) {
-      message.warning('请先选择同事');
+      message.warning('缺少同事信息');
       return;
     }
     const values = await meetingForm.validateFields();
@@ -364,7 +514,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
 
   const submitReport = async () => {
     if (!actionTarget?.targetUserId) {
-      message.warning('请先选择同事');
+      message.warning('缺少同事信息');
       return;
     }
     const values = await reportForm.validateFields();
@@ -397,9 +547,9 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
   return (
     <>
       <Modal
-        title='钉钉日程助手'
+        title='日程助手'
         open={open}
-        width={1200}
+        width={960}
         footer={null}
         maskClosable={false}
         destroyOnHidden
@@ -409,7 +559,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
         }}
         styles={{ body: { padding: 0 } }}
       >
-        <div className='flex h-[70vh] flex-col'>
+        <div className='flex h-[72vh] flex-col'>
           <div
             ref={listRef}
             className='min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3'
@@ -454,19 +604,16 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
                     <div
                       className={`relative rounded-lg px-3 py-2 text-sm leading-relaxed shadow-sm ${
                         isUser
-                          ? 'rounded-tr-sm bg-[#cce7ff] text-neutral-800'
+                          ? 'rounded-tr-sm bg-[#95ec69] text-neutral-800'
                           : 'rounded-tl-sm border border-neutral-100 bg-white text-neutral-800'
                       }`}
                     >
                       {msg.text ? <div className='whitespace-pre-wrap'>{msg.text}</div> : null}
-                      {msg.context?.targetNickname ? (
-                        <div className='mt-1 text-[11px] text-neutral-400'>关于：{msg.context.targetNickname}</div>
-                      ) : null}
                       {msg.suggest?.dayGroups?.length ? (
                         <div className='mt-2'>
                           <div className='mb-1 text-xs text-neutral-500'>
                             推荐时段（{workHoursLabel(msg.suggest)}，每段{' '}
-                            {msg.suggest.durationMin || msg.context?.durationMin || durationMin} 分钟）
+                            {msg.suggest.durationMin || msg.context?.durationMin || 60} 分钟）
                           </div>
                           <Tabs
                             size='small'
@@ -507,22 +654,25 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
                         </div>
                       ) : null}
                       {msg.suggest?.actions?.length ? (
-                        <div className='mt-2 flex flex-wrap gap-1.5'>
-                          {msg.suggest.actions.map((action) => (
-                            <Button
-                              key={`${msg.id}-${action.type}`}
-                              size='small'
-                              type={
-                                action.type === 'CREATE_MEETING' || action.type === 'CREATE_INVITE'
-                                  ? 'primary'
-                                  : 'default'
-                              }
-                              title={action.hint}
-                              onClick={() => runAction(msg, action)}
-                            >
-                              {action.label}
-                            </Button>
-                          ))}
+                        <div className='mt-2'>
+                          <div className='mb-1 text-xs font-medium text-neutral-500'>建议的下一个动作</div>
+                          <div className='flex flex-wrap gap-1.5'>
+                            {msg.suggest.actions.map((action) => (
+                              <Button
+                                key={`${msg.id}-${action.type}`}
+                                size='small'
+                                type={
+                                  action.type === 'CREATE_MEETING' || action.type === 'CREATE_INVITE'
+                                    ? 'primary'
+                                    : 'default'
+                                }
+                                title={action.hint}
+                                onClick={() => runAction(msg, action)}
+                              >
+                                {action.label}
+                              </Button>
+                            ))}
+                          </div>
                         </div>
                       ) : null}
                     </div>
@@ -532,58 +682,41 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
             })}
           </div>
 
-          <div className='shrink-0 border-t border-neutral-200 bg-white px-4 py-3'>
-            <div className='mb-2 text-xs text-neutral-400'>
-              空闲按时段对方的日程规则统计；不可选过去、法定节假日，最多未来 {BOOKING_MAX_DAYS} 天
-            </div>
-            <div className='mb-2 grid gap-2 md:grid-cols-2'>
-              <Select
-                showSearch
-                allowClear
-                optionFilterProp='label'
-                placeholder={loadingUsers ? '正在加载同事' : '选择要问的同事'}
-                loading={loadingUsers}
-                value={targetUserId}
-                onChange={(id) => setTargetUserId(id)}
-                options={users.map((user) => ({
-                  value: user.userId,
-                  disabled: user.dingtalkBound !== 1,
-                  label: `${user.nickname || user.username}${user.username ? `（${user.username}）` : ''}${
-                    user.dingtalkBound === 1 ? '' : ' · 未绑定钉钉'
-                  }`,
-                }))}
-              />
-              <div className='flex items-center gap-2'>
-                <span className='shrink-0 text-xs text-neutral-500'>期望</span>
-                <InputNumber
-                  className='w-full'
-                  min={15}
-                  max={240}
-                  step={15}
-                  value={durationMin}
-                  addonAfter='分钟'
-                  onChange={(v) => setDurationMin(typeof v === 'number' ? v : 60)}
-                />
-              </div>
-              <DatePicker.RangePicker
-                className='w-full md:col-span-2'
-                format='YYYY-MM-DD'
-                value={range}
-                disabledDate={disabledBookingDate}
-                onChange={(value) => {
-                  if (value?.[0] && value?.[1]) setRange(toAskDateRange(value[0], value[1]));
+          <div className='shrink-0 border-t border-neutral-200 bg-[#f7f7f7] px-3 py-2'>
+            <div className='rounded-lg border border-neutral-200 bg-white focus-within:border-[#1f7aef]'>
+              <Mentions
+                value={draft}
+                onChange={setDraft}
+                prefix='@'
+                options={mentionOptions}
+                placeholder={
+                  loadingUsers ? '正在加载同事…' : '输入 @ 选同事，再说时间，例如：@张三 这周有没有 60 分钟空闲？'
+                }
+                autoSize={{ minRows: messages.length <= 1 ? 5 : 3, maxRows: 8 }}
+                className='!border-0 !shadow-none'
+                disabled={querying}
+                filterOption={(input, option) => {
+                  const q = (input || '').toLowerCase();
+                  const label = String(option?.label ?? option?.value ?? '').toLowerCase();
+                  return !q || label.includes(q);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    void handleAsk();
+                  }
                 }}
               />
-            </div>
-            <div className='flex justify-end gap-2'>
-              <Button onClick={onClose}>关闭</Button>
-              <Button
-                type='primary'
-                loading={querying}
-                onClick={() => void handleAsk()}
-              >
-                发送
-              </Button>
+              <div className='flex items-center justify-between gap-2 border-t border-neutral-100 px-3 py-1.5'>
+                <span className='text-xs text-neutral-400'>Ctrl+Enter 发送 · 最多未来 {BOOKING_MAX_DAYS} 天</span>
+                <Button
+                  type='primary'
+                  loading={querying}
+                  onClick={() => void handleAsk()}
+                >
+                  发送
+                </Button>
+              </div>
             </div>
           </div>
         </div>
