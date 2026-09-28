@@ -411,10 +411,17 @@ public class HrInviteService {
 
     @Transactional
     public void createCalendar(Long id) {
+        // 临时关闭：面试邀约不再创建钉钉日程
+        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+            throw new BusinessException("当前已关闭面试邀约创建钉钉日程，仅保存邀约记录");
+        }
         createCalendar(id, true);
     }
 
     private void createCalendar(Long id, boolean notifyCc) {
+        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+            throw new BusinessException("当前已关闭面试邀约创建钉钉日程，仅保存邀约记录");
+        }
         Map<String, Object> invite = loadInvite(id);
         assertCalendarCreatable(invite);
         Long interviewerUserId = (Long) invite.get("interviewerUserId");
@@ -455,6 +462,10 @@ public class HrInviteService {
 
     @Transactional
     public HrInviteSaveVO createCalendarBatch(java.util.List<Long> ids) {
+        // 临时关闭：面试邀约不再创建钉钉日程
+        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+            throw new BusinessException("当前已关闭面试邀约创建钉钉日程，仅保存邀约记录");
+        }
         if (ids == null || ids.isEmpty()) {
             throw new BusinessException("请选择要创建钉钉日程的面试邀约");
         }
@@ -840,6 +851,11 @@ public class HrInviteService {
      */
     private java.util.List<String> attachSessionCalendars(java.util.List<Long> inviteIds, HrInviteCreateDTO dto, int duration) {
         java.util.List<String> unbound = new ArrayList<>();
+        // 临时关闭：不调用钉钉 createEvent，仅保留方法体便于恢复
+        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+            finalizeInviteWithoutCalendar(inviteIds, dto);
+            return unbound;
+        }
         if (inviteIds == null || inviteIds.isEmpty()) {
             return unbound;
         }
@@ -916,6 +932,7 @@ public class HrInviteService {
         List<String> attendees = attendeeUnionIds.stream()
                 .filter(id -> !id.equals(ownerUnionId))
                 .toList();
+        // 创建钉钉日程（仅 AUTO_CREATE_DINGTALK_CALENDAR=true 时会走到这里）
         DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
                 ownerUnionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees, false);
         Long logInviteId = boundInviteIds.getFirst();

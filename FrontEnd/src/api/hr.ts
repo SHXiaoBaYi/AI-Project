@@ -466,16 +466,17 @@ export function updateHrInviteApi(id: number, data: Record<string, unknown>) {
   return request.put<unknown, { id: number; warning?: string }>(`/hr/invite/${id}`, data);
 }
 
-export function createHrInviteCalendarApi(id: number) {
-  return request.post(`/hr/invite/${id}/calendar`);
-}
-
-export function createHrInviteCalendarBatchApi(ids: number[]) {
-  return request.post<unknown, { id?: number; warning?: string; created?: number; unboundInterviewers?: string[] }>(
-    '/hr/invite/calendar/batch',
-    ids,
-  );
-}
+// 临时关闭：面试邀约不再创建钉钉日程（恢复时与后端 calendar 接口一并打开）
+// export function createHrInviteCalendarApi(id: number) {
+//   return request.post(`/hr/invite/${id}/calendar`);
+// }
+//
+// export function createHrInviteCalendarBatchApi(ids: number[]) {
+//   return request.post<unknown, { id?: number; warning?: string; created?: number; unboundInterviewers?: string[] }>(
+//     '/hr/invite/calendar/batch',
+//     ids,
+//   );
+// }
 
 export function deleteHrInviteApi(id: number) {
   return request.delete<unknown, { id: number; warning?: string }>(`/hr/invite/${id}`);

@@ -1,0 +1,7 @@
+# 复制为 config.local.yaml 后填写（安装到千问办公技能目录内）
+# 勿把含密钥的文件提交到公共仓库
+bulletin:
+  formName: 行政通报
+  processCode: '' # 例: PROC-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  deptId: ''
+  confirmPolicy: always # always | never
