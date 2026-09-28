@@ -592,6 +592,8 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
       <InviteFormModal
         open={inviteOpen}
         seed={inviteSeed}
+        createDingTalkCalendar
+        sendDingTalkWorkNotice={false}
         onOpenChange={(next) => {
           setInviteOpen(next);
           if (!next) setInviteSeed(null);

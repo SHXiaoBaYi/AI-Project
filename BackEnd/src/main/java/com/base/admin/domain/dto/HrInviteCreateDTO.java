@@ -45,6 +45,9 @@ public class HrInviteCreateDTO {
     @Schema(description = "地点或会议方式")
     private String location;
 
-    @Schema(description = "是否创建钉钉日程并强制附带简历（日程助手发起邀约时为 true；日程无原生附件，简历先上传钉盘并把 fileId 链接写入日程描述，同时工作通知告知面试官）")
+    @Schema(description = "是否创建钉钉日程并强制附带简历（日程助手发起邀约时为 true；日程无原生附件，简历先上传钉盘并把 fileId 链接写入日程描述）")
     private Boolean createDingTalkCalendar;
+
+    @Schema(description = "是否发送钉钉工作通知；日程助手场景传 false，仅建日程+钉盘简历描述。默认 true")
+    private Boolean sendDingTalkWorkNotice;
 }

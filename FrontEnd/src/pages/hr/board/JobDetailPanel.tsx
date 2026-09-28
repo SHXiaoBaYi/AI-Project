@@ -25,6 +25,16 @@ function uniqueOptions(rows: HrJobDetailRow[], pick: (r: HrJobDetailRow) => stri
   return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN')).map((text) => ({ text, value: text }));
 }
 
+function cmpText(a?: string | null, b?: string | null) {
+  return (a || '').localeCompare(b || '', 'zh-CN');
+}
+
+function cmpNum(a?: number | null, b?: number | null) {
+  const left = a == null ? Number.NEGATIVE_INFINITY : a;
+  const right = b == null ? Number.NEGATIVE_INFINITY : b;
+  return left - right;
+}
+
 function loadStoredWidths(): Record<string, number> {
   try {
     const raw = localStorage.getItem(WIDTH_STORAGE_KEY);
@@ -145,6 +155,7 @@ export default function JobDetailPanel() {
         width: w('jobName', 160),
         filters: jobFilters,
         onFilter: (value, record) => (record.jobName || '') === value,
+        sorter: (a, b) => cmpText(a.jobName, b.jobName),
       },
       {
         title: '岗位状态',
@@ -153,6 +164,7 @@ export default function JobDetailPanel() {
         width: w('statusLabel', 100),
         filters: statusFilters,
         onFilter: (value, record) => (record.statusLabel || record.status || '') === value,
+        sorter: (a, b) => cmpText(a.statusLabel || a.status, b.statusLabel || b.status),
         render: (_, r) => r.statusLabel || r.status || '—',
       },
       {
@@ -162,6 +174,7 @@ export default function JobDetailPanel() {
         width: w('location', 90),
         filters: locationFilters,
         onFilter: (value, record) => (record.location || '') === value,
+        sorter: (a, b) => cmpText(a.location, b.location),
       },
       {
         title: '部门',
@@ -171,6 +184,7 @@ export default function JobDetailPanel() {
         ellipsis: true,
         filters: deptFilters,
         onFilter: (value, record) => (record.deptName || '') === value,
+        sorter: (a, b) => cmpText(a.deptName, b.deptName),
         render: (_, r) => r.deptName || '—',
       },
       {
@@ -181,6 +195,7 @@ export default function JobDetailPanel() {
         ellipsis: true,
         filters: ownerFilters,
         onFilter: (value, record) => (record.ownerName || '') === value,
+        sorter: (a, b) => cmpText(a.ownerName, b.ownerName),
         render: (_, r) => r.ownerName || '—',
       },
       {
@@ -190,6 +205,7 @@ export default function JobDetailPanel() {
         width: w('priorityLabel', 90),
         filters: priorityFilters,
         onFilter: (value, record) => (record.priorityLabel || '') === value,
+        sorter: (a, b) => cmpText(a.priorityLabel, b.priorityLabel),
         render: (_, r) => r.priorityLabel || '—',
       },
       {
@@ -200,6 +216,7 @@ export default function JobDetailPanel() {
         ellipsis: true,
         filters: targetFilters,
         onFilter: (value, record) => (record.targetText || '') === value,
+        sorter: (a, b) => cmpText(a.targetText, b.targetText),
         render: (_, r) => r.targetText || '—',
       },
       {
@@ -208,6 +225,7 @@ export default function JobDetailPanel() {
         key: 'headcount',
         width: w('headcount', 70),
         align: 'left',
+        sorter: (a, b) => cmpNum(a.headcount, b.headcount),
         render: (_, r) => r.headcount ?? '—',
       },
       {
@@ -215,6 +233,7 @@ export default function JobDetailPanel() {
         dataIndex: 'receivedDate',
         key: 'receivedDate',
         width: w('receivedDate', 110),
+        sorter: (a, b) => cmpText(a.receivedDate, b.receivedDate),
         render: (_, r) => r.receivedDate || '—',
       },
       {
@@ -223,6 +242,7 @@ export default function JobDetailPanel() {
         key: 'recruitingDays',
         width: w('recruitingDays', 90),
         align: 'left',
+        sorter: (a, b) => cmpNum(a.recruitingDays, b.recruitingDays),
         render: (_, r) => (r.recruitingDays == null ? '—' : r.recruitingDays),
       },
       {
@@ -231,6 +251,7 @@ export default function JobDetailPanel() {
         key: 'dayProgress',
         ellipsis: true,
         width: w('dayProgress', 260),
+        sorter: (a, b) => cmpText(a.dayProgress, b.dayProgress),
         render: (_, r) => (
           <Typography.Text
             className={r.dayProgress && r.dayProgress !== '无' ? 'text-neutral-800' : 'text-black/35'}
@@ -246,6 +267,7 @@ export default function JobDetailPanel() {
         key: 'weekProgress',
         ellipsis: true,
         width: w('weekProgress', 260),
+        sorter: (a, b) => cmpText(a.weekProgress, b.weekProgress),
         render: (_, r) => (
           <Typography.Text
             className={r.weekProgress && r.weekProgress !== '无' ? 'text-neutral-800' : 'text-black/35'}

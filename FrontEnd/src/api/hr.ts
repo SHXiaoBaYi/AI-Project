@@ -425,6 +425,10 @@ export function createHrInviteApi(data: {
   interviewAt: string;
   durationMin?: number;
   location?: string;
+  /** 日程助手等场景：创建钉钉日程并上传简历到钉盘写入描述 */
+  createDingTalkCalendar?: boolean;
+  /** 是否发钉钉工作通知；助手场景传 false */
+  sendDingTalkWorkNotice?: boolean;
 }) {
   return request.post<unknown, { id: number; warning?: string }>('/hr/invite', data);
 }

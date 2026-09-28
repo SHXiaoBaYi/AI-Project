@@ -70,7 +70,7 @@ public class HrInviteService {
         }
         java.util.List<String> unbound = attachSessionCalendars(inviteIds, dto, duration);
         boolean calendarOk = unbound.size() < ids.size();
-        if (calendarOk && last != null) {
+        if (calendarOk && last != null && shouldSendDingTalkWorkNotice(dto)) {
             notifyRoundCc(last, dto);
         }
         return saveResult(last, unboundMessage(unbound));
@@ -853,6 +853,11 @@ public class HrInviteService {
         return AUTO_CREATE_DINGTALK_CALENDAR || (dto != null && Boolean.TRUE.equals(dto.getCreateDingTalkCalendar()));
     }
 
+    /** 未显式传 false 时默认发工作通知；日程助手传 false 只建日程+钉盘描述 */
+    private boolean shouldSendDingTalkWorkNotice(HrInviteCreateDTO dto) {
+        return dto == null || !Boolean.FALSE.equals(dto.getSendDingTalkWorkNotice());
+    }
+
     private java.util.List<String> attachSessionCalendars(java.util.List<Long> inviteIds, HrInviteCreateDTO dto, int duration) {
         java.util.List<String> unbound = new ArrayList<>();
         if (inviteIds == null || inviteIds.isEmpty()) {
@@ -993,10 +998,12 @@ public class HrInviteService {
                     rs -> rs.next() ? rs.getLong(1) : null, inviteId);
             HrInviteCreateDTO one = copyDto(dto, interviewerUserId);
             writeRoundAndStage(one, person);
-            boolean noticeOk = notifyInterviewer(inviteId, one, person, resume, driveFile);
-            if (!noticeOk) {
-                throw new BusinessException("钉钉日程已创建且简历已上传钉盘，但未能通知面试官「"
-                        + interviewerName(interviewerUserId) + "」，请确认面试官已绑定钉钉 userid 后重试或手动补发");
+            if (shouldSendDingTalkWorkNotice(dto)) {
+                boolean noticeOk = notifyInterviewer(inviteId, one, person, resume, driveFile);
+                if (!noticeOk) {
+                    throw new BusinessException("钉钉日程已创建且简历已上传钉盘，但未能通知面试官「"
+                            + interviewerName(interviewerUserId) + "」，请确认面试官已绑定钉钉 userid 后重试或手动补发");
+                }
             }
         }
         return unbound;
@@ -1091,6 +1098,7 @@ public class HrInviteService {
         one.setLocation(dto.getLocation());
         one.setCcUserIds(dto.getCcUserIds());
         one.setCreateDingTalkCalendar(dto.getCreateDingTalkCalendar());
+        one.setSendDingTalkWorkNotice(dto.getSendDingTalkWorkNotice());
         return one;
     }
 

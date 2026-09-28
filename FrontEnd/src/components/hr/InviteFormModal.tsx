@@ -181,6 +181,10 @@ type InviteFormModalProps = {
   editingInitial?: InviteFormValues | null;
   /** 助手等场景预填，不锁定字段 */
   seed?: InviteFormValues | null;
+  /** 新建时是否创建钉钉日程（简历上传钉盘并写入描述） */
+  createDingTalkCalendar?: boolean;
+  /** 新建时是否发钉钉工作通知；默认 true，日程助手传 false */
+  sendDingTalkWorkNotice?: boolean;
 };
 
 export default function InviteFormModal({
@@ -193,6 +197,8 @@ export default function InviteFormModal({
   editingId,
   editingInitial,
   seed,
+  createDingTalkCalendar,
+  sendDingTalkWorkNotice,
 }: InviteFormModalProps) {
   const { message } = App.useApp();
   const [form] = Form.useForm<InviteFormValues>();
@@ -311,6 +317,8 @@ export default function InviteFormModal({
           interviewAt: dayjs(values.interviewAt).second(0).format('YYYY-MM-DD HH:mm:ss'),
           durationMin: values.durationMin,
           location: values.location,
+          ...(createDingTalkCalendar ? { createDingTalkCalendar: true } : {}),
+          ...(sendDingTalkWorkNotice === false ? { sendDingTalkWorkNotice: false } : {}),
         };
         setSaving(true);
         try {
@@ -321,7 +329,15 @@ export default function InviteFormModal({
           } else {
             const saved = await createHrInviteApi(payload);
             if (saved?.warning) message.warning(saved.warning, 8);
-            else message.success(`已为 ${ids.length} 名面试官发起邀约`);
+            else if (createDingTalkCalendar) {
+              message.success(
+                sendDingTalkWorkNotice === false
+                  ? `已发起邀约并创建钉钉日程（简历已挂钉盘描述），共 ${ids.length} 名面试官`
+                  : `已为 ${ids.length} 名面试官发起邀约并创建钉钉日程`,
+              );
+            } else {
+              message.success(`已为 ${ids.length} 名面试官发起邀约`);
+            }
           }
           onOpenChange(false);
           onSuccess?.();
