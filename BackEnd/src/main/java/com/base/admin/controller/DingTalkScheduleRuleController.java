@@ -6,6 +6,7 @@ import com.base.admin.common.Result;
 import com.base.admin.domain.dto.DingTalkScheduleRecommendDTO;
 import com.base.admin.domain.dto.DingTalkScheduleRuleDTO;
 import com.base.admin.domain.vo.DingTalkScheduleRecommendVO;
+import com.base.admin.domain.vo.DingTalkScheduleRuleOptionsVO;
 import com.base.admin.domain.vo.DingTalkScheduleRuleVO;
 import com.base.admin.service.DingTalkScheduleRuleService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,6 +33,13 @@ public class DingTalkScheduleRuleController {
     @RequiresPermission("system:schedule-rule:mine")
     public Result<DingTalkScheduleRuleVO> mine() {
         return Result.ok(dingTalkScheduleRuleService.getMine());
+    }
+
+    @Operation(summary = "日程规则下拉选项（用户/部门/岗位）")
+    @GetMapping("/options")
+    @RequiresPermission("system:schedule-rule:mine")
+    public Result<DingTalkScheduleRuleOptionsVO> options() {
+        return Result.ok(dingTalkScheduleRuleService.listOptions());
     }
 
     @Operation(summary = "保存本人钉钉日程规则")

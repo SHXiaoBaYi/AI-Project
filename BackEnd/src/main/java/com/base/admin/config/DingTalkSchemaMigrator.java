@@ -181,6 +181,8 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                 "ADD COLUMN action_prefs_json TEXT NULL COMMENT '各动作卡片偏好 JSON' AFTER windows_json");
         addColumnIfMissing("sys_dingtalk_schedule_rule", "blocked_windows_json",
                 "ADD COLUMN blocked_windows_json TEXT NULL COMMENT '不安排任何日程的时段 JSON' AFTER action_prefs_json");
+        addColumnIfMissing("sys_dingtalk_schedule_rule", "extras_json",
+                "ADD COLUMN extras_json TEXT NULL COMMENT '扩展配置：工作/午休/早晨/格子/部门会议/优先级 JSON' AFTER blocked_windows_json");
     }
 
     private void addColumnIfMissing(String table, String column, String alterAdd) {
