@@ -49,9 +49,9 @@ public class HrJobDetailVO {
     @Schema(description = "招聘天数（接收日至今，已关闭则到关闭日）")
     private Integer recruitingDays;
 
-    @Schema(description = "日进展文案")
+    @Schema(description = "日进展文案（当日首次触发的阶段事件）")
     private String dayProgress;
 
-    @Schema(description = "周进展文案")
+    @Schema(description = "周进展文案（当周首次触发的阶段事件）")
     private String weekProgress;
 }

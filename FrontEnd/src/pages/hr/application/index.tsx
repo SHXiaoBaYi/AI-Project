@@ -379,11 +379,14 @@ const ApplicationPage = memo(function ApplicationPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='候选人'
-        params={{ requisitionId: presetRequisitionId }}
+        // 仅从招聘需求跳转带入时注入；勿传 requisitionId: undefined，否则会覆盖搜索栏选中的岗位
+        params={presetRequisitionId ? { requisitionId: presetRequisitionId } : undefined}
         request={async (params) => {
+          const requisitionId =
+            params.requisitionId == null || params.requisitionId === '' ? undefined : Number(params.requisitionId);
           const rows = (await getHrApplicationsApi({
             candidateName: params.displayName,
-            requisitionId: params.requisitionId,
+            requisitionId: Number.isFinite(requisitionId) ? requisitionId : undefined,
             channelCode: params.channelCode,
             stageCode: params.currentStage,
             submitterUserId: params.submitterUserId,

@@ -43,7 +43,7 @@ public class HrBoardController {
         return Result.ok(boardService.board(query));
     }
 
-    @Operation(summary = "岗位实时明细（日/周进展）")
+    @Operation(summary = "岗位明细（日/周进展按当日当周触发事件）")
     @PostMapping("/job-details")
     @RequiresPermission("hr:board:view")
     public Result<List<com.base.admin.domain.vo.HrJobDetailVO>> jobDetails(

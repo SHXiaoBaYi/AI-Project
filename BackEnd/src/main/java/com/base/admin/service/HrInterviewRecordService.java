@@ -481,10 +481,11 @@ public class HrInterviewRecordService {
 
     private void applyStage(Long applicationId, String stageCode) {
         jdbc.update("UPDATE hr_application SET current_stage = ? WHERE id = ? AND is_active = 1", stageCode, applicationId);
+        // 保留首次触发时间，勿刷新 event_at（否则日/周进展会变成实时快照）
         jdbc.update("""
                 INSERT INTO hr_stage_event (application_id, stage_code, event_at, source_sheet, create_by, is_active)
                 VALUES (?, ?, ?, 'INTERVIEW', ?, 1)
-                ON DUPLICATE KEY UPDATE event_at = VALUES(event_at), is_active = 1
+                ON DUPLICATE KEY UPDATE is_active = 1
                 """, applicationId, stageCode, LocalDateTime.now(), SecurityUtils.getCurrentUsername());
     }
 

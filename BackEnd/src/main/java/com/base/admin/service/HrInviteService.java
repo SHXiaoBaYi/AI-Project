@@ -64,7 +64,7 @@ public class HrInviteService {
             inviteIds.add(createOneRecord(one, duration));
         }
         Long last = inviteIds.isEmpty() ? null : inviteIds.get(inviteIds.size() - 1);
-        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+        if (!shouldCreateDingTalkCalendar(dto)) {
             finalizeInviteWithoutCalendar(inviteIds, dto);
             return saveResult(last, null);
         }
@@ -98,7 +98,7 @@ public class HrInviteService {
     private InviteWrite createOne(HrInviteCreateDTO dto) {
         int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
         long inviteId = createOneRecord(dto, duration);
-        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+        if (!shouldCreateDingTalkCalendar(dto)) {
             finalizeInviteWithoutCalendar(List.of(inviteId), dto);
             return new InviteWrite(inviteId, null);
         }
@@ -307,7 +307,7 @@ public class HrInviteService {
             }
         }
         String warning;
-        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
+        if (!shouldCreateDingTalkCalendar(dto)) {
             finalizeInviteWithoutCalendar(keepInviteIds, dto);
             warning = null;
         } else {
@@ -849,13 +849,12 @@ public class HrInviteService {
      * 创建人未绑钉钉时回退为每人各自日历建一条（不再把创建人加为参与人）。
      * @return 未绑定钉钉的面试官姓名列表
      */
+    private boolean shouldCreateDingTalkCalendar(HrInviteCreateDTO dto) {
+        return AUTO_CREATE_DINGTALK_CALENDAR || (dto != null && Boolean.TRUE.equals(dto.getCreateDingTalkCalendar()));
+    }
+
     private java.util.List<String> attachSessionCalendars(java.util.List<Long> inviteIds, HrInviteCreateDTO dto, int duration) {
         java.util.List<String> unbound = new ArrayList<>();
-        // 临时关闭：不调用钉钉 createEvent，仅保留方法体便于恢复
-        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
-            finalizeInviteWithoutCalendar(inviteIds, dto);
-            return unbound;
-        }
         if (inviteIds == null || inviteIds.isEmpty()) {
             return unbound;
         }
@@ -866,11 +865,8 @@ public class HrInviteService {
         String organizerName = currentOrganizerName();
         String title = "【" + ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面") + "】"
                 + basePerson.get("candidate_name") + " - " + basePerson.get("job_name");
-        ResumeFile resume = loadResume(dto.getApplicationId());
-        if (resume == null) {
-            throw new BusinessException("面试日程必须附带简历，请先为候选人上传简历");
-        }
-        String description = buildCalendarDescription(dto, basePerson, resume, organizerName);
+        // 钉钉日程 API 无附件字段：简历上传钉盘后把 fileId 链接写入描述
+        ResumeFile resume = requireResumeFileForCalendar(dto.getApplicationId());
 
         java.util.List<Long> boundInviteIds = new ArrayList<>();
         java.util.List<String> attendeeUnionIds = new ArrayList<>();
@@ -932,13 +928,53 @@ public class HrInviteService {
         List<String> attendees = attendeeUnionIds.stream()
                 .filter(id -> !id.equals(ownerUnionId))
                 .toList();
-        // 创建钉钉日程（仅 AUTO_CREATE_DINGTALK_CALENDAR=true 时会走到这里）
+        Long logInviteId = boundInviteIds.getFirst();
+
+        DingTalkCalendarClient.DriveFile driveFile;
+        try {
+            driveFile = dingTalk.uploadResumeToDrive(ownerUnionId, resume.path(), resume.fileName());
+            writeLog(logInviteId, "UPLOAD_DRIVE",
+                    DingTalkCalendarClient.CalendarCall.ok(driveFile.fileId(),
+                            "{\"spaceId\":\"" + driveFile.spaceId() + "\",\"fileId\":\"" + driveFile.fileId() + "\"}"),
+                    organizerUserId, driveFile.fileId(),
+                    Map.of("spaceId", driveFile.spaceId(), "fileId", driveFile.fileId(),
+                            "fileName", blank(driveFile.fileName()), "unionId", blank(ownerUnionId)));
+        } catch (BusinessException ex) {
+            for (Long inviteId : boundInviteIds) {
+                jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
+                        cut(ex.getMessage()), inviteId);
+            }
+            writeLog(logInviteId, "UPLOAD_DRIVE", DingTalkCalendarClient.CalendarCall.fail(ex.getMessage()),
+                    organizerUserId, null, Map.of("unionId", blank(ownerUnionId)));
+            throw ex;
+        }
+        java.util.List<String> viewerStaffIds = new ArrayList<>();
+        for (Long inviteId : boundInviteIds) {
+            Long uid = jdbc.query("SELECT interviewer_user_id FROM hr_interview_invite WHERE id = ?",
+                    rs -> rs.next() ? rs.getLong(1) : null, inviteId);
+            String staffId = findDingUserId(uid);
+            if (StringUtils.hasText(staffId)) {
+                viewerStaffIds.add(staffId);
+            }
+        }
+        for (Long ccUserId : resolveCcUserIds(dto)) {
+            if (ccUserId == null || interviewerSet.contains(ccUserId)) {
+                continue;
+            }
+            String staffId = findDingUserId(ccUserId);
+            if (StringUtils.hasText(staffId)) {
+                viewerStaffIds.add(staffId);
+            }
+        }
+        dingTalk.grantDriveFileViewer(ownerUnionId, driveFile, viewerStaffIds);
+
+        String description = buildCalendarDescription(dto, basePerson, resume, organizerName, driveFile);
         DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
                 ownerUnionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees, false);
-        Long logInviteId = boundInviteIds.getFirst();
         writeLog(logInviteId, "CREATE_CALENDAR", call, organizerUserId, call.eventId(),
                 Map.of("title", title, "start", String.valueOf(dto.getInterviewAt()), "unionId", blank(ownerUnionId),
-                        "organizer", organizerName, "attendees", String.valueOf(attendees.size()), "mode", "shared-" + calendarMode));
+                        "organizer", organizerName, "attendees", String.valueOf(attendees.size()),
+                        "mode", "shared-" + calendarMode, "driveFileId", driveFile.fileId()));
         if (!call.success()) {
             for (Long inviteId : boundInviteIds) {
                 jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
@@ -957,9 +993,25 @@ public class HrInviteService {
                     rs -> rs.next() ? rs.getLong(1) : null, inviteId);
             HrInviteCreateDTO one = copyDto(dto, interviewerUserId);
             writeRoundAndStage(one, person);
-            notifyInterviewer(inviteId, one, person, resume);
+            boolean noticeOk = notifyInterviewer(inviteId, one, person, resume, driveFile);
+            if (!noticeOk) {
+                throw new BusinessException("钉钉日程已创建且简历已上传钉盘，但未能通知面试官「"
+                        + interviewerName(interviewerUserId) + "」，请确认面试官已绑定钉钉 userid 后重试或手动补发");
+            }
         }
         return unbound;
+    }
+
+    /** 建日程前强制拿到可上传钉盘的简历本地/临时文件 */
+    private ResumeFile requireResumeFileForCalendar(Long applicationId) {
+        ResumeFile resume = loadResume(applicationId);
+        if (resume == null) {
+            throw new BusinessException("面试日程必须附带简历，请先为候选人上传简历");
+        }
+        if (resume.path() == null || !Files.isRegularFile(resume.path())) {
+            throw new BusinessException("候选人简历文件不可用，无法上传到钉盘并绑定到面试日程，请重新上传简历后再发起邀约");
+        }
+        return resume;
     }
 
     /** 抄送人钉钉 unionId（排除面试官）；未绑定的抄送人跳过，仅影响日程参与人。 */
@@ -1038,6 +1090,7 @@ public class HrInviteService {
         one.setDurationMin(dto.getDurationMin());
         one.setLocation(dto.getLocation());
         one.setCcUserIds(dto.getCcUserIds());
+        one.setCreateDingTalkCalendar(dto.getCreateDingTalkCalendar());
         return one;
     }
 
@@ -1046,9 +1099,11 @@ public class HrInviteService {
         return unbound.isEmpty() ? null : unbound.getFirst();
     }
 
-    private void notifyInterviewer(Long inviteId, HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume) {
-        notifyWorkNotice(inviteId, dto.getInterviewerUserId(), person, dto, resume, "NOTIFY_INTERVIEWER",
-                currentOrganizerName());
+    /** @return 工作通知是否发送成功（钉盘链接已写入时视为简历已送达） */
+    private boolean notifyInterviewer(Long inviteId, HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume,
+                                      DingTalkCalendarClient.DriveFile driveFile) {
+        return notifyWorkNotice(inviteId, dto.getInterviewerUserId(), person, dto, resume, "NOTIFY_INTERVIEWER",
+                currentOrganizerName(), driveFile);
     }
 
     /** 抄送人只发工作通知，并回写共享日程 eventId；不再单独建抄送日程。 */
@@ -1111,7 +1166,7 @@ public class HrInviteService {
                         SecurityUtils.getCurrentUserId(), null,
                         Map.of("ccUserId", String.valueOf(ccUserId)));
             }
-            notifyWorkNotice(inviteId, ccUserId, person, dto, resume, "NOTIFY_CC", organizerName);
+            notifyWorkNotice(inviteId, ccUserId, person, dto, resume, "NOTIFY_CC", organizerName, null);
         }
     }
 
@@ -1238,8 +1293,9 @@ public class HrInviteService {
         }
     }
 
-    private void notifyWorkNotice(Long inviteId, Long userId, Map<String, Object> person, HrInviteCreateDTO dto,
-                                  ResumeFile resume, String action, String organizerName) {
+    private boolean notifyWorkNotice(Long inviteId, Long userId, Map<String, Object> person, HrInviteCreateDTO dto,
+                                     ResumeFile resume, String action, String organizerName,
+                                     DingTalkCalendarClient.DriveFile driveFile) {
         String dingUserId = findDingUserId(userId);
         String title = "NOTIFY_CC".equals(action) ? "面试邀约抄送通知" : "面试邀约通知";
         String round = ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面");
@@ -1251,40 +1307,62 @@ public class HrInviteService {
                 + "- **岗位**：" + blank(person.get("job_name")) + "\n"
                 + "- **轮次**：" + round + "\n"
                 + "- **时间**：" + when + "\n";
-        if (resume == null) {
+        boolean driveLinked = driveFile != null && StringUtils.hasText(driveFile.fileId());
+        if (driveLinked) {
+            markdown += "\n简历（钉盘）：[" + blank(driveFile.fileName()) + "](" + driveFile.openUrl() + ")\n"
+                    + "- fileId：" + driveFile.fileId() + "\n"
+                    + "- spaceId：" + driveFile.spaceId() + "\n"
+                    + "（亦可在面试日程描述中打开同一链接）\n";
+        } else if (resume == null) {
             markdown += "\n简历：未上传\n";
         } else if (resume.path() != null && Files.isRegularFile(resume.path())) {
             markdown += "\n简历：见下一条文件消息（" + resume.fileName() + "）\n";
         } else {
             markdown += "\n简历：" + resume.fileName() + "（已上传，请在系统中查看）\n";
         }
-        Path resumePath = resume == null ? null : resume.path();
+        // 已挂钉盘链接时不再强依赖工作通知文件消息；无钉盘时仍尝试发文件
+        Path resumePath = (!driveLinked && resume != null) ? resume.path() : null;
         String resumeName = resume == null ? null : resume.fileName();
         DingTalkCalendarClient.NoticeCall notice = dingTalk.notifyInterview(
                 dingUserId, title, markdown, resumePath, resumeName);
         writeLog(inviteId, action,
                 notice.success()
                         ? DingTalkCalendarClient.CalendarCall.ok(null,
-                        notice.resumeSent() ? "{\"resumeSent\":true}" : "{\"resumeSent\":false}")
+                        notice.resumeSent() || driveLinked
+                                ? "{\"resumeSent\":true,\"drive\":" + driveLinked + "}"
+                                : "{\"resumeSent\":false}")
                         : DingTalkCalendarClient.CalendarCall.fail(notice.message()),
                 SecurityUtils.getCurrentUserId(), null,
                 Map.of("dingUserId", blank(dingUserId), "userId", String.valueOf(userId),
-                        "resume", resumeName == null ? "" : resumeName, "organizer", organizer));
+                        "resume", resumeName == null ? "" : resumeName, "organizer", organizer,
+                        "driveFileId", driveLinked ? driveFile.fileId() : ""));
+        if (!notice.success()) {
+            return false;
+        }
+        return driveLinked || notice.resumeSent();
     }
 
     private String buildCalendarDescription(HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume,
-                                            String organizerName) {
+                                            String organizerName, DingTalkCalendarClient.DriveFile driveFile) {
         String round = ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面");
         String organizer = StringUtils.hasText(organizerName) ? organizerName : currentOrganizerName();
-        String resumeLine = resume == null
-                ? "未上传（请联系招聘负责人）"
-                : resume.fileName();
-        return "组织人：" + organizer
-                + "\n候选人：" + blank(person.get("candidate_name"))
-                + "\n岗位：" + blank(person.get("job_name"))
-                + "\n轮次：" + round
-                + "\n时间：" + formatInterviewAt(dto.getInterviewAt())
-                + "\n简历：" + resumeLine;
+        String resumeName = resume == null ? "未上传" : resume.fileName();
+        StringBuilder sb = new StringBuilder();
+        sb.append("组织人：").append(organizer)
+                .append("\n候选人：").append(blank(person.get("candidate_name")))
+                .append("\n岗位：").append(blank(person.get("job_name")))
+                .append("\n轮次：").append(round)
+                .append("\n时间：").append(formatInterviewAt(dto.getInterviewAt()))
+                .append("\n简历：").append(resumeName);
+        if (driveFile != null && StringUtils.hasText(driveFile.fileId())) {
+            sb.append("\n钉盘 fileId：").append(driveFile.fileId())
+                    .append("\n钉盘 spaceId：").append(driveFile.spaceId())
+                    .append("\n打开简历：").append(driveFile.openUrl())
+                    .append("\n（钉钉日程无原生附件，简历已上传钉盘，点击上方链接查看）");
+        } else {
+            sb.append("\n（钉钉日程无原生附件，请联系招聘负责人获取简历）");
+        }
+        return sb.toString();
     }
 
     private static String formatInterviewAt(LocalDateTime at) {
@@ -1471,11 +1549,12 @@ public class HrInviteService {
                 """, dto.getApplicationId(), dto.getRoundNo(), person.get("nickname"), dto.getInterviewerUserId(),
                 dto.getInterviewAt(), SecurityUtils.getCurrentUsername());
         if (dto.getRoundNo() != null && dto.getRoundNo() == 1) {
+            // event_at = 邀约触发时刻（现在），不是面试预约时间；重复保存不改首次触发时间
             jdbc.update("""
                     INSERT INTO hr_stage_event (application_id, stage_code, event_at, source_sheet, create_by, is_active)
                     VALUES (?, 'INVITED', ?, 'INVITE', ?, 1)
-                    ON DUPLICATE KEY UPDATE event_at = VALUES(event_at), is_active = 1
-                    """, dto.getApplicationId(), dto.getInterviewAt(), SecurityUtils.getCurrentUsername());
+                    ON DUPLICATE KEY UPDATE is_active = 1
+                    """, dto.getApplicationId(), LocalDateTime.now(), SecurityUtils.getCurrentUsername());
         }
     }
 

@@ -90,6 +90,15 @@ public class DingTalkAppService {
         }
     }
 
+    /** 钉盘授权等接口需要的企业 CorpId；未配置时返回空串。 */
+    public String corpId() {
+        Stored stored = loadStored();
+        if (stored == null || !StringUtils.hasText(stored.corpId())) {
+            return "";
+        }
+        return stored.corpId().trim();
+    }
+
     /** 测试连接：密钥留空时用已保存的值，不把密钥回传。 */
     public Credential resolveForTest(DingTalkAppDTO dto) {
         String clientId = dto.getClientId().trim();

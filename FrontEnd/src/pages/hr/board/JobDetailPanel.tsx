@@ -283,7 +283,9 @@ export default function JobDetailPanel() {
     <div className='flex flex-col gap-3'>
       <div className='flex items-center justify-between gap-3'>
         <Typography.Text type='secondary'>
-          实时岗位明细 · 共 {rows.length} 个岗位 · 日/周进展按阶段事件统计；入职显示姓名+日期 · 表头右侧可拖动调列宽
+          岗位明细 · 共 {rows.length} 个岗位 ·
+          日/周进展按触发统计：邀约看发起时间，其他阶段看首次写入时间（不是预约面试日）；入职显示姓名+日期 ·
+          表头右侧可拖动调列宽
         </Typography.Text>
         <Space>
           <Button

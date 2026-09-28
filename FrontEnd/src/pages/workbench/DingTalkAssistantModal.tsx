@@ -27,8 +27,6 @@ import {
 } from '@/utils/chinaHoliday';
 
 const ASSISTANT_NAME = '日程助手';
-const WORK_START = { hour: 9, minute: 30 };
-const WORK_END = { hour: 18, minute: 30 };
 
 type Props = {
   open: boolean;
@@ -84,24 +82,28 @@ function slotStart(slot: DingTalkAssistantSlot | null | undefined) {
   return slot ? dayjs(slot.start).format('YYYY-MM-DD HH:mm:ss') : undefined;
 }
 
-function toWorkRange(from: Dayjs, to: Dayjs): [Dayjs, Dayjs] {
+/** 只传日期范围；工作时段由后端按被问询人日程规则决定 */
+function toAskDateRange(from: Dayjs, to: Dayjs): [Dayjs, Dayjs] {
   const { min, max } = bookingWindow();
   let start = from.startOf('day');
   let end = to.startOf('day');
   if (start.isBefore(min, 'day')) start = min.startOf('day');
   if (end.isAfter(max, 'day')) end = max.startOf('day');
   if (end.isBefore(start, 'day')) end = start;
-  return [
-    start.hour(WORK_START.hour).minute(WORK_START.minute).second(0),
-    end.hour(WORK_END.hour).minute(WORK_END.minute).second(0),
-  ];
+  return [start.hour(0).minute(0).second(0), end.hour(23).minute(59).second(0)];
+}
+
+function workHoursLabel(suggest?: DingTalkAssistantSuggest | null) {
+  const ws = suggest?.workStart || '09:30';
+  const we = suggest?.workEnd || '18:30';
+  return `每天 ${ws}～${we}`;
 }
 
 function defaultAskRange(): [Dayjs, Dayjs] {
   const { min, max } = bookingWindow();
   let end = min.add(4, 'day');
   if (end.isAfter(max, 'day')) end = max.startOf('day');
-  return toWorkRange(min, end);
+  return toAskDateRange(min, end);
 }
 
 /** 去掉法定节假日天、假日上的推荐时段，以及已经过去的时段 */
@@ -162,7 +164,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
         {
           id: msgId(),
           role: 'assistant',
-          text: '你好，我是日程助手。选一位同事和日期范围，我会按每天 09:30～18:30 的工作时段查钉钉闲忙并给出建议，也可帮你发起面试邀约、邀请开会或安排工作汇报。',
+          text: '你好，我是日程助手。选一位同事和日期范围，我会按对方设置的日程规则（工作时间、午休、不安排时段、日程缓存）结合钉钉闲忙给出空闲建议，也可帮你发起面试邀约、邀请开会或安排工作汇报。',
           time: dayjs().format('HH:mm'),
         },
       ]);
@@ -203,12 +205,12 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
     const nickname = composerTargetLabel;
     const askedDuration = durationMin;
     const askedUserId = targetUserId;
-    const [askStart, askEnd] = toWorkRange(range[0], range[1]);
+    const [askStart, askEnd] = toAskDateRange(range[0], range[1]);
     if (!askStart.isBefore(askEnd)) {
       message.warning('请选择有效的日期范围');
       return;
     }
-    const userText = `查一下「${nickname}」在 ${askStart.format('MM-DD')} ~ ${askEnd.format('MM-DD')}（每天 09:30～18:30）是否有连续 ${askedDuration} 分钟空闲？`;
+    const userText = `查一下「${nickname}」在 ${askStart.format('MM-DD')} ~ ${askEnd.format('MM-DD')}（按对方日程规则）是否有连续 ${askedDuration} 分钟空闲？`;
     push({ role: 'user', text: userText });
     setQuerying(true);
     try {
@@ -463,7 +465,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
                       {msg.suggest?.dayGroups?.length ? (
                         <div className='mt-2'>
                           <div className='mb-1 text-xs text-neutral-500'>
-                            推荐时段（工作日 09:30～18:30，每段{' '}
+                            推荐时段（{workHoursLabel(msg.suggest)}，每段{' '}
                             {msg.suggest.durationMin || msg.context?.durationMin || durationMin} 分钟）
                           </div>
                           <Tabs
@@ -532,7 +534,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
 
           <div className='shrink-0 border-t border-neutral-200 bg-white px-4 py-3'>
             <div className='mb-2 text-xs text-neutral-400'>
-              闲忙仅统计每天 09:30～18:30；不可选过去、法定节假日，最多未来 {BOOKING_MAX_DAYS} 天
+              空闲按时段对方的日程规则统计；不可选过去、法定节假日，最多未来 {BOOKING_MAX_DAYS} 天
             </div>
             <div className='mb-2 grid gap-2 md:grid-cols-2'>
               <Select
@@ -569,7 +571,7 @@ const DingTalkAssistantModal = memo(function DingTalkAssistantModal({ open, onCl
                 value={range}
                 disabledDate={disabledBookingDate}
                 onChange={(value) => {
-                  if (value?.[0] && value?.[1]) setRange(toWorkRange(value[0], value[1]));
+                  if (value?.[0] && value?.[1]) setRange(toAskDateRange(value[0], value[1]));
                 }}
               />
             </div>

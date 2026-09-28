@@ -326,7 +326,7 @@ public class HrBoardService {
         return jdbc.query(sql.toString(), (rs, row) -> mapProgress(rs, now), args.toArray());
     }
 
-    /** 岗位实时明细：不分页，含日/周进展 */
+    /** 岗位明细：不分页；日/周进展按当日/当周首次触发的阶段事件统计 */
     public List<HrJobDetailVO> jobDetails(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
         LocalDate today = LocalDate.now();
@@ -393,28 +393,58 @@ public class HrBoardService {
     }
 
     /**
-     * 按需求聚合时间窗内的阶段事件。
+     * 按需求聚合时间窗内「触发」的进展（不是当前实时阶段快照）。
+     * <ul>
+     *   <li>邀约成功：按 {@code hr_interview_invite.create_time}（发起邀约时刻），
+     *       按候选人去重；不用 interview_at / 旧 stage_event.event_at（那是预约面试时间）</li>
+     *   <li>其他阶段：按 {@code hr_stage_event.create_time}（首次写入时刻）</li>
+     * </ul>
      * 普通阶段：待初试1人；入职：已入职：张三(9.21)、李四(9.22)
      */
     private Map<Long, String> loadProgressText(LocalDateTime from, LocalDateTime to) {
-        String sql = """
+        Map<Long, LinkedHashMap<String, ProgressAgg>> byReq = new LinkedHashMap<>();
+
+        // 1) 邀约：以邀约单创建时间为触发点
+        jdbc.query("""
+                SELECT a.requisition_id, COUNT(DISTINCT a.id) cnt
+                FROM hr_interview_invite i
+                JOIN hr_application a ON a.id = i.application_id AND a.is_active = 1
+                WHERE i.is_active = 1
+                  AND i.status IN ('SUCCESS', 'NO_CALENDAR', 'FAILED')
+                  AND i.create_time >= ? AND i.create_time < ?
+                  AND a.requisition_id IS NOT NULL
+                GROUP BY a.requisition_id
+                """, rs -> {
+            long reqId = rs.getLong("requisition_id");
+            int cnt = rs.getInt("cnt");
+            if (cnt <= 0) {
+                return;
+            }
+            LinkedHashMap<String, ProgressAgg> stages = byReq.computeIfAbsent(reqId, k -> new LinkedHashMap<>());
+            ProgressAgg agg = stages.computeIfAbsent("INVITED", k -> new ProgressAgg("邀约成功"));
+            agg.count = cnt;
+        }, from, to);
+
+        // 2) 其他阶段：以阶段事件首次写入时间为触发点（排除 INVITED，避免与邀约单重复/串用预约时间）
+        jdbc.query("""
                 SELECT a.requisition_id,
                        e.stage_code,
                        COALESCE(s.stage_name, e.stage_code) stage_name,
-                       DATE(e.event_at) event_day,
+                       DATE(e.create_time) event_day,
                        c.display_name candidate_name,
-                       COALESCE(ob.onboard_date, DATE(e.event_at)) onboard_day,
+                       COALESCE(ob.onboard_date, DATE(e.create_time)) onboard_day,
                        COALESCE(s.sort_no, 999) sort_no
                 FROM hr_stage_event e
                 JOIN hr_application a ON a.id = e.application_id AND a.is_active = 1
                 JOIN hr_candidate c ON c.id = a.candidate_id AND c.is_active = 1
                 LEFT JOIN hr_stage_def s ON s.stage_code = e.stage_code AND s.is_active = 1
                 LEFT JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
-                WHERE e.is_active = 1 AND e.event_at >= ? AND e.event_at < ?
-                ORDER BY a.requisition_id, COALESCE(s.sort_no, 999), e.stage_code, e.event_at, a.id
-                """;
-        Map<Long, LinkedHashMap<String, ProgressAgg>> byReq = new LinkedHashMap<>();
-        jdbc.query(sql, rs -> {
+                WHERE e.is_active = 1
+                  AND e.stage_code <> 'INVITED'
+                  AND e.create_time >= ? AND e.create_time < ?
+                  AND a.requisition_id IS NOT NULL
+                ORDER BY a.requisition_id, COALESCE(s.sort_no, 999), e.stage_code, e.create_time, a.id
+                """, rs -> {
             long reqId = rs.getLong("requisition_id");
             String code = rs.getString("stage_code");
             String stageName = displayStageName(code, rs.getString("stage_name"));
@@ -440,12 +470,23 @@ public class HrBoardService {
         Map<Long, String> result = new HashMap<>();
         for (Map.Entry<Long, LinkedHashMap<String, ProgressAgg>> e : byReq.entrySet()) {
             List<String> parts = new ArrayList<>();
-            for (ProgressAgg agg : e.getValue().values()) {
+            // 固定顺序：邀约成功靠前，其余按插入顺序
+            LinkedHashMap<String, ProgressAgg> stages = e.getValue();
+            if (stages.containsKey("INVITED")) {
+                ProgressAgg invited = stages.get("INVITED");
+                if (invited.count > 0) {
+                    parts.add(invited.name + invited.count + "人");
+                }
+            }
+            for (Map.Entry<String, ProgressAgg> se : stages.entrySet()) {
+                if ("INVITED".equals(se.getKey())) {
+                    continue;
+                }
+                ProgressAgg agg = se.getValue();
                 if (agg.count <= 0) {
                     continue;
                 }
                 if (!agg.people.isEmpty()) {
-                    // 已入职：姓名(日期)
                     parts.add(agg.name + "：" + String.join("、", agg.people));
                 } else {
                     parts.add(agg.name + agg.count + "人");

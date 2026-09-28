@@ -26,6 +26,21 @@ public class DingTalkAssistantSuggestVO {
     @Schema(description = "期望时长（分钟）", example = "60")
     private Integer durationMin;
 
+    @Schema(description = "被问询人工作开始 HH:mm（来自其日程规则）", example = "09:30")
+    private String workStart;
+
+    @Schema(description = "被问询人工作结束 HH:mm（来自其日程规则）", example = "18:30")
+    private String workEnd;
+
+    @Schema(description = "被问询人午休开始 HH:mm", example = "13:00")
+    private String lunchStart;
+
+    @Schema(description = "被问询人午休结束 HH:mm", example = "14:00")
+    private String lunchEnd;
+
+    @Schema(description = "被问询人日程缓存（分钟）", example = "15")
+    private Integer bufferMin;
+
     @Schema(description = "查询失败或绑定问题时的错误说明")
     private String error;
 

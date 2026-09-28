@@ -108,6 +108,12 @@ export type DingTalkAssistantSuggest = {
   targetNickname?: string;
   targetUsername?: string;
   durationMin: number;
+  /** 被问询人日程规则中的工作/午休时段 */
+  workStart?: string;
+  workEnd?: string;
+  lunchStart?: string;
+  lunchEnd?: string;
+  bufferMin?: number;
   error?: string;
   adviceText?: string;
   dayGroups?: DingTalkAssistantDayGroup[];

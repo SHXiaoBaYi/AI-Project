@@ -51,27 +51,42 @@ public class DingTalkBusyService {
     }
 
     public List<DingTalkBusyUserVO> query(DingTalkBusyQueryDTO dto) {
+        return query(dto, WORK_START, WORK_END);
+    }
+
+    /**
+     * 按指定工作时段切分闲忙格（日程助手按被问询人规则传入其 workStart/workEnd）。
+     */
+    public List<DingTalkBusyUserVO> query(DingTalkBusyQueryDTO dto, LocalTime workStart, LocalTime workEnd) {
         if (!dingTalk.configured()) {
             throw new BusinessException("钉钉应用还没配置或未启用，请到「系统管理 → 钉钉应用配置」填写");
         }
         if (!dto.getStartTime().isBefore(dto.getEndTime())) {
             throw new BusinessException("结束时间必须晚于开始时间");
         }
+        LocalTime dayStart = workStart == null ? WORK_START : workStart;
+        LocalTime dayEnd = workEnd == null ? WORK_END : workEnd;
+        if (!dayStart.isBefore(dayEnd)) {
+            throw new BusinessException("工作时间结束须晚于开始");
+        }
         LocalDate today = LocalDate.now();
         LocalDate maxDay = ChinaHoliday.maxBookableDate(today);
-        LocalDateTime earliest = today.atTime(WORK_START);
-        LocalDateTime latest = maxDay.atTime(WORK_END);
+        LocalDateTime earliest = today.atTime(dayStart);
+        LocalDateTime latest = maxDay.atTime(dayEnd);
         if (dto.getStartTime().toLocalDate().isBefore(today) || dto.getEndTime().toLocalDate().isBefore(today)) {
             throw new BusinessException("不能查询已经过去的日期");
         }
         if (dto.getStartTime().toLocalDate().isAfter(maxDay) || dto.getEndTime().toLocalDate().isAfter(maxDay)) {
             throw new BusinessException("最多只能查看未来 " + ChinaHoliday.BOOKING_MAX_DAYS + " 天内的闲忙");
         }
-        // 仅统计每天工作时段 09:30～18:30；法定节假日不生成时段（范围可跨过假日）
-        LocalDateTime rangeStart = alignToWorkStart(dto.getStartTime().isBefore(earliest) ? earliest : dto.getStartTime());
-        LocalDateTime rangeEnd = alignToWorkEnd(dto.getEndTime().isAfter(latest) ? latest : dto.getEndTime());
+        // 法定节假日不生成时段（范围可跨过假日）；工作时段由入参决定
+        LocalDateTime rangeStart = alignToWorkStart(
+                dto.getStartTime().isBefore(earliest) ? earliest : dto.getStartTime(), dayStart, dayEnd);
+        LocalDateTime rangeEnd = alignToWorkEnd(
+                dto.getEndTime().isAfter(latest) ? latest : dto.getEndTime(), dayStart, dayEnd);
         if (!rangeStart.isBefore(rangeEnd)) {
-            throw new BusinessException("所选范围不包含工作时段（每天 09:30～18:30）");
+            throw new BusinessException("所选范围不包含工作时段（每天 "
+                    + dayStart + "～" + dayEnd + "）");
         }
         List<Long> userIds = dto.getUserIds().stream().filter(id -> id != null).distinct().toList();
         if (userIds.isEmpty()) {
@@ -101,7 +116,7 @@ public class DingTalkBusyService {
             DingTalkCalendarClient.BusySchedule schedule = dingTalk.queryBusy(user.unionId(), rangeStart, rangeEnd);
             vo.setError(schedule.error());
             if (!StringUtils.hasText(schedule.error())) {
-                vo.setSlots(buildSlots(rangeStart, rangeEnd, schedule.items()));
+                vo.setSlots(buildSlots(rangeStart, rangeEnd, schedule.items(), dayStart, dayEnd));
             }
             result.add(vo);
         }
@@ -130,7 +145,8 @@ public class DingTalkBusyService {
     }
 
     private static List<DingTalkBusySlotVO> buildSlots(LocalDateTime rangeStart, LocalDateTime rangeEnd,
-                                                       List<DingTalkCalendarClient.BusyItem> items) {
+                                                       List<DingTalkCalendarClient.BusyItem> items,
+                                                       LocalTime workStart, LocalTime workEnd) {
         List<DingTalkCalendarClient.BusyItem> clipped = new ArrayList<>();
         if (items != null) {
             for (DingTalkCalendarClient.BusyItem item : items) {
@@ -145,21 +161,21 @@ public class DingTalkBusyService {
             }
         }
         List<DingTalkBusySlotVO> slots = new ArrayList<>();
-        LocalDateTime cursor = alignToWorkStart(rangeStart);
+        LocalDateTime cursor = alignToWorkStart(rangeStart, workStart, workEnd);
         while (cursor.isBefore(rangeEnd)) {
             if (ChinaHoliday.isOffDay(cursor.toLocalDate())) {
-                cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
+                cursor = cursor.toLocalDate().plusDays(1).atTime(workStart);
                 continue;
             }
-            if (cursor.toLocalTime().isBefore(WORK_START)) {
-                cursor = cursor.toLocalDate().atTime(WORK_START);
+            if (cursor.toLocalTime().isBefore(workStart)) {
+                cursor = cursor.toLocalDate().atTime(workStart);
                 continue;
             }
-            if (!cursor.toLocalTime().isBefore(WORK_END)) {
-                cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
+            if (!cursor.toLocalTime().isBefore(workEnd)) {
+                cursor = cursor.toLocalDate().plusDays(1).atTime(workStart);
                 continue;
             }
-            LocalDateTime dayWorkEnd = cursor.toLocalDate().atTime(WORK_END);
+            LocalDateTime dayWorkEnd = cursor.toLocalDate().atTime(workEnd);
             LocalDateTime boundary = nextHalfHour(cursor);
             LocalDateTime slotEnd = boundary;
             if (slotEnd.isAfter(dayWorkEnd)) {
@@ -169,7 +185,7 @@ public class DingTalkBusyService {
                 slotEnd = rangeEnd;
             }
             if (!cursor.isBefore(slotEnd)) {
-                cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
+                cursor = cursor.toLocalDate().plusDays(1).atTime(workStart);
                 continue;
             }
             slots.add(slot(statusOf(cursor, slotEnd, clipped), cursor, slotEnd));
@@ -181,26 +197,26 @@ public class DingTalkBusyService {
     }
 
     /** 落到查询范围内的第一个工作时段起点（跳过法定节假日） */
-    private static LocalDateTime alignToWorkStart(LocalDateTime time) {
+    private static LocalDateTime alignToWorkStart(LocalDateTime time, LocalTime workStart, LocalTime workEnd) {
         LocalDateTime cursor = time;
-        if (cursor.toLocalTime().isBefore(WORK_START)) {
-            cursor = cursor.toLocalDate().atTime(WORK_START);
-        } else if (!cursor.toLocalTime().isBefore(WORK_END)) {
-            cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
+        if (cursor.toLocalTime().isBefore(workStart)) {
+            cursor = cursor.toLocalDate().atTime(workStart);
+        } else if (!cursor.toLocalTime().isBefore(workEnd)) {
+            cursor = cursor.toLocalDate().plusDays(1).atTime(workStart);
         }
         while (ChinaHoliday.isOffDay(cursor.toLocalDate())) {
-            cursor = cursor.toLocalDate().plusDays(1).atTime(WORK_START);
+            cursor = cursor.toLocalDate().plusDays(1).atTime(workStart);
         }
         return cursor;
     }
 
     /** 落到查询范围内的最后一个工作时段终点 */
-    private static LocalDateTime alignToWorkEnd(LocalDateTime time) {
-        if (time.toLocalTime().isBefore(WORK_START)) {
-            return time.toLocalDate().minusDays(1).atTime(WORK_END);
+    private static LocalDateTime alignToWorkEnd(LocalDateTime time, LocalTime workStart, LocalTime workEnd) {
+        if (time.toLocalTime().isBefore(workStart)) {
+            return time.toLocalDate().minusDays(1).atTime(workEnd);
         }
-        if (time.toLocalTime().isAfter(WORK_END)) {
-            return time.toLocalDate().atTime(WORK_END);
+        if (time.toLocalTime().isAfter(workEnd)) {
+            return time.toLocalDate().atTime(workEnd);
         }
         return time;
     }

@@ -445,7 +445,7 @@ public class HrWorkbookSeeder implements ApplicationRunner {
         jdbc.update("""
                 INSERT INTO hr_stage_event (application_id, stage_code, event_at, source_sheet, create_by, is_active)
                 VALUES (?, ?, ?, ?, 'hr-seed', 1)
-                ON DUPLICATE KEY UPDATE event_at = VALUES(event_at)
+                ON DUPLICATE KEY UPDATE is_active = 1
                 """, applicationId, stage, at, source);
     }
 
