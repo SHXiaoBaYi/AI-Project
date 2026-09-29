@@ -342,6 +342,8 @@ public class SysLoginServiceImpl implements SysLoginService {
             menus = TreeUtil.buildMenuTree(menuMapper.selectMenusByUserId(userId));
         }
 
+        boolean ecomManage = LocalhostAccess.canAccessDataScope(currentRequest(), user.getUsername());
+        boolean ecomAllowed = ecomManage || isEcomAclEnabled(user.getUserId());
         return UserInfoVO.builder()
                 .userId(user.getUserId())
                 .username(user.getUsername())
@@ -350,7 +352,26 @@ public class SysLoginServiceImpl implements SysLoginService {
                 .roles(roleKeys)
                 .permissions(permissions)
                 .menus(menus)
+                .ecomAllowed(ecomAllowed)
+                .ecomCanManageAcl(ecomManage)
                 .build();
+    }
+
+    private boolean isEcomAclEnabled(Long userId) {
+        try {
+            Integer n = jdbc.query("""
+                    SELECT enabled FROM ecom_acl WHERE user_id = ? AND is_active = 1 LIMIT 1
+                    """, rs -> rs.next() ? rs.getInt(1) : 0, userId);
+            return n != null && n == 1;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private HttpServletRequest currentRequest() {
+        var attrs = (org.springframework.web.context.request.ServletRequestAttributes)
+                org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        return attrs == null ? null : attrs.getRequest();
     }
 
     private record BoundUser(Long userId, String username) {

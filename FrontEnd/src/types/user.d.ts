@@ -5,6 +5,8 @@ export interface UserInfo {
   avatar: string;
   roles: string[];
   permissions: string[];
+  ecomAllowed?: boolean;
+  ecomCanManageAcl?: boolean;
 }
 
 export interface UserVO {

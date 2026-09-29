@@ -34,6 +34,11 @@ const Login = lazy(() => import('@/pages/login'));
 const NotFound = lazy(() => import('@/pages/404'));
 const Demo = lazy(() => import('@/pages/test/demo'));
 const DataScopePage = lazy(() => import('@/pages/system/data-scope'));
+const EcomLayout = lazy(() => import('@/layouts/EcomLayout'));
+const EcomDataPage = lazy(() => import('@/pages/ecom/data'));
+const EcomShopsPage = lazy(() => import('@/pages/ecom/shops'));
+const EcomBoardPage = lazy(() => import('@/pages/ecom/board'));
+const EcomAclPage = lazy(() => import('@/pages/ecom/acl'));
 
 function withSuspense(Component: LazyExoticComponent<any>) {
   return (
@@ -138,6 +143,62 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
             replace
           />
         ),
+      },
+      {
+        path: '/ecom',
+        element: withSuspense(EcomLayout),
+        errorElement: <RouteErrorPage />,
+        children: [
+          {
+            index: true,
+            element: (
+              <Navigate
+                to='/ecom/data'
+                replace
+              />
+            ),
+          },
+          { path: 'data', element: withSuspense(EcomDataPage), errorElement: <RouteErrorPage /> },
+          { path: 'shops', element: withSuspense(EcomShopsPage), errorElement: <RouteErrorPage /> },
+          { path: 'board', element: withSuspense(EcomBoardPage), errorElement: <RouteErrorPage /> },
+          { path: 'acl', element: withSuspense(EcomAclPage), errorElement: <RouteErrorPage /> },
+          {
+            path: 'import',
+            element: (
+              <Navigate
+                to='/ecom/data'
+                replace
+              />
+            ),
+          },
+          {
+            path: 'facts',
+            element: (
+              <Navigate
+                to='/ecom/data'
+                replace
+              />
+            ),
+          },
+          {
+            path: 'archive',
+            element: (
+              <Navigate
+                to='/ecom/data'
+                replace
+              />
+            ),
+          },
+          {
+            path: 'targets',
+            element: (
+              <Navigate
+                to='/ecom/board'
+                replace
+              />
+            ),
+          },
+        ],
       },
       {
         path: '/',

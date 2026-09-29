@@ -11,3 +11,9 @@ export function canSeeDataScopePage(username?: string | null) {
   if (isLocalhostHost()) return true;
   return !!username && username.toLowerCase() === DATA_SCOPE_OPERATOR;
 }
+
+/** 电商运营入口：本机/bella，或后端下发的 ecomAllowed（ACL） */
+export function canSeeEcomModule(username?: string | null, ecomAllowed?: boolean | null) {
+  if (ecomAllowed) return true;
+  return canSeeDataScopePage(username);
+}

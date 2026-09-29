@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import { ProLayout, PageContainer } from '@ant-design/pro-components';
-import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import {
+  LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  SafetyCertificateOutlined,
+  ShoppingOutlined,
+} from '@ant-design/icons';
 import { getIconComponent } from '@/utils/iconMap';
 import { Dropdown, theme } from 'antd';
 import { useSelector, useDispatch } from 'react-redux';
@@ -13,7 +19,7 @@ import avatarPng from '@/assets/avatar.png';
 import PageErrorBoundary from '@/components/PageErrorBoundary';
 import { ExternalLinkProvider } from '@/components/ExternalLinkDrawer';
 import { resolveMenuFullPath } from '@/utils/menuPath';
-import { canSeeDataScopePage } from '@/utils/localhostAccess';
+import { canSeeDataScopePage, canSeeEcomModule } from '@/utils/localhostAccess';
 
 function convertMenusToRoute(menus: MenuTree[], parentPath = ''): any[] {
   return menus.map((item) => {
@@ -69,7 +75,18 @@ export default function BasicLayout() {
   };
 
   const showDataScope = canSeeDataScopePage(userInfo?.username);
+  const showEcom = canSeeEcomModule(userInfo?.username, userInfo?.ecomAllowed);
   const avatarMenuItems = [
+    ...(showEcom
+      ? [
+          {
+            key: 'ecom',
+            icon: <ShoppingOutlined />,
+            label: '电商运营',
+            onClick: () => navigate('/ecom/data'),
+          },
+        ]
+      : []),
     ...(showDataScope
       ? [
           {

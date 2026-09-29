@@ -37,6 +37,11 @@ public final class LocalhostAccess {
         return StringUtils.hasText(username) && DATA_SCOPE_OPERATOR.equalsIgnoreCase(username.trim());
     }
 
+    /** 电商运营暗门：一期与数据权限同口径（localhost / bella），后续可叠 ACL */
+    public static boolean canAccessEcom(HttpServletRequest request, String username) {
+        return canAccessDataScope(request, username);
+    }
+
     public static boolean isDataScopeOperator(String username) {
         return StringUtils.hasText(username) && DATA_SCOPE_OPERATOR.equalsIgnoreCase(username.trim());
     }

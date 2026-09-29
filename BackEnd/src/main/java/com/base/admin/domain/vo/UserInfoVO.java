@@ -32,4 +32,10 @@ public class UserInfoVO {
 
     @Schema(description = "菜单树")
     private List<MenuVO> menus;
+
+    @Schema(description = "是否可进入电商运营暗门")
+    private Boolean ecomAllowed;
+
+    @Schema(description = "是否可管理电商 ACL")
+    private Boolean ecomCanManageAcl;
 }
