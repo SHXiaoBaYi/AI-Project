@@ -22,6 +22,15 @@ public class GeoDailyBulkSaveResultVO {
     @Schema(description = "因已统计而跳过的条数", example = "2")
     private int skippedLockedCount;
 
+    @Schema(description = "强制覆盖已统计条数", example = "3")
+    private int forcedUpdateCount;
+
+    @Schema(description = "强制更新后重算落库的看板周期数", example = "3")
+    private int boardPeriodCount;
+
+    @Schema(description = "强制更新后重算落库的看板快照条数", example = "42")
+    private int boardSnapshotCount;
+
     @Schema(description = "已统计冲突列表（needConfirm=true 时返回）")
     private List<GeoDailyBulkConflictVO> lockedConflicts = new ArrayList<>();
 }

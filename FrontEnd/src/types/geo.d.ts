@@ -178,6 +178,8 @@ export interface GeoDailyBulkGroupDTO {
 
 export interface GeoDailyBulkSaveDTO {
   ignoreLocked?: boolean;
+  /** 强制覆盖已统计记录，并重算落库周/月/年看板 */
+  forceUpdate?: boolean;
   groups: GeoDailyBulkGroupDTO[];
 }
 
@@ -196,6 +198,9 @@ export interface GeoDailyBulkSaveResult {
   insertCount: number;
   updateCount: number;
   skippedLockedCount: number;
+  forcedUpdateCount?: number;
+  boardPeriodCount?: number;
+  boardSnapshotCount?: number;
   lockedConflicts: GeoDailyBulkConflict[];
 }
 

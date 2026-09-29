@@ -14,6 +14,9 @@ public class GeoDailyBulkSaveDTO {
     @Schema(description = "是否忽略已统计冲突（true=跳过已统计记录继续保存其余）", example = "false")
     private Boolean ignoreLocked;
 
+    @Schema(description = "是否强制覆盖已统计记录，并重算落库对应周/月/年看板", example = "false")
+    private Boolean forceUpdate;
+
     @Valid
     @NotEmpty(message = "请至少提交一个话题分组")
     @Schema(description = "按日期+话题+关键字分组的监测数据")

@@ -1,0 +1,7 @@
+﻿node.exe : error: too many arguments. Expected 0 arguments but got 2: api, Modal.
+所在位置 D:\AI-XBY\dev-tools\node-v22.19.0-win-x64\antd.ps1:16 字符: 5
++     & "$basedir/node$exe"  "$basedir/node_modules/@ant-design/cli/dis ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: too many... 2: api, Modal.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

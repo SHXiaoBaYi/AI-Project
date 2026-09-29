@@ -149,7 +149,7 @@ public class GeoMonitorController {
         return Result.ok();
     }
 
-    @Operation(summary = "整单批量保存日监测（多日期多话题，支持已统计冲突确认）")
+    @Operation(summary = "整单批量保存日监测（多日期多话题，支持已统计冲突确认/强制更新并重算看板）")
     @PostMapping("/daily/bulk")
     @RequiresPermission("geo:daily:add")
     @Log(title = "GEO日监测整单批量", businessType = 1)

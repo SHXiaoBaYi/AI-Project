@@ -502,15 +502,13 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
 
   const showLockedConfirm = (result: GeoDailyBulkSaveResult) => {
     const conflicts = result.lockedConflicts || [];
-    modal.confirm({
+    const instance = modal.confirm({
       title: '部分数据已被统计，无法覆盖',
       width: 640,
-      okText: '忽略此处更新',
-      cancelText: '取消',
       content: (
         <div className='max-h-80 space-y-2 overflow-y-auto text-sm'>
           <p className='text-neutral-500'>
-            以下记录已存在且已被周/月/年统计。可选择「忽略此处更新」跳过这些记录，其余未统计数据仍会一次性保存；取消则整单不保存。
+            以下记录已存在且已被周/月/年统计。可选择「忽略此处更新」跳过这些记录并保存其余数据；「强制更新」会覆盖这些记录并重算落库对应周/月/年看板；取消则整单不保存。
           </p>
           <ul className='m-0 list-disc space-y-2 pl-5'>
             {conflicts.map((item) => (
@@ -524,11 +522,35 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           </ul>
         </div>
       ),
-      onOk: () => submitBulk(true),
+      footer: () => (
+        <div className='flex justify-end gap-2'>
+          <Button onClick={() => instance.destroy()}>取消</Button>
+          <Button
+            danger
+            onClick={() => {
+              instance.destroy();
+              void submitBulk({ forceUpdate: true });
+            }}
+          >
+            强制更新
+          </Button>
+          <Button
+            type='primary'
+            onClick={() => {
+              instance.destroy();
+              void submitBulk({ ignoreLocked: true });
+            }}
+          >
+            忽略此处更新
+          </Button>
+        </div>
+      ),
     });
   };
 
-  const submitBulk = async (ignoreLocked: boolean) => {
+  const submitBulk = async (opts?: { ignoreLocked?: boolean; forceUpdate?: boolean }) => {
+    const ignoreLocked = Boolean(opts?.ignoreLocked);
+    const forceUpdate = Boolean(opts?.forceUpdate);
     const groups = buildGroups();
     if (!groups) return;
     if (!groups.length) {
@@ -540,6 +562,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
     try {
       const result = await saveGeoDailyBulkApi({
         ignoreLocked,
+        forceUpdate,
         groups: groups.map((g) => ({
           inspectDate: g.inspectDate,
           topicId: g.topicId,
@@ -570,9 +593,18 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
         message.warning(`已忽略 ${skipped} 条已统计数据，本次无写入内容`);
         return;
       }
+      const forced = result.forcedUpdateCount || 0;
+      const boardHint =
+        forceUpdate && (result.boardSnapshotCount || 0) > 0
+          ? `，已重算看板快照 ${result.boardSnapshotCount} 条（周期 ${result.boardPeriodCount || 0}）`
+          : forceUpdate && forced > 0
+            ? '，已触发周/月/年看板重算落库'
+            : '';
       message.success(
         `保存成功：新增 ${result.insertCount || 0}，覆盖 ${result.updateCount || 0}` +
-          (skipped ? `，忽略已统计 ${skipped}` : ''),
+          (forced ? `（含强制 ${forced}）` : '') +
+          (skipped ? `，忽略已统计 ${skipped}` : '') +
+          boardHint,
       );
       onOpenChange(false);
       onSuccess();
@@ -584,7 +616,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   };
 
   const handleSave = () => {
-    void submitBulk(false);
+    void submitBulk();
   };
 
   const buildTopicColumns = (tabKey: string): ColumnsType<TopicRow> => [

@@ -1,0 +1,17 @@
+=== geo_topic ===
+3	新疆羊肉	active=1	daily=915	place=33	year=1	board=31
+4	全国羊肉	active=1	daily=546	place=54	year=1	board=29
+17	吃羊场景	active=1	daily=1484	place=76	year=5	board=26
+20	哪餐	active=1	daily=574	place=30	year=0	board=27
+41	新疆旅游特产/伴手礼	active=1	daily=2306	place=141	year=1	board=29
+59	小巴依	active=1	daily=0	place=9	year=0	board=0
+60	送礼/礼品推荐	active=1	daily=1474	place=82	year=3	board=23
+
+=== orphan daily (topic_id not in geo_topic) ===
+count=0
+
+=== orphan placement ===
+count=0
+
+=== placement topic_name mismatch ===
+(none)

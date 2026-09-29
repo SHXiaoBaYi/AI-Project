@@ -400,11 +400,14 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             throw new BusinessException("请至少提交一个话题分组");
         }
         boolean ignoreLocked = Boolean.TRUE.equals(dto.getIgnoreLocked());
+        boolean forceUpdate = Boolean.TRUE.equals(dto.getForceUpdate());
         Map<Long, String> topicNames = topicNameMap();
         Set<String> seenKeys = new HashSet<>();
         List<GeoDailyBulkConflictVO> conflicts = new ArrayList<>();
         List<GeoDailyDTO> toInsert = new ArrayList<>();
         List<GeoDailyDTO> toUpdate = new ArrayList<>();
+        Set<LocalDate> forceBoardDates = new LinkedHashSet<>();
+        int forcedUpdateCount = 0;
 
         for (GeoDailyBulkGroupDTO group : dto.getGroups()) {
             if (group == null) {
@@ -461,6 +464,13 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                 GeoMonitorDaily existing = dailyMapper.selectUkIncludeDeleted(
                         group.getInspectDate(), platform, keyword, termType);
                 if (existing != null && Integer.valueOf(1).equals(existing.getBoardLocked())) {
+                    if (forceUpdate) {
+                        one.setId(existing.getId());
+                        toUpdate.add(one);
+                        forceBoardDates.add(group.getInspectDate());
+                        forcedUpdateCount++;
+                        continue;
+                    }
                     conflicts.add(buildConflict(existing, topicName,
                             "该记录已被周/月/年统计，不可覆盖"));
                     continue;
@@ -480,12 +490,12 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         GeoDailyBulkSaveResultVO result = new GeoDailyBulkSaveResultVO();
         result.setLockedConflicts(conflicts);
 
-        if (!ignoreLocked && !conflicts.isEmpty()) {
+        if (!forceUpdate && !ignoreLocked && !conflicts.isEmpty()) {
             result.setNeedConfirm(true);
             return result;
         }
 
-        if (ignoreLocked) {
+        if (!forceUpdate && ignoreLocked) {
             result.setSkippedLockedCount(conflicts.size());
         }
 
@@ -500,17 +510,24 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         int insertCount = 0;
         int updateCount = 0;
         for (GeoDailyDTO one : toInsert) {
-            upsertDailyAllowOverwriteUnlocked(one, true);
+            upsertDailyAllowOverwriteUnlocked(one, true, forceUpdate);
             insertCount++;
         }
         for (GeoDailyDTO one : toUpdate) {
-            upsertDailyAllowOverwriteUnlocked(one, false);
+            upsertDailyAllowOverwriteUnlocked(one, false, forceUpdate);
             updateCount++;
+        }
+
+        if (forceUpdate && !forceBoardDates.isEmpty()) {
+            GeoPersistResultVO board = rePersistBoardsForDates(forceBoardDates);
+            result.setBoardPeriodCount(board.getPeriodCount());
+            result.setBoardSnapshotCount(board.getSnapshotCount());
         }
 
         result.setNeedConfirm(false);
         result.setInsertCount(insertCount);
         result.setUpdateCount(updateCount);
+        result.setForcedUpdateCount(forcedUpdateCount);
         return result;
     }
 
@@ -527,9 +544,9 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
     }
 
     /**
-     * 批量新增专用：已存在且未统计则覆盖；不做“整日周期锁定”拦截（冲突已在上层识别）。
+     * 批量新增专用：已存在且未统计则覆盖；forceOverwrite=true 时可覆盖已统计记录。
      */
-    private void upsertDailyAllowOverwriteUnlocked(GeoDailyDTO dto, boolean allowInsert) {
+    private void upsertDailyAllowOverwriteUnlocked(GeoDailyDTO dto, boolean allowInsert, boolean forceOverwrite) {
         topicService.getById(dto.getTopicId());
         platformService.getOrCreate(dto.getPlatform());
         String platform = dto.getPlatform().trim();
@@ -540,7 +557,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         if (existing == null && dto.getId() != null) {
             existing = dailyMapper.selectById(dto.getId());
         }
-        if (existing != null && Integer.valueOf(1).equals(existing.getBoardLocked())) {
+        if (existing != null && Integer.valueOf(1).equals(existing.getBoardLocked()) && !forceOverwrite) {
             throw new BusinessException("该日监测数据已被周/月/年统计，不可编辑或删除");
         }
         if (existing == null) {
@@ -561,6 +578,38 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         dailyMapper.updateById(existing);
     }
 
+    /** 强制更新后，按涉及日期重算并落库对应周/月/年看板快照。 */
+    private GeoPersistResultVO rePersistBoardsForDates(Collection<LocalDate> dates) {
+        LocalDate min = dates.stream().min(LocalDate::compareTo).orElse(null);
+        LocalDate max = dates.stream().max(LocalDate::compareTo).orElse(null);
+        if (min == null || max == null) {
+            return emptyPersistResult();
+        }
+        GeoBoardQueryDTO query = new GeoBoardQueryDTO();
+        query.setStartDate(min);
+        query.setEndDate(max);
+
+        LocalDate[] weekR = weekRange(query);
+        List<TrendAgg> weeks = liveTrend(weekR[0], weekR[1], query, BoardDim.TOPIC,
+                GeoMonitorServiceImpl::weekKey, GeoMonitorServiceImpl::weekLabel, GeoMonitorServiceImpl::weekBounds);
+        GeoPersistResultVO weekResult = persistTrend(GeoPeriodType.WEEK, weeks, false);
+
+        LocalDate[] monthR = monthRange(query);
+        List<TrendAgg> months = liveTrend(monthR[0], monthR[1], query, BoardDim.TOPIC,
+                GeoMonitorServiceImpl::monthKey, GeoMonitorServiceImpl::monthLabel, GeoMonitorServiceImpl::monthBounds);
+        GeoPersistResultVO monthResult = persistTrend(GeoPeriodType.MONTH, months, false);
+
+        LocalDate[] yearR = yearRange(query);
+        List<YearAgg> years = liveYearly(yearR[0], yearR[1], query, BoardDim.TOPIC);
+        GeoPersistResultVO yearResult = persistYearly(years, false);
+
+        GeoPersistResultVO merged = new GeoPersistResultVO();
+        merged.setPeriodCount(weekResult.getPeriodCount() + monthResult.getPeriodCount() + yearResult.getPeriodCount());
+        merged.setSnapshotCount(weekResult.getSnapshotCount() + monthResult.getSnapshotCount() + yearResult.getSnapshotCount());
+        merged.setLockedDailyCount(
+                weekResult.getLockedDailyCount() + monthResult.getLockedDailyCount() + yearResult.getLockedDailyCount());
+        return merged;
+    }
     @Override
     public GeoDailyGroupVO getDailyGroup(LocalDate inspectDate, String keyword) {
         if (inspectDate == null || !StringUtils.hasText(keyword)) {
