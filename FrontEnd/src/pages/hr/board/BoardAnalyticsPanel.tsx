@@ -518,7 +518,7 @@ export default function BoardAnalyticsPanel() {
       <ChartExportCard
         title='招聘漏斗'
         filename='招聘漏斗'
-        hint='按投递日期统计。点击某一层查看该环节候选人，并可导出明细。转化率 = 本层人数 ÷ 上一层人数。'
+        hint='按所选日期范围内各环节触发汇总（非简历队列累计）。待初试/待复试/待终试为尚未发生的待面试存量；点击某一层可下钻明细。转化率 = 本层人数 ÷ 上一层人数。'
       >
         <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
           {funnelChart.length ? (

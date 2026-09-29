@@ -35,9 +35,13 @@ public class HrBoardService {
     private static final FunnelStage[] FUNNEL = {
             new FunnelStage("SCREEN", "HR初筛通过", null),
             new FunnelStage("INVITE", "邀约成功", "邀约成功率"),
-            new FunnelStage("SHOW", "候选人到面（一面）", "到面率"),
-            new FunnelStage("RETEST", "复试通过", "复试通过率"),
-            new FunnelStage("FINAL", "终面通过", "终面通过率"),
+            new FunnelStage("PENDING_FIRST", "候选人待初试", "待初试占比"),
+            new FunnelStage("FIRST", "候选人初试", "初试率"),
+            new FunnelStage("PENDING_RETEST", "候选人待复试", "待复试占比"),
+            new FunnelStage("RETEST", "候选人复试", "复试率"),
+            new FunnelStage("PENDING_FINAL", "候选人待终试", "待终试占比"),
+            new FunnelStage("FINAL_INT", "候选人终试", "终试率"),
+            new FunnelStage("FINAL_PASS", "终试通过", "终试通过率"),
             new FunnelStage("SALARY", "薪资沟通中", "薪资沟通进入率"),
             new FunnelStage("BG_COLLECT", "背调资料收集中", "背调资料收集进入率"),
             new FunnelStage("BG_CHECK", "背调中", "背调进入率"),
@@ -47,6 +51,11 @@ public class HrBoardService {
             new FunnelStage("ACCEPT", "Offer接受", "Offer接受率"),
             new FunnelStage("ONBOARD", "候选人入职", "入职率")
     };
+
+    private static final Set<String> PENDING_FIRST_STAGES = Set.of("FIRST_PENDING");
+    private static final Set<String> PENDING_RETEST_STAGES = Set.of("R2_PENDING");
+    private static final Set<String> PENDING_FINAL_STAGES = Set.of("R3_PENDING", "R4_PENDING", "R5_PENDING");
+
 
     private static final String[] CYCLE_STAGE_NAMES = {
             "需求发起至简历到位", "初筛到一面", "一面到复试", "终面到发Offer", "Offer发出到入职"
@@ -134,15 +143,13 @@ public class HrBoardService {
         if (index < 0) {
             return List.of();
         }
+        LocalDateTime now = LocalDateTime.now();
         List<HrBoardVO.DrillRow> rows = new ArrayList<>();
         for (Milestone milestone : loadMilestones(q)) {
-            if (!inWindow(milestone.submittedAt, q.getStartDate(), q.getEndDate())) {
+            if (!funnelHit(milestone, index, q.getStartDate(), q.getEndDate(), now)) {
                 continue;
             }
-            if (!reached(milestone)[index]) {
-                continue;
-            }
-            rows.add(toDrill(milestone, FUNNEL[index].name(), reachedDate(milestone, index)));
+            rows.add(toDrill(milestone, FUNNEL[index].name(), funnelReachedDate(milestone, index)));
         }
         rows.sort(Comparator.comparing(HrBoardVO.DrillRow::getReachedAt, Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparing(HrBoardVO.DrillRow::getApplicationId, Comparator.nullsLast(Comparator.reverseOrder())));
@@ -972,12 +979,33 @@ public class HrBoardService {
                        (SELECT MIN(e.event_at) FROM hr_stage_event e
                           WHERE e.application_id = a.id AND e.is_active = 1
                             AND e.stage_code IN ('SHOW_UP','FIRST_ROUND','FIRST_PENDING','FIRST_FAIL','R1_DISPUTE')) show_event_at,
+                       (SELECT MIN(rec.interviewed_at) FROM hr_interview_record rec
+                          WHERE rec.application_id = a.id AND rec.is_active = 1 AND rec.round_no = 1
+                            AND rec.interviewed_at IS NOT NULL) first_done_at,
+                       (SELECT MIN(rec.interviewed_at) FROM hr_interview_record rec
+                          WHERE rec.application_id = a.id AND rec.is_active = 1 AND rec.round_no = 2
+                            AND rec.interviewed_at IS NOT NULL) second_done_at,
                        (SELECT MIN(COALESCE(rec.interviewed_at, i.interview_at))
                           FROM hr_interview_invite i
                           LEFT JOIN hr_interview_record rec ON rec.invite_id = i.id AND rec.is_active = 1
                           WHERE i.application_id = a.id AND i.is_active = 1 AND i.round_no = 1 AND i.status <> 'CANCELLED') first_at,
-                       (SELECT MIN(rd.interview_at) FROM hr_interview_round rd
-                          WHERE rd.application_id = a.id AND rd.is_active = 1 AND rd.round_no = 2 AND rd.interview_at IS NOT NULL) second_at,
+                       (SELECT MIN(COALESCE(rec.interviewed_at, i.interview_at))
+                          FROM hr_interview_invite i
+                          LEFT JOIN hr_interview_record rec ON rec.invite_id = i.id AND rec.is_active = 1
+                          WHERE i.application_id = a.id AND i.is_active = 1 AND i.round_no = 2 AND i.status <> 'CANCELLED') second_at,
+                       (SELECT MIN(COALESCE(i.interview_at, rd.interview_at))
+                          FROM hr_interview_invite i
+                          LEFT JOIN hr_interview_round rd ON rd.application_id = a.id AND rd.is_active = 1
+                            AND rd.round_no = i.round_no
+                          WHERE i.application_id = a.id AND i.is_active = 1 AND i.status <> 'CANCELLED'
+                            AND r.id IS NOT NULL
+                            AND i.round_no = (SELECT MAX(x.round_no) FROM hr_requisition_round x
+                                              WHERE x.requisition_id = r.id AND x.is_active = 1)) final_scheduled_at,
+                       (SELECT MIN(rec.interviewed_at) FROM hr_interview_record rec
+                          WHERE rec.application_id = a.id AND rec.is_active = 1 AND rec.interviewed_at IS NOT NULL
+                            AND r.id IS NOT NULL
+                            AND rec.round_no = (SELECT MAX(x.round_no) FROM hr_requisition_round x
+                                                WHERE x.requisition_id = r.id AND x.is_active = 1)) final_done_at,
                        (SELECT rd.interview_at FROM hr_interview_round rd
                           WHERE rd.application_id = a.id AND rd.is_active = 1 AND rd.interview_at IS NOT NULL
                             AND r.id IS NOT NULL
@@ -999,6 +1027,9 @@ public class HrBoardService {
                           WHERE e.application_id = a.id AND e.is_active = 1 AND e.stage_code = 'MEDICAL') medical_at,
                        (SELECT MIN(e.event_at) FROM hr_stage_event e
                           WHERE e.application_id = a.id AND e.is_active = 1 AND e.stage_code = 'OFFER_PENDING') offer_pending_at,
+                       (SELECT MIN(e.event_at) FROM hr_stage_event e
+                          WHERE e.application_id = a.id AND e.is_active = 1
+                            AND e.stage_code IN ('OFFER_ACCEPTED', 'ACCEPTED')) accept_at,
                        off.offered_at,
                        off.status offer_status,
                        ob.onboard_date
@@ -1022,6 +1053,10 @@ public class HrBoardService {
         Integer priority = rs.wasNull() ? null : priorityValue;
         LocalDateTime showAt = firstNonNull(timeOf(rs, "show_record_at"), timeOf(rs, "show_event_at"));
         LocalDateTime firstAt = firstNonNull(timeOf(rs, "first_at"), timeOf(rs, "show_record_at"));
+        LocalDateTime firstDoneAt = firstNonNull(timeOf(rs, "first_done_at"), showAt);
+        LocalDateTime secondDoneAt = timeOf(rs, "second_done_at");
+        LocalDateTime finalDoneAt = firstNonNull(timeOf(rs, "final_done_at"), timeOf(rs, "final_interview_at"));
+        LocalDateTime finalScheduledAt = firstNonNull(timeOf(rs, "final_scheduled_at"), timeOf(rs, "final_interview_at"));
         return new Milestone(
                 rs.getLong("application_id"),
                 rs.getString("candidate_name"),
@@ -1043,12 +1078,17 @@ public class HrBoardService {
                 firstNonNull(timeOf(rs, "final_interview_at"), timeOf(rs, "final_event_at")),
                 firstNonNull(timeOf(rs, "retest_event_at"), timeOf(rs, "retest_record_at")),
                 timeOf(rs, "final_event_at"),
+                firstDoneAt,
+                secondDoneAt,
+                finalDoneAt,
+                finalScheduledAt,
                 timeOf(rs, "salary_at"),
                 timeOf(rs, "bg_collect_at"),
                 timeOf(rs, "bg_check_at"),
                 timeOf(rs, "medical_at"),
                 timeOf(rs, "offer_pending_at"),
                 timeOf(rs, "offered_at"),
+                timeOf(rs, "accept_at"),
                 rs.getString("offer_status"),
                 dateOf(rs, "onboard_date"));
     }
@@ -1078,18 +1118,137 @@ public class HrBoardService {
 
     private static long[] countFunnel(List<Milestone> rows, LocalDate start, LocalDate end) {
         long[] counts = new long[FUNNEL.length];
+        LocalDateTime now = LocalDateTime.now();
         for (Milestone milestone : rows) {
-            if (!inWindow(milestone.submittedAt, start, end)) {
-                continue;
-            }
-            boolean[] flags = reached(milestone);
-            for (int i = 0; i < flags.length; i++) {
-                if (flags[i]) {
+            for (int i = 0; i < FUNNEL.length; i++) {
+                if (funnelHit(milestone, i, start, end, now)) {
                     counts[i]++;
                 }
             }
         }
         return counts;
+    }
+
+    /**
+     * 漏斗按「日期范围内该阶段触发/存量」独立计数（非简历提交日队列 + 累计到达）。
+     * <ul>
+     *   <li>HR初筛通过：简历录入日（submitted_at）落在范围内</li>
+     *   <li>邀约成功：邀约发起日落在范围内</li>
+     *   <li>待初试/待复试/待终试：尚未发生的待面试存量，关联邀约/预约日落在范围内</li>
+     *   <li>初试/复试/终试：对应轮次实际面试日落在范围内</li>
+     *   <li>终试通过及之后各阶段：首次进入该阶段的事件日落在范围内</li>
+     * </ul>
+     */
+    private static boolean funnelHit(Milestone m, int index, LocalDate start, LocalDate end, LocalDateTime now) {
+        String stage = m.currentStage == null ? "" : m.currentStage;
+        return switch (index) {
+            case 0 -> inWindow(m.submittedAt, start, end);
+            case 1 -> inWindow(toDate(m.inviteAt), start, end);
+            case 2 -> isPendingFirst(m, now) && pendingAnchored(m.inviteAt, m.firstAt, m.submittedAt, start, end);
+            case 3 -> inWindow(toDate(firstNonNull(m.firstDoneAt, m.showAt)), start, end);
+            case 4 -> isPendingRetest(m, now) && pendingAnchored(m.secondAt, m.firstDoneAt, m.submittedAt, start, end);
+            case 5 -> inWindow(toDate(m.secondDoneAt), start, end);
+            case 6 -> isPendingFinal(m, now) && pendingAnchored(m.finalScheduledAt, m.secondDoneAt, m.submittedAt, start, end);
+            case 7 -> inWindow(toDate(m.finalDoneAt), start, end);
+            case 8 -> inWindow(toDate(m.finalEventAt), start, end);
+            case 9 -> inWindow(toDate(m.salaryAt), start, end);
+            case 10 -> inWindow(toDate(m.bgCollectAt), start, end);
+            case 11 -> inWindow(toDate(m.bgCheckAt), start, end);
+            case 12 -> inWindow(toDate(m.medicalAt), start, end);
+            case 13 -> inWindow(toDate(m.offerPendingAt), start, end);
+            case 14 -> inWindow(toDate(m.offerAt), start, end);
+            case 15 -> inWindow(toDate(m.acceptAt), start, end)
+                    || ("OFFER_ACCEPTED".equals(stage) && inWindow(toDate(m.offerAt), start, end));
+            case 16 -> inWindow(m.onboardDate, start, end);
+            default -> false;
+        };
+    }
+
+    private static boolean pendingAnchored(LocalDateTime primary, LocalDateTime secondary, LocalDate fallback,
+                                          LocalDate start, LocalDate end) {
+        if (inWindow(toDate(primary), start, end) || inWindow(toDate(secondary), start, end)) {
+            return true;
+        }
+        // 无邀约/预约时间时，退回简历录入日，避免待面试阶段恒为空
+        return inWindow(fallback, start, end);
+    }
+
+    private static boolean isPendingFirst(Milestone m, LocalDateTime now) {
+        if (PENDING_FIRST_STAGES.contains(nullToEmpty(m.currentStage))) {
+            return true;
+        }
+        if (m.inviteAt == null) {
+            return false;
+        }
+        if (m.firstDoneAt != null || m.showAt != null) {
+            return false;
+        }
+        return m.firstAt == null || !m.firstAt.isBefore(now);
+    }
+
+    private static boolean isPendingRetest(Milestone m, LocalDateTime now) {
+        if (PENDING_RETEST_STAGES.contains(nullToEmpty(m.currentStage))) {
+            return true;
+        }
+        if (m.secondAt == null) {
+            return false;
+        }
+        if (m.secondDoneAt != null) {
+            return false;
+        }
+        return !m.secondAt.isBefore(now);
+    }
+
+    private static boolean isPendingFinal(Milestone m, LocalDateTime now) {
+        if (PENDING_FINAL_STAGES.contains(nullToEmpty(m.currentStage))) {
+            return true;
+        }
+        if (m.finalScheduledAt == null) {
+            return false;
+        }
+        if (m.finalDoneAt != null || m.finalEventAt != null) {
+            return false;
+        }
+        return !m.finalScheduledAt.isBefore(now);
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static LocalDate funnelReachedDate(Milestone milestone, int index) {
+        return switch (index) {
+            case 0 -> milestone.submittedAt;
+            case 1 -> toDate(milestone.inviteAt);
+            case 2 -> firstNonNullDate(toDate(milestone.firstAt), toDate(milestone.inviteAt), milestone.submittedAt);
+            case 3 -> toDate(firstNonNull(milestone.firstDoneAt, milestone.showAt));
+            case 4 -> firstNonNullDate(toDate(milestone.secondAt), toDate(milestone.firstDoneAt), milestone.submittedAt);
+            case 5 -> toDate(milestone.secondDoneAt);
+            case 6 -> firstNonNullDate(toDate(milestone.finalScheduledAt), toDate(milestone.secondDoneAt), milestone.submittedAt);
+            case 7 -> toDate(milestone.finalDoneAt);
+            case 8 -> toDate(milestone.finalEventAt);
+            case 9 -> toDate(milestone.salaryAt);
+            case 10 -> toDate(milestone.bgCollectAt);
+            case 11 -> toDate(milestone.bgCheckAt);
+            case 12 -> toDate(milestone.medicalAt);
+            case 13 -> toDate(milestone.offerPendingAt);
+            case 14 -> toDate(milestone.offerAt);
+            case 15 -> firstNonNullDate(toDate(milestone.acceptAt), toDate(milestone.offerAt));
+            case 16 -> milestone.onboardDate;
+            default -> milestone.submittedAt;
+        };
+    }
+
+    private static LocalDate firstNonNullDate(LocalDate... dates) {
+        if (dates == null) {
+            return null;
+        }
+        for (LocalDate date : dates) {
+            if (date != null) {
+                return date;
+            }
+        }
+        return null;
     }
 
     private List<HrBoardVO.ChartPoint> buildJobCycle(List<Milestone> rows, HrBoardQueryDTO q, String cycleJob) {
@@ -1237,22 +1396,8 @@ public class HrBoardService {
     }
 
     private static LocalDate reachedDate(Milestone milestone, int index) {
-        return switch (index) {
-            case 0 -> milestone.screenAt != null ? milestone.screenAt.toLocalDate() : milestone.submittedAt;
-            case 1 -> toDate(milestone.inviteAt);
-            case 2 -> toDate(firstNonNull(milestone.showAt, milestone.firstAt));
-            case 3 -> toDate(firstNonNull(milestone.retestAt, milestone.secondAt));
-            case 4 -> toDate(firstNonNull(milestone.finalAt, milestone.finalEventAt));
-            case 5 -> toDate(milestone.salaryAt);
-            case 6 -> toDate(milestone.bgCollectAt);
-            case 7 -> toDate(milestone.bgCheckAt);
-            case 8 -> toDate(milestone.medicalAt);
-            case 9 -> toDate(milestone.offerPendingAt);
-            case 10 -> toDate(milestone.offerAt);
-            case 11 -> milestone.onboardDate != null ? milestone.onboardDate : toDate(milestone.offerAt);
-            case 12 -> milestone.onboardDate;
-            default -> milestone.submittedAt;
-        };
+        // 兼容面试看板等仍按旧漏斗下标取到达日的调用
+        return funnelReachedDate(milestone, Math.min(index, FUNNEL.length - 1));
     }
 
     private void appendRequisitionFilter(StringBuilder sql, List<Object> args, HrBoardQueryDTO q, String requisition) {
@@ -1528,12 +1673,17 @@ public class HrBoardService {
             LocalDateTime finalAt,
             LocalDateTime retestAt,
             LocalDateTime finalEventAt,
+            LocalDateTime firstDoneAt,
+            LocalDateTime secondDoneAt,
+            LocalDateTime finalDoneAt,
+            LocalDateTime finalScheduledAt,
             LocalDateTime salaryAt,
             LocalDateTime bgCollectAt,
             LocalDateTime bgCheckAt,
             LocalDateTime medicalAt,
             LocalDateTime offerPendingAt,
             LocalDateTime offerAt,
+            LocalDateTime acceptAt,
             String offerStatus,
             LocalDate onboardDate) {
     }

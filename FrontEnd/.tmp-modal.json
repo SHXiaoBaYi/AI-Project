@@ -1,0 +1,427 @@
+﻿{
+  "name": "Modal",
+  "nameZh": "瀵硅瘽妗?,
+  "description": "灞曠ず涓€涓璇濇锛屾彁渚涙爣棰樸€佸唴瀹瑰尯銆佹搷浣滃尯銆?,
+  "props": [
+    {
+      "name": "afterClose",
+      "type": "function",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "cancelButtonProps",
+      "type": "[ButtonProps](/components/button/#api)",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "cancelText",
+      "type": "ReactNode",
+      "default": "`Cancel`",
+      "since": ""
+    },
+    {
+      "name": "centered",
+      "type": "boolean",
+      "default": "false",
+      "since": ""
+    },
+    {
+      "name": "classNames",
+      "type": "Record<[SemanticDOM](#semantic-dom), string> | (info: { props }) => Record<[SemanticDOM](#semantic-dom), string>",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "closable",
+      "type": "boolean | [ClosableType](#closabletype)",
+      "default": "true",
+      "since": ""
+    },
+    {
+      "name": "closeIcon",
+      "type": "ReactNode",
+      "default": "<CloseOutlined />",
+      "since": ""
+    },
+    {
+      "name": "confirmLoading",
+      "type": "boolean",
+      "default": "false",
+      "since": ""
+    },
+    {
+      "name": "destroyOnClose",
+      "type": "boolean",
+      "default": "false",
+      "since": ""
+    },
+    {
+      "name": "destroyOnHidden",
+      "type": "boolean",
+      "default": "false",
+      "since": "5.25.0"
+    },
+    {
+      "name": "focusTriggerAfterClose",
+      "type": "boolean",
+      "default": "true",
+      "since": "4.9.0"
+    },
+    {
+      "name": "footer",
+      "type": "ReactNode | (originNode: ReactNode, extra: { OkBtn: React.FC, CancelBtn: React.FC }) => ReactNode",
+      "default": "(OK and Cancel buttons)",
+      "since": "renderFunction: 5.9.0"
+    },
+    {
+      "name": "forceRender",
+      "type": "boolean",
+      "default": "false",
+      "since": ""
+    },
+    {
+      "name": "focusable",
+      "type": "`{ trap?: boolean, focusTriggerAfterClose?: boolean }`",
+      "default": "-",
+      "since": "6.2.0"
+    },
+    {
+      "name": "getContainer",
+      "type": "HTMLElement | () => HTMLElement | Selectors | false",
+      "default": "document.body",
+      "since": ""
+    },
+    {
+      "name": "keyboard",
+      "type": "boolean",
+      "default": "true",
+      "since": ""
+    },
+    {
+      "name": "mask",
+      "type": "boolean | `{enabled?: boolean, blur?: boolean, closable?: boolean}`",
+      "default": "true",
+      "since": "mask.closable: 6.3.0"
+    },
+    {
+      "name": "maskClosable",
+      "type": "boolean",
+      "default": "true",
+      "since": ""
+    },
+    {
+      "name": "modalRender",
+      "type": "(node: ReactNode) => ReactNode",
+      "default": "-",
+      "since": "4.7.0"
+    },
+    {
+      "name": "okButtonProps",
+      "type": "[ButtonProps](/components/button/#api)",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "okText",
+      "type": "ReactNode",
+      "default": "`OK`",
+      "since": ""
+    },
+    {
+      "name": "okType",
+      "type": "string",
+      "default": "`primary`",
+      "since": ""
+    },
+    {
+      "name": "style",
+      "type": "CSSProperties",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "styles",
+      "type": "Record<[SemanticDOM](#semantic-dom), CSSProperties> | (info: { props })=> Record<[SemanticDOM](#semantic-dom), CSSProperties>",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "loading",
+      "type": "boolean",
+      "default": "-",
+      "since": "5.18.0"
+    },
+    {
+      "name": "scrollLock",
+      "type": "boolean",
+      "default": "true",
+      "since": "6.5.0"
+    },
+    {
+      "name": "title",
+      "type": "ReactNode",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "open",
+      "type": "boolean",
+      "default": "false",
+      "since": ""
+    },
+    {
+      "name": "width",
+      "type": "string | number | [Breakpoint](/components/grid#col)",
+      "default": "520",
+      "since": "Breakpoint: 5.23.0"
+    },
+    {
+      "name": "wrapClassName",
+      "type": "string",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "zIndex",
+      "type": "number",
+      "default": "1000",
+      "since": ""
+    },
+    {
+      "name": "onCancel",
+      "type": "function(e)",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "onOk",
+      "type": "function(e)",
+      "default": "-",
+      "since": ""
+    },
+    {
+      "name": "afterOpenChange",
+      "type": "(open: boolean) => void",
+      "default": "-",
+      "since": "5.4.0"
+    }
+  ],
+  "subComponentProps": {
+    "Modal.method()": [
+      {
+        "name": "afterClose",
+        "type": "function",
+        "default": "-",
+        "since": "4.9.0"
+      },
+      {
+        "name": "autoFocusButton",
+        "type": "null | `ok` | `cancel`",
+        "default": "`ok`",
+        "since": ""
+      },
+      {
+        "name": "cancelButtonProps",
+        "type": "[ButtonProps](/components/button/#api)",
+        "default": "-",
+        "since": ""
+      },
+      {
+        "name": "cancelText",
+        "type": "string",
+        "default": "`Cancel`",
+        "since": ""
+      },
+      {
+        "name": "centered",
+        "type": "boolean",
+        "default": "false",
+        "since": ""
+      },
+      {
+        "name": "className",
+        "type": "string",
+        "default": "-",
+        "since": ""
+      },
+      {
+        "name": "closable",
+        "type": "boolean | [ClosableType](#closabletype)",
+        "default": "false",
+        "since": ""
+      },
+      {
+        "name": "closeIcon",
+        "type": "ReactNode",
+        "default": "undefined",
+        "since": "4.9.0"
+      },
+      {
+        "name": "content",
+        "type": "ReactNode",
+        "default": "-",
+        "since": ""
+      },
+      {
+        "name": "focusable.autoFocusButton",
+        "type": "null | `ok` | `cancel`",
+        "default": "`ok`",
+        "since": "6.2.0"
+      },
+      {
+        "name": "footer",
+        "type": "ReactNode | (originNode: ReactNode, extra: { OkBtn: React.FC, CancelBtn: React.FC }) => ReactNode",
+        "default": "-",
+        "since": "renderFunction: 5.9.0"
+      },
+      {
+        "name": "getContainer",
+        "type": "HTMLElement | () => HTMLElement | Selectors | false",
+        "default": "document.body",
+        "since": ""
+      },
+      {
+        "name": "icon",
+        "type": "ReactNode",
+        "default": "<ExclamationCircleFilled />",
+        "since": ""
+      },
+      {
+        "name": "keyboard",
+        "type": "boolean",
+        "default": "true",
+        "since": ""
+      },
+      {
+        "name": "mask",
+        "type": "boolean | `{enabled?: boolean, blur?: boolean, closable?: boolean}`",
+        "default": "true",
+        "since": ""
+      },
+      {
+        "name": "maskClosable",
+        "type": "boolean",
+        "default": "false",
+        "since": ""
+      },
+      {
+        "name": "scrollLock",
+        "type": "boolean",
+        "default": "true",
+        "since": "6.5.0"
+      },
+      {
+        "name": "okButtonProps",
+        "type": "[ButtonProps](/components/button/#api)",
+        "default": "-",
+        "since": ""
+      },
+      {
+        "name": "okText",
+        "type": "string",
+        "default": "`OK`",
+        "since": ""
+      },
+      {
+        "name": "okType",
+        "type": "string",
+        "default": "`primary`",
+        "since": ""
+      },
+      {
+        "name": "style",
+        "type": "CSSProperties",
+        "default": "-",
+        "since": ""
+      },
+      {
+        "name": "title",
+        "type": "ReactNode",
+        "default": "-",
+        "since": ""
+      },
+      {
+        "name": "width",
+        "type": "string | number",
+        "default": "416",
+        "since": ""
+      },
+      {
+        "name": "wrapClassName",
+        "type": "string",
+        "default": "-",
+        "since": "4.18.0"
+      },
+      {
+        "name": "zIndex",
+        "type": "number",
+        "default": "1000",
+        "since": ""
+      },
+      {
+        "name": "onCancel",
+        "type": "function(close)",
+        "default": "-",
+        "since": ""
+      },
+      {
+        "name": "onOk",
+        "type": "function(close)",
+        "default": "-",
+        "since": ""
+      }
+    ],
+    "Modal.ClosableType": [
+      {
+        "name": "afterClose",
+        "type": "function",
+        "default": "-",
+        "since": ""
+      },
+      {
+        "name": "closeIcon",
+        "type": "ReactNode",
+        "default": "undefined",
+        "since": ""
+      },
+      {
+        "name": "disabled",
+        "type": "boolean",
+        "default": "false",
+        "since": ""
+      },
+      {
+        "name": "onClose",
+        "type": "Function",
+        "default": "undefined",
+        "since": ""
+      }
+    ]
+  },
+  "commonProps": [
+    {
+      "name": "className",
+      "type": "string",
+      "default": "-",
+      "description": "Additional CSS class",
+      "descriptionZh": "棰濆鐨?CSS 绫诲悕"
+    },
+    {
+      "name": "style",
+      "type": "CSSProperties",
+      "default": "-",
+      "description": "Additional style",
+      "descriptionZh": "棰濆鐨勬牱寮?
+    },
+    {
+      "name": "rootClassName",
+      "type": "string",
+      "default": "-",
+      "description": "ClassName on the root element",
+      "descriptionZh": "鏍瑰厓绱犵殑绫诲悕"
+    }
+  ],
+  "htmlElement": "div"
+}

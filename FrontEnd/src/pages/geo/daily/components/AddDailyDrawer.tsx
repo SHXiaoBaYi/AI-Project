@@ -330,13 +330,18 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   onOpenChange,
   onSuccess,
 }: AddDailyDrawerProps) {
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
   const currentUserId = useSelector((state: RootState) => state.user.userInfo?.userId);
   const [tabs, setTabs] = useState<DateTab[]>([]);
   const [activeKey, setActiveKey] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [addDateOpen, setAddDateOpen] = useState(false);
   const [pendingDate, setPendingDate] = useState<Dayjs>(dayjs());
+  const [lockedConfirmOpen, setLockedConfirmOpen] = useState(false);
+  const [lockedConflicts, setLockedConflicts] = useState<GeoDailyBulkSaveResult['lockedConflicts']>([]);
+  const submitBulkRef = useRef<(opts?: { ignoreLocked?: boolean; forceUpdate?: boolean }) => Promise<void>>(
+    async () => undefined,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -501,51 +506,8 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   };
 
   const showLockedConfirm = (result: GeoDailyBulkSaveResult) => {
-    const conflicts = result.lockedConflicts || [];
-    const instance = modal.confirm({
-      title: '部分数据已被统计，无法覆盖',
-      width: 640,
-      content: (
-        <div className='max-h-80 space-y-2 overflow-y-auto text-sm'>
-          <p className='text-neutral-500'>
-            以下记录已存在且已被周/月/年统计。可选择「忽略此处更新」跳过这些记录并保存其余数据；「强制更新」会覆盖这些记录并重算落库对应周/月/年看板；取消则整单不保存。
-          </p>
-          <ul className='m-0 list-disc space-y-2 pl-5'>
-            {conflicts.map((item) => (
-              <li key={`${item.inspectDate}-${item.platform}-${item.keyword}-${item.id ?? 'new'}`}>
-                <div className='font-medium text-neutral-800'>
-                  {item.inspectDate} · {item.topicName || '话题'} · {item.platform} ·「{item.keyword}」
-                </div>
-                <div className='text-red-500'>{item.reason}</div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ),
-      footer: () => (
-        <div className='flex justify-end gap-2'>
-          <Button onClick={() => instance.destroy()}>取消</Button>
-          <Button
-            danger
-            onClick={() => {
-              instance.destroy();
-              void submitBulk({ forceUpdate: true });
-            }}
-          >
-            强制更新
-          </Button>
-          <Button
-            type='primary'
-            onClick={() => {
-              instance.destroy();
-              void submitBulk({ ignoreLocked: true });
-            }}
-          >
-            忽略此处更新
-          </Button>
-        </div>
-      ),
-    });
+    setLockedConflicts(result.lockedConflicts || []);
+    setLockedConfirmOpen(true);
   };
 
   const submitBulk = async (opts?: { ignoreLocked?: boolean; forceUpdate?: boolean }) => {
@@ -587,6 +549,9 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
         return;
       }
 
+      setLockedConfirmOpen(false);
+      setLockedConflicts([]);
+
       const saved = (result.insertCount || 0) + (result.updateCount || 0);
       const skipped = result.skippedLockedCount || 0;
       if (saved <= 0 && skipped > 0) {
@@ -614,6 +579,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       setSaving(false);
     }
   };
+  submitBulkRef.current = submitBulk;
 
   const handleSave = () => {
     void submitBulk();
@@ -750,7 +716,7 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
       >
         <div className='mb-3 text-sm text-neutral-500'>
           默认打开当天日期 Tab。按日期分
-          Tab；每个话题一行并平铺全部平台。保存时一次性提交：未统计数据自动覆盖，已统计数据会提示并可选择忽略。
+          Tab；每个话题一行并平铺全部平台。保存时一次性提交：未统计数据自动覆盖，已统计数据会提示并可选择忽略或强制更新。
         </div>
         <Tabs
           type='editable-card'
@@ -813,6 +779,62 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
             allowClear={false}
             onChange={(v) => v && setPendingDate(v)}
           />
+        </div>
+      </Modal>
+
+      <Modal
+        title='部分数据已被统计，无法覆盖'
+        open={lockedConfirmOpen}
+        width={640}
+        zIndex={2000}
+        destroyOnHidden
+        maskClosable={false}
+        onCancel={() => setLockedConfirmOpen(false)}
+        footer={
+          <div className='flex flex-wrap justify-end gap-2'>
+            <Button
+              disabled={saving}
+              onClick={() => setLockedConfirmOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              danger
+              loading={saving}
+              onClick={() => {
+                setLockedConfirmOpen(false);
+                void submitBulkRef.current({ forceUpdate: true });
+              }}
+            >
+              强制更新
+            </Button>
+            <Button
+              type='primary'
+              loading={saving}
+              onClick={() => {
+                setLockedConfirmOpen(false);
+                void submitBulkRef.current({ ignoreLocked: true });
+              }}
+            >
+              忽略此处更新
+            </Button>
+          </div>
+        }
+      >
+        <div className='max-h-80 space-y-2 overflow-y-auto text-sm'>
+          <p className='text-neutral-500'>
+            以下记录已存在且已被周/月/年统计。可选择「忽略此处更新」跳过这些记录并保存其余数据；「强制更新」会覆盖这些记录并重算落库对应周/月/年看板；取消则整单不保存。
+          </p>
+          <ul className='m-0 list-disc space-y-2 pl-5'>
+            {(lockedConflicts || []).map((item) => (
+              <li key={`${item.inspectDate}-${item.platform}-${item.keyword}-${item.id ?? 'new'}`}>
+                <div className='font-medium text-neutral-800'>
+                  {item.inspectDate} · {item.topicName || '话题'} · {item.platform} ·「{item.keyword}」
+                </div>
+                <div className='text-red-500'>{item.reason}</div>
+              </li>
+            ))}
+          </ul>
         </div>
       </Modal>
     </>
