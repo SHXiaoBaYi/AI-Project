@@ -1,9 +1,6 @@
 package com.base.admin.service;
 
-import com.base.admin.domain.dto.DingTalkAssistantMeetingDTO;
-import com.base.admin.domain.dto.DingTalkAssistantReportDTO;
 import com.base.admin.domain.dto.DingTalkAssistantSuggestDTO;
-import com.base.admin.domain.vo.DingTalkAssistantActionResultVO;
 import com.base.admin.domain.vo.DingTalkAssistantSuggestVO;
 import com.base.admin.domain.vo.DingTalkBusyUserOptionVO;
 import com.base.admin.exception.BusinessException;
@@ -42,7 +39,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 钉钉机器人单聊：结论简报 + ActionCard；点卡片回传指令后建钉钉日程并落系统记录。
+ * 钉钉机器人单聊：结论 + 动作卡片。
+ * <p>钉钉开放平台不提供「打开自带建日程弹窗」协议，因此卡片不会 API 静默建日程；
+ * 引导用户在钉钉日程里新建，建好后再点「同步到系统」落库。
  */
 @Slf4j
 @Service
@@ -51,12 +50,18 @@ public class DingTalkRobotAssistantService {
 
     private static final Pattern AT_MENTION = Pattern.compile("@([^\\s@，,。！!？?\\n]+)");
     private static final Pattern QUOTED = Pattern.compile("「([^」]+)」");
-    private static final Pattern BOOK_CMD = Pattern.compile("(?i)#B[:：]\\s*([A-Za-z0-9_\\-+=/]+)");
-    private static final DateTimeFormatter SLOT_FMT = DateTimeFormatter.ofPattern("MM-dd HH:mm");
+    private static final Pattern PREP_CMD = Pattern.compile("(?i)#P[:：]\\s*([A-Za-z0-9_\\-+=/]+)");
+    private static final Pattern SYNC_CMD = Pattern.compile("(?i)#S[:：]\\s*([A-Za-z0-9_\\-+=/]+)");
     private static final DateTimeFormatter API_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter CARD_TIME = DateTimeFormatter.ofPattern("MM-dd HH:mm");
-    private static final int MAX_CARD_BUTTONS = 5;
-    private static final String BOOK_PREFIX = "#B:";
+    private static final int MAX_SLOT_LINES = 5;
+    private static final String PREP_PREFIX = "#P:";
+    private static final String SYNC_PREFIX = "#S:";
+    /** 打开钉钉日程首页（平台未开放「创建日程弹窗」跳转协议） */
+    private static final String DING_CALENDAR_OPEN =
+            "dingtalk://dingtalkclient/page/link?url="
+                    + URLEncoder.encode("https://calendar.dingtalk.com/", StandardCharsets.UTF_8)
+                    + "&pc_slide=true";
 
     private final DingTalkAssistantService dingTalkAssistantService;
     private final DingTalkBusyService dingTalkBusyService;
@@ -70,6 +75,10 @@ public class DingTalkRobotAssistantService {
     });
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+
+    /** 最近一次「去建日程」意图，便于用户只回「已创建」也能同步 */
+    private final java.util.concurrent.ConcurrentHashMap<Long, BookCommand> lastPrepByUser =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public void handleBotMessage(ChatbotMessage message) {
         if (message == null) {
@@ -92,13 +101,29 @@ public class DingTalkRobotAssistantService {
         log.info("dingtalk robot inbound senderStaffId={} nick={} text={}",
                 senderStaffId, message.getSenderNick(), abbreviate(trimmed, 120));
 
-        if (isBookCommand(trimmed)) {
+        if (isPrepCommand(trimmed)) {
             worker.execute(() -> {
                 try {
-                    replyText(webhook, confirmBooking(senderStaffId, trimmed));
+                    SuggestReply reply = prepareManualBooking(senderStaffId, trimmed);
+                    if (reply.buttons().isEmpty()) {
+                        replyText(webhook, reply.markdown());
+                    } else {
+                        replyActionCard(webhook, "去钉钉建日程", reply.markdown(), reply.buttons());
+                    }
                 } catch (Exception ex) {
-                    log.warn("dingtalk robot book failed: {}", ex.getMessage(), ex);
-                    replyText(webhook, "创建日程失败：" + (ex.getMessage() == null ? "请稍后重试" : ex.getMessage()));
+                    log.warn("dingtalk robot prep failed: {}", ex.getMessage(), ex);
+                    replyText(webhook, "准备失败：" + (ex.getMessage() == null ? "请稍后重试" : ex.getMessage()));
+                }
+            });
+            return;
+        }
+        if (isSyncCommand(trimmed) || isSyncPhrase(trimmed)) {
+            worker.execute(() -> {
+                try {
+                    replyText(webhook, syncManualBooking(senderStaffId, trimmed));
+                } catch (Exception ex) {
+                    log.warn("dingtalk robot sync failed: {}", ex.getMessage(), ex);
+                    replyText(webhook, "同步失败：" + (ex.getMessage() == null ? "请稍后重试" : ex.getMessage()));
                 }
             });
             return;
@@ -111,7 +136,7 @@ public class DingTalkRobotAssistantService {
                 if (reply.buttons().isEmpty()) {
                     replyText(webhook, reply.markdown());
                 } else {
-                    replyActionCard(webhook, "可约时段", reply.markdown(), reply.buttons());
+                    replyActionCard(webhook, "下一步", reply.markdown(), reply.buttons());
                 }
             } catch (Exception ex) {
                 log.warn("dingtalk robot process failed: {}", ex.getMessage(), ex);
@@ -142,58 +167,102 @@ public class DingTalkRobotAssistantService {
         return buildSuggestReply(vo);
     }
 
-    String confirmBooking(String senderStaffId, String text) {
+    SuggestReply prepareManualBooking(String senderStaffId, String text) {
         SenderUser sender = findSender(senderStaffId);
         if (sender == null) {
-            return "你的钉钉账号未绑定本系统，无法创建日程。";
+            return SuggestReply.text("你的钉钉账号未绑定本系统，无法同步日程。");
         }
-        BookCommand cmd = parseBookCommand(text);
+        BookCommand cmd = parseBookCommand(text, PREP_CMD);
         if (cmd == null) {
-            return "预约指令无效，请重新查询后点击卡片按钮。";
+            return SuggestReply.text("预约指令无效，请重新查询后点击卡片按钮。");
         }
+        lastPrepByUser.put(sender.userId(), cmd);
+        String who = loadNickname(cmd.targetUserId());
+        String intent = switch (cmd.action()) {
+            case "interview" -> "面试邀约";
+            case "report" -> "工作汇报";
+            default -> "会议";
+        };
+        String titleHint = switch (cmd.action()) {
+            case "interview" -> "面试 · " + (StringUtils.hasText(cmd.jobName()) ? cmd.jobName() : "岗位待填") + " · " + who;
+            case "report" -> "工作汇报 · " + who;
+            default -> "会议 · " + who;
+        };
+        String body = "请在钉钉里手动新建日程（不会由机器人自动创建）：\n"
+                + "· 类型：" + intent + "\n"
+                + "· 建议主题：" + titleHint + "\n"
+                + "· 建议时间：" + cmd.start().format(CARD_TIME) + "（" + cmd.durationMin() + " 分钟）\n"
+                + "· 参与人：你 + " + who + "\n\n"
+                + "先点「打开钉钉日程」新建；建好后再点「已建好，同步系统」。";
+        String sync = encodeBookCommand(SYNC_PREFIX, cmd.action(), cmd.targetUserId(), cmd.start(),
+                cmd.durationMin(), cmd.jobName());
+        List<CardButton> buttons = List.of(
+                new CardButton("打开钉钉日程", DING_CALENDAR_OPEN),
+                new CardButton("已建好，同步系统", dtmdSendMessage(sync)));
+        return new SuggestReply(body, buttons);
+    }
+
+    String syncManualBooking(String senderStaffId, String text) {
+        SenderUser sender = findSender(senderStaffId);
+        if (sender == null) {
+            return "你的钉钉账号未绑定本系统，无法同步。";
+        }
+        BookCommand cmd = parseBookCommand(text, SYNC_CMD);
+        if (cmd == null) {
+            cmd = lastPrepByUser.get(sender.userId());
+        }
+        if (cmd == null) {
+            return "没有可同步的预约。请先查询可约时段，再点「发起面试邀约 / 邀请开会」。";
+        }
+        BookCommand finalCmd = cmd;
         return RobotSecurity.runAs(sender.userId(), sender.username(), () -> {
-            if ("report".equals(cmd.action())) {
-                DingTalkAssistantReportDTO dto = new DingTalkAssistantReportDTO();
-                dto.setTargetUserId(cmd.targetUserId());
-                dto.setStartTime(cmd.start());
-                dto.setDurationMin(cmd.durationMin());
-                dto.setTitle(StringUtils.hasText(cmd.jobName())
-                        ? "工作汇报 · " + cmd.jobName()
-                        : null);
-                DingTalkAssistantActionResultVO result = dingTalkAssistantService.createReport(dto);
-                return formatBookResult("工作汇报日程", result);
-            }
-            DingTalkAssistantMeetingDTO dto = new DingTalkAssistantMeetingDTO();
-            dto.setTargetUserId(cmd.targetUserId());
-            dto.setStartTime(cmd.start());
-            dto.setDurationMin(cmd.durationMin());
-            dto.setOnlineMeeting(true);
-            String targetName = loadNickname(cmd.targetUserId());
-            if ("interview".equals(cmd.action())) {
-                String job = StringUtils.hasText(cmd.jobName()) ? cmd.jobName() : "面试";
-                dto.setTitle("面试 · " + job + " · " + targetName);
-                dto.setDescription("由钉钉机器人预约（面试）。系统已写入助手日程记录。");
+            String who = loadNickname(finalCmd.targetUserId());
+            String kind = "report".equals(finalCmd.action()) ? "REPORT" : "MEETING";
+            String title;
+            String description;
+            if ("interview".equals(finalCmd.action())) {
+                String job = StringUtils.hasText(finalCmd.jobName()) ? finalCmd.jobName() : "面试";
+                title = "面试 · " + job + " · " + who;
+                description = "用户在钉钉手动建日程后，由机器人同步到系统（暂无候选人时不建 HR 邀约单）。";
+            } else if ("report".equals(finalCmd.action())) {
+                title = "工作汇报 · " + who;
+                description = "用户在钉钉手动建日程后，由机器人同步到系统。";
             } else {
-                dto.setTitle("会议 · " + targetName);
-                dto.setDescription("由钉钉机器人预约。");
+                title = "会议 · " + who;
+                description = "用户在钉钉手动建日程后，由机器人同步到系统。";
             }
-            DingTalkAssistantActionResultVO result = dingTalkAssistantService.createMeeting(dto);
-            // 面试场景：钉钉日程 + 助手日程记录（暂无候选人时不建 hr 邀约单）
-            String label = "interview".equals(cmd.action()) ? "面试日程" : "会议日程";
-            return formatBookResult(label, result);
+            Long recordId = insertAssistantRecord(kind, title, description, finalCmd.start(), finalCmd.durationMin(),
+                    sender.userId(), finalCmd.targetUserId(), sender.username());
+            lastPrepByUser.remove(sender.userId());
+            return "已同步到系统助手日程记录"
+                    + (recordId == null ? "。" : "（#" + recordId + "）。")
+                    + "\n钉钉侧请确认你已在日历里建好对应日程。";
         });
     }
 
-    private static String formatBookResult(String label, DingTalkAssistantActionResultVO result) {
-        if (result == null) {
-            return label + "处理完成。";
-        }
-        if (result.isSuccess()) {
-            return label + "已创建成功。"
-                    + (StringUtils.hasText(result.getMessage()) ? "\n" + result.getMessage() : "");
-        }
-        return label + "未完全成功："
-                + (StringUtils.hasText(result.getMessage()) ? result.getMessage() : "请稍后重试");
+    private Long insertAssistantRecord(String kind, String title, String description, LocalDateTime start,
+                                       int durationMin, Long querierId, Long targetId, String createBy) {
+        var keys = new org.springframework.jdbc.support.GeneratedKeyHolder();
+        jdbc.update(con -> {
+            var ps = con.prepareStatement("""
+                    INSERT INTO sys_dingtalk_assistant_event
+                    (kind, title, description, location, online_meeting, start_time, duration_min, end_time,
+                     querier_user_id, target_user_id, querier_event_id, target_event_id, task_id, status, create_by, is_active)
+                    VALUES (?, ?, ?, '', 1, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'SUCCESS', ?, 1)
+                    """, java.sql.Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, kind);
+            ps.setString(2, title);
+            ps.setString(3, description);
+            ps.setTimestamp(4, java.sql.Timestamp.valueOf(start));
+            ps.setInt(5, durationMin);
+            ps.setTimestamp(6, java.sql.Timestamp.valueOf(start.plusMinutes(durationMin)));
+            ps.setLong(7, querierId);
+            ps.setLong(8, targetId);
+            ps.setString(9, createBy == null ? "robot" : createBy);
+            return ps;
+        }, keys);
+        Number key = keys.getKey();
+        return key == null ? null : key.longValue();
     }
 
     private SuggestReply buildSuggestReply(DingTalkAssistantSuggestVO vo) {
@@ -214,14 +283,15 @@ public class DingTalkRobotAssistantService {
         };
         String jobBit = StringUtils.hasText(vo.getJobName()) ? "（「" + vo.getJobName().trim() + "」）" : "";
 
-        List<CardButton> buttons = new ArrayList<>();
+        List<LocalDateTime> starts = new ArrayList<>();
+        List<Integer> durations = new ArrayList<>();
         if (vo.getDayGroups() != null) {
             for (DingTalkAssistantSuggestVO.DayGroup day : vo.getDayGroups()) {
                 if (day.getSlots() == null) {
                     continue;
                 }
                 for (DingTalkAssistantSuggestVO.SlotOption slot : day.getSlots()) {
-                    if (buttons.size() >= MAX_CARD_BUTTONS || slot.getStart() == null) {
+                    if (starts.size() >= MAX_SLOT_LINES || slot.getStart() == null) {
                         break;
                     }
                     int slotDuration = duration;
@@ -231,40 +301,57 @@ public class DingTalkRobotAssistantService {
                             slotDuration = (int) mins;
                         }
                     }
-                    String title = buttonTitle(action, slot.getStart(), slotDuration);
-                    String cmd = encodeBookCommand(action, vo.getTargetUserId(), slot.getStart(), slotDuration, vo.getJobName());
-                    buttons.add(new CardButton(title, dtmdSendMessage(cmd)));
+                    starts.add(slot.getStart());
+                    durations.add(slotDuration);
                 }
-                if (buttons.size() >= MAX_CARD_BUTTONS) {
+                if (starts.size() >= MAX_SLOT_LINES) {
                     break;
                 }
             }
         }
 
-        // 机器人只回结论，不回规则配置 / 闲忙明细
-        if (buttons.isEmpty()) {
+        if (starts.isEmpty()) {
             return SuggestReply.text("「" + who + "」近期暂无可约的" + intentLabel + "时段" + jobBit
                     + "。可换一天、缩短时长后再问。");
         }
-        int freeDays = (int) vo.getDayGroups().stream()
-                .filter(d -> d.getSlots() != null && !d.getSlots().isEmpty())
-                .count();
-        int slotCount = vo.getDayGroups().stream()
-                .mapToInt(d -> d.getSlots() == null ? 0 : d.getSlots().size())
-                .sum();
-        String body = "「" + who + "」近期有空：共 " + freeDays + " 天、" + slotCount
-                + " 个可约" + intentLabel + "时段" + jobBit
-                + "（每段约 " + duration + " 分钟）。\n\n点击下方按钮即可在钉钉建日程，并自动同步到系统。";
-        return new SuggestReply(body, buttons);
-    }
 
-    private static String buttonTitle(String action, LocalDateTime start, int durationMin) {
-        String prefix = switch (action) {
-            case "interview" -> "约面试";
-            case "report" -> "约汇报";
-            default -> "约会议";
-        };
-        return prefix + " " + start.format(CARD_TIME) + "（" + durationMin + "分）";
+        StringBuilder body = new StringBuilder();
+        body.append("「").append(who).append("」近期有空：共 ").append(starts.size())
+                .append(" 个推荐").append(intentLabel).append("时段").append(jobBit).append("：\n");
+        for (int i = 0; i < starts.size(); i++) {
+            body.append(i + 1).append(". ").append(starts.get(i).format(CARD_TIME))
+                    .append("（").append(durations.get(i)).append(" 分）\n");
+        }
+        body.append("\n点下方动作后，请在钉钉自带日程里新建（机器人不会自动创建）；建好后再同步到系统。");
+
+        // 默认用第一个推荐时段；动作对齐工作台：面试邀约 / 会议 / 汇报
+        LocalDateTime firstStart = starts.getFirst();
+        int firstDuration = durations.getFirst();
+        List<CardButton> buttons = new ArrayList<>();
+        if ("interview".equals(action)) {
+            buttons.add(new CardButton("发起面试邀约",
+                    dtmdSendMessage(encodeBookCommand(PREP_PREFIX, "interview", vo.getTargetUserId(),
+                            firstStart, firstDuration, vo.getJobName()))));
+        } else if ("report".equals(action)) {
+            buttons.add(new CardButton("安排工作汇报",
+                    dtmdSendMessage(encodeBookCommand(PREP_PREFIX, "report", vo.getTargetUserId(),
+                            firstStart, firstDuration, vo.getJobName()))));
+        } else if ("meeting".equals(action)) {
+            buttons.add(new CardButton("邀请开会",
+                    dtmdSendMessage(encodeBookCommand(PREP_PREFIX, "meeting", vo.getTargetUserId(),
+                            firstStart, firstDuration, vo.getJobName()))));
+        } else {
+            buttons.add(new CardButton("发起面试邀约",
+                    dtmdSendMessage(encodeBookCommand(PREP_PREFIX, "interview", vo.getTargetUserId(),
+                            firstStart, firstDuration, vo.getJobName()))));
+            buttons.add(new CardButton("邀请开会",
+                    dtmdSendMessage(encodeBookCommand(PREP_PREFIX, "meeting", vo.getTargetUserId(),
+                            firstStart, firstDuration, vo.getJobName()))));
+            buttons.add(new CardButton("安排工作汇报",
+                    dtmdSendMessage(encodeBookCommand(PREP_PREFIX, "report", vo.getTargetUserId(),
+                            firstStart, firstDuration, vo.getJobName()))));
+        }
+        return new SuggestReply(body.toString().trim(), buttons);
     }
 
     private static String normalizeAction(String raw) {
@@ -278,11 +365,14 @@ public class DingTalkRobotAssistantService {
         if (a.contains("report") || "汇报".equals(a)) {
             return "report";
         }
+        if (a.contains("busy") || "闲忙".equals(a) || "有没有空".equals(a)) {
+            return "busy_query";
+        }
         return "meeting";
     }
 
-    private String encodeBookCommand(String action, Long targetUserId, LocalDateTime start, int durationMin,
-                                     String jobName) {
+    private String encodeBookCommand(String prefix, String action, Long targetUserId, LocalDateTime start,
+                                     int durationMin, String jobName) {
         try {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("a", action);
@@ -294,14 +384,14 @@ public class DingTalkRobotAssistantService {
             }
             String json = objectMapper.writeValueAsString(node);
             String b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(json.getBytes(StandardCharsets.UTF_8));
-            return BOOK_PREFIX + b64;
+            return prefix + b64;
         } catch (Exception ex) {
             throw new BusinessException("生成预约指令失败");
         }
     }
 
-    private BookCommand parseBookCommand(String text) {
-        Matcher m = BOOK_CMD.matcher(text.replace('\u00A0', ' '));
+    private BookCommand parseBookCommand(String text, Pattern pattern) {
+        Matcher m = pattern.matcher(text.replace('\u00A0', ' '));
         if (!m.find()) {
             return null;
         }
@@ -320,8 +410,21 @@ public class DingTalkRobotAssistantService {
         }
     }
 
-    private static boolean isBookCommand(String text) {
-        return text != null && BOOK_CMD.matcher(text).find();
+    private static boolean isPrepCommand(String text) {
+        return text != null && PREP_CMD.matcher(text).find();
+    }
+
+    private static boolean isSyncCommand(String text) {
+        return text != null && SYNC_CMD.matcher(text).find();
+    }
+
+    private static boolean isSyncPhrase(String text) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        String t = text.trim();
+        return "已创建".equals(t) || "已建好".equals(t) || "同步".equals(t) || "同步系统".equals(t)
+                || "已建好，同步系统".equals(t);
     }
 
     private static String dtmdSendMessage(String content) {
