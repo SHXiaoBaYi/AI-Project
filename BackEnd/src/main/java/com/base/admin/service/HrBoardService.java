@@ -56,10 +56,6 @@ public class HrBoardService {
             new FunnelStage("PENDING_FINAL", "候选人待终试", null)
     };
 
-    private static final Set<String> PENDING_FIRST_STAGES = Set.of("FIRST_PENDING");
-    private static final Set<String> PENDING_RETEST_STAGES = Set.of("R2_PENDING");
-    private static final Set<String> PENDING_FINAL_STAGES = Set.of("R3_PENDING", "R4_PENDING", "R5_PENDING");
-
 
     private static final String[] CYCLE_STAGE_NAMES = {
             "需求发起至简历到位", "初筛到一面", "一面到复试", "终面到发Offer", "Offer发出到入职"
@@ -103,7 +99,7 @@ public class HrBoardService {
         List<HrBoardVO.ProgressRow> progress = loadProgress(q);
         HrBoardVO vo = new HrBoardVO();
         vo.setFunnel(buildFunnel(rows, q));
-        vo.setPendingInterview(buildPendingInterview(rows, q));
+        vo.setPendingInterview(buildPendingInterview(q));
         String cycleJob = blankToNull(q.getCycleJob());
         vo.setCycleJob(cycleJob);
         vo.setJobCycle(buildJobCycle(rows, q, cycleJob));
@@ -165,18 +161,58 @@ public class HrBoardService {
     }
 
     private List<HrBoardVO.DrillRow> pendingInterviewDrill(HrBoardQueryDTO q, int pendingIndex) {
-        LocalDateTime now = LocalDateTime.now();
-        List<HrBoardVO.DrillRow> rows = new ArrayList<>();
-        for (Milestone milestone : loadMilestones(q)) {
-            if (!pendingInterviewHit(milestone, pendingIndex, q.getStartDate(), q.getEndDate(), now)) {
-                continue;
-            }
-            rows.add(toDrill(milestone, PENDING_INTERVIEW[pendingIndex].name(),
-                    pendingInterviewReachedDate(milestone, pendingIndex)));
-        }
-        rows.sort(Comparator.comparing(HrBoardVO.DrillRow::getReachedAt, Comparator.nullsLast(Comparator.reverseOrder()))
-                .thenComparing(HrBoardVO.DrillRow::getApplicationId, Comparator.nullsLast(Comparator.reverseOrder())));
-        return rows;
+        StringBuilder sql = new StringBuilder("""
+                SELECT a.id application_id,
+                       c.display_name candidate_name,
+                       COALESCE(NULLIF(TRIM(r.job_name), ''), '未关联岗位') job_name,
+                       COALESCE(ch.channel_name, a.channel_code, '') channel_name,
+                       a.submitted_at,
+                       COALESCE(sd.stage_name, a.current_stage) stage_name,
+                       r.priority,
+                       (SELECT GROUP_CONCAT(DISTINCT u.nickname SEPARATOR '、')
+                          FROM hr_requisition_owner ro
+                          LEFT JOIN sys_user u ON u.user_id = ro.user_id
+                          WHERE ro.requisition_id = r.id AND ro.is_active = 1) owner_name,
+                       MIN(COALESCE(rec.interviewed_at, inv.interview_at)) interview_at
+                FROM hr_interview_record rec
+                JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
+                JOIN hr_candidate c ON c.id = a.candidate_id AND c.is_active = 1
+                LEFT JOIN hr_interview_invite inv ON inv.id = rec.invite_id AND inv.is_active = 1
+                LEFT JOIN hr_requisition r ON r.id = COALESCE(rec.requisition_id, a.requisition_id) AND r.is_active = 1
+                LEFT JOIN hr_channel ch ON ch.channel_code = a.channel_code
+                LEFT JOIN hr_stage_def sd ON sd.stage_code = a.current_stage
+                WHERE rec.is_active = 1
+                  AND (rec.conclusion IS NULL OR rec.conclusion = '' OR UPPER(rec.conclusion) = 'PENDING')
+                """);
+        List<Object> args = new ArrayList<>();
+        appendPendingRoundFilter(sql, args, pendingIndex);
+        appendPendingInterviewTimeFilter(sql, args, q);
+        appendShared(sql, args, q, "a", "r");
+        // 与「面试记录」列表一致：待面试指标不套招聘数据权限，否则列表可见、看板为 0
+        sql.append("""
+                GROUP BY a.id, c.display_name, r.job_name, ch.channel_name, a.channel_code, a.submitted_at,
+                         a.current_stage, sd.stage_name, r.priority, r.id
+                ORDER BY interview_at DESC, a.id DESC
+                """);
+        String stageName = PENDING_INTERVIEW[pendingIndex].name();
+        return jdbc.query(sql.toString(), (rs, rowNum) -> {
+            HrBoardVO.DrillRow row = new HrBoardVO.DrillRow();
+            row.setApplicationId(rs.getLong("application_id"));
+            row.setCandidateName(rs.getString("candidate_name"));
+            row.setJobName(rs.getString("job_name"));
+            row.setChannel(rs.getString("channel_name"));
+            row.setStageName(rs.getString("stage_name"));
+            row.setSubmittedAt(dateOf(rs, "submitted_at"));
+            row.setOwnerName(rs.getString("owner_name"));
+            int priorityValue = rs.getInt("priority");
+            Integer priority = rs.wasNull() ? null : priorityValue;
+            row.setPriorityLabel(priorityLabel(priority));
+            row.setFunnelStage(stageName);
+            LocalDateTime at = timeOf(rs, "interview_at");
+            row.setInterviewAt(at);
+            row.setReachedAt(at == null ? null : at.toLocalDate());
+            return row;
+        }, args.toArray());
     }
 
     private List<HrBoardVO.ProgressRow> hcDrill(HrBoardQueryDTO q) {
@@ -1139,12 +1175,12 @@ public class HrBoardService {
         return nodes;
     }
 
-    private List<HrBoardVO.FunnelNode> buildPendingInterview(List<Milestone> rows, HrBoardQueryDTO q) {
+    private List<HrBoardVO.FunnelNode> buildPendingInterview(HrBoardQueryDTO q) {
         Period previous = shift(q.getStartDate(), q.getEndDate(), false);
         Period year = shift(q.getStartDate(), q.getEndDate(), true);
-        long[] current = countPendingInterview(rows, q.getStartDate(), q.getEndDate());
-        long[] mom = countPendingInterview(rows, previous.start(), previous.end());
-        long[] yoy = countPendingInterview(rows, year.start(), year.end());
+        long[] current = countPendingInterview(q, q.getStartDate(), q.getEndDate());
+        long[] mom = countPendingInterview(q, previous.start(), previous.end());
+        long[] yoy = countPendingInterview(q, year.start(), year.end());
         List<HrBoardVO.FunnelNode> nodes = new ArrayList<>();
         for (int i = 0; i < PENDING_INTERVIEW.length; i++) {
             HrBoardVO.FunnelNode node = new HrBoardVO.FunnelNode();
@@ -1158,24 +1194,85 @@ public class HrBoardService {
         return nodes;
     }
 
+    /**
+     * 待面试：与「面试记录」同口径——结论为待定(PENDING)或未填，
+     * 面试时间（记录 interviewed_at，空则回退邀约 interview_at）落在筛选范围内；按候选人去重。
+     * 初试=round1，复试=round2，终试=round≥3。
+     */
+    private long[] countPendingInterview(HrBoardQueryDTO base, LocalDate start, LocalDate end) {
+        HrBoardQueryDTO q = copyQueryDates(base, start, end);
+        long[] counts = new long[PENDING_INTERVIEW.length];
+        for (int i = 0; i < PENDING_INTERVIEW.length; i++) {
+            counts[i] = countPendingInterviewRound(q, i);
+        }
+        return counts;
+    }
+
+    private long countPendingInterviewRound(HrBoardQueryDTO q, int pendingIndex) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT COUNT(DISTINCT rec.application_id)
+                FROM hr_interview_record rec
+                JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
+                LEFT JOIN hr_interview_invite inv ON inv.id = rec.invite_id AND inv.is_active = 1
+                LEFT JOIN hr_requisition r ON r.id = COALESCE(rec.requisition_id, a.requisition_id) AND r.is_active = 1
+                WHERE rec.is_active = 1
+                  AND (rec.conclusion IS NULL OR rec.conclusion = '' OR UPPER(rec.conclusion) = 'PENDING')
+                """);
+        List<Object> args = new ArrayList<>();
+        appendPendingRoundFilter(sql, args, pendingIndex);
+        appendPendingInterviewTimeFilter(sql, args, q);
+        appendShared(sql, args, q, "a", "r");
+        Long n = jdbc.query(sql.toString(), rs -> rs.next() ? rs.getLong(1) : 0L, args.toArray());
+        return n == null ? 0L : n;
+    }
+
+    /** 面试时间：优先记录 interviewed_at，否则用关联邀约 interview_at */
+    private static void appendPendingInterviewTimeFilter(StringBuilder sql, List<Object> args, HrBoardQueryDTO q) {
+        sql.append(" AND COALESCE(rec.interviewed_at, inv.interview_at) IS NOT NULL ");
+        if (q.getStartDate() != null) {
+            sql.append(" AND COALESCE(rec.interviewed_at, inv.interview_at) >= ? ");
+            args.add(q.getStartDate().atStartOfDay());
+        }
+        if (q.getEndDate() != null) {
+            sql.append(" AND COALESCE(rec.interviewed_at, inv.interview_at) < ? ");
+            args.add(q.getEndDate().plusDays(1).atStartOfDay());
+        }
+    }
+
+    private static void appendPendingRoundFilter(StringBuilder sql, List<Object> args, int pendingIndex) {
+        switch (pendingIndex) {
+            case 0 -> sql.append(" AND rec.round_no = 1 ");
+            case 1 -> sql.append(" AND rec.round_no = 2 ");
+            case 2 -> sql.append(" AND rec.round_no >= 3 ");
+            default -> sql.append(" AND 1 = 0 ");
+        }
+    }
+
+    private static HrBoardQueryDTO copyQueryDates(HrBoardQueryDTO base, LocalDate start, LocalDate end) {
+        HrBoardQueryDTO q = new HrBoardQueryDTO();
+        if (base != null) {
+            q.setLocationCode(base.getLocationCode());
+            q.setStatus(base.getStatus());
+            q.setPriority(base.getPriority());
+            q.setRequisitionId(base.getRequisitionId());
+            q.setChannelCode(base.getChannelCode());
+            q.setOwnerUserId(base.getOwnerUserId());
+            q.setDeptId(base.getDeptId());
+            q.setJobName(base.getJobName());
+            q.setJobCategory(base.getJobCategory());
+            q.setTargetText(base.getTargetText());
+            q.setGrain(base.getGrain());
+        }
+        q.setStartDate(start);
+        q.setEndDate(end);
+        return q;
+    }
+
     private static long[] countFunnel(List<Milestone> rows, LocalDate start, LocalDate end) {
         long[] counts = new long[FUNNEL.length];
         for (Milestone milestone : rows) {
             for (int i = 0; i < FUNNEL.length; i++) {
                 if (funnelHit(milestone, i, start, end)) {
-                    counts[i]++;
-                }
-            }
-        }
-        return counts;
-    }
-
-    private static long[] countPendingInterview(List<Milestone> rows, LocalDate start, LocalDate end) {
-        long[] counts = new long[PENDING_INTERVIEW.length];
-        LocalDateTime now = LocalDateTime.now();
-        for (Milestone milestone : rows) {
-            for (int i = 0; i < PENDING_INTERVIEW.length; i++) {
-                if (pendingInterviewHit(milestone, i, start, end, now)) {
                     counts[i]++;
                 }
             }
@@ -1214,70 +1311,6 @@ public class HrBoardService {
         };
     }
 
-    /** 待面试存量：尚未发生的待面试，关联邀约/预约日落在筛选范围内。 */
-    private static boolean pendingInterviewHit(Milestone m, int index, LocalDate start, LocalDate end,
-                                              LocalDateTime now) {
-        return switch (index) {
-            case 0 -> isPendingFirst(m, now) && pendingAnchored(m.inviteAt, m.firstAt, m.submittedAt, start, end);
-            case 1 -> isPendingRetest(m, now) && pendingAnchored(m.secondAt, m.firstDoneAt, m.submittedAt, start, end);
-            case 2 -> isPendingFinal(m, now)
-                    && pendingAnchored(m.finalScheduledAt, m.secondDoneAt, m.submittedAt, start, end);
-            default -> false;
-        };
-    }
-
-    private static boolean pendingAnchored(LocalDateTime primary, LocalDateTime secondary, LocalDate fallback,
-                                          LocalDate start, LocalDate end) {
-        if (inWindow(toDate(primary), start, end) || inWindow(toDate(secondary), start, end)) {
-            return true;
-        }
-        // 无邀约/预约时间时，退回简历录入日，避免待面试阶段恒为空
-        return inWindow(fallback, start, end);
-    }
-
-    private static boolean isPendingFirst(Milestone m, LocalDateTime now) {
-        if (PENDING_FIRST_STAGES.contains(nullToEmpty(m.currentStage))) {
-            return true;
-        }
-        if (m.inviteAt == null) {
-            return false;
-        }
-        if (m.firstDoneAt != null || m.showAt != null) {
-            return false;
-        }
-        return m.firstAt == null || !m.firstAt.isBefore(now);
-    }
-
-    private static boolean isPendingRetest(Milestone m, LocalDateTime now) {
-        if (PENDING_RETEST_STAGES.contains(nullToEmpty(m.currentStage))) {
-            return true;
-        }
-        if (m.secondAt == null) {
-            return false;
-        }
-        if (m.secondDoneAt != null) {
-            return false;
-        }
-        return !m.secondAt.isBefore(now);
-    }
-
-    private static boolean isPendingFinal(Milestone m, LocalDateTime now) {
-        if (PENDING_FINAL_STAGES.contains(nullToEmpty(m.currentStage))) {
-            return true;
-        }
-        if (m.finalScheduledAt == null) {
-            return false;
-        }
-        if (m.finalDoneAt != null || m.finalEventAt != null) {
-            return false;
-        }
-        return !m.finalScheduledAt.isBefore(now);
-    }
-
-    private static String nullToEmpty(String value) {
-        return value == null ? "" : value;
-    }
-
     private static LocalDate funnelReachedDate(Milestone milestone, int index) {
         return switch (index) {
             case 0 -> milestone.submittedAt;
@@ -1294,16 +1327,6 @@ public class HrBoardService {
             case 11 -> toDate(milestone.offerAt);
             case 12 -> firstNonNullDate(toDate(milestone.acceptAt), toDate(milestone.offerAt));
             case 13 -> milestone.onboardDate;
-            default -> milestone.submittedAt;
-        };
-    }
-
-    private static LocalDate pendingInterviewReachedDate(Milestone milestone, int index) {
-        return switch (index) {
-            case 0 -> firstNonNullDate(toDate(milestone.firstAt), toDate(milestone.inviteAt), milestone.submittedAt);
-            case 1 -> firstNonNullDate(toDate(milestone.secondAt), toDate(milestone.firstDoneAt), milestone.submittedAt);
-            case 2 -> firstNonNullDate(toDate(milestone.finalScheduledAt), toDate(milestone.secondDoneAt),
-                    milestone.submittedAt);
             default -> milestone.submittedAt;
         };
     }

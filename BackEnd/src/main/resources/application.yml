@@ -98,6 +98,9 @@ dingtalk:
   enabled: ${DINGTALK_ENABLED:false}
   client-id: ${DINGTALK_CLIENT_ID:}
   client-secret: ${DINGTALK_CLIENT_SECRET:}
+  robot:
+    # 机器人 Stream 入站（单聊 → 日程助手）。后端需常驻出网；本地调试可设 false
+    stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:true}
 
 # 演示数据已清空。保持 false，避免启动时再把测试数据刷回去。
 demo:

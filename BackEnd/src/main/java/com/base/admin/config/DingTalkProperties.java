@@ -15,4 +15,13 @@ public class DingTalkProperties {
     private String clientId = "";
 
     private String clientSecret = "";
+
+    /** 机器人 Stream 入站（单聊日程助手） */
+    private Robot robot = new Robot();
+
+    @Data
+    public static class Robot {
+        /** 是否启动 Stream 长连接；本地可关，生产常驻服务建议开 */
+        private boolean streamEnabled = true;
+    }
 }

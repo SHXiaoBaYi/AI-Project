@@ -620,7 +620,7 @@ export default function BoardAnalyticsPanel() {
       <ChartExportCard
         title='待面试'
         filename='待面试'
-        hint='当前筛选时间范围内尚未发生的待面试存量（待初试 / 待复试 / 待终试）。点击柱子或表格行可下钻明细。'
+        hint='与「面试记录」同口径：结论为待定或未填，面试时间落在上方日期内（按候选人去重）。初试=第1轮，复试=第2轮，终试=第3轮及以上。'
       >
         <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
           {pendingInterviewChart.some((item) => item.count > 0) ? (
