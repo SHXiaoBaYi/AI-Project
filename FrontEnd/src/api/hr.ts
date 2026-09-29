@@ -94,6 +94,7 @@ export interface HrInterviewStats {
 
 export interface HrBoard {
   funnel: HrFunnelNode[];
+  pendingInterview?: HrFunnelNode[];
   cycleJob?: string | null;
   jobCycle: HrChartPoint[];
   stageCycle: HrChartPoint[];

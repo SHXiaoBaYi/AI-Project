@@ -121,8 +121,9 @@ public class HrBoardController {
     @RequiresPermission("hr:board:view")
     public Result<List<Map<String, String>>> metrics() {
         return Result.ok(List.of(
-                Map.of("name", "招聘漏斗", "formula", "按投递日期落入所选时间的候选人，统计已到达的环节。后一环节包含已进入更后环节的人"),
-                Map.of("name", "环节转化率", "formula", "本环节人数 ÷ 上一环节人数。到面率 = 到面人数 ÷ 邀约成功人数"),
+                Map.of("name", "招聘漏斗", "formula", "按所选日期范围内各环节触发人数统计（初筛/邀约/面试/Offer/入职等过程节点），不含待面试存量"),
+                Map.of("name", "待面试", "formula", "当前筛选范围内尚未发生的待初试、待复试、待终试存量，单独展示，不进漏斗转化"),
+                Map.of("name", "环节转化率", "formula", "本环节人数 ÷ 上一环节人数"),
                 Map.of("name", "招聘完成率", "formula", "已到岗人数 ÷ 总需求HC（招聘中+已完成+停止招聘）。冻结HC单独统计"),
                 Map.of("name", "岗位进度状态", "formula", "待启动/简历收集中/面试中/offer中/已完成/暂停冻结，按需求关联候选人进展推导"),
                 Map.of("name", "面试通过率", "formula", "该轮结论为通过的评价数 ÷（通过+未通过）。爽约=已邀约且面试时间已过但仍未到面"),

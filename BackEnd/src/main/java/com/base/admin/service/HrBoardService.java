@@ -35,11 +35,8 @@ public class HrBoardService {
     private static final FunnelStage[] FUNNEL = {
             new FunnelStage("SCREEN", "HR初筛通过", null),
             new FunnelStage("INVITE", "邀约成功", "邀约成功率"),
-            new FunnelStage("PENDING_FIRST", "候选人待初试", "待初试占比"),
             new FunnelStage("FIRST", "候选人初试", "初试率"),
-            new FunnelStage("PENDING_RETEST", "候选人待复试", "待复试占比"),
             new FunnelStage("RETEST", "候选人复试", "复试率"),
-            new FunnelStage("PENDING_FINAL", "候选人待终试", "待终试占比"),
             new FunnelStage("FINAL_INT", "候选人终试", "终试率"),
             new FunnelStage("FINAL_PASS", "终试通过", "终试通过率"),
             new FunnelStage("SALARY", "薪资沟通中", "薪资沟通进入率"),
@@ -50,6 +47,13 @@ public class HrBoardService {
             new FunnelStage("OFFER", "发放Offer", "Offer发放率"),
             new FunnelStage("ACCEPT", "Offer接受", "Offer接受率"),
             new FunnelStage("ONBOARD", "候选人入职", "入职率")
+    };
+
+    /** 待面试存量，不进漏斗转化链，单独出图 */
+    private static final FunnelStage[] PENDING_INTERVIEW = {
+            new FunnelStage("PENDING_FIRST", "候选人待初试", null),
+            new FunnelStage("PENDING_RETEST", "候选人待复试", null),
+            new FunnelStage("PENDING_FINAL", "候选人待终试", null)
     };
 
     private static final Set<String> PENDING_FIRST_STAGES = Set.of("FIRST_PENDING");
@@ -99,6 +103,7 @@ public class HrBoardService {
         List<HrBoardVO.ProgressRow> progress = loadProgress(q);
         HrBoardVO vo = new HrBoardVO();
         vo.setFunnel(buildFunnel(rows, q));
+        vo.setPendingInterview(buildPendingInterview(rows, q));
         String cycleJob = blankToNull(q.getCycleJob());
         vo.setCycleJob(cycleJob);
         vo.setJobCycle(buildJobCycle(rows, q, cycleJob));
@@ -139,17 +144,35 @@ public class HrBoardService {
     }
 
     private List<HrBoardVO.DrillRow> funnelDrill(HrBoardQueryDTO q) {
+        int pendingIndex = pendingInterviewIndex(q.getStageCode());
+        if (pendingIndex >= 0) {
+            return pendingInterviewDrill(q, pendingIndex);
+        }
         int index = funnelIndex(q.getStageCode());
         if (index < 0) {
             return List.of();
         }
-        LocalDateTime now = LocalDateTime.now();
         List<HrBoardVO.DrillRow> rows = new ArrayList<>();
         for (Milestone milestone : loadMilestones(q)) {
-            if (!funnelHit(milestone, index, q.getStartDate(), q.getEndDate(), now)) {
+            if (!funnelHit(milestone, index, q.getStartDate(), q.getEndDate())) {
                 continue;
             }
             rows.add(toDrill(milestone, FUNNEL[index].name(), funnelReachedDate(milestone, index)));
+        }
+        rows.sort(Comparator.comparing(HrBoardVO.DrillRow::getReachedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(HrBoardVO.DrillRow::getApplicationId, Comparator.nullsLast(Comparator.reverseOrder())));
+        return rows;
+    }
+
+    private List<HrBoardVO.DrillRow> pendingInterviewDrill(HrBoardQueryDTO q, int pendingIndex) {
+        LocalDateTime now = LocalDateTime.now();
+        List<HrBoardVO.DrillRow> rows = new ArrayList<>();
+        for (Milestone milestone : loadMilestones(q)) {
+            if (!pendingInterviewHit(milestone, pendingIndex, q.getStartDate(), q.getEndDate(), now)) {
+                continue;
+            }
+            rows.add(toDrill(milestone, PENDING_INTERVIEW[pendingIndex].name(),
+                    pendingInterviewReachedDate(milestone, pendingIndex)));
         }
         rows.sort(Comparator.comparing(HrBoardVO.DrillRow::getReachedAt, Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparing(HrBoardVO.DrillRow::getApplicationId, Comparator.nullsLast(Comparator.reverseOrder())));
@@ -1116,12 +1139,43 @@ public class HrBoardService {
         return nodes;
     }
 
+    private List<HrBoardVO.FunnelNode> buildPendingInterview(List<Milestone> rows, HrBoardQueryDTO q) {
+        Period previous = shift(q.getStartDate(), q.getEndDate(), false);
+        Period year = shift(q.getStartDate(), q.getEndDate(), true);
+        long[] current = countPendingInterview(rows, q.getStartDate(), q.getEndDate());
+        long[] mom = countPendingInterview(rows, previous.start(), previous.end());
+        long[] yoy = countPendingInterview(rows, year.start(), year.end());
+        List<HrBoardVO.FunnelNode> nodes = new ArrayList<>();
+        for (int i = 0; i < PENDING_INTERVIEW.length; i++) {
+            HrBoardVO.FunnelNode node = new HrBoardVO.FunnelNode();
+            node.setStageCode(PENDING_INTERVIEW[i].code());
+            node.setStageName(PENDING_INTERVIEW[i].name());
+            node.setCount(current[i]);
+            node.setMom(rateDelta(current[i], mom[i]));
+            node.setYoy(rateDelta(current[i], yoy[i]));
+            nodes.add(node);
+        }
+        return nodes;
+    }
+
     private static long[] countFunnel(List<Milestone> rows, LocalDate start, LocalDate end) {
         long[] counts = new long[FUNNEL.length];
-        LocalDateTime now = LocalDateTime.now();
         for (Milestone milestone : rows) {
             for (int i = 0; i < FUNNEL.length; i++) {
-                if (funnelHit(milestone, i, start, end, now)) {
+                if (funnelHit(milestone, i, start, end)) {
+                    counts[i]++;
+                }
+            }
+        }
+        return counts;
+    }
+
+    private static long[] countPendingInterview(List<Milestone> rows, LocalDate start, LocalDate end) {
+        long[] counts = new long[PENDING_INTERVIEW.length];
+        LocalDateTime now = LocalDateTime.now();
+        for (Milestone milestone : rows) {
+            for (int i = 0; i < PENDING_INTERVIEW.length; i++) {
+                if (pendingInterviewHit(milestone, i, start, end, now)) {
                     counts[i]++;
                 }
             }
@@ -1130,36 +1184,44 @@ public class HrBoardService {
     }
 
     /**
-     * 漏斗按「日期范围内该阶段触发/存量」独立计数（非简历提交日队列 + 累计到达）。
+     * 漏斗按「日期范围内该阶段触发」独立计数（非简历提交日队列 + 累计到达）。
      * <ul>
      *   <li>HR初筛通过：简历录入日（submitted_at）落在范围内</li>
      *   <li>邀约成功：邀约发起日落在范围内</li>
-     *   <li>待初试/待复试/待终试：尚未发生的待面试存量，关联邀约/预约日落在范围内</li>
      *   <li>初试/复试/终试：对应轮次实际面试日落在范围内</li>
      *   <li>终试通过及之后各阶段：首次进入该阶段的事件日落在范围内</li>
      * </ul>
      */
-    private static boolean funnelHit(Milestone m, int index, LocalDate start, LocalDate end, LocalDateTime now) {
+    private static boolean funnelHit(Milestone m, int index, LocalDate start, LocalDate end) {
         String stage = m.currentStage == null ? "" : m.currentStage;
         return switch (index) {
             case 0 -> inWindow(m.submittedAt, start, end);
             case 1 -> inWindow(toDate(m.inviteAt), start, end);
-            case 2 -> isPendingFirst(m, now) && pendingAnchored(m.inviteAt, m.firstAt, m.submittedAt, start, end);
-            case 3 -> inWindow(toDate(firstNonNull(m.firstDoneAt, m.showAt)), start, end);
-            case 4 -> isPendingRetest(m, now) && pendingAnchored(m.secondAt, m.firstDoneAt, m.submittedAt, start, end);
-            case 5 -> inWindow(toDate(m.secondDoneAt), start, end);
-            case 6 -> isPendingFinal(m, now) && pendingAnchored(m.finalScheduledAt, m.secondDoneAt, m.submittedAt, start, end);
-            case 7 -> inWindow(toDate(m.finalDoneAt), start, end);
-            case 8 -> inWindow(toDate(m.finalEventAt), start, end);
-            case 9 -> inWindow(toDate(m.salaryAt), start, end);
-            case 10 -> inWindow(toDate(m.bgCollectAt), start, end);
-            case 11 -> inWindow(toDate(m.bgCheckAt), start, end);
-            case 12 -> inWindow(toDate(m.medicalAt), start, end);
-            case 13 -> inWindow(toDate(m.offerPendingAt), start, end);
-            case 14 -> inWindow(toDate(m.offerAt), start, end);
-            case 15 -> inWindow(toDate(m.acceptAt), start, end)
+            case 2 -> inWindow(toDate(firstNonNull(m.firstDoneAt, m.showAt)), start, end);
+            case 3 -> inWindow(toDate(m.secondDoneAt), start, end);
+            case 4 -> inWindow(toDate(m.finalDoneAt), start, end);
+            case 5 -> inWindow(toDate(m.finalEventAt), start, end);
+            case 6 -> inWindow(toDate(m.salaryAt), start, end);
+            case 7 -> inWindow(toDate(m.bgCollectAt), start, end);
+            case 8 -> inWindow(toDate(m.bgCheckAt), start, end);
+            case 9 -> inWindow(toDate(m.medicalAt), start, end);
+            case 10 -> inWindow(toDate(m.offerPendingAt), start, end);
+            case 11 -> inWindow(toDate(m.offerAt), start, end);
+            case 12 -> inWindow(toDate(m.acceptAt), start, end)
                     || ("OFFER_ACCEPTED".equals(stage) && inWindow(toDate(m.offerAt), start, end));
-            case 16 -> inWindow(m.onboardDate, start, end);
+            case 13 -> inWindow(m.onboardDate, start, end);
+            default -> false;
+        };
+    }
+
+    /** 待面试存量：尚未发生的待面试，关联邀约/预约日落在筛选范围内。 */
+    private static boolean pendingInterviewHit(Milestone m, int index, LocalDate start, LocalDate end,
+                                              LocalDateTime now) {
+        return switch (index) {
+            case 0 -> isPendingFirst(m, now) && pendingAnchored(m.inviteAt, m.firstAt, m.submittedAt, start, end);
+            case 1 -> isPendingRetest(m, now) && pendingAnchored(m.secondAt, m.firstDoneAt, m.submittedAt, start, end);
+            case 2 -> isPendingFinal(m, now)
+                    && pendingAnchored(m.finalScheduledAt, m.secondDoneAt, m.submittedAt, start, end);
             default -> false;
         };
     }
@@ -1220,21 +1282,28 @@ public class HrBoardService {
         return switch (index) {
             case 0 -> milestone.submittedAt;
             case 1 -> toDate(milestone.inviteAt);
-            case 2 -> firstNonNullDate(toDate(milestone.firstAt), toDate(milestone.inviteAt), milestone.submittedAt);
-            case 3 -> toDate(firstNonNull(milestone.firstDoneAt, milestone.showAt));
-            case 4 -> firstNonNullDate(toDate(milestone.secondAt), toDate(milestone.firstDoneAt), milestone.submittedAt);
-            case 5 -> toDate(milestone.secondDoneAt);
-            case 6 -> firstNonNullDate(toDate(milestone.finalScheduledAt), toDate(milestone.secondDoneAt), milestone.submittedAt);
-            case 7 -> toDate(milestone.finalDoneAt);
-            case 8 -> toDate(milestone.finalEventAt);
-            case 9 -> toDate(milestone.salaryAt);
-            case 10 -> toDate(milestone.bgCollectAt);
-            case 11 -> toDate(milestone.bgCheckAt);
-            case 12 -> toDate(milestone.medicalAt);
-            case 13 -> toDate(milestone.offerPendingAt);
-            case 14 -> toDate(milestone.offerAt);
-            case 15 -> firstNonNullDate(toDate(milestone.acceptAt), toDate(milestone.offerAt));
-            case 16 -> milestone.onboardDate;
+            case 2 -> toDate(firstNonNull(milestone.firstDoneAt, milestone.showAt));
+            case 3 -> toDate(milestone.secondDoneAt);
+            case 4 -> toDate(milestone.finalDoneAt);
+            case 5 -> toDate(milestone.finalEventAt);
+            case 6 -> toDate(milestone.salaryAt);
+            case 7 -> toDate(milestone.bgCollectAt);
+            case 8 -> toDate(milestone.bgCheckAt);
+            case 9 -> toDate(milestone.medicalAt);
+            case 10 -> toDate(milestone.offerPendingAt);
+            case 11 -> toDate(milestone.offerAt);
+            case 12 -> firstNonNullDate(toDate(milestone.acceptAt), toDate(milestone.offerAt));
+            case 13 -> milestone.onboardDate;
+            default -> milestone.submittedAt;
+        };
+    }
+
+    private static LocalDate pendingInterviewReachedDate(Milestone milestone, int index) {
+        return switch (index) {
+            case 0 -> firstNonNullDate(toDate(milestone.firstAt), toDate(milestone.inviteAt), milestone.submittedAt);
+            case 1 -> firstNonNullDate(toDate(milestone.secondAt), toDate(milestone.firstDoneAt), milestone.submittedAt);
+            case 2 -> firstNonNullDate(toDate(milestone.finalScheduledAt), toDate(milestone.secondDoneAt),
+                    milestone.submittedAt);
             default -> milestone.submittedAt;
         };
     }
@@ -1473,6 +1542,18 @@ public class HrBoardService {
         }
         for (int i = 0; i < FUNNEL.length; i++) {
             if (FUNNEL[i].code().equals(code)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int pendingInterviewIndex(String code) {
+        if (code == null) {
+            return -1;
+        }
+        for (int i = 0; i < PENDING_INTERVIEW.length; i++) {
+            if (PENDING_INTERVIEW[i].code().equals(code)) {
                 return i;
             }
         }

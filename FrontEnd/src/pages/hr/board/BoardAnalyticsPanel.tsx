@@ -36,6 +36,17 @@ const PRIORITY = [
 
 type DrillMode = 'funnel' | 'hc' | 'interview' | 'interviewer' | 'failReason' | 'volume';
 
+const PENDING_FUNNEL_CODES = new Set(['PENDING_FIRST', 'PENDING_RETEST', 'PENDING_FINAL']);
+
+function isPendingInterviewNode(node: HrFunnelNode) {
+  return (
+    PENDING_FUNNEL_CODES.has(node.stageCode) ||
+    !!node.stageName?.includes('待初试') ||
+    !!node.stageName?.includes('待复试') ||
+    !!node.stageName?.includes('待终试')
+  );
+}
+
 function pct(value?: number | null) {
   if (value == null || Number.isNaN(value)) return '—';
   return `${(value * 100).toFixed(1)}%`;
@@ -388,12 +399,31 @@ export default function BoardAnalyticsPanel() {
           ? { picker: 'year' as const }
           : { picker: 'date' as const };
 
+  const funnelNodes = useMemo(() => (board?.funnel || []).filter((node) => !isPendingInterviewNode(node)), [board]);
+
   const funnelChart = useMemo(
     () =>
-      (board?.funnel || [])
+      funnelNodes
         .filter((node) => node.count > 0)
         .map((node) => ({ stage: node.stageName, count: node.count, stageCode: node.stageCode })),
-    [board],
+    [funnelNodes],
+  );
+
+  const pendingInterviewNodes = useMemo(() => {
+    const fromApi = board?.pendingInterview || [];
+    if (fromApi.length) return fromApi;
+    // 兼容未重启的旧后端：仍从 funnel 里抽出待面试三档
+    return (board?.funnel || []).filter((node) => isPendingInterviewNode(node));
+  }, [board]);
+
+  const pendingInterviewChart = useMemo(
+    () =>
+      pendingInterviewNodes.map((node) => ({
+        stage: node.stageName,
+        count: node.count,
+        stageCode: node.stageCode,
+      })),
+    [pendingInterviewNodes],
   );
 
   const openDrill = async (mode: DrillMode, title: string, extra: HrBoardQuery) => {
@@ -518,7 +548,7 @@ export default function BoardAnalyticsPanel() {
       <ChartExportCard
         title='招聘漏斗'
         filename='招聘漏斗'
-        hint='按所选日期范围内各环节触发汇总（非简历队列累计）。待初试/待复试/待终试为尚未发生的待面试存量；点击某一层可下钻明细。转化率 = 本层人数 ÷ 上一层人数。'
+        hint='按所选日期范围内各环节触发汇总（非简历队列累计）。点击某一层可下钻明细。转化率 = 本层人数 ÷ 上一层人数。'
       >
         <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
           {funnelChart.length ? (
@@ -540,7 +570,7 @@ export default function BoardAnalyticsPanel() {
                 }) => {
                   plot.chart?.on('element:click', (evt) => {
                     const stage = evt?.data?.data?.stage;
-                    const node = (board?.funnel || []).find((item) => item.stageName === stage);
+                    const node = funnelNodes.find((item) => item.stageName === stage);
                     if (node) void openFunnel(node);
                   });
                 }}
@@ -555,7 +585,7 @@ export default function BoardAnalyticsPanel() {
             rowKey='stageCode'
             size='small'
             pagination={false}
-            dataSource={board?.funnel || []}
+            dataSource={funnelNodes}
             onRow={(record) => ({
               onClick: () => void openFunnel(record),
               className: 'cursor-pointer',
@@ -570,6 +600,102 @@ export default function BoardAnalyticsPanel() {
                 render: (value: number | null, record) =>
                   record.conversionLabel ? `${record.conversionLabel} ${pct(value)}` : '—',
               },
+              {
+                title: '环比',
+                dataIndex: 'mom',
+                width: 88,
+                render: (value: number | null) => signedPct(value),
+              },
+              {
+                title: '同比',
+                dataIndex: 'yoy',
+                width: 88,
+                render: (value: number | null) => signedPct(value),
+              },
+            ]}
+          />
+        </div>
+      </ChartExportCard>
+
+      <ChartExportCard
+        title='待面试'
+        filename='待面试'
+        hint='当前筛选时间范围内尚未发生的待面试存量（待初试 / 待复试 / 待终试）。点击柱子或表格行可下钻明细。'
+      >
+        <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
+          {pendingInterviewChart.some((item) => item.count > 0) ? (
+            <Suspense fallback={<ChartFallback height={320} />}>
+              <Column
+                key={pendingInterviewChart.map((item) => `${item.stageCode}:${item.count}`).join('|')}
+                data={pendingInterviewChart}
+                xField='stage'
+                yField='count'
+                colorField='stage'
+                height={320}
+                legend={false}
+                scale={{
+                  color: {
+                    range: ['#5B8FF9', '#61DDAA', '#F6BD16'],
+                  },
+                }}
+                style={{
+                  maxWidth: 72,
+                  radiusTopLeft: 4,
+                  radiusTopRight: 4,
+                }}
+                label={{
+                  text: (datum: { count?: number }) => `${datum.count ?? 0}`,
+                  position: 'top',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  dy: -4,
+                }}
+                axis={{
+                  x: {
+                    labelFontSize: 12,
+                    labelAutoRotate: false,
+                    labelAutoHide: false,
+                  },
+                  y: { title: '人数', tickCount: 5 },
+                }}
+                tooltip={{
+                  items: [
+                    {
+                      channel: 'y',
+                      valueFormatter: (value: number) => `${value} 人`,
+                    },
+                  ],
+                }}
+                onReady={(plot: {
+                  chart?: {
+                    on: (event: string, handler: (evt: { data?: { data?: { stage?: string } } }) => void) => void;
+                  };
+                }) => {
+                  plot.chart?.on('element:click', (evt) => {
+                    const stage = evt?.data?.data?.stage;
+                    const node = pendingInterviewNodes.find((item) => item.stageName === stage);
+                    if (node) void openFunnel(node);
+                  });
+                }}
+              />
+            </Suspense>
+          ) : (
+            <div className='flex h-[320px] items-center justify-center text-sm text-neutral-400'>
+              当前范围内暂无待面试数据
+            </div>
+          )}
+          <Table
+            rowKey='stageCode'
+            size='small'
+            pagination={false}
+            dataSource={pendingInterviewNodes}
+            onRow={(record) => ({
+              onClick: () => void openFunnel(record),
+              className: 'cursor-pointer',
+            })}
+            columns={[
+              { title: '环节', dataIndex: 'stageName' },
+              { title: '人数', dataIndex: 'count', width: 72 },
               {
                 title: '环比',
                 dataIndex: 'mom',

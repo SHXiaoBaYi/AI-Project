@@ -15,6 +15,9 @@ public class HrBoardVO {
     @Schema(description = "漏斗")
     private List<FunnelNode> funnel = new ArrayList<>();
 
+    @Schema(description = "待面试存量：待初试/待复试/待终试")
+    private List<FunnelNode> pendingInterview = new ArrayList<>();
+
     @Schema(description = "招聘周期当前下钻岗位，空表示各岗位")
     private String cycleJob;
 
