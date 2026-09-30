@@ -35,6 +35,15 @@ export function dingTalkLoginApi(authCode: string, force = false, forceTicket?: 
   });
 }
 
+export function dingTalkSsoApi(authCode: string, mode: 'corp' | 'oauth' = 'corp', force = true, forceTicket?: string) {
+  return request.post<unknown, { token: string }>('/auth/dingtalk/sso', {
+    authCode: forceTicket ? undefined : authCode,
+    mode,
+    force,
+    forceTicket,
+  });
+}
+
 export function loginApi(username: string, password: string, force = false) {
   return request.post<unknown, { token: string }>('/auth/login', { username, password, force });
 }

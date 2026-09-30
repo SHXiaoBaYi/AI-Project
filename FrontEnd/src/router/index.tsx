@@ -34,6 +34,7 @@ const Login = lazy(() => import('@/pages/login'));
 const NotFound = lazy(() => import('@/pages/404'));
 const Demo = lazy(() => import('@/pages/test/demo'));
 const DataScopePage = lazy(() => import('@/pages/system/data-scope'));
+const DingTalkBridgePage = lazy(() => import('@/pages/dingtalk/bridge'));
 const EcomLayout = lazy(() => import('@/layouts/EcomLayout'));
 const EcomDataPage = lazy(() => import('@/pages/ecom/data'));
 const EcomShopsPage = lazy(() => import('@/pages/ecom/shops'));
@@ -118,6 +119,11 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
           element: <Login />,
         },
         {
+          path: '/dingtalk/bridge',
+          element: withSuspense(DingTalkBridgePage),
+          errorElement: <RouteErrorPage />,
+        },
+        {
           path: '*',
           element: (
             <Navigate
@@ -143,6 +149,11 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
             replace
           />
         ),
+      },
+      {
+        path: '/dingtalk/bridge',
+        element: withSuspense(DingTalkBridgePage),
+        errorElement: <RouteErrorPage />,
       },
       {
         path: '/ecom',

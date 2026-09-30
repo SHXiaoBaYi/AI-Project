@@ -3,6 +3,7 @@ package com.base.admin.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.base.admin.common.Constants;
 import com.base.admin.domain.dto.DingTalkLoginDTO;
+import com.base.admin.domain.dto.DingTalkSsoDTO;
 import com.base.admin.domain.dto.LoginDTO;
 import com.base.admin.domain.entity.SysRole;
 import com.base.admin.domain.entity.SysUser;
@@ -147,6 +148,60 @@ public class SysLoginServiceImpl implements SysLoginService {
             }
         }
 
+        return issueLoginToken(userId, username, ip, userAgent);
+    }
+
+    @Override
+    @Transactional
+    public LoginVO loginByDingTalkSso(DingTalkSsoDTO dto, String ip, String userAgent) {
+        String mode = dto.getMode() == null ? "corp" : dto.getMode().trim().toLowerCase();
+        boolean force = dto.getForce() == null || Boolean.TRUE.equals(dto.getForce());
+        Long userId;
+        String username;
+
+        if (force && StringUtils.hasText(dto.getForceTicket())) {
+            DingTalkForceLoginTicketStore.Entry pending = forceLoginTicketStore.consume(dto.getForceTicket());
+            if (pending == null) {
+                throw new BusinessException("强制登录已失效，请重新授权");
+            }
+            userId = pending.userId();
+            username = pending.username();
+        } else if ("oauth".equals(mode)) {
+            if (!StringUtils.hasText(dto.getAuthCode())) {
+                throw new BusinessException("缺少钉钉授权码");
+            }
+            DingTalkAuthService.UserProfile profile = dingTalkAuthService.resolveByAuthCode(dto.getAuthCode());
+            BoundUser bound = resolveSystemUser(profile);
+            userId = bound.userId();
+            username = bound.username();
+            if (!force && onlineSessionService.hasActiveSession(userId)) {
+                String ticket = forceLoginTicketStore.issue(userId, username);
+                throw new BusinessException(
+                        Constants.CODE_LOGIN_CONFLICT,
+                        "该账号已在其他设备登录，是否强制对方下线？",
+                        Map.of("forceTicket", ticket));
+            }
+        } else {
+            if (!StringUtils.hasText(dto.getAuthCode())) {
+                throw new BusinessException("缺少钉钉免登授权码");
+            }
+            DingTalkAuthService.CorpIdentity identity = dingTalkAuthService.resolveByCorpAuthCode(dto.getAuthCode());
+            BoundUser bound = resolveBoundByCorp(identity);
+            userId = bound.userId();
+            username = bound.username();
+            if (!force && onlineSessionService.hasActiveSession(userId)) {
+                String ticket = forceLoginTicketStore.issue(userId, username);
+                throw new BusinessException(
+                        Constants.CODE_LOGIN_CONFLICT,
+                        "该账号已在其他设备登录，是否强制对方下线？",
+                        Map.of("forceTicket", ticket));
+            }
+        }
+
+        return issueLoginToken(userId, username, ip, userAgent);
+    }
+
+    private LoginVO issueLoginToken(Long userId, String username, String ip, String userAgent) {
         SysUser user = userMapper.selectById(userId);
         if (user == null || (user.getIsActive() != null && user.getIsActive() == 0)) {
             throw new BusinessException("系统账号不存在或已删除");
@@ -160,6 +215,30 @@ public class SysLoginServiceImpl implements SysLoginService {
         String token = jwtUtils.generateToken(userId, username, tokenId);
         onlineSessionService.saveSession(userId, username, tokenId, ip, userAgent);
         return LoginVO.builder().token(token).build();
+    }
+
+    private BoundUser resolveBoundByCorp(DingTalkAuthService.CorpIdentity identity) {
+        BoundUser byUserId = findByDingUserId(identity.userid());
+        if (byUserId != null) {
+            upsertBind(byUserId.userId(), identity.userid(), identity.unionId());
+            return byUserId;
+        }
+        if (StringUtils.hasText(identity.unionId()) && !identity.unionId().startsWith("corp_")) {
+            BoundUser byUnion = findByUnionId(identity.unionId());
+            if (byUnion != null) {
+                upsertBind(byUnion.userId(), identity.userid(), identity.unionId());
+                return byUnion;
+            }
+        }
+        if (StringUtils.hasText(identity.mobile())) {
+            BoundUser byPhone = findByPhone(identity.mobile());
+            if (byPhone != null) {
+                upsertBind(byPhone.userId(), identity.userid(), identity.unionId());
+                return byPhone;
+            }
+        }
+        // 与扫码登录一致：本企业成员免登通过但系统无账号 → 自动注册 hr_user 并绑定钉钉
+        return createUserFromDingTalk(identity.toProfile(), identity.userid());
     }
 
     private BoundUser resolveSystemUser(DingTalkAuthService.UserProfile profile) {
@@ -228,7 +307,7 @@ public class SysLoginServiceImpl implements SysLoginService {
         user.setAvatar(StringUtils.hasText(profile.avatar()) ? profile.avatar().trim() : null);
         user.setGender(0);
         user.setStatus(Constants.STATUS_ACTIVE);
-        user.setRemark("钉钉扫码自动注册");
+        user.setRemark("钉钉免登/扫码自动注册");
         userMapper.insert(user);
 
         userRoleMapper.insertUserRole(user.getUserId(), roleId);

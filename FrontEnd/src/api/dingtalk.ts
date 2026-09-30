@@ -216,3 +216,13 @@ export function updateDingTalkAssistantScheduleApi(data: {
 export function cancelDingTalkAssistantScheduleApi(id: number) {
   return request.delete<unknown, DingTalkAssistantActionResult>(`/system/dingtalk/assistant/schedules/${id}`);
 }
+
+export type DingTalkIntentExecuteResult = {
+  status: 'done' | 'need_candidate' | string;
+  message?: string;
+  candidates?: Array<{ name: string; jobName?: string; ticket: string }>;
+};
+
+export function executeDingTalkIntentApi(ticket: string) {
+  return request.post<unknown, DingTalkIntentExecuteResult>('/system/dingtalk/assistant/intent/execute', { ticket });
+}

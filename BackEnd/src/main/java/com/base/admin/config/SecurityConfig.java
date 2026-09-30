@@ -37,7 +37,8 @@ public class SecurityConfig {
                                 "/auth/login",
                                 "/auth/login-options",
                                 "/auth/dingtalk/config",
-                                "/auth/dingtalk/login")
+                                "/auth/dingtalk/login",
+                                "/auth/dingtalk/sso")
                         .permitAll()
                         .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()

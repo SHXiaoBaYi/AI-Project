@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -16,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 /**
- * 钉钉 OAuth 扫码登录：authCode → 用户 token → 通讯录个人身份（unionId）。
+ * 钉钉登录：OAuth 扫码（unionId）或企业内 H5 免登（userid）。
  */
 @Service
 @RequiredArgsConstructor
@@ -42,6 +43,87 @@ public class DingTalkAuthService {
         } catch (Exception ex) {
             throw new BusinessException("钉钉登录失败：" + ex.getMessage());
         }
+    }
+
+    /**
+     * 企业内 H5 免登：JSAPI requestAuthCode → getuserinfo → 补全通讯录详情。
+     */
+    public CorpIdentity resolveByCorpAuthCode(String authCode) {
+        DingTalkAppService.Credential credential = dingTalkAppService.credential();
+        if (credential == null) {
+            throw new BusinessException("钉钉应用未配置或未启用，无法免登");
+        }
+        if (!StringUtils.hasText(authCode)) {
+            throw new BusinessException("缺少钉钉免登授权码");
+        }
+        try {
+            String accessToken = appAccessToken(credential);
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("code", authCode.trim());
+            JsonNode json = postJson(
+                    "https://oapi.dingtalk.com/topapi/v2/user/getuserinfo?access_token="
+                            + URLEncoder.encode(accessToken, StandardCharsets.UTF_8),
+                    body,
+                    null);
+            if (json.path("errcode").asInt(0) != 0) {
+                String err = firstNonBlank(json.path("errmsg").asText(""), json.path("message").asText(""), "免登失败");
+                throw new BusinessException("钉钉免登失败：" + err);
+            }
+            JsonNode result = json.path("result");
+            String userid = firstNonBlank(result.path("userid").asText(""), result.path("userId").asText(""));
+            if (!StringUtils.hasText(userid)) {
+                throw new BusinessException("钉钉免登未返回 userid");
+            }
+            String unionId = firstNonBlank(
+                    result.path("unionid").asText(""),
+                    result.path("unionId").asText(""),
+                    result.path("associated_unionid").asText(""));
+            String nick = firstNonBlank(result.path("name").asText(""), result.path("nick").asText(""));
+            String mobile = "";
+            String avatar = "";
+            try {
+                ObjectNode get = objectMapper.createObjectNode();
+                get.put("userid", userid);
+                get.put("language", "zh_CN");
+                JsonNode detail = postJson(
+                        "https://oapi.dingtalk.com/topapi/v2/user/get?access_token="
+                                + URLEncoder.encode(accessToken, StandardCharsets.UTF_8),
+                        get,
+                        null);
+                if (detail.path("errcode").asInt(-1) == 0) {
+                    JsonNode u = detail.path("result");
+                    unionId = firstNonBlank(unionId,
+                            u.path("unionid").asText(""),
+                            u.path("unionId").asText(""));
+                    nick = firstNonBlank(nick, u.path("name").asText(""), u.path("nickname").asText(""));
+                    mobile = normalizeMobile(firstNonBlank(u.path("mobile").asText(""), u.path("telephone").asText("")));
+                    avatar = firstNonBlank(u.path("avatar").asText(""), u.path("avatarUrl").asText(""));
+                }
+            } catch (Exception ignored) {
+                // 详情失败仍可用 userid 建号/绑定
+            }
+            if (!StringUtils.hasText(unionId)) {
+                unionId = "corp_" + userid;
+            }
+            return new CorpIdentity(userid, unionId, nick, mobile, avatar);
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new BusinessException("钉钉免登失败：" + ex.getMessage());
+        }
+    }
+
+    private String appAccessToken(DingTalkAppService.Credential credential) throws Exception {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("appKey", credential.clientId());
+        body.put("appSecret", credential.clientSecret());
+        JsonNode json = postJson("https://api.dingtalk.com/v1.0/oauth2/accessToken", body, null);
+        String token = json.path("accessToken").asText("");
+        if (!StringUtils.hasText(token)) {
+            String err = firstNonBlank(json.path("message").asText(""), "获取应用 accessToken 失败");
+            throw new BusinessException(err);
+        }
+        return token;
     }
 
     private String exchangeUserAccessToken(DingTalkAppService.Credential credential, String authCode) throws Exception {
@@ -120,5 +202,12 @@ public class DingTalkAuthService {
     }
 
     public record UserProfile(String unionId, String openId, String nick, String mobile, String avatar) {
+    }
+
+    public record CorpIdentity(String userid, String unionId, String nick, String mobile, String avatar) {
+        public UserProfile toProfile() {
+            return new UserProfile(unionId, "", nick == null ? "" : nick, mobile == null ? "" : mobile,
+                    avatar == null ? "" : avatar);
+        }
     }
 }

@@ -100,6 +100,8 @@ dingtalk:
   client-secret: ${DINGTALK_CLIENT_SECRET:}
   # 简历上传 spaceId 可选覆盖（走 Drive）；留空则用 Storage APP 应用空间
   resume-space-id: ${DINGTALK_RESUME_SPACE_ID:}
+  # ActionCard 打开的 H5 根（含 /shxby）；留空则从 upload-public-base 去掉 /api 推导
+  h5-base-url: ${DINGTALK_H5_BASE_URL:}
   robot:
     # 机器人 Stream 入站（单聊 → 日程助手）。后端需常驻出网；本地调试可设 false
     stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:true}

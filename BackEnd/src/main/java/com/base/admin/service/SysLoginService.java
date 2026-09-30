@@ -1,6 +1,7 @@
 package com.base.admin.service;
 
 import com.base.admin.domain.dto.DingTalkLoginDTO;
+import com.base.admin.domain.dto.DingTalkSsoDTO;
 import com.base.admin.domain.dto.LoginDTO;
 import com.base.admin.domain.vo.DingTalkLoginConfigVO;
 import com.base.admin.domain.vo.LoginOptionsVO;
@@ -18,6 +19,9 @@ public interface SysLoginService {
     DingTalkLoginConfigVO dingTalkLoginConfig();
 
     LoginVO loginByDingTalk(DingTalkLoginDTO dto, String ip, String userAgent);
+
+    /** 钉钉 H5 免登（corp）或 OAuth 授权码登录。 */
+    LoginVO loginByDingTalkSso(DingTalkSsoDTO dto, String ip, String userAgent);
 
     void logout(Long userId);
 

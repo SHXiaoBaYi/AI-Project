@@ -111,10 +111,12 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
       >
         <p className='mb-4 text-sm text-neutral-500'>
           用于钉钉扫码登录、按手机号绑定钉钉身份，以及创建/取消日程、简历上传钉盘。Client Secret
-          只保存到数据库，页面只显示脱敏结果。扫码登录需在钉钉开放平台配置回调域名，并与本系统登录页同源。
-          简历默认上传到应用存储空间（需 Storage.Space.Write / Permission.Write / UploadInfo.Read / File.Write /
-          File.Read。上传后取 HTTPS 预览链接写入日程 richTextDescription，PC 可点开）。可用 dingtalk.resume-space-id
-          覆盖为指定 Drive 空间。
+          只保存到数据库，页面只显示脱敏结果。扫码登录需在钉钉开放平台配置回调域名，并与本系统登录页同源。 机器人
+          ActionCard 会打开 H5（/dingtalk/bridge）并走企业免登；请把该域名配进钉钉应用「应用首页/PC
+          端首页」可访问地址，且 CorpId 已填写。简历默认上传到应用存储空间（需 Storage.Space.Write / Permission.Write /
+          UploadInfo.Read / File.Write / File.Read。上传后取 HTTPS 预览链接写入日程 richTextDescription，PC
+          可点开）。可用 dingtalk.resume-space-id 覆盖为指定 Drive 空间；可用 dingtalk.h5-base-url 指定 H5
+          根地址（默认从 upload-public-base 去掉 /api）。
         </p>
         {saved?.hasClientSecret ? (
           <div className='mb-4 text-sm text-neutral-600'>

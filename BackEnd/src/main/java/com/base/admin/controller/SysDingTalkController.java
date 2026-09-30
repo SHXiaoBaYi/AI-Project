@@ -9,6 +9,7 @@ import com.base.admin.domain.dto.DingTalkAssistantReportDTO;
 import com.base.admin.domain.dto.DingTalkAssistantScheduleUpdateDTO;
 import com.base.admin.domain.dto.DingTalkAssistantSuggestDTO;
 import com.base.admin.domain.dto.DingTalkBusyQueryDTO;
+import com.base.admin.domain.dto.DingTalkIntentExecuteDTO;
 import com.base.admin.domain.vo.DingTalkAppVO;
 import com.base.admin.domain.vo.DingTalkAssistantActionResultVO;
 import com.base.admin.domain.vo.DingTalkAssistantScheduleVO;
@@ -16,10 +17,12 @@ import com.base.admin.domain.vo.DingTalkAssistantSuggestVO;
 import com.base.admin.domain.vo.DingTalkBusyUserOptionVO;
 import com.base.admin.domain.vo.DingTalkBusyUserVO;
 import com.base.admin.domain.vo.DingTalkDirectoryUserVO;
+import com.base.admin.domain.vo.DingTalkIntentExecuteVO;
 import com.base.admin.service.DingTalkAppService;
 import com.base.admin.service.DingTalkAssistantService;
 import com.base.admin.service.DingTalkBusyService;
 import com.base.admin.service.DingTalkCalendarClient;
+import com.base.admin.service.DingTalkRobotAssistantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -46,6 +49,7 @@ public class SysDingTalkController {
     private final DingTalkCalendarClient dingTalkCalendarClient;
     private final DingTalkBusyService dingTalkBusyService;
     private final DingTalkAssistantService dingTalkAssistantService;
+    private final DingTalkRobotAssistantService dingTalkRobotAssistantService;
 
     @Operation(summary = "查询钉钉应用配置")
     @GetMapping
@@ -114,6 +118,14 @@ public class SysDingTalkController {
     @Log(title = "日程助手汇报", businessType = 1)
     public Result<DingTalkAssistantActionResultVO> assistantReport(@Valid @RequestBody DingTalkAssistantReportDTO dto) {
         return Result.ok(dingTalkAssistantService.createReport(dto));
+    }
+
+    @Operation(summary = "日程助手：执行机器人 ActionCard 意图（H5 免登后）")
+    @PostMapping("/assistant/intent/execute")
+    @RequiresPermission({"system:dingtalk:busy", "hr:invite:list", "system:dingtalk:list"})
+    @Log(title = "日程助手意图", businessType = 1)
+    public Result<DingTalkIntentExecuteVO> executeIntent(@Valid @RequestBody DingTalkIntentExecuteDTO dto) {
+        return Result.ok(dingTalkRobotAssistantService.executeIntent(dto.getTicket()));
     }
 
     @Operation(summary = "助手日程列表（当前用户发起或作为对方）")

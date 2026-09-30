@@ -2,6 +2,7 @@ package com.base.admin.controller;
 
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.DingTalkLoginDTO;
+import com.base.admin.domain.dto.DingTalkSsoDTO;
 import com.base.admin.domain.dto.LoginDTO;
 import com.base.admin.domain.vo.DingTalkLoginConfigVO;
 import com.base.admin.domain.vo.LoginOptionsVO;
@@ -48,6 +49,13 @@ public class SysLoginController {
     @PostMapping("/auth/dingtalk/login")
     public Result<LoginVO> dingTalkLogin(@Valid @RequestBody DingTalkLoginDTO dto, HttpServletRequest request) {
         LoginVO vo = loginService.loginByDingTalk(dto, IpUtils.getClientIp(request), request.getHeader("User-Agent"));
+        return Result.ok(vo);
+    }
+
+    @Operation(summary = "钉钉 H5 免登 / OAuth 授权登录")
+    @PostMapping("/auth/dingtalk/sso")
+    public Result<LoginVO> dingTalkSso(@Valid @RequestBody DingTalkSsoDTO dto, HttpServletRequest request) {
+        LoginVO vo = loginService.loginByDingTalkSso(dto, IpUtils.getClientIp(request), request.getHeader("User-Agent"));
         return Result.ok(vo);
     }
 
