@@ -973,9 +973,18 @@ public class HrInviteService {
         }
         dingTalk.grantDriveFileViewer(ownerUnionId, driveFile, viewerStaffIds);
 
-        String description = buildCalendarDescription(dto, basePerson, resume, organizerName, driveFile);
+        String cardTitle = StringUtils.hasText(driveFile.fileName()) ? driveFile.fileName() : resume.fileName();
+        if (!StringUtils.hasText(cardTitle)) {
+            cardTitle = "简历";
+        }
+        String cardUrl = StringUtils.hasText(driveFile.previewUrl()) ? driveFile.previewUrl() : driveFile.openUrl();
+        String bodyPlain = buildCalendarBodyPlain(dto, basePerson, organizerName);
+        // plain：第一行是卡片标题（文件名），便于无富文本时也能看到简历名
+        String description = cardTitle + "\n\n" + bodyPlain;
+        String richText = DingTalkCalendarClient.buildResumeLinkCardRichText(cardTitle, cardUrl, bodyPlain);
         DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
-                ownerUnionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees, false);
+                ownerUnionId, title, description, dto.getInterviewAt(), duration, dto.getLocation(), attendees,
+                false, richText);
         writeLog(logInviteId, "CREATE_CALENDAR", call, organizerUserId, call.eventId(),
                 Map.of("title", title, "start", String.valueOf(dto.getInterviewAt()), "unionId", blank(ownerUnionId),
                         "organizer", organizerName, "attendees", String.valueOf(attendees.size()),
@@ -1352,25 +1361,23 @@ public class HrInviteService {
 
     private String buildCalendarDescription(HrInviteCreateDTO dto, Map<String, Object> person, ResumeFile resume,
                                             String organizerName, DingTalkCalendarClient.DriveFile driveFile) {
+        String resumeName = resume == null ? "未上传" : resume.fileName();
+        if (driveFile != null && StringUtils.hasText(driveFile.fileName())) {
+            resumeName = driveFile.fileName();
+        }
+        String body = buildCalendarBodyPlain(dto, person, organizerName);
+        return resumeName + "\n\n" + body;
+    }
+
+    /** 日程正文（不含简历卡片行） */
+    private String buildCalendarBodyPlain(HrInviteCreateDTO dto, Map<String, Object> person, String organizerName) {
         String round = ROUND_NAME.getOrDefault(dto.getRoundNo(), dto.getRoundNo() + "面");
         String organizer = StringUtils.hasText(organizerName) ? organizerName : currentOrganizerName();
-        String resumeName = resume == null ? "未上传" : resume.fileName();
-        StringBuilder sb = new StringBuilder();
-        sb.append("组织人：").append(organizer)
-                .append("\n候选人：").append(blank(person.get("candidate_name")))
-                .append("\n岗位：").append(blank(person.get("job_name")))
-                .append("\n轮次：").append(round)
-                .append("\n时间：").append(formatInterviewAt(dto.getInterviewAt()))
-                .append("\n简历：").append(resumeName);
-        if (driveFile != null && StringUtils.hasText(driveFile.fileId())) {
-            sb.append("\n钉盘 fileId：").append(driveFile.fileId())
-                    .append("\n钉盘 spaceId：").append(driveFile.spaceId())
-                    .append("\n打开简历：").append(driveFile.openUrl())
-                    .append("\n（钉钉日程无原生附件，简历已上传钉盘，点击上方链接查看）");
-        } else {
-            sb.append("\n（钉钉日程无原生附件，请联系招聘负责人获取简历）");
-        }
-        return sb.toString();
+        return "组织人：" + organizer
+                + "\n候选人：" + blank(person.get("candidate_name"))
+                + "\n岗位：" + blank(person.get("job_name"))
+                + "\n轮次：" + round
+                + "\n时间：" + formatInterviewAt(dto.getInterviewAt());
     }
 
     private static String formatInterviewAt(LocalDateTime at) {

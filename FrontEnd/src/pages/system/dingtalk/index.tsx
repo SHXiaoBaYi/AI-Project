@@ -110,8 +110,11 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
         className='max-w-3xl'
       >
         <p className='mb-4 text-sm text-neutral-500'>
-          用于钉钉扫码登录、按手机号绑定钉钉身份，以及创建/取消日程。Client Secret
+          用于钉钉扫码登录、按手机号绑定钉钉身份，以及创建/取消日程、简历上传钉盘。Client Secret
           只保存到数据库，页面只显示脱敏结果。扫码登录需在钉钉开放平台配置回调域名，并与本系统登录页同源。
+          简历默认上传到应用存储空间（需 Storage.Space.Write / Permission.Write / UploadInfo.Read / File.Write /
+          File.Read。上传后取 HTTPS 预览链接写入日程 richTextDescription，PC 可点开）。可用 dingtalk.resume-space-id
+          覆盖为指定 Drive 空间。
         </p>
         {saved?.hasClientSecret ? (
           <div className='mb-4 text-sm text-neutral-600'>

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -41,6 +42,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class DingTalkCalendarClient {
 
     private static final DateTimeFormatter DING_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
@@ -52,7 +54,7 @@ public class DingTalkCalendarClient {
 
     public CalendarCall createEvent(String unionId, String title, String description, LocalDateTime start,
                                     int durationMin, String location) {
-        return createEvent(unionId, title, description, start, durationMin, location, List.of(), false);
+        return createEvent(unionId, title, description, start, durationMin, location, List.of(), false, null);
     }
 
     /**
@@ -61,6 +63,16 @@ public class DingTalkCalendarClient {
      */
     public CalendarCall createEvent(String ownerUnionId, String title, String description, LocalDateTime start,
                                     int durationMin, String location, List<String> attendeeUnionIds, boolean onlineMeeting) {
+        return createEvent(ownerUnionId, title, description, start, durationMin, location, attendeeUnionIds,
+                onlineMeeting, null);
+    }
+
+    /**
+     * @param richTextHtml 可选；用于简历链接卡片等富文本。为空时由 plain description 自动转 HTML。
+     */
+    public CalendarCall createEvent(String ownerUnionId, String title, String description, LocalDateTime start,
+                                    int durationMin, String location, List<String> attendeeUnionIds,
+                                    boolean onlineMeeting, String richTextHtml) {
         if (!ready()) {
             return CalendarCall.fail("钉钉未配置。请到「系统管理 → 钉钉应用配置」填写并启用");
         }
@@ -71,9 +83,7 @@ public class DingTalkCalendarClient {
             String token = accessToken();
             ObjectNode body = objectMapper.createObjectNode();
             body.put("summary", title);
-            if (StringUtils.hasText(description)) {
-                body.put("description", description);
-            }
+            applyEventDescription(body, description, richTextHtml);
             body.put("isAllDay", false);
             body.set("start", timeNode(start));
             body.set("end", timeNode(start.plusMinutes(Math.max(durationMin, 15))));
@@ -162,8 +172,10 @@ public class DingTalkCalendarClient {
     }
 
     /**
-     * 将本地简历上传到组织人钉盘（企业空间根目录），返回 fileId 与可打开链接。
-     * 日程 API 无附件字段时，把 openUrl / fileId 写进日程描述。
+     * 将本地简历上传到钉钉应用存储空间（APP space）。
+     * <p>优先 {@code dingtalk.resume-space-id}；否则
+     * {@code POST /v1.0/storage/spaces}（ownerType=APP，scene 已存在则直接返回原空间），
+     * 再走 Storage 上传。说明：{@code GET /drive/spaces?spaceType=app} 非法，官方仅支持 org。
      */
     public DriveFile uploadResumeToDrive(String ownerUnionId, Path file, String fileName) {
         if (!ready()) {
@@ -186,20 +198,16 @@ public class DingTalkCalendarClient {
             String token = accessToken();
             String name = sanitizeDriveFileName(fileName, file);
             String md5 = md5Hex(file);
-            String spaceId = resolveOrgSpaceId(token, ownerUnionId.trim());
-            JsonNode uploadInfo = getDriveUploadInfo(token, spaceId, ownerUnionId.trim(), name, size, md5);
-            String mediaId = putDriveFileBytes(token, spaceId, ownerUnionId.trim(), name, size, md5, file, uploadInfo);
-            if (!StringUtils.hasText(mediaId)) {
-                throw new BusinessException("钉盘上传未返回 mediaId");
+            String unionId = ownerUnionId.trim();
+            String configured = properties.getResumeSpaceId();
+            if (StringUtils.hasText(configured)) {
+                // 显式覆盖：按企业盘 Drive 上传
+                return uploadResumeViaDriveApi(token, configured.trim(), unionId, name, size, md5, file);
             }
-            JsonNode added = addDriveFile(token, spaceId, ownerUnionId.trim(), name, mediaId);
-            String fileId = added.path("fileId").asText("");
-            String savedName = added.path("fileName").asText(name);
-            if (!StringUtils.hasText(fileId)) {
-                throw new BusinessException("钉盘未返回 fileId：" + cut(added.toString(), 180));
-            }
-            String openUrl = buildDriveOpenUrl(spaceId, fileId, savedName);
-            return new DriveFile(spaceId, fileId, savedName, openUrl);
+            String spaceId = resolveOrCreateAppStorageSpace(token, unionId);
+            // APP 空间：应用权限开通后仍需给操作人临时授权，否则 uploadInfos 会 403 no privilege
+            grantAppSpaceOperatorAccess(token, spaceId, unionId);
+            return uploadResumeViaStorageApi(token, spaceId, unionId, name, size, md5, file);
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -208,8 +216,246 @@ public class DingTalkCalendarClient {
     }
 
     /**
+     * 获取/创建应用存储空间：POST /v1.0/storage/spaces?unionId=…（ownerType=APP）。
+     * 相同 scene+sceneId 已存在时钉钉直接返回原空间。
+     */
+    private String resolveOrCreateAppStorageSpace(String token, String unionId) throws Exception {
+        ObjectNode body = objectMapper.createObjectNode();
+        ObjectNode option = body.putObject("option");
+        option.put("name", "HR简历");
+        option.put("ownerType", "APP");
+        option.put("scene", "hrresume");
+        option.put("sceneId", "default");
+        ObjectNode capabilities = option.putObject("capabilities");
+        capabilities.put("canSearch", true);
+        capabilities.put("canRename", false);
+        capabilities.put("canRecordRecentFile", false);
+        JsonNode json = apiPost(token, "https://api.dingtalk.com/v1.0/storage/spaces?unionId=" + encode(unionId), body);
+        JsonNode space = json.path("space");
+        String spaceId = firstText(space, "id", "spaceId");
+        if (!StringUtils.hasText(spaceId)) {
+            spaceId = firstText(json, "id", "spaceId");
+        }
+        if (!StringUtils.hasText(spaceId)) {
+            throw new BusinessException("获取应用存储空间失败（请开通 Storage.Space.Write）："
+                    + cut(json.toString(), 180));
+        }
+        return spaceId;
+    }
+
+    /**
+     * APP 存储空间：给操作人授予根目录临时编辑权（最长 3600 秒）。
+     * 官方说明：APP 空间任何人操作都需先授权；仅开通 Storage.UploadInfo.Read 不够。
+     */
+    private void grantAppSpaceOperatorAccess(String token, String spaceId, String unionId) throws Exception {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("roleId", "MANAGER");
+        ObjectNode option = body.putObject("option");
+        option.put("duration", 3600);
+        ArrayNode members = body.putArray("members");
+        ObjectNode member = members.addObject();
+        member.put("type", "USER");
+        member.put("id", unionId);
+        String corpId = dingTalkAppService.corpId();
+        if (StringUtils.hasText(corpId)) {
+            member.put("corpId", corpId);
+        }
+        try {
+            apiPost(token, "https://api.dingtalk.com/v1.0/storage/spaces/" + encode(spaceId)
+                    + "/dentries/0/permissions?unionId=" + encode(unionId), body);
+        } catch (BusinessException ex) {
+            String msg = ex.getMessage() == null ? "" : ex.getMessage();
+            if (msg.contains("403") || msg.contains("permissionDenied") || msg.contains("no privilege")) {
+                throw new BusinessException(msg + "；APP 空间授权失败，请同时开通 Storage.Permission.Write"
+                        + "（上传前需给操作人临时授权，仅开通 UploadInfo.Read 不够）");
+            }
+            throw ex;
+        }
+    }
+
+    /** 钉盘 Drive 上传（配置覆盖 spaceId 时使用） */
+    private DriveFile uploadResumeViaDriveApi(String token, String spaceId, String unionId, String name,
+                                              long size, String md5, Path file) throws Exception {
+        JsonNode uploadInfo = getDriveUploadInfo(token, spaceId, unionId, name, size, md5);
+        String mediaId = putDriveFileBytes(file, uploadInfo);
+        if (!StringUtils.hasText(mediaId)) {
+            throw new BusinessException("钉盘上传未返回 mediaId：" + cut(uploadInfo.toString(), 180));
+        }
+        JsonNode added = addDriveFile(token, spaceId, unionId, name, mediaId);
+        String fileId = firstText(added, "fileId", "id");
+        String savedName = firstText(added, "fileName", "name");
+        if (!StringUtils.hasText(savedName)) {
+            savedName = name;
+        }
+        if (!StringUtils.hasText(fileId)) {
+            throw new BusinessException("钉盘未返回 fileId：" + cut(added.toString(), 180));
+        }
+        String previewUrl = resolveDentryPreviewUrl(token, spaceId, fileId, unionId);
+        String openUrl = StringUtils.hasText(previewUrl) ? previewUrl : buildDriveOpenUrl(spaceId, fileId, savedName);
+        return new DriveFile(spaceId, fileId, savedName, openUrl, null, previewUrl);
+    }
+
+    /** 应用存储空间：Storage 上传信息 → OSS → commit */
+    private DriveFile uploadResumeViaStorageApi(String token, String spaceId, String unionId, String name,
+                                                long size, String md5, Path file) throws Exception {
+        JsonNode uploadInfo = getStorageUploadInfo(token, spaceId, unionId, name, size, md5);
+        String uploadKey = uploadInfo.path("uploadKey").asText("");
+        if (!StringUtils.hasText(uploadKey)) {
+            throw new BusinessException("钉盘上传未返回 uploadKey（请开通 Storage.UploadInfo.Read）："
+                    + cut(uploadInfo.toString(), 180));
+        }
+        putStorageFileBytes(file, uploadInfo);
+        JsonNode committed = commitStorageFile(token, spaceId, unionId, name, uploadKey, size);
+        JsonNode dentry = committed.path("dentry");
+        if (!dentry.isObject() || dentry.isMissingNode()) {
+            dentry = committed;
+        }
+        String fileId = firstText(dentry, "id", "fileId");
+        String savedName = firstText(dentry, "name", "fileName");
+        if (!StringUtils.hasText(savedName)) {
+            savedName = name;
+        }
+        String uuid = firstText(dentry, "uuid", "dentryUuid");
+        if (!StringUtils.hasText(fileId)) {
+            throw new BusinessException("钉盘提交文件未返回 fileId：" + cut(committed.toString(), 180));
+        }
+        String previewUrl = resolveDentryPreviewUrl(token, spaceId, fileId, unionId);
+        String openUrl = StringUtils.hasText(previewUrl) ? previewUrl : buildDriveOpenUrl(spaceId, fileId, savedName);
+        return new DriveFile(spaceId, fileId, savedName, openUrl, uuid, previewUrl);
+    }
+
+    /**
+     * 获取钉盘文件 HTTPS 预览链接（PC/手机都可点开）。
+     * 需 Storage.File.Read；失败时返回空，调用方回退 dingtalk://。
+     */
+    private String resolveDentryPreviewUrl(String token, String spaceId, String dentryId, String unionId) {
+        if (!StringUtils.hasText(spaceId) || !StringUtils.hasText(dentryId) || !StringUtils.hasText(unionId)) {
+            return "";
+        }
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            ObjectNode option = body.putObject("option");
+            option.put("type", "PREVIEW");
+            option.put("checkLogin", true);
+            option.put("waterMark", false);
+            JsonNode json = apiPost(token, "https://api.dingtalk.com/v1.0/storage/spaces/" + encode(spaceId)
+                    + "/dentries/" + encode(dentryId) + "/openInfos/query?unionId=" + encode(unionId), body);
+            String url = firstText(json, "url");
+            return StringUtils.hasText(url) && url.startsWith("http") ? url.trim() : "";
+        } catch (Exception ex) {
+            log.warn("resolve dentry preview url failed spaceId={} dentryId={}: {}", spaceId, dentryId, ex.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 日程描述：同时写 plain description + richTextDescription（HTML）。
+     * PC 端对 description 里的 dingtalk:// 基本不可点；HTTPS + HTML a 标签才能打开。
+     * @param richTextHtml 若传入则直接使用（用于简历卡片）；否则由 plain 自动转 HTML。
+     */
+    private void applyEventDescription(ObjectNode body, String description, String richTextHtml) {
+        String plain = description == null ? "" : description.trim();
+        body.put("description", plain);
+        String rich = StringUtils.hasText(richTextHtml) ? richTextHtml.trim() : "";
+        if (!StringUtils.hasText(rich) && StringUtils.hasText(plain)) {
+            rich = toCalendarRichTextHtml(plain);
+        }
+        if (!StringUtils.hasText(rich)) {
+            return;
+        }
+        ObjectNode richNode = body.putObject("richTextDescription");
+        richNode.put("text", rich);
+    }
+
+    /**
+     * 简历链接卡片（放在描述第一行）+ 正文。
+     * 卡片标题用简历文件名，href 用 HTTPS 预览链接；富文本里做成灰底圆角块，接近附件卡片观感。
+     */
+    public static String buildResumeLinkCardRichText(String cardTitle, String cardUrl, String bodyPlain) {
+        String title = StringUtils.hasText(cardTitle) ? cardTitle.trim() : "简历";
+        String url = StringUtils.hasText(cardUrl) ? cardUrl.trim() : "";
+        StringBuilder html = new StringBuilder();
+        html.append("<div class=\"__aliyun_email_body_block\">");
+        if (StringUtils.hasText(url) && url.startsWith("http")) {
+            html.append("<div style=\"clear:both;margin:0 0 12px 0;padding:12px 14px;")
+                    .append("background:#F7F8FA;border:1px solid #E5E6EB;border-radius:8px;\">")
+                    .append("<div style=\"font-size:12px;color:#86909C;margin-bottom:4px;\">附件 · 简历</div>")
+                    .append("<a href=\"").append(escapeHtml(url)).append("\" ")
+                    .append("style=\"color:#1677FF;text-decoration:none;font-size:14px;font-weight:600;\">")
+                    .append(escapeHtml(title)).append("</a>")
+                    .append("<div style=\"margin-top:6px;font-size:12px;color:#86909C;\">点击打开</div>")
+                    .append("</div>");
+        } else {
+            html.append("<div style=\"clear:both;margin:0 0 12px 0;padding:12px 14px;")
+                    .append("background:#F7F8FA;border:1px solid #E5E6EB;border-radius:8px;\">")
+                    .append("<div style=\"font-size:14px;font-weight:600;color:#1D2129;\">")
+                    .append(escapeHtml(title)).append("</div>")
+                    .append("</div>");
+        }
+        if (StringUtils.hasText(bodyPlain)) {
+            for (String line : bodyPlain.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1)) {
+                html.append("<div style=\"clear:both;\">");
+                html.append(linkifyAndEscape(line));
+                html.append("</div>");
+            }
+        }
+        html.append("</div>");
+        return html.toString();
+    }
+
+    /** 把纯文本描述转成日程富文本 HTML；自动把 http(s) 链接变成可点击 a 标签。 */
+    static String toCalendarRichTextHtml(String plain) {
+        String[] lines = plain.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+        StringBuilder html = new StringBuilder();
+        html.append("<div class=\"__aliyun_email_body_block\">");
+        for (String line : lines) {
+            html.append("<div style=\"clear:both;\">");
+            html.append(linkifyAndEscape(line));
+            html.append("</div>");
+        }
+        html.append("</div>");
+        return html.toString();
+    }
+
+    private static String linkifyAndEscape(String line) {
+        if (line == null || line.isEmpty()) {
+            return "<br/>";
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(https?://\\S+)")
+                .matcher(line);
+        StringBuilder out = new StringBuilder();
+        int last = 0;
+        while (m.find()) {
+            out.append(escapeHtml(line.substring(last, m.start())));
+            String url = m.group(1);
+            while (url.endsWith("）") || url.endsWith(")") || url.endsWith("。") || url.endsWith(",") || url.endsWith("，")) {
+                url = url.substring(0, url.length() - 1);
+            }
+            out.append("<a href=\"").append(escapeHtml(url)).append("\">").append(escapeHtml(url)).append("</a>");
+            last = m.start() + url.length();
+            if (last < m.end()) {
+                out.append(escapeHtml(line.substring(last, m.end())));
+                last = m.end();
+            }
+        }
+        out.append(escapeHtml(line.substring(last)));
+        return out.toString();
+    }
+
+    private static String escapeHtml(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "";
+        }
+        return raw.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
+    }
+
+    /**
      * 给面试官/抄送人授予钉盘文件「可查看/下载」权限（best-effort，失败不抛）。
-     * memberId 需为钉钉 staffId（userid）。
+     * memberId 需为钉钉 staffId（userid）。优先走 Storage 权限接口。
      */
     public void grantDriveFileViewer(String ownerUnionId, DriveFile driveFile, List<String> staffIds) {
         if (driveFile == null || !StringUtils.hasText(ownerUnionId) || staffIds == null || staffIds.isEmpty()) {
@@ -230,6 +476,24 @@ public class DingTalkCalendarClient {
         }
         try {
             String token = accessToken();
+            if (StringUtils.hasText(driveFile.uuid())) {
+                ObjectNode body = objectMapper.createObjectNode();
+                body.put("roleId", "DOWNLOADER");
+                // APP 空间只支持临时授权
+                ObjectNode option = body.putObject("option");
+                option.put("duration", 30L * 24 * 3600);
+                ArrayNode members = body.putArray("members");
+                for (String staffId : ids) {
+                    ObjectNode m = members.addObject();
+                    m.put("type", "USER");
+                    m.put("id", staffId);
+                    m.put("corpId", corpId);
+                }
+                apiPost(token, "https://api.dingtalk.com/v2.0/storage/spaces/dentries/"
+                        + encode(driveFile.uuid()) + "/permissions?unionId=" + encode(ownerUnionId.trim()), body);
+                return;
+            }
+            // 无 uuid 时回退旧 Drive 权限接口（best-effort）
             ObjectNode body = objectMapper.createObjectNode();
             body.put("role", "viewer");
             body.put("unionId", ownerUnionId.trim());
@@ -285,11 +549,7 @@ public class DingTalkCalendarClient {
             ObjectNode body = objectMapper.createObjectNode();
             body.put("id", eventId);
             body.put("summary", title);
-            if (StringUtils.hasText(description)) {
-                body.put("description", description);
-            } else {
-                body.put("description", "");
-            }
+            applyEventDescription(body, description, null);
             body.put("isAllDay", false);
             body.set("start", timeNode(start));
             body.set("end", timeNode(start.plusMinutes(Math.max(durationMin, 15))));
@@ -828,21 +1088,7 @@ public class DingTalkCalendarClient {
         assertDingOk(json, "发送钉钉工作通知失败");
     }
 
-    private String resolveOrgSpaceId(String token, String unionId) throws Exception {
-        String url = "https://api.dingtalk.com/v1.0/drive/spaces?unionId=" + encode(unionId)
-                + "&spaceType=org&maxResults=50";
-        JsonNode json = apiGet(token, url);
-        JsonNode spaces = json.path("spaces");
-        if (!spaces.isArray() || spaces.isEmpty()) {
-            throw new BusinessException("未找到可用钉盘企业空间，请确认应用已开通钉盘权限且组织人已开通钉盘");
-        }
-        String first = spaces.get(0).path("spaceId").asText("");
-        if (!StringUtils.hasText(first)) {
-            throw new BusinessException("钉盘空间列表未返回 spaceId");
-        }
-        return first;
-    }
-
+    /** Drive：获取文件上传信息（应用盘 / 企业盘） */
     private JsonNode getDriveUploadInfo(String token, String spaceId, String unionId, String fileName,
                                         long fileSize, String md5) throws Exception {
         String url = "https://api.dingtalk.com/v1.0/drive/spaces/" + encode(spaceId)
@@ -854,8 +1100,7 @@ public class DingTalkCalendarClient {
         return apiGet(token, url);
     }
 
-    private String putDriveFileBytes(String token, String spaceId, String unionId, String fileName, long fileSize,
-                                     String md5, Path file, JsonNode uploadInfo) throws Exception {
+    private String putDriveFileBytes(Path file, JsonNode uploadInfo) throws Exception {
         JsonNode headerInfo = uploadInfo.path("headerSignatureUploadInfo");
         if (headerInfo.isObject() && !headerInfo.isMissingNode()) {
             String resourceUrl = headerInfo.path("resourceUrl").asText("");
@@ -887,7 +1132,6 @@ public class DingTalkCalendarClient {
         }
         JsonNode sts = uploadInfo.path("stsUploadInfo");
         if (sts.isObject() && !sts.isMissingNode()) {
-            // 部分租户只返回 STS；用临时密钥直传 OSS
             String bucket = sts.path("bucket").asText("");
             String endPoint = sts.path("endPoint").asText("");
             String mediaId = sts.path("mediaId").asText("");
@@ -925,7 +1169,7 @@ public class DingTalkCalendarClient {
             }
             return mediaId;
         }
-        throw new BusinessException("钉盘未返回可用上传协议（需开通钉盘上传权限）：" + cut(uploadInfo.toString(), 180));
+        throw new BusinessException("钉盘未返回可用上传协议：" + cut(uploadInfo.toString(), 180));
     }
 
     private JsonNode addDriveFile(String token, String spaceId, String unionId, String fileName, String mediaId)
@@ -940,11 +1184,95 @@ public class DingTalkCalendarClient {
         return apiPost(token, "https://api.dingtalk.com/v1.0/drive/spaces/" + encode(spaceId) + "/files", body);
     }
 
+    private JsonNode getStorageUploadInfo(String token, String spaceId, String unionId, String fileName,
+                                          long fileSize, String md5) throws Exception {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("protocol", "HEADER_SIGNATURE");
+        body.put("multipart", false);
+        ObjectNode option = body.putObject("option");
+        option.put("storageDriver", "DINGTALK");
+        ObjectNode preCheck = option.putObject("preCheckParam");
+        preCheck.put("md5", md5);
+        preCheck.put("size", fileSize);
+        preCheck.put("parentId", "0");
+        preCheck.put("name", fileName);
+        return apiPost(token, "https://api.dingtalk.com/v1.0/storage/spaces/" + encode(spaceId)
+                + "/files/uploadInfos/query?unionId=" + encode(unionId), body);
+    }
+
+    private void putStorageFileBytes(Path file, JsonNode uploadInfo) throws Exception {
+        JsonNode headerInfo = uploadInfo.path("headerSignatureInfo");
+        if (!headerInfo.isObject() || headerInfo.isMissingNode()) {
+            headerInfo = uploadInfo.path("headerSignatureUploadInfo");
+        }
+        if (!headerInfo.isObject() || headerInfo.isMissingNode()) {
+            throw new BusinessException("钉盘未返回 Header 加签上传信息（需 Storage.UploadInfo.Read）："
+                    + cut(uploadInfo.toString(), 180));
+        }
+        String resourceUrl = "";
+        JsonNode urls = headerInfo.path("resourceUrls");
+        if (urls.isArray() && !urls.isEmpty()) {
+            resourceUrl = urls.get(0).asText("");
+        }
+        if (!StringUtils.hasText(resourceUrl)) {
+            resourceUrl = headerInfo.path("resourceUrl").asText("");
+        }
+        if (!StringUtils.hasText(resourceUrl)) {
+            throw new BusinessException("钉盘上传信息缺少 resourceUrl");
+        }
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(resourceUrl))
+                .timeout(Duration.ofSeconds(60))
+                .PUT(HttpRequest.BodyPublishers.ofFile(file));
+        JsonNode headers = headerInfo.path("headers");
+        if (headers.isObject()) {
+            Iterator<String> names = headers.fieldNames();
+            while (names.hasNext()) {
+                String key = names.next();
+                String value = headers.path(key).asText("");
+                if (StringUtils.hasText(key) && StringUtils.hasText(value)) {
+                    builder.header(key, value);
+                }
+            }
+        }
+        HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 300) {
+            throw new BusinessException("钉盘 OSS 上传失败 HTTP " + response.statusCode()
+                    + "：" + cut(response.body(), 160));
+        }
+    }
+
+    private JsonNode commitStorageFile(String token, String spaceId, String unionId, String fileName,
+                                       String uploadKey, long fileSize) throws Exception {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("uploadKey", uploadKey);
+        body.put("name", fileName);
+        body.put("parentId", "0");
+        ObjectNode option = body.putObject("option");
+        option.put("size", fileSize);
+        option.put("conflictStrategy", "AUTO_RENAME");
+        return apiPost(token, "https://api.dingtalk.com/v1.0/storage/spaces/" + encode(spaceId)
+                + "/files/commit?unionId=" + encode(unionId), body);
+    }
+
     private static String buildDriveOpenUrl(String spaceId, String fileId, String fileName) {
         return "dingtalk://dingtalkclient/action/open_file?spaceId=" + encode(spaceId)
                 + "&fileId=" + encode(fileId)
                 + "&fileName=" + encode(fileName == null ? "resume" : fileName)
                 + "&fileType=file";
+    }
+
+    private static String firstText(JsonNode node, String... fields) {
+        if (node == null || fields == null) {
+            return "";
+        }
+        for (String field : fields) {
+            String value = node.path(field).asText("");
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return "";
     }
 
     private static String sanitizeDriveFileName(String fileName, Path file) {
@@ -990,11 +1318,12 @@ public class DingTalkCalendarClient {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         JsonNode json = objectMapper.readTree(response.body() == null || response.body().isBlank() ? "{}" : response.body());
         if (response.statusCode() >= 300) {
-            throw new BusinessException("钉钉接口失败 HTTP " + response.statusCode() + "：" + briefDingError(json, response.body()));
+            throw new BusinessException(dingHttpFail(response.statusCode(), url, json, response.body()));
         }
         String code = json.path("code").asText("");
         if (StringUtils.hasText(code) && !"0".equals(code)) {
-            throw new BusinessException("钉钉接口失败：" + briefDingError(json, response.body()));
+            throw new BusinessException("钉钉接口失败：" + briefDingError(json, response.body())
+                    + hintForPrivilege(url, briefDingError(json, response.body())));
         }
         return json;
     }
@@ -1007,16 +1336,62 @@ public class DingTalkCalendarClient {
                 .header("x-acs-dingtalk-access-token", token)
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         JsonNode json = objectMapper.readTree(response.body() == null || response.body().isBlank() ? "{}" : response.body());
         if (response.statusCode() >= 300) {
-            throw new BusinessException("钉钉接口失败 HTTP " + response.statusCode() + "：" + briefDingError(json, response.body()));
+            throw new BusinessException(dingHttpFail(response.statusCode(), url, json, response.body()));
         }
         String code = json.path("code").asText("");
         if (StringUtils.hasText(code) && !"0".equals(code)) {
-            throw new BusinessException("钉钉接口失败：" + briefDingError(json, response.body()));
+            throw new BusinessException("钉钉接口失败：" + briefDingError(json, response.body())
+                    + hintForPrivilege(url, briefDingError(json, response.body())));
         }
         return json;
+    }
+
+    private static String dingHttpFail(int status, String url, JsonNode json, String raw) {
+        String brief = briefDingError(json, raw);
+        String path = url == null ? "" : url.replaceFirst("^https://api\\.dingtalk\\.com", "");
+        int q = path.indexOf('?');
+        if (q > 0) {
+            path = path.substring(0, q);
+        }
+        return "钉钉接口失败 HTTP " + status + "：" + brief
+                + (StringUtils.hasText(path) ? "（" + path + "）" : "")
+                + hintForPrivilege(url, brief);
+    }
+
+    private static String hintForPrivilege(String url, String brief) {
+        if (url == null || brief == null) {
+            return "";
+        }
+        String lower = brief.toLowerCase();
+        if (!(lower.contains("privilege") || lower.contains("permission") || lower.contains("权限") || lower.contains("forbidden"))) {
+            return "";
+        }
+        if (url.contains("/storage/spaces") && !url.contains("/files/") && !url.contains("/dentries/")) {
+            return "；请开通 Storage.Space.Write";
+        }
+        if (url.contains("openInfos") && url.contains("/storage/")) {
+            return "；请开通 Storage.File.Read（获取简历 HTTPS 预览链接，PC 端可点开）";
+        }
+        if (url.contains("uploadInfos") && url.contains("/storage/")) {
+            return "；APP 空间需先给操作人临时授权（代码会自动授权）；请确认已开通 Storage.UploadInfo.Read"
+                    + " 与 Storage.Permission.Write，且权限已审批生效";
+        }
+        if (url.contains("/files/commit")) {
+            return "；请开通 Storage.File.Write";
+        }
+        if (url.contains("/permissions")) {
+            return "；请开通 Storage.Permission.Write（APP 空间上传前给操作人临时授权）";
+        }
+        if (url.contains("/drive/spaces") && url.contains("uploadInfos")) {
+            return "；请确认应用具备钉盘上传权限，且操作人对该空间有上传权";
+        }
+        if (url.contains("/drive/spaces")) {
+            return "；GET /drive/spaces 的 spaceType 仅支持 org，应用空间请用 Storage 添加空间接口";
+        }
+        return "；请检查钉钉应用权限是否已审批生效";
     }
 
     private static String cut(String text, int max) {
@@ -1168,8 +1543,12 @@ public class DingTalkCalendarClient {
         }
     }
 
-    /** 已上传到钉盘的简历：日程描述挂 openUrl / fileId */
-    public record DriveFile(String spaceId, String fileId, String fileName, String openUrl) {
+    /** 已上传到钉盘的简历：优先用 HTTPS 预览链接（PC 可点）；uuid 用于 Storage 授权 */
+    public record DriveFile(String spaceId, String fileId, String fileName, String openUrl, String uuid,
+                            String previewUrl) {
+        public DriveFile(String spaceId, String fileId, String fileName, String openUrl, String uuid) {
+            this(spaceId, fileId, fileName, openUrl, uuid, null);
+        }
     }
 
     public record DingIdentity(String userId, String unionId) {
