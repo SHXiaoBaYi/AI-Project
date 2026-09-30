@@ -499,10 +499,11 @@ public class DingTalkRobotAssistantService {
                     if (starts.size() >= MAX_SLOT_LINES || slot.getStart() == null) {
                         break;
                     }
+                    // 结束时刻 = 开始 + 意图时长（如 20 分钟 → 15:00 ~ 15:20），不用整点窗
                     int slotDuration = duration;
                     if (slot.getEnd() != null) {
                         long mins = Duration.between(slot.getStart(), slot.getEnd()).toMinutes();
-                        if (mins >= 15 && mins <= 240) {
+                        if (mins >= 15 && mins <= 240 && mins == duration) {
                             slotDuration = (int) mins;
                         }
                     }
@@ -531,8 +532,9 @@ public class DingTalkRobotAssistantService {
                 .append("：共 ").append(starts.size())
                 .append(" 个推荐").append(intentLabel).append("时段").append(jobBit).append("：\n");
         for (int i = 0; i < starts.size(); i++) {
-            body.append(i + 1).append(". ").append(starts.get(i).format(CARD_TIME))
-                    .append("（").append(durations.get(i)).append(" 分）\n");
+            LocalDateTime s = starts.get(i);
+            LocalDateTime e = s.plusMinutes(durations.get(i));
+            body.append(i + 1).append(". ").append(formatSlotRange(s, e)).append('\n');
         }
         body.append("\n点下方按钮将打开系统页面（钉钉内免登），表单内可选上方推荐时段（默认第一个）");
         if (multi) {
@@ -587,7 +589,7 @@ public class DingTalkRobotAssistantService {
                 DingTalkIntentExecuteVO.SlotOption opt = new DingTalkIntentExecuteVO.SlotOption();
                 opt.setStart(slot.start().format(API_TIME));
                 opt.setDurationMin(slot.durationMin() <= 0 ? fallbackDuration : slot.durationMin());
-                opt.setLabel(slot.start().format(CARD_TIME) + "（" + opt.getDurationMin() + " 分）");
+                opt.setLabel(formatSlotRange(slot.start(), slot.start().plusMinutes(opt.getDurationMin())));
                 out.add(opt);
             }
         }
@@ -595,10 +597,22 @@ public class DingTalkRobotAssistantService {
             DingTalkIntentExecuteVO.SlotOption opt = new DingTalkIntentExecuteVO.SlotOption();
             opt.setStart(fallbackStart.format(API_TIME));
             opt.setDurationMin(fallbackDuration);
-            opt.setLabel(fallbackStart.format(CARD_TIME) + "（" + fallbackDuration + " 分）");
+            opt.setLabel(formatSlotRange(fallbackStart, fallbackStart.plusMinutes(fallbackDuration)));
             out.add(opt);
         }
         return out;
+    }
+
+    /** 如：10-09 15:00 ~ 16:00 */
+    private static String formatSlotRange(LocalDateTime start, LocalDateTime end) {
+        if (start == null) {
+            return "";
+        }
+        LocalDateTime e = end != null ? end : start;
+        if (start.toLocalDate().equals(e.toLocalDate())) {
+            return start.format(CARD_TIME) + " ~ " + e.format(DateTimeFormatter.ofPattern("HH:mm"));
+        }
+        return start.format(CARD_TIME) + " ~ " + e.format(CARD_TIME);
     }
 
     private String issueIntentTicket(String kind, String action, Long targetUserId, LocalDateTime start,

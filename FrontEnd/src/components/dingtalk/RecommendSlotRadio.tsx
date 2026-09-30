@@ -10,8 +10,9 @@ export type RecommendSlotOption = {
 export function formatRecommendSlotLabel(slot: RecommendSlotOption) {
   if (slot.label?.trim()) return slot.label.trim();
   const start = dayjs(slot.start);
-  const time = start.isValid() ? start.format('M月D日 HH:mm') : slot.start;
-  return `${time}（${slot.durationMin || 60} 分）`;
+  if (!start.isValid()) return slot.start;
+  const end = start.add(slot.durationMin || 60, 'minute');
+  return `${start.format('MM-DD HH:mm')} ~ ${end.format('HH:mm')}`;
 }
 
 type Props = {

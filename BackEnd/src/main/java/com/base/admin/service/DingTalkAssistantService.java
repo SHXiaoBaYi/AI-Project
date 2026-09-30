@@ -1047,7 +1047,8 @@ public class DingTalkAssistantService {
                     DingTalkAssistantSuggestVO.SlotOption slot = new DingTalkAssistantSuggestVO.SlotOption();
                     slot.setStart(cursor);
                     slot.setEnd(slotEnd);
-                    slot.setLabel(cursor.format(LABEL_TIME) + "–" + slotEnd.format(LABEL_TIME));
+                    slot.setLabel(cursor.format(DAY_TAB) + " " + cursor.format(LABEL_TIME)
+                            + " ~ " + slotEnd.format(LABEL_TIME));
                     group.getSlots().add(slot);
                     cursor = cursor.plusMinutes(step);
                 }
@@ -1495,12 +1496,13 @@ public class DingTalkAssistantService {
                 字段：
                 action: interview|meeting|report|busy_query
                 jobName: 岗位名或 null（仅面试时尽量提取，如「品牌总监」）
-                durationMin: 15~240 的整数或 null
+                durationMin: 15~240 的整数或 null。用户说了「20分钟/半小时/1小时」等必须原样换算填入；没提时长才填 null
                 startDate: yyyy-MM-dd 或 null（相对词「今天/明天/后天/本周/下周」请输出 null，由服务端自己算）
                 endDate: yyyy-MM-dd 或 null
                 earliestTime: HH:mm 或 null（如「下午三点后」→ 15:00；拿不准则 null）
                 规则：提到面试/邀约/候选人 → interview；开会/会议 → meeting；汇报 → report；只问有没有空 → busy_query。
                 今天是 %s。日期必须 ≥ 今天；拿不准就输出 null。用户写了具体日期（如 10/9）时必须填 startDate=endDate。
+                禁止把用户明确的时长改成默认 60。
                 """.formatted(today);
         String raw = aiChatService.chat(system, "用户原话：\n" + message);
         if (!StringUtils.hasText(raw)) {
@@ -1515,7 +1517,9 @@ public class DingTalkAssistantService {
         try {
             JsonNode node = objectMapper.readTree(json);
             String action = normalizeAction(textOrNull(node, "action"), fallback.action());
-            Integer duration = intOrNull(node, "durationMin");
+            // 用户原话里写明的时长优先，防止模型默认成 60
+            Integer explicitDuration = extractDuration(message);
+            Integer duration = explicitDuration != null ? explicitDuration : intOrNull(node, "durationMin");
             if (duration == null) {
                 duration = fallback.durationMin();
             }
@@ -1538,8 +1542,15 @@ public class DingTalkAssistantService {
             duration = clampDuration(duration, action, rule);
             // 用户口语里已钉死日期/时段时，以启发式为准，避免 AI 扩成整段 lookAhead
             if (fallback.pinnedRange()) {
-                return new ParsedIntent(action, jobName, null, duration,
-                        fallback.rangeStart(), fallback.rangeEnd(), true);
+                rangeStart = fallback.rangeStart();
+                rangeEnd = fallback.rangeEnd();
+                // 精确时刻 + 最终时长：结束=开始+时长（如 15:00 + 20分 → 15:20）
+                if (extractExactTimeOfDay(message) != null && rangeStart != null) {
+                    LocalDateTime endAt = rangeStart.plusMinutes(duration);
+                    LocalDateTime dayWorkEnd = rangeStart.toLocalDate().atTime(hours.workEnd());
+                    rangeEnd = endAt.isAfter(dayWorkEnd) ? dayWorkEnd : endAt;
+                }
+                return new ParsedIntent(action, jobName, null, duration, rangeStart, rangeEnd, true);
             }
             return new ParsedIntent(action, jobName, null, duration, rangeStart, rangeEnd, false);
         } catch (Exception e) {
@@ -1968,7 +1979,7 @@ public class DingTalkAssistantService {
         if (msg.contains("一小时") || msg.contains("1小时") || msg.contains("1 小时") || msg.contains("一个小时")) {
             return 60;
         }
-        Matcher timed = Pattern.compile("时长\\s*(\\d{1,3})\\s*分钟").matcher(msg);
+        Matcher timed = Pattern.compile("时长\\s*(\\d{1,3})\\s*分钟?").matcher(msg);
         if (timed.find()) {
             return Integer.parseInt(timed.group(1));
         }
@@ -1976,9 +1987,13 @@ public class DingTalkAssistantService {
         if (timedHour.find()) {
             return (int) Math.round(Double.parseDouble(timedHour.group(1)) * 60);
         }
-        Matcher min = Pattern.compile("(\\d{1,3})\\s*分钟").matcher(msg);
+        Matcher min = Pattern.compile("(\\d{1,3})\\s*分钟?").matcher(msg);
         if (min.find()) {
             return Integer.parseInt(min.group(1));
+        }
+        Matcher minEn = Pattern.compile("(\\d{1,3})\\s*(?:min|mins|minutes)\\b", Pattern.CASE_INSENSITIVE).matcher(msg);
+        if (minEn.find()) {
+            return Integer.parseInt(minEn.group(1));
         }
         Matcher hour = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*小时").matcher(msg);
         if (hour.find()) {
