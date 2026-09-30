@@ -31,6 +31,6 @@ public class DingTalkAppDTO {
     @Schema(description = "是否启用 1=启用 0=停用", requiredMode = Schema.RequiredMode.REQUIRED, example = "1")
     private Integer enabled;
 
-    @Schema(description = "王方扬机器人联调：local / online；非王方扬提交时忽略")
+    @Schema(description = "联调账号机器人路由 local/online；仅 wangfangyang/thh/tbb 提交时生效")
     private String robotRoute;
 }

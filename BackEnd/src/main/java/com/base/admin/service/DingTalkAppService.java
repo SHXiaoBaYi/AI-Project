@@ -11,12 +11,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.Locale;
+import java.util.Set;
+
 @Service
 @RequiredArgsConstructor
 public class DingTalkAppService {
 
-    /** 唯一可切换机器人本机/线上的账号 */
-    public static final String ROBOT_DEBUG_USERNAME = "wangfangyang";
+    /** 可切换机器人本机/线上的账号（共用同一 robot_route 开关） */
+    public static final Set<String> ROBOT_DEBUG_USERNAMES = Set.of("wangfangyang", "thh", "tbb");
     public static final String ROUTE_LOCAL = "local";
     public static final String ROUTE_ONLINE = "online";
 
@@ -110,7 +113,7 @@ public class DingTalkAppService {
 
     /**
      * 按发起人决定 ActionCard H5 走本机还是线上。
-     * 仅王方扬可读库里的开关（默认 local）；其他人固定 online。
+     * wangfangyang / thh / tbb 共用库里的开关（默认 local）；其他人固定 online。
      */
     public String resolveRobotRoute(Long senderUserId) {
         if (isRobotDebugOperator(senderUserId)) {
@@ -128,12 +131,18 @@ public class DingTalkAppService {
                 "SELECT username FROM sys_user WHERE user_id = ? AND is_active = 1 LIMIT 1",
                 rs -> rs.next() ? rs.getString(1) : null,
                 userId);
-        return ROBOT_DEBUG_USERNAME.equalsIgnoreCase(username == null ? "" : username.trim());
+        return isRobotDebugUsername(username);
     }
 
     public boolean isCurrentRobotDebugOperator() {
-        String username = SecurityUtils.getCurrentUsername();
-        return ROBOT_DEBUG_USERNAME.equalsIgnoreCase(username == null ? "" : username.trim());
+        return isRobotDebugUsername(SecurityUtils.getCurrentUsername());
+    }
+
+    private static boolean isRobotDebugUsername(String username) {
+        if (!StringUtils.hasText(username)) {
+            return false;
+        }
+        return ROBOT_DEBUG_USERNAMES.contains(username.trim().toLowerCase(Locale.ROOT));
     }
 
     /** 测试连接：密钥留空时用已保存的值，不把密钥回传。 */

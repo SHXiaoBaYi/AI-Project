@@ -149,21 +149,21 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
           <div className='mb-4 rounded border border-neutral-200 bg-neutral-50 px-4 py-3'>
             <div className='mb-2 flex flex-wrap items-center gap-2'>
               <span className='font-medium'>机器人联调环境</span>
-              {canEditRobotRoute ? <Tag color='blue'>王方扬可切换</Tag> : <Tag>其他人固定线上</Tag>}
+              {canEditRobotRoute ? <Tag color='blue'>wangfangyang / thh / tbb 可切换</Tag> : <Tag>其他人固定线上</Tag>}
             </div>
             <p className='mb-3 text-sm text-neutral-500'>
-              仅账号 wangfangyang（王方扬）发起的机器人对话受此开关影响：开=本机 H5（默认），关=线上
-              H5。其他用户发起的对话一律走线上，不可改。
+              账号 wangfangyang、thh、tbb 发起的机器人对话共用此开关：开=本机 H5（默认），关=线上
+              H5。其他用户一律走线上，不可改。
             </p>
             <Form.Item
               name='robotRouteLocal'
-              label='王方扬 → 本机'
+              label='联调账号 → 本机'
               valuePropName='checked'
               className='mb-0'
               extra={
                 canEditRobotRoute
                   ? '打开：卡片打开本机 Vite（local-h5-base-url）；关闭：打开线上 /shxby'
-                  : '当前登录人不是王方扬，保存时不会改此开关'
+                  : '当前登录人不在联调白名单，保存时不会改此开关'
               }
             >
               <Switch disabled={!canEdit || !canEditRobotRoute} />

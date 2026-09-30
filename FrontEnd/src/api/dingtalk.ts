@@ -8,7 +8,7 @@ export type DingTalkAppVO = {
   clientSecretMasked?: string;
   hasClientSecret?: boolean;
   enabled: number;
-  /** local=本机 online=线上；仅王方扬可改 */
+  /** local=本机 online=线上；wangfangyang/thh/tbb 可改 */
   robotRoute?: 'local' | 'online' | string;
   canEditRobotRoute?: boolean;
 };
