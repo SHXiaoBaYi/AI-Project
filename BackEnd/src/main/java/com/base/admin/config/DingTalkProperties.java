@@ -31,6 +31,12 @@ public class DingTalkProperties {
      */
     private String h5BaseUrl = "";
 
+    /**
+     * 王方扬选「本机」时 ActionCard 打开的 H5 根。
+     * 例：http://127.0.0.1:3000 。留空则用 h5-base-url，再空则用 http://127.0.0.1:3000。
+     */
+    private String localH5BaseUrl = "";
+
     @Data
     public static class Robot {
         /** 是否启动 Stream 长连接；本地可关，生产常驻服务建议开 */

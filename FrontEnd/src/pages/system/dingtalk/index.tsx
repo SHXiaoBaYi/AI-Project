@@ -1,15 +1,8 @@
-import { memo, useEffect, useMemo, useState } from 'react';
-import { App, Button, Card, Form, Input, Switch, Table, Tag } from 'antd';
+import { memo, useEffect, useState } from 'react';
+import { App, Button, Card, Form, Input, Switch, Tag } from 'antd';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import { usePermission } from '@/hooks/usePermission';
-import {
-  getDingTalkAppApi,
-  getDingTalkDirectoryApi,
-  saveDingTalkAppApi,
-  testDingTalkAppApi,
-  type DingTalkAppVO,
-  type DingTalkDirectoryUser,
-} from '@/api/dingtalk';
+import { getDingTalkAppApi, saveDingTalkAppApi, testDingTalkAppApi, type DingTalkAppVO } from '@/api/dingtalk';
 
 const DingTalkConfigPage = memo(function DingTalkConfigPage() {
   const { message } = App.useApp();
@@ -20,15 +13,14 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saved, setSaved] = useState<DingTalkAppVO | null>(null);
-  const [directory, setDirectory] = useState<DingTalkDirectoryUser[]>([]);
-  const [loadingDirectory, setLoadingDirectory] = useState(false);
-  const [keyword, setKeyword] = useState('');
+  const [canEditRobotRoute, setCanEditRobotRoute] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
       const data = await getDingTalkAppApi();
       setSaved(data);
+      setCanEditRobotRoute(!!data?.canEditRobotRoute);
       form.setFieldsValue({
         appId: data?.appId || '',
         agentId: data?.agentId || '',
@@ -36,6 +28,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
         corpId: data?.corpId || '',
         clientSecret: '',
         enabled: data?.enabled === 1,
+        robotRouteLocal: (data?.robotRoute || 'local') === 'local',
       });
     } finally {
       setLoading(false);
@@ -56,6 +49,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
       corpId: values.corpId ? String(values.corpId).trim() : '',
       clientSecret: values.clientSecret ? String(values.clientSecret).trim() : undefined,
       enabled: values.enabled ? 1 : 0,
+      robotRoute: values.robotRouteLocal ? 'local' : 'online',
     };
   };
 
@@ -82,26 +76,6 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
     }
   };
 
-  const loadDirectory = async () => {
-    setLoadingDirectory(true);
-    try {
-      const rows = await getDingTalkDirectoryApi();
-      setDirectory(rows ?? []);
-      setKeyword('');
-    } finally {
-      setLoadingDirectory(false);
-    }
-  };
-
-  const filteredDirectory = useMemo(() => {
-    const text = keyword.trim().toLowerCase();
-    if (!text) return directory;
-    return directory.filter((row) => {
-      const blob = `${row.name} ${row.mobile} ${row.telephone || ''} ${row.userid} ${row.unionId || ''}`.toLowerCase();
-      return blob.includes(text);
-    });
-  }, [directory, keyword]);
-
   return (
     <div className='flex flex-col gap-4'>
       <Card
@@ -111,12 +85,8 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
       >
         <p className='mb-4 text-sm text-neutral-500'>
           用于钉钉扫码登录、按手机号绑定钉钉身份，以及创建/取消日程、简历上传钉盘。Client Secret
-          只保存到数据库，页面只显示脱敏结果。扫码登录需在钉钉开放平台配置回调域名，并与本系统登录页同源。 机器人
-          ActionCard 会打开 H5（/dingtalk/bridge）并走企业免登；请把该域名配进钉钉应用「应用首页/PC
-          端首页」可访问地址，且 CorpId 已填写。简历默认上传到应用存储空间（需 Storage.Space.Write / Permission.Write /
-          UploadInfo.Read / File.Write / File.Read。上传后取 HTTPS 预览链接写入日程 richTextDescription，PC
-          可点开）。可用 dingtalk.resume-space-id 覆盖为指定 Drive 空间；可用 dingtalk.h5-base-url 指定 H5
-          根地址（默认从 upload-public-base 去掉 /api）。
+          只保存到数据库，页面只显示脱敏结果。扫码登录需在钉钉开放平台配置回调域名，并与本系统登录页同源。机器人
+          ActionCard 会打开 H5（/dingtalk/bridge）并走企业免登；CorpId 必填。简历默认上传应用存储空间。
         </p>
         {saved?.hasClientSecret ? (
           <div className='mb-4 text-sm text-neutral-600'>
@@ -128,7 +98,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
           form={form}
           layout='vertical'
           disabled={!canEdit}
-          initialValues={{ enabled: true }}
+          initialValues={{ enabled: true, robotRouteLocal: true }}
         >
           <Form.Item
             name='appId'
@@ -154,9 +124,9 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
           <Form.Item
             name='corpId'
             label='CorpId'
-            extra='填写后扫码仅允许本企业专属账号，避免扫到个人钉钉'
+            extra='填写后扫码仅允许本企业专属账号，免登也依赖此字段'
           >
-            <Input placeholder='钉钉企业 CorpId（可选，建议填写）' />
+            <Input placeholder='钉钉企业 CorpId（建议填写）' />
           </Form.Item>
           <Form.Item
             name='clientSecret'
@@ -175,6 +145,30 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
           >
             <Switch />
           </Form.Item>
+
+          <div className='mb-4 rounded border border-neutral-200 bg-neutral-50 px-4 py-3'>
+            <div className='mb-2 flex flex-wrap items-center gap-2'>
+              <span className='font-medium'>机器人联调环境</span>
+              {canEditRobotRoute ? <Tag color='blue'>王方扬可切换</Tag> : <Tag>其他人固定线上</Tag>}
+            </div>
+            <p className='mb-3 text-sm text-neutral-500'>
+              仅账号 wangfangyang（王方扬）发起的机器人对话受此开关影响：开=本机 H5（默认），关=线上
+              H5。其他用户发起的对话一律走线上，不可改。
+            </p>
+            <Form.Item
+              name='robotRouteLocal'
+              label='王方扬 → 本机'
+              valuePropName='checked'
+              className='mb-0'
+              extra={
+                canEditRobotRoute
+                  ? '打开：卡片打开本机 Vite（local-h5-base-url）；关闭：打开线上 /shxby'
+                  : '当前登录人不是王方扬，保存时不会改此开关'
+              }
+            >
+              <Switch disabled={!canEdit || !canEditRobotRoute} />
+            </Form.Item>
+          </div>
         </Form>
         <div className='flex gap-2'>
           <PermissionButton
@@ -193,71 +187,6 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
             测试连接
           </Button>
         </div>
-      </Card>
-      <Card
-        title='应用读到的通讯录'
-        extra={
-          <Button
-            loading={loadingDirectory}
-            onClick={() => void loadDirectory()}
-          >
-            读取
-          </Button>
-        }
-      >
-        <p className='mb-3 text-sm text-neutral-500'>
-          这里是钉钉接口返回的已加入成员，绑定用的就是这份数据。可按姓名或手机号检索，对照 15102131256、13876985672
-          是否出现、手机号是否为空、是不是企业账号。
-        </p>
-        {directory.length > 0 ? (
-          <>
-            <Input.Search
-              allowClear
-              className='mb-3 max-w-md'
-              placeholder='检索姓名、手机号、userid'
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-            />
-            <div className='mb-2 text-sm text-neutral-500'>
-              共 {directory.length} 人{keyword.trim() ? `，匹配 ${filteredDirectory.length} 人` : ''}
-            </div>
-            <Table<DingTalkDirectoryUser>
-              size='small'
-              rowKey='userid'
-              pagination={false}
-              scroll={{ x: 1100, y: 480 }}
-              dataSource={filteredDirectory}
-              columns={[
-                { title: '姓名', dataIndex: 'name', width: 120, fixed: 'left' },
-                { title: '手机号', dataIndex: 'mobile', width: 140, render: (value: string) => value || '—' },
-                { title: '国家码', dataIndex: 'stateCode', width: 90, render: (value: string) => value || '—' },
-                { title: '分机', dataIndex: 'telephone', width: 120, render: (value: string) => value || '—' },
-                {
-                  title: '企业账号',
-                  dataIndex: 'exclusiveAccount',
-                  width: 100,
-                  render: (value: boolean) => (value ? <Tag color='blue'>是</Tag> : <Tag>否</Tag>),
-                },
-                {
-                  title: '隐藏手机号',
-                  dataIndex: 'hideMobile',
-                  width: 110,
-                  render: (value: boolean) => (value ? <Tag color='orange'>是</Tag> : <Tag>否</Tag>),
-                },
-                {
-                  title: '已激活',
-                  dataIndex: 'active',
-                  width: 90,
-                  render: (value: boolean) => (value ? <Tag color='success'>是</Tag> : <Tag>否</Tag>),
-                },
-                { title: 'userid', dataIndex: 'userid', width: 180 },
-                { title: 'unionId', dataIndex: 'unionId', width: 220, render: (value: string) => value || '—' },
-              ]}
-            />
-          </>
-        ) : (
-          <div className='py-6 text-sm text-neutral-400'>{loadingDirectory ? '正在读取钉钉通讯录' : '还没有读取'}</div>
-        )}
       </Card>
     </div>
   );

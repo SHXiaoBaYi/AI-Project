@@ -3,14 +3,14 @@ import { Button, Result, Spin, Typography } from 'antd';
 import { getDingTalkLoginConfigApi, dingTalkSsoApi } from '@/api/auth';
 import { executeDingTalkIntentApi, type DingTalkIntentExecuteResult } from '@/api/dingtalk';
 import { CODE_LOGIN_CONFLICT } from '@/api/request';
-import { setToken, getToken } from '@/utils/auth';
-import { withBase } from '@/utils/basePath';
+import { setToken, getToken, removeToken } from '@/utils/auth';
 
 const DD_JSAPI = 'https://g.alicdn.com/dingding/dingtalk-jsapi/3.0.25/dingtalk.open.js';
 
 declare global {
   interface Window {
     dd?: {
+      env?: { platform?: string };
       ready: (fn: () => void) => void;
       error?: (fn: (err: unknown) => void) => void;
       runtime?: {
@@ -18,10 +18,11 @@ declare global {
           requestAuthCode: (opts: {
             corpId: string;
             onSuccess: (res: { code?: string }) => void;
-            onFail: (err: { errorMessage?: string; message?: string }) => void;
+            onFail: (err: { errorMessage?: string; message?: string; errorCode?: string }) => void;
           }) => void;
         };
       };
+      getAuthCode?: (opts: { corpId: string }) => Promise<{ code?: string }>;
       biz?: {
         navigation?: {
           close?: () => void;
@@ -31,8 +32,14 @@ declare global {
   }
 }
 
-function isDingTalkUa() {
-  return /DingTalk/i.test(navigator.userAgent || '');
+function isDingTalkClient() {
+  const ua = navigator.userAgent || '';
+  if (/DingTalk/i.test(ua)) return true;
+  try {
+    return !!window.dd?.env?.platform;
+  } catch {
+    return false;
+  }
 }
 
 function loadDingTalkJsapi() {
@@ -56,106 +63,82 @@ function loadDingTalkJsapi() {
   });
 }
 
+/** 静默免登：requestAuthCode / getAuthCode，无需用户点击 */
 function requestCorpAuthCode(corpId: string) {
   return new Promise<string>((resolve, reject) => {
-    if (!window.dd?.ready || !window.dd.runtime?.permission?.requestAuthCode) {
-      reject(new Error('当前环境不支持钉钉免登'));
-      return;
-    }
-    window.dd.ready(() => {
-      window.dd!.runtime!.permission!.requestAuthCode({
+    let settled = false;
+    const ok = (code: string) => {
+      if (settled) return;
+      settled = true;
+      resolve(code);
+    };
+    const fail = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      const e = err as { errorMessage?: string; message?: string };
+      reject(new Error(e?.errorMessage || e?.message || '免登授权失败'));
+    };
+
+    const tryLegacy = () => {
+      if (!window.dd?.runtime?.permission?.requestAuthCode) {
+        fail(new Error('当前环境不支持钉钉免登 JSAPI'));
+        return;
+      }
+      window.dd.runtime.permission.requestAuthCode({
         corpId,
         onSuccess: (res) => {
-          if (res?.code) {
-            resolve(res.code);
-          } else {
-            reject(new Error('未获取到免登授权码'));
-          }
+          if (res?.code) ok(res.code);
+          else fail(new Error('未获取到免登授权码'));
         },
-        onFail: (err) => {
-          reject(new Error(err?.errorMessage || err?.message || '免登授权失败'));
-        },
+        onFail: fail,
       });
-    });
+    };
+
+    const run = () => {
+      if (settled) return;
+      if (typeof window.dd?.getAuthCode === 'function') {
+        window.dd
+          .getAuthCode({ corpId })
+          .then((res) => {
+            if (res?.code) ok(res.code);
+            else tryLegacy();
+          })
+          .catch(() => tryLegacy());
+        return;
+      }
+      tryLegacy();
+    };
+
+    if (!window.dd?.ready) {
+      fail(new Error('钉钉 JSAPI 未就绪'));
+      return;
+    }
+    window.dd.ready(run);
   });
 }
 
-function oauthAuthorizeUrl(clientId: string, corpId: string | undefined, ticket: string) {
-  const redirect = `${window.location.origin}${withBase('/dingtalk/bridge')}`;
-  const params = new URLSearchParams({
-    redirect_uri: redirect,
-    response_type: 'code',
-    client_id: clientId,
-    scope: 'openid',
-    prompt: 'consent',
-    state: ticket,
-  });
-  if (corpId) {
-    params.set('exclusiveLogin', 'true');
-    params.set('exclusiveCorpId', corpId);
+async function ssoWithForce(authCode: string, mode: 'corp' | 'oauth') {
+  try {
+    return await dingTalkSsoApi(authCode, mode, true);
+  } catch (err) {
+    const e = err as Error & { code?: number; data?: { forceTicket?: string } };
+    if (e.code === CODE_LOGIN_CONFLICT) {
+      const forceTicket =
+        e.data && typeof e.data === 'object' && 'forceTicket' in e.data
+          ? String((e.data as { forceTicket?: string }).forceTicket || '')
+          : '';
+      return dingTalkSsoApi(authCode, mode, true, forceTicket || undefined);
+    }
+    throw err;
   }
-  return `https://login.dingtalk.com/oauth2/auth?${params.toString()}`;
 }
 
 export default function DingTalkBridgePage() {
   const [status, setStatus] = useState<'loading' | 'pick' | 'done' | 'error'>('loading');
-  const [tip, setTip] = useState('正在连接钉钉…');
+  const [tip, setTip] = useState('正在免登…');
   const [message, setMessage] = useState('');
   const [candidates, setCandidates] = useState<DingTalkIntentExecuteResult['candidates']>([]);
   const ran = useRef(false);
-
-  const finishLogin = useCallback(async (jwt: string) => {
-    setToken(jwt);
-  }, []);
-
-  const ensureLogin = useCallback(
-    async (ticket: string) => {
-      if (getToken()) {
-        return;
-      }
-      const config = await getDingTalkLoginConfigApi();
-      if (!config?.enabled || !config.clientId) {
-        throw new Error(config?.message || '钉钉登录未配置');
-      }
-
-      const params = new URLSearchParams(window.location.search);
-      const oauthCode = params.get('authCode') || params.get('code');
-      if (oauthCode) {
-        const res = await dingTalkSsoApi(oauthCode, 'oauth', true);
-        await finishLogin(res.token);
-        window.history.replaceState({}, '', `${window.location.pathname}?ticket=${encodeURIComponent(ticket)}`);
-        return;
-      }
-
-      if (isDingTalkUa() && config.corpId) {
-        setTip('正在免登…');
-        await loadDingTalkJsapi();
-        const code = await requestCorpAuthCode(config.corpId);
-        try {
-          const res = await dingTalkSsoApi(code, 'corp', true);
-          await finishLogin(res.token);
-          return;
-        } catch (err) {
-          const e = err as Error & { code?: number; data?: { forceTicket?: string } };
-          if (e.code === CODE_LOGIN_CONFLICT) {
-            const forceTicket =
-              e.data && typeof e.data === 'object' && 'forceTicket' in e.data
-                ? String((e.data as { forceTicket?: string }).forceTicket || '')
-                : '';
-            const res = await dingTalkSsoApi(code, 'corp', true, forceTicket || undefined);
-            await finishLogin(res.token);
-            return;
-          }
-          throw err;
-        }
-      }
-
-      setTip('跳转钉钉授权…');
-      window.location.href = oauthAuthorizeUrl(config.clientId, config.corpId, ticket);
-      throw new Error('__redirect__');
-    },
-    [finishLogin],
-  );
 
   const runIntent = useCallback(async (ticket: string) => {
     setTip('正在执行…');
@@ -170,6 +153,52 @@ export default function DingTalkBridgePage() {
     setStatus('done');
   }, []);
 
+  const ensureSilentLogin = useCallback(async () => {
+    if (getToken()) {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const oauthCode = params.get('authCode') || params.get('code');
+    const ticket = params.get('ticket') || params.get('state') || '';
+    const corpIdFromUrl = (params.get('corpId') || '').trim();
+
+    if (oauthCode) {
+      setTip('正在登录…');
+      const res = await ssoWithForce(oauthCode, 'oauth');
+      setToken(res.token);
+      if (ticket) {
+        window.history.replaceState(
+          {},
+          '',
+          `${window.location.pathname}?ticket=${encodeURIComponent(ticket)}${
+            corpIdFromUrl ? `&corpId=${encodeURIComponent(corpIdFromUrl)}` : ''
+          }`,
+        );
+      }
+      return;
+    }
+
+    setTip('正在免登…');
+    const config = await getDingTalkLoginConfigApi();
+    const corpId = corpIdFromUrl || (config.corpId || '').trim();
+    if (!config?.enabled || !config.clientId) {
+      throw new Error(config?.message || '钉钉登录未配置');
+    }
+    if (!corpId) {
+      throw new Error('未配置企业 CorpId，无法免登。请在「钉钉应用配置」填写 CorpId');
+    }
+    if (!isDingTalkClient()) {
+      throw new Error('请在钉钉客户端内打开此链接（当前非钉钉环境，无法静默免登）');
+    }
+
+    await loadDingTalkJsapi();
+    // 清理可能残留的无效 token，避免干扰
+    removeToken();
+    const code = await requestCorpAuthCode(corpId);
+    const res = await ssoWithForce(code, 'corp');
+    setToken(res.token);
+  }, []);
+
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
@@ -182,22 +211,22 @@ export default function DingTalkBridgePage() {
     }
     (async () => {
       try {
-        await ensureLogin(ticket);
+        await ensureSilentLogin();
         await runIntent(ticket);
       } catch (err) {
-        if (err instanceof Error && err.message === '__redirect__') {
-          return;
-        }
         setStatus('error');
         setMessage(err instanceof Error ? err.message : '处理失败');
       }
     })();
-  }, [ensureLogin, runIntent]);
+  }, [ensureSilentLogin, runIntent]);
 
   const onPick = async (inviteTicket: string) => {
     setStatus('loading');
     setTip('正在创建面试日程…');
     try {
+      if (!getToken()) {
+        await ensureSilentLogin();
+      }
       await runIntent(inviteTicket);
     } catch (err) {
       setStatus('error');
@@ -255,7 +284,7 @@ export default function DingTalkBridgePage() {
         title='已处理'
         subTitle={<span className='text-left whitespace-pre-wrap'>{message}</span>}
         extra={
-          isDingTalkUa() ? (
+          isDingTalkClient() ? (
             <Button
               type='primary'
               onClick={() => window.dd?.biz?.navigation?.close?.()}

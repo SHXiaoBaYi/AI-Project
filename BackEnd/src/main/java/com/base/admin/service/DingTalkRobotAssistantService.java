@@ -78,6 +78,7 @@ public class DingTalkRobotAssistantService {
     private final HrInviteService hrInviteService;
     private final DingTalkIntentTicketStore intentTicketStore;
     private final DingTalkProperties dingTalkProperties;
+    private final DingTalkAppService dingTalkAppService;
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
@@ -568,9 +569,9 @@ public class DingTalkRobotAssistantService {
     private String h5ActionUrl(String kind, String action, Long targetUserId, LocalDateTime start,
                                int durationMin, String jobName, Long applicationId, Integer roundNo,
                                Long senderUserId) {
-        String base = resolveH5BaseUrl();
+        String base = resolveH5BaseUrl(senderUserId);
         if (!StringUtils.hasText(base)) {
-            log.warn("dingtalk.h5-base-url 未配置，ActionCard 回退为会话指令");
+            log.warn("dingtalk H5 base 未配置，ActionCard 回退为会话指令");
             if (KIND_INVITE.equals(kind)) {
                 return dtmdSendMessage(encodeBookCommand(INVITE_PREFIX, action, targetUserId, start,
                         durationMin, jobName, applicationId, roundNo));
@@ -580,14 +581,32 @@ public class DingTalkRobotAssistantService {
         }
         String ticket = issueIntentTicket(kind, action, targetUserId, start, durationMin, jobName,
                 applicationId, roundNo, senderUserId);
-        String page = base.replaceAll("/+$", "") + "/dingtalk/bridge?ticket="
-                + URLEncoder.encode(ticket, StandardCharsets.UTF_8);
+        StringBuilder page = new StringBuilder();
+        page.append(base.replaceAll("/+$", "")).append("/dingtalk/bridge?ticket=")
+                .append(URLEncoder.encode(ticket, StandardCharsets.UTF_8));
+        String corpId = dingTalkAppService.corpId();
+        if (StringUtils.hasText(corpId)) {
+            page.append("&corpId=").append(URLEncoder.encode(corpId, StandardCharsets.UTF_8));
+        }
+        String route = dingTalkAppService.resolveRobotRoute(senderUserId);
+        log.info("dingtalk ActionCard H5 url base={} route={} kind={} action={} sender={}",
+                base, route, kind, action, senderUserId);
         return "dingtalk://dingtalkclient/page/link?url="
-                + URLEncoder.encode(page, StandardCharsets.UTF_8)
+                + URLEncoder.encode(page.toString(), StandardCharsets.UTF_8)
                 + "&pc_slide=true";
     }
 
-    private String resolveH5BaseUrl() {
+    private String resolveH5BaseUrl(Long senderUserId) {
+        String route = dingTalkAppService.resolveRobotRoute(senderUserId);
+        if (DingTalkAppService.ROUTE_LOCAL.equals(route)) {
+            if (StringUtils.hasText(dingTalkProperties.getLocalH5BaseUrl())) {
+                return dingTalkProperties.getLocalH5BaseUrl().trim().replaceAll("/+$", "");
+            }
+            if (StringUtils.hasText(dingTalkProperties.getH5BaseUrl())) {
+                return dingTalkProperties.getH5BaseUrl().trim().replaceAll("/+$", "");
+            }
+            return "http://127.0.0.1:3000";
+        }
         if (StringUtils.hasText(dingTalkProperties.getH5BaseUrl())) {
             return dingTalkProperties.getH5BaseUrl().trim().replaceAll("/+$", "");
         }

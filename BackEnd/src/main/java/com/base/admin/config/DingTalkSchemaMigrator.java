@@ -37,6 +37,7 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='钉钉企业内部应用配置'
                 """);
         ensureCorpIdColumn();
+        ensureRobotRouteColumn();
         Integer count = jdbc.queryForObject("SELECT COUNT(1) FROM sys_dingtalk_app WHERE id = 1", Integer.class);
         if (count == null || count == 0) {
             jdbc.update("""
@@ -164,6 +165,22 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                   ADD COLUMN corp_id VARCHAR(64) NOT NULL DEFAULT '' COMMENT '企业 CorpId（扫码限制企业专属账号）' AFTER client_secret
                 """);
         log.info("已为 sys_dingtalk_app 增加 corp_id 字段");
+    }
+
+    private void ensureRobotRouteColumn() {
+        Integer exists = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_dingtalk_app' AND COLUMN_NAME = 'robot_route'
+                """, Integer.class);
+        if (exists != null && exists > 0) {
+            return;
+        }
+        jdbc.execute("""
+                ALTER TABLE sys_dingtalk_app
+                  ADD COLUMN robot_route VARCHAR(16) NOT NULL DEFAULT 'local'
+                    COMMENT '王方扬机器人联调：local=本机 H5，online=线上 H5；其他人固定 online' AFTER enabled
+                """);
+        log.info("已为 sys_dingtalk_app 增加 robot_route 字段");
     }
 
     private void ensureScheduleRuleSecretaryColumns() {

@@ -8,6 +8,9 @@ export type DingTalkAppVO = {
   clientSecretMasked?: string;
   hasClientSecret?: boolean;
   enabled: number;
+  /** local=本机 online=线上；仅王方扬可改 */
+  robotRoute?: 'local' | 'online' | string;
+  canEditRobotRoute?: boolean;
 };
 
 export type DingTalkAppDTO = {
@@ -17,6 +20,7 @@ export type DingTalkAppDTO = {
   corpId?: string;
   clientSecret?: string;
   enabled: number;
+  robotRoute?: 'local' | 'online' | string;
 };
 
 export function getDingTalkAppApi() {
@@ -29,22 +33,6 @@ export function saveDingTalkAppApi(data: DingTalkAppDTO) {
 
 export function testDingTalkAppApi(data: DingTalkAppDTO) {
   return request.post('/system/dingtalk/test', data);
-}
-
-export type DingTalkDirectoryUser = {
-  name: string;
-  mobile: string;
-  stateCode?: string;
-  telephone?: string;
-  exclusiveAccount?: boolean;
-  hideMobile?: boolean;
-  active?: boolean;
-  userid: string;
-  unionId?: string;
-};
-
-export function getDingTalkDirectoryApi() {
-  return request.get<unknown, DingTalkDirectoryUser[]>('/system/dingtalk/directory');
 }
 
 export type DingTalkBusyUserOption = {

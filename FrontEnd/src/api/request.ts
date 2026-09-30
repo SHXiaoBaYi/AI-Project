@@ -23,9 +23,23 @@ const HTTP_STATUS_MESSAGES: Record<number, string> = {
 
 let kicking = false;
 
+function isDingTalkBridgePath() {
+  try {
+    const path = window.location.pathname || '';
+    return path.includes('/dingtalk/bridge');
+  } catch {
+    return false;
+  }
+}
+
 /** 处理认证/授权失败，返回 true 表示已拦截 */
 function handleAuthError(code: number, tip?: string): boolean {
   if (code === CODE_SESSION_KICKED || code === CODE_SESSION_EXPIRED || code === HTTP_UNAUTHORIZED) {
+    // 机器人 H5 免登落地页自己处理登录，禁止踢去扫码登录页
+    if (isDingTalkBridgePath()) {
+      removeToken();
+      return true;
+    }
     if (kicking) {
       return true;
     }
@@ -42,7 +56,9 @@ function handleAuthError(code: number, tip?: string): boolean {
     return true;
   }
   if (code === HTTP_FORBIDDEN) {
-    message.error('权限不足，请联系管理员');
+    if (!isDingTalkBridgePath()) {
+      message.error('权限不足，请联系管理员');
+    }
     return true;
   }
   return false;

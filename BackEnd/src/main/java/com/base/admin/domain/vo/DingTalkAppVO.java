@@ -27,4 +27,10 @@ public class DingTalkAppVO {
 
     @Schema(description = "是否启用 1=启用 0=停用", example = "1")
     private Integer enabled;
+
+    @Schema(description = "王方扬机器人联调路由：local=本机，online=线上（其他人固定 online）")
+    private String robotRoute;
+
+    @Schema(description = "当前登录人是否可改 robotRoute（仅 wangfangyang）")
+    private Boolean canEditRobotRoute;
 }

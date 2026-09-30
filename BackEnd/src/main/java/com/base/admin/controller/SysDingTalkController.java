@@ -16,7 +16,6 @@ import com.base.admin.domain.vo.DingTalkAssistantScheduleVO;
 import com.base.admin.domain.vo.DingTalkAssistantSuggestVO;
 import com.base.admin.domain.vo.DingTalkBusyUserOptionVO;
 import com.base.admin.domain.vo.DingTalkBusyUserVO;
-import com.base.admin.domain.vo.DingTalkDirectoryUserVO;
 import com.base.admin.domain.vo.DingTalkIntentExecuteVO;
 import com.base.admin.service.DingTalkAppService;
 import com.base.admin.service.DingTalkAssistantService;
@@ -76,13 +75,6 @@ public class SysDingTalkController {
         return Result.ok();
     }
 
-    @Operation(summary = "应用实际读到的钉钉已加入成员")
-    @GetMapping("/directory")
-    @RequiresPermission("system:dingtalk:list")
-    public Result<List<DingTalkDirectoryUserVO>> directory() {
-        return Result.ok(dingTalkCalendarClient.listDirectory());
-    }
-
     @Operation(summary = "已绑定钉钉、可查询闲忙的用户")
     @GetMapping("/busy/users")
     @RequiresPermission({"system:dingtalk:busy", "hr:invite:list", "system:dingtalk:list"})
@@ -122,7 +114,6 @@ public class SysDingTalkController {
 
     @Operation(summary = "日程助手：执行机器人 ActionCard 意图（H5 免登后）")
     @PostMapping("/assistant/intent/execute")
-    @RequiresPermission({"system:dingtalk:busy", "hr:invite:list", "system:dingtalk:list"})
     @Log(title = "日程助手意图", businessType = 1)
     public Result<DingTalkIntentExecuteVO> executeIntent(@Valid @RequestBody DingTalkIntentExecuteDTO dto) {
         return Result.ok(dingTalkRobotAssistantService.executeIntent(dto.getTicket()));

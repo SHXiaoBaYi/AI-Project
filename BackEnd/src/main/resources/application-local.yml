@@ -15,12 +15,15 @@ spring:
 xby:
   upload-dir: ${UPLOAD_DIR:D:/AI-XBY/AI-Project/BackEnd/uploads}
 
+# 钉钉机器人联调（ActionCard → H5）：
+# 王方扬在「钉钉应用配置」可选本机/线上；其他人固定线上。
+# 本机 H5 默认如下（桌面钉钉可开 127.0.0.1:3000；手机需局域网 IP）
+dingtalk:
+  local-h5-base-url: ${DINGTALK_LOCAL_H5_BASE_URL:http://127.0.0.1:3000}
+
 # AI 试用（任选一家配 key，设 enabled=true 后重启）：
 # xby:
 #   ai:
 #     enabled: true
-#     provider: tongyi          # deepseek | tongyi | zhipu | moonshot
-#     tongyi-api-key: sk-ws-H.PHPIRMI.qxoO.MEQCIH-ZOpcLKJfrbSio4z0HI0Y27xvw2ZK4x4fIYJKxzGRuAiAfLNiAN3LYcDH_0aHLIfYrJYw8xoUcNW4tpVbOsm0ozw  # 通义 DashScope API-KEY
-#     # deepseek-api-key: sk-xxxx
-#     # zhipu-api-key: xxxx.xxxx
-#     # moonshot-api-key: sk-xxxx
+#     provider: tongyi
+#     tongyi-api-key: sk-xxxx
