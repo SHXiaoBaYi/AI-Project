@@ -189,7 +189,7 @@ public class DingTalkRobotAssistantService {
     }
 
     /**
-     * H5 免登后执行 ActionCard 意图：建会议/汇报，或返回候选人列表。
+     * H5 免登后执行 ActionCard 意图：返回打开系统表单所需预填，或执行已选候选人的邀约。
      */
     public DingTalkIntentExecuteVO executeIntent(String ticket) {
         Long currentUserId = SecurityUtils.getCurrentUserId();
@@ -215,6 +215,7 @@ public class DingTalkRobotAssistantService {
         SenderUser sender = new SenderUser(currentUserId, username, loadNickname(currentUserId), null, null);
         lastPrepByUser.put(currentUserId, cmd);
 
+        // 已选定候选人的邀约票据：直接创建
         if (KIND_INVITE.equals(intent.kind())) {
             DingTalkIntentExecuteVO vo = new DingTalkIntentExecuteVO();
             vo.setStatus("done");
@@ -222,53 +223,30 @@ public class DingTalkRobotAssistantService {
             return vo;
         }
 
-        if ("interview".equals(cmd.action())) {
-            return buildCandidatePickIntent(cmd, currentUserId);
+        // 面试 / 开会 / 汇报：均打开系统表单（与工作台日程助手一致）
+        if ("interview".equals(cmd.action()) || "meeting".equals(cmd.action()) || "report".equals(cmd.action())) {
+            DingTalkIntentExecuteVO vo = new DingTalkIntentExecuteVO();
+            vo.setStatus(switch (cmd.action()) {
+                case "meeting" -> "open_meeting_form";
+                case "report" -> "open_report_form";
+                default -> "open_invite_form";
+            });
+            vo.setTargetUserId(cmd.targetUserId());
+            vo.setTargetNickname(loadNickname(cmd.targetUserId()));
+            vo.setStartTime(cmd.start().format(API_TIME));
+            vo.setDurationMin(cmd.durationMin());
+            vo.setJobName(cmd.jobName());
+            vo.setMessage(switch (cmd.action()) {
+                case "meeting" -> "请完善会议信息后提交";
+                case "report" -> "请完善工作汇报信息后提交";
+                default -> "请完善面试邀约信息后提交";
+            });
+            return vo;
         }
 
         DingTalkIntentExecuteVO vo = new DingTalkIntentExecuteVO();
         vo.setStatus("done");
-        vo.setMessage(createMeetingOrReport(sender, cmd));
-        return vo;
-    }
-
-    private DingTalkIntentExecuteVO buildCandidatePickIntent(BookCommand cmd, Long senderUserId) {
-        DingTalkIntentExecuteVO vo = new DingTalkIntentExecuteVO();
-        List<CandidateOption> candidates = listInviteableCandidates(cmd.jobName());
-        if (candidates.isEmpty()) {
-            vo.setStatus("done");
-            vo.setMessage("暂无可邀约且已上传简历的候选人"
-                    + (StringUtils.hasText(cmd.jobName()) ? "（岗位「" + cmd.jobName() + "」）" : "")
-                    + "。请先在招聘里维护候选人简历与阶段。");
-            return vo;
-        }
-        List<DingTalkIntentExecuteVO.Candidate> options = new ArrayList<>();
-        for (CandidateOption c : candidates) {
-            Integer round = nextInviteRound(c.stage());
-            if (round == null) {
-                continue;
-            }
-            String inviteTicket = issueIntentTicket(KIND_INVITE, "interview", cmd.targetUserId(), cmd.start(),
-                    cmd.durationMin(), cmd.jobName(), c.applicationId(), round, senderUserId);
-            DingTalkIntentExecuteVO.Candidate opt = new DingTalkIntentExecuteVO.Candidate();
-            opt.setName(c.name());
-            opt.setJobName(StringUtils.hasText(c.jobName()) ? c.jobName() : "未定岗");
-            opt.setTicket(inviteTicket);
-            options.add(opt);
-            if (options.size() >= MAX_CANDIDATE_BUTTONS) {
-                break;
-            }
-        }
-        if (options.isEmpty()) {
-            vo.setStatus("done");
-            vo.setMessage("候选人阶段暂不可邀约，请到招聘面板核对后再试。");
-            return vo;
-        }
-        vo.setStatus("need_candidate");
-        String who = loadNickname(cmd.targetUserId());
-        vo.setMessage("将为「" + who + "」创建面试钉钉日程（" + cmd.start().format(CARD_TIME)
-                + "，" + cmd.durationMin() + " 分）。请选择候选人：");
-        vo.setCandidates(options);
+        vo.setMessage("未知操作");
         return vo;
     }
 
@@ -528,7 +506,7 @@ public class DingTalkRobotAssistantService {
             body.append(i + 1).append(". ").append(starts.get(i).format(CARD_TIME))
                     .append("（").append(durations.get(i)).append(" 分）\n");
         }
-        body.append("\n点下方按钮将打开系统页面（钉钉内免登），自动创建钉钉日程；面试邀约会先选候选人，并把简历钉盘链接写入日程描述。");
+        body.append("\n点下方按钮将打开系统页面（钉钉内免登），进入与工作台日程助手相同的表单完善后提交。");
 
         LocalDateTime firstStart = starts.getFirst();
         int firstDuration = durations.getFirst();
@@ -587,10 +565,12 @@ public class DingTalkRobotAssistantService {
         String corpId = dingTalkAppService.corpId();
         if (StringUtils.hasText(corpId)) {
             page.append("&corpId=").append(URLEncoder.encode(corpId, StandardCharsets.UTF_8));
+        } else {
+            log.warn("dingtalk ActionCard 未带 corpId：库表/配置均为空，H5 免登会失败");
         }
         String route = dingTalkAppService.resolveRobotRoute(senderUserId);
-        log.info("dingtalk ActionCard H5 url base={} route={} kind={} action={} sender={}",
-                base, route, kind, action, senderUserId);
+        log.info("dingtalk ActionCard H5 url base={} route={} hasCorpId={} kind={} action={} sender={}",
+                base, route, StringUtils.hasText(corpId), kind, action, senderUserId);
         return "dingtalk://dingtalkclient/page/link?url="
                 + URLEncoder.encode(page.toString(), StandardCharsets.UTF_8)
                 + "&pc_slide=true";

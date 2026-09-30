@@ -16,6 +16,9 @@ public class DingTalkProperties {
 
     private String clientSecret = "";
 
+    /** 企业 CorpId；库表为空时作兜底（免登 JSAPI 必填） */
+    private String corpId = "";
+
     /** 机器人 Stream 入站（单聊日程助手） */
     private Robot robot = new Robot();
 

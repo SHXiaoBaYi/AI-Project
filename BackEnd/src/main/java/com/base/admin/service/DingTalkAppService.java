@@ -1,5 +1,6 @@
 package com.base.admin.service;
 
+import com.base.admin.config.DingTalkProperties;
 import com.base.admin.domain.dto.DingTalkAppDTO;
 import com.base.admin.domain.vo.DingTalkAppVO;
 import com.base.admin.domain.vo.DingTalkLoginConfigVO;
@@ -24,6 +25,7 @@ public class DingTalkAppService {
     public static final String ROUTE_ONLINE = "online";
 
     private final JdbcTemplate jdbc;
+    private final DingTalkProperties dingTalkProperties;
 
     public DingTalkAppVO get() {
         Stored stored = loadStored();
@@ -45,6 +47,9 @@ public class DingTalkAppService {
         vo.setAgentId(stored.agentId());
         vo.setClientId(stored.clientId());
         vo.setCorpId(stored.corpId());
+        if (!StringUtils.hasText(vo.getCorpId()) && StringUtils.hasText(dingTalkProperties.getCorpId())) {
+            vo.setCorpId(dingTalkProperties.getCorpId().trim());
+        }
         vo.setHasClientSecret(StringUtils.hasText(stored.clientSecret()));
         vo.setClientSecretMasked(mask(stored.clientSecret()));
         vo.setEnabled(stored.enabled());
@@ -68,6 +73,9 @@ public class DingTalkAppService {
         vo.setEnabled(1);
         vo.setClientId(stored.clientId().trim());
         String corpId = stored.corpId() == null ? "" : stored.corpId().trim();
+        if (!StringUtils.hasText(corpId) && StringUtils.hasText(dingTalkProperties.getCorpId())) {
+            corpId = dingTalkProperties.getCorpId().trim();
+        }
         vo.setCorpId(corpId);
         vo.setExclusiveLogin(StringUtils.hasText(corpId));
         vo.setMessage("请使用钉钉扫码登录");
@@ -102,13 +110,16 @@ public class DingTalkAppService {
         }
     }
 
-    /** 钉盘授权等接口需要的企业 CorpId；未配置时返回空串。 */
+    /** 钉盘授权、免登等接口需要的企业 CorpId；库表优先，其次 yml dingtalk.corp-id。 */
     public String corpId() {
         Stored stored = loadStored();
-        if (stored == null || !StringUtils.hasText(stored.corpId())) {
-            return "";
+        if (stored != null && StringUtils.hasText(stored.corpId())) {
+            return stored.corpId().trim();
         }
-        return stored.corpId().trim();
+        if (StringUtils.hasText(dingTalkProperties.getCorpId())) {
+            return dingTalkProperties.getCorpId().trim();
+        }
+        return "";
     }
 
     /**
@@ -162,6 +173,9 @@ public class DingTalkAppService {
             throw new BusinessException("请填写 Client Secret");
         }
         String corpId = dto.getCorpId() == null ? "" : dto.getCorpId().trim();
+        if (!StringUtils.hasText(corpId)) {
+            throw new BusinessException("请填写企业 CorpId（钉钉开放平台「应用信息 / 企业信息」里的 CorpId，不是 ClientId）");
+        }
         String user = SecurityUtils.getCurrentUsername();
         Stored current = loadStored();
         String robotRoute = current == null ? ROUTE_LOCAL : normalizeRoute(current.robotRoute());

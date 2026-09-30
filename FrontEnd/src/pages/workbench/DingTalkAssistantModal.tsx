@@ -1,12 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Avatar, Button, DatePicker, Form, Input, InputNumber, Mentions, Modal, Radio, Switch, Tabs } from 'antd';
+import { App, Avatar, Button, Mentions, Modal, Radio, Tabs } from 'antd';
 import { useSelector } from 'react-redux';
 import dayjs, { type Dayjs } from 'dayjs';
 import { usePermission } from '@/hooks/usePermission';
+import MeetingFormModal from '@/components/dingtalk/MeetingFormModal';
+import ReportFormModal from '@/components/dingtalk/ReportFormModal';
 import InviteFormModal, { type InviteFormValues } from '@/components/hr/InviteFormModal';
 import {
-  createDingTalkAssistantMeetingApi,
-  createDingTalkAssistantReportApi,
   getDingTalkBusyUsersApi,
   suggestDingTalkAssistantApi,
   type DingTalkAssistantAction,
@@ -16,15 +16,7 @@ import {
   type DingTalkBusyUserOption,
 } from '@/api/dingtalk';
 import type { RootState } from '@/store';
-import {
-  BOOKING_MAX_DAYS,
-  bookingDateTimeError,
-  bookingPastDisabledTime,
-  bookingRangeError,
-  bookingWindow,
-  disabledBookingDate,
-  isChinaHoliday,
-} from '@/utils/chinaHoliday';
+import { BOOKING_MAX_DAYS, bookingRangeError, bookingWindow, isChinaHoliday } from '@/utils/chinaHoliday';
 
 const ASSISTANT_NAME = '日程助手';
 
@@ -51,11 +43,6 @@ type ChatMessage = {
   selectedKey?: string;
   context?: MessageContext;
   time: string;
-};
-
-type ActionTarget = {
-  targetUserId: number;
-  targetNickname: string;
 };
 
 type ParsedAsk = {
@@ -256,12 +243,20 @@ function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
   const [draft, setDraft] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteSeed, setInviteSeed] = useState<InviteFormValues | null>(null);
-  const [actionSaving, setActionSaving] = useState(false);
   const [meetingOpen, setMeetingOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
-  const [meetingForm] = Form.useForm();
-  const [reportForm] = Form.useForm();
+  const [meetingSeed, setMeetingSeed] = useState<{
+    targetUserId: number;
+    targetNickname: string;
+    startTime?: string;
+    durationMin: number;
+  } | null>(null);
+  const [reportSeed, setReportSeed] = useState<{
+    targetUserId: number;
+    targetNickname: string;
+    startTime?: string;
+    durationMin: number;
+  } | null>(null);
 
   const mentionOptions = useMemo(
     () =>
@@ -391,16 +386,12 @@ function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
       message.warning('这条消息里没有同事信息，请重新 @ 询问');
       return;
     }
-    const minutes = msg.context?.durationMin || 60;
-    meetingForm.setFieldsValue({
-      title: nickname ? `与${nickname}的会议` : '会议',
-      startTime: start ? dayjs(start) : dayjs().add(1, 'hour').minute(0).second(0),
-      durationMin: minutes,
-      location: '',
-      description: '',
-      onlineMeeting: true,
+    setMeetingSeed({
+      targetUserId: userId,
+      targetNickname: nickname,
+      startTime: start,
+      durationMin: msg.context?.durationMin || 60,
     });
-    setActionTarget({ targetUserId: userId, targetNickname: nickname });
     setMeetingOpen(true);
   };
 
@@ -413,15 +404,12 @@ function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
       message.warning('这条消息里没有同事信息，请重新 @ 询问');
       return;
     }
-    const minutes = msg.context?.durationMin || 60;
-    reportForm.setFieldsValue({
-      title: nickname ? `工作汇报 · ${nickname}` : '工作汇报',
-      startTime: start ? dayjs(start) : dayjs().add(1, 'hour').minute(0).second(0),
-      durationMin: minutes,
-      location: '',
-      content: '',
+    setReportSeed({
+      targetUserId: userId,
+      targetNickname: nickname,
+      startTime: start,
+      durationMin: msg.context?.durationMin || 60,
     });
-    setActionTarget({ targetUserId: userId, targetNickname: nickname });
     setReportOpen(true);
   };
 
@@ -465,71 +453,6 @@ function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
     }
   };
 
-  const submitMeeting = async () => {
-    if (!actionTarget?.targetUserId) {
-      message.warning('缺少同事信息');
-      return;
-    }
-    const values = await meetingForm.validateFields();
-    const startErr = bookingDateTimeError(dayjs(values.startTime));
-    if (startErr) {
-      message.warning(startErr);
-      return;
-    }
-    setActionSaving(true);
-    try {
-      const result = await createDingTalkAssistantMeetingApi({
-        targetUserId: actionTarget.targetUserId,
-        title: values.title,
-        startTime: dayjs(values.startTime).second(0).format('YYYY-MM-DD HH:mm:ss'),
-        durationMin: values.durationMin,
-        location: values.location,
-        description: values.description,
-        onlineMeeting: !!values.onlineMeeting,
-      });
-      setMeetingOpen(false);
-      setActionTarget(null);
-      meetingForm.resetFields();
-      push({ role: 'user', text: `邀请「${actionTarget.targetNickname}」参加会议：${values.title}` });
-      push({ role: 'assistant', text: result.message || '会议已创建' });
-      message.success(result.message || '会议已创建');
-    } finally {
-      setActionSaving(false);
-    }
-  };
-
-  const submitReport = async () => {
-    if (!actionTarget?.targetUserId) {
-      message.warning('缺少同事信息');
-      return;
-    }
-    const values = await reportForm.validateFields();
-    const startErr = bookingDateTimeError(dayjs(values.startTime));
-    if (startErr) {
-      message.warning(startErr);
-      return;
-    }
-    setActionSaving(true);
-    try {
-      const result = await createDingTalkAssistantReportApi({
-        targetUserId: actionTarget.targetUserId,
-        title: values.title,
-        content: values.content,
-        location: values.location,
-        startTime: dayjs(values.startTime).second(0).format('YYYY-MM-DD HH:mm:ss'),
-        durationMin: values.durationMin,
-      });
-      setReportOpen(false);
-      setActionTarget(null);
-      reportForm.resetFields();
-      push({ role: 'user', text: `安排与「${actionTarget.targetNickname}」的工作汇报` });
-      push({ role: 'assistant', text: result.message || '汇报已安排' });
-      message.success(result.message || '汇报已安排');
-    } finally {
-      setActionSaving(false);
-    }
-  };
-
   return (
     <>
       <Modal
@@ -540,7 +463,7 @@ function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
         maskClosable={false}
         destroyOnHidden
         onCancel={() => {
-          if (querying || actionSaving) return;
+          if (querying) return;
           onClose();
         }}
         styles={{ body: { padding: 0 } }}
@@ -719,178 +642,37 @@ function DingTalkAssistantModal({ open, onClose, onOpenBusy }: Props) {
         }}
       />
 
-      <Modal
-        title={actionTarget?.targetNickname ? `邀请「${actionTarget.targetNickname}」开会` : '邀请开会'}
+      <MeetingFormModal
         open={meetingOpen}
-        width={520}
-        maskClosable={false}
-        destroyOnHidden
-        confirmLoading={actionSaving}
-        okText='创建会议日程'
-        cancelText='取消'
-        onOk={() => void submitMeeting()}
-        onCancel={() => {
-          if (actionSaving) return;
-          setMeetingOpen(false);
-          setActionTarget(null);
-          meetingForm.resetFields();
+        targetUserId={meetingSeed?.targetUserId}
+        targetNickname={meetingSeed?.targetNickname}
+        seed={meetingSeed ? { startTime: meetingSeed.startTime, durationMin: meetingSeed.durationMin } : null}
+        onOpenChange={(next) => {
+          setMeetingOpen(next);
+          if (!next) setMeetingSeed(null);
         }}
-      >
-        <Form
-          form={meetingForm}
-          layout='vertical'
-          className='pt-2'
-        >
-          <Form.Item
-            name='title'
-            label='主题'
-            rules={[{ required: true, message: '请填写会议主题' }]}
-          >
-            <Input placeholder='与钉钉日程「主题」一致' />
-          </Form.Item>
-          <Form.Item
-            name='startTime'
-            label='开始时间'
-            extra={`不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`}
-            rules={[
-              { required: true, message: '请选择开始时间' },
-              {
-                validator: async (_, value) => {
-                  const err = bookingDateTimeError(value);
-                  if (err) return Promise.reject(new Error(err));
-                  return Promise.resolve();
-                },
-              },
-            ]}
-          >
-            <DatePicker
-              showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false, hideDisabledOptions: true }}
-              className='w-full'
-              format='YYYY-MM-DD HH:mm'
-              disabledDate={disabledBookingDate}
-              disabledTime={(date) => bookingPastDisabledTime(date)}
-            />
-          </Form.Item>
-          <Form.Item
-            name='durationMin'
-            label='时长（分钟）'
-            rules={[{ required: true, message: '请填写时长' }]}
-          >
-            <InputNumber
-              className='w-full'
-              min={15}
-              max={240}
-              step={15}
-            />
-          </Form.Item>
-          <Form.Item
-            name='location'
-            label='地点'
-          >
-            <Input placeholder='会议室 / 线上地址' />
-          </Form.Item>
-          <Form.Item
-            name='description'
-            label='描述'
-          >
-            <Input.TextArea
-              rows={2}
-              placeholder='会议说明'
-            />
-          </Form.Item>
-          <Form.Item
-            name='onlineMeeting'
-            label='钉钉视频会议'
-            valuePropName='checked'
-          >
-            <Switch
-              checkedChildren='开'
-              unCheckedChildren='关'
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+        onSuccess={(tip) => {
+          const who = meetingSeed?.targetNickname || '对方';
+          push({ role: 'user', text: `邀请「${who}」参加会议` });
+          push({ role: 'assistant', text: tip });
+        }}
+      />
 
-      <Modal
-        title={actionTarget?.targetNickname ? `与「${actionTarget.targetNickname}」汇报工作` : '汇报工作'}
+      <ReportFormModal
         open={reportOpen}
-        width={520}
-        maskClosable={false}
-        destroyOnHidden
-        confirmLoading={actionSaving}
-        okText='确认安排'
-        cancelText='取消'
-        onOk={() => void submitReport()}
-        onCancel={() => {
-          if (actionSaving) return;
-          setReportOpen(false);
-          setActionTarget(null);
-          reportForm.resetFields();
+        targetUserId={reportSeed?.targetUserId}
+        targetNickname={reportSeed?.targetNickname}
+        seed={reportSeed ? { startTime: reportSeed.startTime, durationMin: reportSeed.durationMin } : null}
+        onOpenChange={(next) => {
+          setReportOpen(next);
+          if (!next) setReportSeed(null);
         }}
-      >
-        <Form
-          form={reportForm}
-          layout='vertical'
-          className='pt-2'
-        >
-          <Form.Item
-            name='title'
-            label='主题'
-          >
-            <Input placeholder='工作汇报标题' />
-          </Form.Item>
-          <Form.Item
-            name='startTime'
-            label='开始时间'
-            extra={`不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`}
-            rules={[
-              { required: true, message: '请选择开始时间' },
-              {
-                validator: async (_, value) => {
-                  const err = bookingDateTimeError(value);
-                  if (err) return Promise.reject(new Error(err));
-                  return Promise.resolve();
-                },
-              },
-            ]}
-          >
-            <DatePicker
-              showTime={{ minuteStep: 15, format: 'HH:mm', showSecond: false, hideDisabledOptions: true }}
-              className='w-full'
-              format='YYYY-MM-DD HH:mm'
-              disabledDate={disabledBookingDate}
-              disabledTime={(date) => bookingPastDisabledTime(date)}
-            />
-          </Form.Item>
-          <Form.Item
-            name='durationMin'
-            label='时长（分钟）'
-            rules={[{ required: true, message: '请填写时长' }]}
-          >
-            <InputNumber
-              className='w-full'
-              min={15}
-              max={240}
-              step={15}
-            />
-          </Form.Item>
-          <Form.Item
-            name='location'
-            label='地点'
-          >
-            <Input placeholder='可选' />
-          </Form.Item>
-          <Form.Item
-            name='content'
-            label='说明'
-          >
-            <Input.TextArea
-              rows={2}
-              placeholder='汇报要点'
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+        onSuccess={(tip) => {
+          const who = reportSeed?.targetNickname || '对方';
+          push({ role: 'user', text: `安排与「${who}」的工作汇报` });
+          push({ role: 'assistant', text: tip });
+        }}
+      />
     </>
   );
 }

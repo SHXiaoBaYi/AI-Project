@@ -124,9 +124,10 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
           <Form.Item
             name='corpId'
             label='CorpId'
-            extra='填写后扫码仅允许本企业专属账号，免登也依赖此字段'
+            rules={[{ required: true, message: '请填写企业 CorpId（免登必填，不是 ClientId）' }]}
+            extra='钉钉开放平台 → 应用信息/企业信息里的 CorpId。ClientId 不能当 CorpId 用。'
           >
-            <Input placeholder='钉钉企业 CorpId（建议填写）' />
+            <Input placeholder='企业 CorpId，例如 dingxxxxxxxx' />
           </Form.Item>
           <Form.Item
             name='clientSecret'

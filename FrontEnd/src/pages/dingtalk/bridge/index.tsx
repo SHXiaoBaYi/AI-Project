@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Result, Spin, Typography } from 'antd';
+import { App, Button, Result, Spin, Typography } from 'antd';
 import { getDingTalkLoginConfigApi, dingTalkSsoApi } from '@/api/auth';
 import { executeDingTalkIntentApi, type DingTalkIntentExecuteResult } from '@/api/dingtalk';
 import { CODE_LOGIN_CONFLICT } from '@/api/request';
+import MeetingFormModal from '@/components/dingtalk/MeetingFormModal';
+import ReportFormModal from '@/components/dingtalk/ReportFormModal';
+import InviteFormModal, { type InviteFormValues } from '@/components/hr/InviteFormModal';
 import { setToken, getToken, removeToken } from '@/utils/auth';
 
 const DD_JSAPI = 'https://g.alicdn.com/dingding/dingtalk-jsapi/3.0.25/dingtalk.open.js';
@@ -63,7 +66,6 @@ function loadDingTalkJsapi() {
   });
 }
 
-/** 静默免登：requestAuthCode / getAuthCode，无需用户点击 */
 function requestCorpAuthCode(corpId: string) {
   return new Promise<string>((resolve, reject) => {
     let settled = false;
@@ -133,25 +135,85 @@ async function ssoWithForce(authCode: string, mode: 'corp' | 'oauth') {
   }
 }
 
+type FormKind = 'invite' | 'meeting' | 'report';
+
+function formTitle(kind: FormKind) {
+  if (kind === 'meeting') return '邀请开会';
+  if (kind === 'report') return '安排工作汇报';
+  return '发起面试邀约';
+}
+
 export default function DingTalkBridgePage() {
-  const [status, setStatus] = useState<'loading' | 'pick' | 'done' | 'error'>('loading');
+  const { message } = App.useApp();
+  const [status, setStatus] = useState<'loading' | 'form' | 'done' | 'error'>('loading');
   const [tip, setTip] = useState('正在免登…');
-  const [message, setMessage] = useState('');
-  const [candidates, setCandidates] = useState<DingTalkIntentExecuteResult['candidates']>([]);
+  const [messageText, setMessageText] = useState('');
+  const [formKind, setFormKind] = useState<FormKind>('invite');
+  const [formHint, setFormHint] = useState('');
+  const [targetUserId, setTargetUserId] = useState<number | undefined>();
+  const [targetNickname, setTargetNickname] = useState('');
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [meetingOpen, setMeetingOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [inviteSeed, setInviteSeed] = useState<InviteFormValues | null>(null);
+  const [slotSeed, setSlotSeed] = useState<{ startTime?: string; durationMin: number } | null>(null);
   const ran = useRef(false);
 
-  const runIntent = useCallback(async (ticket: string) => {
-    setTip('正在执行…');
-    const result = await executeDingTalkIntentApi(ticket);
-    if (result.status === 'need_candidate' && result.candidates?.length) {
-      setCandidates(result.candidates);
-      setMessage(result.message || '请选择候选人');
-      setStatus('pick');
-      return;
-    }
-    setMessage(result.message || '已完成');
+  const markDone = useCallback((text: string) => {
+    setInviteOpen(false);
+    setMeetingOpen(false);
+    setReportOpen(false);
+    setMessageText(text);
     setStatus('done');
   }, []);
+
+  const openForms = useCallback((kind: FormKind, result: DingTalkIntentExecuteResult) => {
+    const userId = result.targetUserId ? Number(result.targetUserId) : undefined;
+    const who = result.targetNickname || '对方';
+    const start = result.startTime || '';
+    const duration = result.durationMin || 60;
+    setFormKind(kind);
+    setTargetUserId(userId);
+    setTargetNickname(who);
+    setSlotSeed({ startTime: start || undefined, durationMin: duration });
+    setFormHint(`预填对方「${who}」、时间 ${start || '待选'}（${duration} 分）；请确认后提交。`);
+    setStatus('form');
+    if (kind === 'invite') {
+      setInviteSeed({
+        interviewerUserIds: userId ? [userId] : [],
+        interviewAt: start || undefined,
+        durationMin: duration,
+        roundNo: 1,
+      });
+      setInviteOpen(true);
+    } else if (kind === 'meeting') {
+      setMeetingOpen(true);
+    } else {
+      setReportOpen(true);
+    }
+  }, []);
+
+  const runIntent = useCallback(
+    async (ticket: string) => {
+      setTip('正在打开…');
+      const result = await executeDingTalkIntentApi(ticket);
+      if (result.status === 'open_invite_form') {
+        openForms('invite', result);
+        return;
+      }
+      if (result.status === 'open_meeting_form') {
+        openForms('meeting', result);
+        return;
+      }
+      if (result.status === 'open_report_form') {
+        openForms('report', result);
+        return;
+      }
+      setMessageText(result.message || '已完成');
+      setStatus('done');
+    },
+    [openForms],
+  );
 
   const ensureSilentLogin = useCallback(async () => {
     if (getToken()) {
@@ -185,14 +247,15 @@ export default function DingTalkBridgePage() {
       throw new Error(config?.message || '钉钉登录未配置');
     }
     if (!corpId) {
-      throw new Error('未配置企业 CorpId，无法免登。请在「钉钉应用配置」填写 CorpId');
+      throw new Error(
+        '当前读到的 CorpId 为空。请到「系统管理 → 钉钉应用配置」填写并保存企业 CorpId（开放平台企业信息里的，不是 ClientId），然后重新点机器人卡片',
+      );
     }
     if (!isDingTalkClient()) {
       throw new Error('请在钉钉客户端内打开此链接（当前非钉钉环境，无法静默免登）');
     }
 
     await loadDingTalkJsapi();
-    // 清理可能残留的无效 token，避免干扰
     removeToken();
     const code = await requestCorpAuthCode(corpId);
     const res = await ssoWithForce(code, 'corp');
@@ -206,7 +269,7 @@ export default function DingTalkBridgePage() {
     const ticket = params.get('ticket') || params.get('state') || '';
     if (!ticket) {
       setStatus('error');
-      setMessage('缺少意图参数，请从钉钉机器人卡片重新进入');
+      setMessageText('缺少意图参数，请从钉钉机器人卡片重新进入');
       return;
     }
     (async () => {
@@ -215,24 +278,10 @@ export default function DingTalkBridgePage() {
         await runIntent(ticket);
       } catch (err) {
         setStatus('error');
-        setMessage(err instanceof Error ? err.message : '处理失败');
+        setMessageText(err instanceof Error ? err.message : '处理失败');
       }
     })();
   }, [ensureSilentLogin, runIntent]);
-
-  const onPick = async (inviteTicket: string) => {
-    setStatus('loading');
-    setTip('正在创建面试日程…');
-    try {
-      if (!getToken()) {
-        await ensureSilentLogin();
-      }
-      await runIntent(inviteTicket);
-    } catch (err) {
-      setStatus('error');
-      setMessage(err instanceof Error ? err.message : '创建失败');
-    }
-  };
 
   if (status === 'loading') {
     return (
@@ -243,24 +292,58 @@ export default function DingTalkBridgePage() {
     );
   }
 
-  if (status === 'pick') {
+  if (status === 'form') {
     return (
-      <div className='mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-slate-50 px-4 py-8'>
-        <Typography.Title level={4}>{message}</Typography.Title>
-        <div className='flex flex-col gap-2'>
-          {(candidates || []).map((c) => (
-            <Button
-              key={c.ticket}
-              type='primary'
-              block
-              className='h-auto py-3 text-left whitespace-normal'
-              onClick={() => void onPick(c.ticket)}
-            >
-              {c.name}
-              {c.jobName ? ` · ${c.jobName}` : ''}
-            </Button>
-          ))}
+      <div className='min-h-screen bg-slate-50 px-4 py-6'>
+        <div className='mx-auto max-w-lg'>
+          <Typography.Title
+            level={4}
+            className='!mb-2'
+          >
+            {formTitle(formKind)}
+          </Typography.Title>
+          {formHint ? <Typography.Paragraph type='secondary'>{formHint}</Typography.Paragraph> : null}
+          <Button
+            type='primary'
+            block
+            className='mb-4'
+            onClick={() => {
+              if (formKind === 'invite') setInviteOpen(true);
+              else if (formKind === 'meeting') setMeetingOpen(true);
+              else setReportOpen(true);
+            }}
+          >
+            打开表单
+          </Button>
         </div>
+
+        <InviteFormModal
+          open={inviteOpen}
+          seed={inviteSeed}
+          createDingTalkCalendar
+          sendDingTalkWorkNotice={false}
+          onOpenChange={setInviteOpen}
+          onSuccess={() => {
+            message.success('面试邀约已提交');
+            markDone('面试邀约已提交');
+          }}
+        />
+        <MeetingFormModal
+          open={meetingOpen}
+          targetUserId={targetUserId}
+          targetNickname={targetNickname}
+          seed={slotSeed}
+          onOpenChange={setMeetingOpen}
+          onSuccess={(tipText) => markDone(tipText)}
+        />
+        <ReportFormModal
+          open={reportOpen}
+          targetUserId={targetUserId}
+          targetNickname={targetNickname}
+          seed={slotSeed}
+          onOpenChange={setReportOpen}
+          onSuccess={(tipText) => markDone(tipText)}
+        />
       </div>
     );
   }
@@ -271,7 +354,7 @@ export default function DingTalkBridgePage() {
         <Result
           status='error'
           title='无法完成'
-          subTitle={message}
+          subTitle={messageText}
         />
       </div>
     );
@@ -282,7 +365,7 @@ export default function DingTalkBridgePage() {
       <Result
         status='success'
         title='已处理'
-        subTitle={<span className='text-left whitespace-pre-wrap'>{message}</span>}
+        subTitle={<span className='text-left whitespace-pre-wrap'>{messageText}</span>}
         extra={
           isDingTalkClient() ? (
             <Button

@@ -206,9 +206,14 @@ export function cancelDingTalkAssistantScheduleApi(id: number) {
 }
 
 export type DingTalkIntentExecuteResult = {
-  status: 'done' | 'need_candidate' | string;
+  status: 'done' | 'need_candidate' | 'open_invite_form' | 'open_meeting_form' | 'open_report_form' | string;
   message?: string;
   candidates?: Array<{ name: string; jobName?: string; ticket: string }>;
+  targetUserId?: number;
+  targetNickname?: string;
+  startTime?: string;
+  durationMin?: number;
+  jobName?: string;
 };
 
 export function executeDingTalkIntentApi(ticket: string) {
