@@ -9,6 +9,9 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 
 @Data
 @Schema(description = "日程助手：邀请参加会议（字段对齐钉钉日程）")
@@ -17,6 +20,9 @@ public class DingTalkAssistantMeetingDTO {
     @NotNull(message = "请选择会议对象")
     @Schema(description = "被邀请人系统用户ID", requiredMode = Schema.RequiredMode.REQUIRED, example = "2")
     private Long targetUserId;
+
+    @Schema(description = "额外参会人用户ID（多人共同开会）")
+    private List<Long> attendeeUserIds;
 
     @NotBlank(message = "请填写会议主题")
     @Schema(description = "会议主题（钉钉 summary）", requiredMode = Schema.RequiredMode.REQUIRED, example = "周会同步")

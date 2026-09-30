@@ -176,13 +176,19 @@ public class DingTalkRobotAssistantService {
         if (resolve.error() != null) {
             return SuggestReply.text(resolve.error());
         }
-        DingTalkBusyUserOptionVO target = resolve.user();
-        if (target.getDingtalkBound() == null || target.getDingtalkBound() != 1) {
-            return SuggestReply.text("「" + displayName(target) + "」还未绑定钉钉，暂时查不了闲忙。");
+        List<DingTalkBusyUserOptionVO> targets = resolve.users();
+        if (targets == null || targets.isEmpty()) {
+            return SuggestReply.text("没认出要查的同事。请带上姓名，例如：查 Bella 最近有没有空安排面试品牌总监");
+        }
+        for (DingTalkBusyUserOptionVO target : targets) {
+            if (target.getDingtalkBound() == null || target.getDingtalkBound() != 1) {
+                return SuggestReply.text("「" + displayName(target) + "」还未绑定钉钉，暂时查不了闲忙。");
+            }
         }
 
         DingTalkAssistantSuggestDTO dto = new DingTalkAssistantSuggestDTO();
-        dto.setTargetUserId(target.getUserId());
+        dto.setTargetUserId(targets.getFirst().getUserId());
+        dto.setTargetUserIds(targets.stream().map(DingTalkBusyUserOptionVO::getUserId).toList());
         dto.setMessage(text);
         DingTalkAssistantSuggestVO vo = dingTalkAssistantService.suggest(dto);
         return buildSuggestReply(vo, sender.userId());
@@ -231,15 +237,30 @@ public class DingTalkRobotAssistantService {
                 case "report" -> "open_report_form";
                 default -> "open_invite_form";
             });
+            List<Long> targetIds = intent.targetUserIds() == null || intent.targetUserIds().isEmpty()
+                    ? List.of(cmd.targetUserId())
+                    : intent.targetUserIds();
+            List<String> nicknames = new ArrayList<>();
+            for (Long id : targetIds) {
+                nicknames.add(loadNickname(id));
+            }
             vo.setTargetUserId(cmd.targetUserId());
-            vo.setTargetNickname(loadNickname(cmd.targetUserId()));
+            vo.setTargetUserIds(targetIds);
+            vo.setTargetNickname(String.join("、", nicknames));
+            vo.setTargetNicknames(nicknames);
             vo.setStartTime(cmd.start().format(API_TIME));
             vo.setDurationMin(cmd.durationMin());
             vo.setJobName(cmd.jobName());
+            vo.setSlots(toSlotOptions(intent.slots(), cmd.start(), cmd.durationMin()));
+            if (!vo.getSlots().isEmpty()) {
+                DingTalkIntentExecuteVO.SlotOption first = vo.getSlots().getFirst();
+                vo.setStartTime(first.getStart());
+                vo.setDurationMin(first.getDurationMin());
+            }
             vo.setMessage(switch (cmd.action()) {
-                case "meeting" -> "请完善会议信息后提交";
-                case "report" -> "请完善工作汇报信息后提交";
-                default -> "请完善面试邀约信息后提交";
+                case "meeting" -> "请从推荐时段中选择并完善会议信息后提交";
+                case "report" -> "请从推荐时段中选择并完善工作汇报信息后提交";
+                default -> "请从推荐时段中选择并完善面试邀约信息后提交";
             });
             return vo;
         }
@@ -495,58 +516,122 @@ public class DingTalkRobotAssistantService {
         }
 
         if (starts.isEmpty()) {
-            return SuggestReply.text("「" + who + "」近期暂无可约的" + intentLabel + "时段" + jobBit
-                    + "。可换一天、缩短时长后再问。");
+            String emptyHint = (vo.getTargetUserIds() != null && vo.getTargetUserIds().size() > 1)
+                    ? "「" + who + "」近期暂无共同可约的" + intentLabel + "时段" + jobBit
+                    + "。可换一天、缩短时长后再问。"
+                    : "「" + who + "」近期暂无可约的" + intentLabel + "时段" + jobBit
+                    + "。可换一天、缩短时长后再问。";
+            return SuggestReply.text(emptyHint);
         }
 
         StringBuilder body = new StringBuilder();
-        body.append("「").append(who).append("」近期有空：共 ").append(starts.size())
+        boolean multi = vo.getTargetUserIds() != null && vo.getTargetUserIds().size() > 1;
+        body.append("「").append(who).append("」近期")
+                .append(multi ? "共同有空" : "有空")
+                .append("：共 ").append(starts.size())
                 .append(" 个推荐").append(intentLabel).append("时段").append(jobBit).append("：\n");
         for (int i = 0; i < starts.size(); i++) {
             body.append(i + 1).append(". ").append(starts.get(i).format(CARD_TIME))
                     .append("（").append(durations.get(i)).append(" 分）\n");
         }
-        body.append("\n点下方按钮将打开系统页面（钉钉内免登），进入与工作台日程助手相同的表单完善后提交。");
+        body.append("\n点下方按钮将打开系统页面（钉钉内免登），表单内可选上方推荐时段（默认第一个）");
+        if (multi) {
+            body.append("，并预填上述同事");
+        }
+        body.append("。");
 
         LocalDateTime firstStart = starts.getFirst();
         int firstDuration = durations.getFirst();
+        List<DingTalkIntentTicketStore.Slot> ticketSlots = new ArrayList<>();
+        for (int i = 0; i < starts.size(); i++) {
+            ticketSlots.add(new DingTalkIntentTicketStore.Slot(starts.get(i), durations.get(i)));
+        }
+        List<Long> targetIds = vo.getTargetUserIds() == null || vo.getTargetUserIds().isEmpty()
+                ? List.of(vo.getTargetUserId())
+                : vo.getTargetUserIds();
         List<CardButton> buttons = new ArrayList<>();
         if ("interview".equals(action)) {
             buttons.add(new CardButton("发起面试邀约",
                     h5ActionUrl(KIND_PREP, "interview", vo.getTargetUserId(),
-                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId)));
+                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId, ticketSlots, targetIds)));
         } else if ("report".equals(action)) {
-            buttons.add(new CardButton("安排工作汇报",
+            buttons.add(new CardButton(multi ? "安排工作汇报" : "安排工作汇报",
                     h5ActionUrl(KIND_PREP, "report", vo.getTargetUserId(),
-                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId)));
+                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId, ticketSlots, targetIds)));
         } else if ("meeting".equals(action)) {
-            buttons.add(new CardButton("邀请开会",
+            buttons.add(new CardButton(multi ? "邀请他们开会" : "邀请开会",
                     h5ActionUrl(KIND_PREP, "meeting", vo.getTargetUserId(),
-                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId)));
+                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId, ticketSlots, targetIds)));
         } else {
             buttons.add(new CardButton("发起面试邀约",
                     h5ActionUrl(KIND_PREP, "interview", vo.getTargetUserId(),
-                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId)));
-            buttons.add(new CardButton("邀请开会",
+                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId, ticketSlots, targetIds)));
+            buttons.add(new CardButton(multi ? "邀请他们开会" : "邀请开会",
                     h5ActionUrl(KIND_PREP, "meeting", vo.getTargetUserId(),
-                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId)));
+                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId, ticketSlots, targetIds)));
             buttons.add(new CardButton("安排工作汇报",
                     h5ActionUrl(KIND_PREP, "report", vo.getTargetUserId(),
-                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId)));
+                            firstStart, firstDuration, vo.getJobName(), null, null, senderUserId, ticketSlots, targetIds)));
         }
         return new SuggestReply(body.toString().trim(), buttons);
     }
 
+    private List<DingTalkIntentExecuteVO.SlotOption> toSlotOptions(
+            List<DingTalkIntentTicketStore.Slot> slots, LocalDateTime fallbackStart, int fallbackDuration) {
+        List<DingTalkIntentExecuteVO.SlotOption> out = new ArrayList<>();
+        if (slots != null) {
+            for (DingTalkIntentTicketStore.Slot slot : slots) {
+                if (slot == null || slot.start() == null) {
+                    continue;
+                }
+                DingTalkIntentExecuteVO.SlotOption opt = new DingTalkIntentExecuteVO.SlotOption();
+                opt.setStart(slot.start().format(API_TIME));
+                opt.setDurationMin(slot.durationMin() <= 0 ? fallbackDuration : slot.durationMin());
+                opt.setLabel(slot.start().format(CARD_TIME) + "（" + opt.getDurationMin() + " 分）");
+                out.add(opt);
+            }
+        }
+        if (out.isEmpty() && fallbackStart != null) {
+            DingTalkIntentExecuteVO.SlotOption opt = new DingTalkIntentExecuteVO.SlotOption();
+            opt.setStart(fallbackStart.format(API_TIME));
+            opt.setDurationMin(fallbackDuration);
+            opt.setLabel(fallbackStart.format(CARD_TIME) + "（" + fallbackDuration + " 分）");
+            out.add(opt);
+        }
+        return out;
+    }
+
     private String issueIntentTicket(String kind, String action, Long targetUserId, LocalDateTime start,
                                      int durationMin, String jobName, Long applicationId, Integer roundNo,
-                                     Long senderUserId) {
+                                     Long senderUserId, List<DingTalkIntentTicketStore.Slot> slots,
+                                     List<Long> targetUserIds) {
+        List<Long> ids = targetUserIds == null || targetUserIds.isEmpty()
+                ? (targetUserId == null ? List.of() : List.of(targetUserId))
+                : targetUserIds;
         return intentTicketStore.issue(new DingTalkIntentTicketStore.Intent(
-                kind, action, targetUserId, start, durationMin, jobName, applicationId, roundNo, senderUserId, 0L));
+                kind, action, targetUserId, start, durationMin, jobName, applicationId, roundNo, senderUserId,
+                slots == null ? List.of() : slots, ids, 0L));
     }
 
     private String h5ActionUrl(String kind, String action, Long targetUserId, LocalDateTime start,
                                int durationMin, String jobName, Long applicationId, Integer roundNo,
                                Long senderUserId) {
+        return h5ActionUrl(kind, action, targetUserId, start, durationMin, jobName, applicationId, roundNo,
+                senderUserId, List.of(new DingTalkIntentTicketStore.Slot(start, durationMin)),
+                targetUserId == null ? List.of() : List.of(targetUserId));
+    }
+
+    private String h5ActionUrl(String kind, String action, Long targetUserId, LocalDateTime start,
+                               int durationMin, String jobName, Long applicationId, Integer roundNo,
+                               Long senderUserId, List<DingTalkIntentTicketStore.Slot> slots) {
+        return h5ActionUrl(kind, action, targetUserId, start, durationMin, jobName, applicationId, roundNo,
+                senderUserId, slots, targetUserId == null ? List.of() : List.of(targetUserId));
+    }
+
+    private String h5ActionUrl(String kind, String action, Long targetUserId, LocalDateTime start,
+                               int durationMin, String jobName, Long applicationId, Integer roundNo,
+                               Long senderUserId, List<DingTalkIntentTicketStore.Slot> slots,
+                               List<Long> targetUserIds) {
         String base = resolveH5BaseUrl(senderUserId);
         if (!StringUtils.hasText(base)) {
             log.warn("dingtalk H5 base 未配置，ActionCard 回退为会话指令");
@@ -558,7 +643,7 @@ public class DingTalkRobotAssistantService {
                     durationMin, jobName, applicationId, roundNo));
         }
         String ticket = issueIntentTicket(kind, action, targetUserId, start, durationMin, jobName,
-                applicationId, roundNo, senderUserId);
+                applicationId, roundNo, senderUserId, slots, targetUserIds);
         StringBuilder page = new StringBuilder();
         page.append(base.replaceAll("/+$", "")).append("/dingtalk/bridge?ticket=")
                 .append(URLEncoder.encode(ticket, StandardCharsets.UTF_8));
@@ -569,8 +654,9 @@ public class DingTalkRobotAssistantService {
             log.warn("dingtalk ActionCard 未带 corpId：库表/配置均为空，H5 免登会失败");
         }
         String route = dingTalkAppService.resolveRobotRoute(senderUserId);
-        log.info("dingtalk ActionCard H5 url base={} route={} hasCorpId={} kind={} action={} sender={}",
-                base, route, StringUtils.hasText(corpId), kind, action, senderUserId);
+        log.info("dingtalk ActionCard H5 url base={} route={} hasCorpId={} kind={} action={} sender={} targets={}",
+                base, route, StringUtils.hasText(corpId), kind, action, senderUserId,
+                targetUserIds == null ? 0 : targetUserIds.size());
         return "dingtalk://dingtalkclient/page/link?url="
                 + URLEncoder.encode(page.toString(), StandardCharsets.UTF_8)
                 + "&pc_slide=true";
@@ -714,12 +800,19 @@ public class DingTalkRobotAssistantService {
         while (quoted.find()) {
             tokens.add(quoted.group(1));
         }
-        for (int i = tokens.size() - 1; i >= 0; i--) {
-            DingTalkBusyUserOptionVO hit = matchUserByToken(tokens.get(i), users);
-            if (hit != null) {
-                return ResolveResult.ok(hit);
+        tokens.addAll(extractAttendeeNameTokens(text));
+        List<DingTalkBusyUserOptionVO> fromTokens = new ArrayList<>();
+        Set<Long> tokenSeen = new LinkedHashSet<>();
+        for (String token : tokens) {
+            DingTalkBusyUserOptionVO hit = matchUserByToken(token, users);
+            if (hit != null && tokenSeen.add(hit.getUserId())) {
+                fromTokens.add(hit);
             }
         }
+        if (!fromTokens.isEmpty()) {
+            return ResolveResult.ok(fromTokens);
+        }
+
         List<DingTalkBusyUserOptionVO> candidates = new ArrayList<>();
         List<DingTalkBusyUserOptionVO> sorted = users.stream()
                 .sorted(Comparator.comparingInt((DingTalkBusyUserOptionVO u) ->
@@ -734,14 +827,57 @@ public class DingTalkRobotAssistantService {
             }
         }
         if (candidates.size() == 1) {
-            return ResolveResult.ok(candidates.getFirst());
+            return ResolveResult.ok(candidates);
         }
         if (candidates.size() > 1) {
+            if (looksLikeMultiPersonAsk(text)) {
+                return ResolveResult.ok(candidates);
+            }
             String names = candidates.stream().limit(5).map(DingTalkRobotAssistantService::displayName)
                     .reduce((a, b) -> a + "、" + b).orElse("");
-            return ResolveResult.error("匹配到多位同事（" + names + "），请写清楚，例如：@Bella 最近有没有空安排面试？");
+            return ResolveResult.error("匹配到多位同事（" + names + "），若要查共同空闲请写清，例如：查一下庞焯文和 Bella 两个人最近都有空的 40 分钟");
         }
         return ResolveResult.error("没认出要查的同事。请带上姓名，例如：查 Bella 最近有没有空安排面试品牌总监");
+    }
+
+    /** 从「参会人张三、李四」「邀请张三和李四」等结构抽出姓名片段 */
+    private static List<String> extractAttendeeNameTokens(String text) {
+        if (!StringUtils.hasText(text)) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        Matcher labeled = Pattern.compile(
+                "(?:参会人|出席人|邀请|约上|约下|跟|和)\\s*[:：]?\\s*([^，。！？\\n]{2,40})").matcher(text);
+        while (labeled.find()) {
+            splitPersonNames(labeled.group(1), out);
+        }
+        return out;
+    }
+
+    private static void splitPersonNames(String chunk, List<String> out) {
+        if (!StringUtils.hasText(chunk)) {
+            return;
+        }
+        String cleaned = chunk.replaceAll("(开会|会议|面试|汇报|有没有空|空闲|时间|时长).*$", "").trim();
+        for (String part : cleaned.split("[、，,/和与及\\s]+")) {
+            String name = part == null ? "" : part.trim().replaceAll("^[的地得]", "");
+            if (name.length() >= 2 && name.length() <= 20 && !out.contains(name)) {
+                out.add(name);
+            }
+        }
+    }
+
+    /** 口语上明确在查多人共同空闲，而不是单人姓名歧义 */
+    private static boolean looksLikeMultiPersonAsk(String text) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        String t = text.trim();
+        return t.contains("两人") || t.contains("两位") || t.contains("三个") || t.contains("三位")
+                || t.contains("多人") || t.contains("共同") || t.contains("都有空") || t.contains("都有")
+                || t.contains("一起") || t.contains("以及") || t.contains("和") || t.contains("与")
+                || t.contains("参会") || t.contains("出席") || t.contains("邀请")
+                || t.contains("、") || t.contains(",") || t.contains("，");
     }
 
     private static DingTalkBusyUserOptionVO matchUserByToken(String token, List<DingTalkBusyUserOptionVO> users) {
@@ -900,13 +1036,21 @@ public class DingTalkRobotAssistantService {
     record SenderUser(Long userId, String username, String nickname, String dingUserId, String unionId) {
     }
 
-    record ResolveResult(DingTalkBusyUserOptionVO user, String error) {
+    record ResolveResult(List<DingTalkBusyUserOptionVO> users, String error) {
         static ResolveResult ok(DingTalkBusyUserOptionVO user) {
-            return new ResolveResult(user, null);
+            return new ResolveResult(user == null ? List.of() : List.of(user), null);
+        }
+
+        static ResolveResult ok(List<DingTalkBusyUserOptionVO> users) {
+            return new ResolveResult(users == null ? List.of() : users, null);
         }
 
         static ResolveResult error(String error) {
-            return new ResolveResult(null, error);
+            return new ResolveResult(List.of(), error);
+        }
+
+        DingTalkBusyUserOptionVO user() {
+            return users == null || users.isEmpty() ? null : users.getFirst();
         }
     }
 

@@ -141,6 +141,7 @@ export type DingTalkAssistantActionResult = {
 
 export function createDingTalkAssistantMeetingApi(data: {
   targetUserId: number;
+  attendeeUserIds?: number[];
   title: string;
   startTime: string;
   durationMin?: number;
@@ -210,10 +211,13 @@ export type DingTalkIntentExecuteResult = {
   message?: string;
   candidates?: Array<{ name: string; jobName?: string; ticket: string }>;
   targetUserId?: number;
+  targetUserIds?: number[];
   targetNickname?: string;
+  targetNicknames?: string[];
   startTime?: string;
   durationMin?: number;
   jobName?: string;
+  slots?: Array<{ start: string; durationMin: number; label?: string }>;
 };
 
 export function executeDingTalkIntentApi(ticket: string) {

@@ -19,11 +19,17 @@ public class DingTalkIntentExecuteVO {
     @Schema(description = "待选候选人（status=need_candidate）")
     private List<Candidate> candidates = new ArrayList<>();
 
-    @Schema(description = "邀约表单预填：面试官用户 ID")
+    @Schema(description = "邀约表单预填：面试官用户 ID（多人时为首位）")
     private Long targetUserId;
 
-    @Schema(description = "邀约表单预填：面试官昵称")
+    @Schema(description = "多人共同空闲：全部目标用户 ID")
+    private List<Long> targetUserIds = new ArrayList<>();
+
+    @Schema(description = "邀约表单预填：面试官昵称（多人时为「A、B」）")
     private String targetNickname;
+
+    @Schema(description = "多人昵称列表")
+    private List<String> targetNicknames = new ArrayList<>();
 
     @Schema(description = "邀约表单预填：开始时间 yyyy-MM-dd HH:mm:ss")
     private String startTime;
@@ -34,6 +40,9 @@ public class DingTalkIntentExecuteVO {
     @Schema(description = "查询里提到的岗位（仅提示，不锁定）")
     private String jobName;
 
+    @Schema(description = "机器人推荐时段（表单内单选，默认第一项）")
+    private List<SlotOption> slots = new ArrayList<>();
+
     @Data
     @Schema(description = "候选人选项")
     public static class Candidate {
@@ -43,5 +52,16 @@ public class DingTalkIntentExecuteVO {
         private String jobName;
         @Schema(description = "点选后继续执行的 invite 票据")
         private String ticket;
+    }
+
+    @Data
+    @Schema(description = "推荐时段")
+    public static class SlotOption {
+        @Schema(description = "开始时间 yyyy-MM-dd HH:mm:ss")
+        private String start;
+        @Schema(description = "时长分钟")
+        private Integer durationMin;
+        @Schema(description = "展示文案")
+        private String label;
     }
 }

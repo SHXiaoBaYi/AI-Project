@@ -2,6 +2,7 @@ package com.base.admin.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,8 +14,11 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -63,6 +67,31 @@ public class DingTalkIntentTicketStore {
             }
             if (intent.roundNo() != null) {
                 node.put("r", intent.roundNo());
+            }
+            List<Long> targets = intent.targetUserIds() == null ? List.of() : intent.targetUserIds();
+            if (targets.size() > 1 || (targets.size() == 1 && !Objects.equals(targets.getFirst(), intent.targetUserId()))) {
+                ArrayNode ts = node.putArray("ts");
+                for (Long id : targets) {
+                    if (id != null) {
+                        ts.add(id);
+                    }
+                }
+            } else if (intent.targetUserId() != null) {
+                // 单人也写一份，便于统一解析
+                ArrayNode ts = node.putArray("ts");
+                ts.add(intent.targetUserId());
+            }
+            List<Slot> slots = intent.slots() == null ? List.of() : intent.slots();
+            if (!slots.isEmpty()) {
+                ArrayNode arr = node.putArray("ss");
+                for (Slot slot : slots) {
+                    if (slot == null || slot.start() == null) {
+                        continue;
+                    }
+                    ObjectNode one = arr.addObject();
+                    one.put("s", slot.start().format(API_TIME));
+                    one.put("d", slot.durationMin() <= 0 ? intent.durationMin() : slot.durationMin());
+                }
             }
             String payload = Base64.getUrlEncoder().withoutPadding()
                     .encodeToString(objectMapper.writeValueAsBytes(node));
@@ -113,16 +142,47 @@ public class DingTalkIntentTicketStore {
             Long appId = node.hasNonNull("app") ? node.path("app").asLong() : null;
             Integer round = node.hasNonNull("r") ? node.path("r").asInt() : null;
             String job = node.hasNonNull("j") ? node.path("j").asText() : null;
+            LocalDateTime start = LocalDateTime.parse(node.path("s").asText(), API_TIME);
+            int duration = node.path("d").asInt(60);
+            List<Slot> slots = new ArrayList<>();
+            JsonNode ss = node.get("ss");
+            if (ss != null && ss.isArray()) {
+                for (JsonNode item : ss) {
+                    String s = item.path("s").asText(null);
+                    if (!StringUtils.hasText(s)) {
+                        continue;
+                    }
+                    slots.add(new Slot(LocalDateTime.parse(s, API_TIME), item.path("d").asInt(duration)));
+                }
+            }
+            if (slots.isEmpty()) {
+                slots.add(new Slot(start, duration));
+            }
+            List<Long> targetIds = new ArrayList<>();
+            JsonNode ts = node.get("ts");
+            if (ts != null && ts.isArray()) {
+                for (JsonNode item : ts) {
+                    if (item != null && item.canConvertToLong()) {
+                        targetIds.add(item.asLong());
+                    }
+                }
+            }
+            long primaryTarget = node.path("t").asLong();
+            if (targetIds.isEmpty() && primaryTarget > 0) {
+                targetIds.add(primaryTarget);
+            }
             return new Intent(
                     node.path("k").asText(""),
                     node.path("a").asText(""),
-                    node.path("t").asLong(),
-                    LocalDateTime.parse(node.path("s").asText(), API_TIME),
-                    node.path("d").asInt(60),
+                    primaryTarget,
+                    start,
+                    duration,
                     job,
                     appId,
                     round,
                     node.path("u").asLong(),
+                    slots,
+                    targetIds,
                     exp);
         } catch (Exception ex) {
             log.warn("dingtalk intent ticket parse failed: {}", ex.getMessage());
@@ -146,8 +206,12 @@ public class DingTalkIntentTicketStore {
         usedJti.entrySet().removeIf(e -> e.getValue() < now);
     }
 
+    public record Slot(LocalDateTime start, int durationMin) {
+    }
+
     /**
-     * @param kind prep=先建会/汇报或选人；invite=选定候选人后创建面试邀约
+     * @param kind prep=打开系统表单；invite=选定候选人后创建面试邀约
+     * @param slots 机器人推荐时段（表单内单选，默认第一项）
      */
     public record Intent(
             String kind,
@@ -159,11 +223,13 @@ public class DingTalkIntentTicketStore {
             Long applicationId,
             Integer roundNo,
             Long senderUserId,
+            List<Slot> slots,
+            List<Long> targetUserIds,
             long expireAt
     ) {
         public Intent withExpireAt(long expire) {
             return new Intent(kind, action, targetUserId, start, durationMin, jobName,
-                    applicationId, roundNo, senderUserId, expire);
+                    applicationId, roundNo, senderUserId, slots, targetUserIds, expire);
         }
     }
 }

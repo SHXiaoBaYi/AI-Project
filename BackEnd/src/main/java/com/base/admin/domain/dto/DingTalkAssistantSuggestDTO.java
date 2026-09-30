@@ -4,18 +4,21 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 @Schema(description = "日程助手：查询某人闲忙并给出约谈建议")
 public class DingTalkAssistantSuggestDTO {
 
-    @NotNull(message = "请选择要查询的同事")
-    @Schema(description = "目标系统用户ID（须已绑定钉钉）", requiredMode = Schema.RequiredMode.REQUIRED, example = "1")
+    @Schema(description = "目标系统用户ID（须已绑定钉钉）；多人时传第一个，并配合 targetUserIds", example = "1")
     private Long targetUserId;
+
+    @Schema(description = "多人共同空闲：目标用户 ID 列表（含首位）；有值时按交集推荐时段")
+    private List<Long> targetUserIds = new ArrayList<>();
 
     @Schema(description = "用户原话（口语）；有则后端解析意图/岗位/时长/日期", example = "@张三 什么时候有空可以面试一个品牌总监")
     private String message;

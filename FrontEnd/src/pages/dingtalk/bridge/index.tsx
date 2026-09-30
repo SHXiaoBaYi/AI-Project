@@ -5,6 +5,7 @@ import { executeDingTalkIntentApi, type DingTalkIntentExecuteResult } from '@/ap
 import { CODE_LOGIN_CONFLICT } from '@/api/request';
 import MeetingFormModal from '@/components/dingtalk/MeetingFormModal';
 import ReportFormModal from '@/components/dingtalk/ReportFormModal';
+import type { RecommendSlotOption } from '@/components/dingtalk/RecommendSlotRadio';
 import InviteFormModal, { type InviteFormValues } from '@/components/hr/InviteFormModal';
 import { setToken, getToken, removeToken } from '@/utils/auth';
 
@@ -151,12 +152,14 @@ export default function DingTalkBridgePage() {
   const [formKind, setFormKind] = useState<FormKind>('invite');
   const [formHint, setFormHint] = useState('');
   const [targetUserId, setTargetUserId] = useState<number | undefined>();
+  const [targetUserIds, setTargetUserIds] = useState<number[]>([]);
   const [targetNickname, setTargetNickname] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [meetingOpen, setMeetingOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [inviteSeed, setInviteSeed] = useState<InviteFormValues | null>(null);
   const [slotSeed, setSlotSeed] = useState<{ startTime?: string; durationMin: number } | null>(null);
+  const [slotOptions, setSlotOptions] = useState<RecommendSlotOption[]>([]);
   const ran = useRef(false);
 
   const markDone = useCallback((text: string) => {
@@ -168,19 +171,45 @@ export default function DingTalkBridgePage() {
   }, []);
 
   const openForms = useCallback((kind: FormKind, result: DingTalkIntentExecuteResult) => {
-    const userId = result.targetUserId ? Number(result.targetUserId) : undefined;
-    const who = result.targetNickname || '对方';
-    const start = result.startTime || '';
-    const duration = result.durationMin || 60;
+    const ids =
+      result.targetUserIds && result.targetUserIds.length
+        ? result.targetUserIds.map(Number).filter((n) => Number.isFinite(n))
+        : result.targetUserId
+          ? [Number(result.targetUserId)]
+          : [];
+    const userId = ids[0];
+    const who =
+      (result.targetNicknames && result.targetNicknames.length
+        ? result.targetNicknames.join('、')
+        : result.targetNickname) || '对方';
+    const slots: RecommendSlotOption[] =
+      result.slots && result.slots.length
+        ? result.slots.map((s) => ({
+            start: s.start,
+            durationMin: s.durationMin || 60,
+            label: s.label,
+          }))
+        : result.startTime
+          ? [{ start: result.startTime, durationMin: result.durationMin || 60 }]
+          : [];
+    const first = slots[0];
+    const start = first?.start || result.startTime || '';
+    const duration = first?.durationMin || result.durationMin || 60;
     setFormKind(kind);
     setTargetUserId(userId);
+    setTargetUserIds(ids);
     setTargetNickname(who);
+    setSlotOptions(slots);
     setSlotSeed({ startTime: start || undefined, durationMin: duration });
-    setFormHint(`预填对方「${who}」、时间 ${start || '待选'}（${duration} 分）；请确认后提交。`);
+    setFormHint(
+      slots.length
+        ? `预填「${who}」；请从 ${slots.length} 个推荐时段中选择（默认第一项）后提交。`
+        : `预填「${who}」；请确认时间后提交。`,
+    );
     setStatus('form');
     if (kind === 'invite') {
       setInviteSeed({
-        interviewerUserIds: userId ? [userId] : [],
+        interviewerUserIds: ids,
         interviewAt: start || undefined,
         durationMin: duration,
         roundNo: 1,
@@ -320,6 +349,7 @@ export default function DingTalkBridgePage() {
         <InviteFormModal
           open={inviteOpen}
           seed={inviteSeed}
+          slotOptions={slotOptions}
           createDingTalkCalendar
           sendDingTalkWorkNotice={false}
           onOpenChange={setInviteOpen}
@@ -331,8 +361,10 @@ export default function DingTalkBridgePage() {
         <MeetingFormModal
           open={meetingOpen}
           targetUserId={targetUserId}
+          targetUserIds={targetUserIds}
           targetNickname={targetNickname}
           seed={slotSeed}
+          slotOptions={slotOptions}
           onOpenChange={setMeetingOpen}
           onSuccess={(tipText) => markDone(tipText)}
         />
@@ -341,6 +373,7 @@ export default function DingTalkBridgePage() {
           targetUserId={targetUserId}
           targetNickname={targetNickname}
           seed={slotSeed}
+          slotOptions={slotOptions}
           onOpenChange={setReportOpen}
           onSuccess={(tipText) => markDone(tipText)}
         />

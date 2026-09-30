@@ -525,8 +525,16 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             throw new BusinessException("内容投放ID不能为空");
         }
         GeoContentPlacement placement = requirePlacement(dto.getId());
+        Long previousTopicId = placement.getTopicId();
+        String previousQuestion = nz(placement.getTargetQuestion()).trim();
         fillPlacement(placement, dto);
-        assertTopicQuestionUnique(placement.getTopicId(), placement.getTargetQuestion(), dto.getId());
+        String nextQuestion = nz(placement.getTargetQuestion()).trim();
+        // 仅改发布人/撰写人/备注时不做唯一校验，避免历史重复数据或空白差异把分配拦住
+        boolean topicOrQuestionChanged = !Objects.equals(previousTopicId, placement.getTopicId())
+                || !previousQuestion.equals(nextQuestion);
+        if (topicOrQuestionChanged) {
+            assertTopicQuestionUnique(placement.getTopicId(), placement.getTargetQuestion(), dto.getId());
+        }
         placementMapper.updateById(placement);
         placementTaskSyncService.ensureTasksForPlacement(placement);
     }
@@ -1180,9 +1188,13 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     }
 
     private boolean existsTopicQuestion(Long topicId, String targetQuestion, Long excludeId) {
+        String question = targetQuestion == null ? "" : targetQuestion.trim();
+        if (topicId == null || !StringUtils.hasText(question)) {
+            return false;
+        }
         LambdaQueryWrapper<GeoContentPlacement> wrapper = new LambdaQueryWrapper<GeoContentPlacement>()
                 .eq(GeoContentPlacement::getTopicId, topicId)
-                .eq(GeoContentPlacement::getTargetQuestion, targetQuestion.trim());
+                .apply("TRIM(target_question) = {0}", question);
         if (excludeId != null) {
             wrapper.ne(GeoContentPlacement::getId, excludeId);
         }

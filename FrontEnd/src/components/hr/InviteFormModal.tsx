@@ -9,6 +9,7 @@ import {
   getHrUsersApi,
   updateHrInviteApi,
 } from '@/api/hr';
+import RecommendSlotRadio, { type RecommendSlotOption } from '@/components/dingtalk/RecommendSlotRadio';
 import {
   InviteCandidateSelect,
   buildAppReqMap,
@@ -181,6 +182,8 @@ type InviteFormModalProps = {
   editingInitial?: InviteFormValues | null;
   /** 助手等场景预填，不锁定字段 */
   seed?: InviteFormValues | null;
+  /** 机器人推荐时段：有值时用单选，不展示日期组件 */
+  slotOptions?: RecommendSlotOption[] | null;
   /** 新建时是否创建钉钉日程（简历上传钉盘并写入描述） */
   createDingTalkCalendar?: boolean;
   /** 新建时是否发钉钉工作通知；默认 true，日程助手传 false */
@@ -197,12 +200,14 @@ export default function InviteFormModal({
   editingId,
   editingInitial,
   seed,
+  slotOptions,
   createDingTalkCalendar,
   sendDingTalkWorkNotice,
 }: InviteFormModalProps) {
   const { message } = App.useApp();
   const [form] = Form.useForm<InviteFormValues>();
   const [saving, setSaving] = useState(false);
+  const useSlots = (slotOptions?.length || 0) > 0;
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [allCandidates, setAllCandidates] = useState<InviteCandidateOption[]>([]);
   const [appReq, setAppReq] = useState<Map<number, number>>(new Map());
@@ -276,19 +281,20 @@ export default function InviteFormModal({
       return;
     }
     if (seed) {
+      const first = useSlots ? slotOptions![0] : null;
       form.setFieldsValue({
         roundNo: seed.roundNo ?? 1,
-        durationMin: seed.durationMin ?? 60,
+        durationMin: first?.durationMin ?? seed.durationMin ?? 60,
         applicationId: seed.applicationId,
         interviewerUserIds: seed.interviewerUserIds,
         ccUserIds: seed.ccUserIds,
         location: seed.location,
-        interviewAt: seed.interviewAt ? dayjs(seed.interviewAt) : undefined,
+        interviewAt: first ? first.start : seed.interviewAt ? dayjs(seed.interviewAt) : undefined,
       });
       return;
     }
     form.setFieldsValue({ roundNo: 1, durationMin: 60, interviewerUserIds: undefined, ccUserIds: undefined });
-  }, [open, preset, editingInitial, seed, form]);
+  }, [open, preset, editingInitial, seed, form, useSlots, slotOptions]);
 
   const title = editingId ? '编辑邀约' : preset ? `邀约：${preset.displayName}` : '新增邀约';
   const autoFillPeople = !editingId;
@@ -404,26 +410,42 @@ export default function InviteFormModal({
         </Form.Item>
         <Form.Item
           name='interviewAt'
-          label='开始时间'
-          extra={`每天 09:30～17:30，半小时一档；不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`}
-          rules={[{ required: true, validator: validateInterviewAt }]}
+          label={useSlots ? '推荐时段' : '开始时间'}
+          extra={
+            useSlots
+              ? '来自机器人推荐，默认第一项'
+              : `每天 09:30～17:30，半小时一档；不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`
+          }
+          rules={
+            useSlots
+              ? [{ required: true, message: '请选择时段' }]
+              : [{ required: true, validator: validateInterviewAt }]
+          }
         >
-          <DatePicker
-            className='w-full'
-            format='YYYY-MM-DD HH:mm'
-            disabledDate={disabledBookingDate}
-            showTime={{
-              format: 'HH:mm',
-              minuteStep: 30,
-              hideDisabledOptions: true,
-              showSecond: false,
-            }}
-            disabledTime={(date) => interviewAtDisabledTime(date)}
-          />
+          {useSlots ? (
+            <RecommendSlotRadio
+              options={slotOptions!}
+              onDurationChange={(durationMin) => form.setFieldsValue({ durationMin })}
+            />
+          ) : (
+            <DatePicker
+              className='w-full'
+              format='YYYY-MM-DD HH:mm'
+              disabledDate={disabledBookingDate}
+              showTime={{
+                format: 'HH:mm',
+                minuteStep: 30,
+                hideDisabledOptions: true,
+                showSecond: false,
+              }}
+              disabledTime={(date) => interviewAtDisabledTime(date)}
+            />
+          )}
         </Form.Item>
         <Form.Item
           name='durationMin'
           label='时长（分钟）'
+          hidden={useSlots}
         >
           <InputNumber
             className='w-full'

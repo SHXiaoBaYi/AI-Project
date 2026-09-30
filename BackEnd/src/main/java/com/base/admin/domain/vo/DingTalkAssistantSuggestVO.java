@@ -17,8 +17,14 @@ public class DingTalkAssistantSuggestVO {
     @Schema(description = "目标用户ID", example = "1")
     private Long targetUserId;
 
+    @Schema(description = "多人共同空闲时的全部目标用户 ID（含首位）")
+    private List<Long> targetUserIds = new ArrayList<>();
+
     @Schema(description = "目标用户昵称", example = "张三")
     private String targetNickname;
+
+    @Schema(description = "多人时昵称列表")
+    private List<String> targetNicknames = new ArrayList<>();
 
     @Schema(description = "目标用户名", example = "zhangsan")
     private String targetUsername;

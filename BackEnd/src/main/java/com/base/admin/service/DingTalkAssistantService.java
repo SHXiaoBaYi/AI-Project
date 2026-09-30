@@ -34,10 +34,13 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -71,11 +74,46 @@ public class DingTalkAssistantService {
     private final ObjectMapper objectMapper;
 
     public DingTalkAssistantSuggestVO suggest(DingTalkAssistantSuggestDTO dto) {
-        if (dto.getTargetUserId() == null) {
+        List<Long> targetIds = resolveSuggestTargetIds(dto);
+        if (targetIds.isEmpty()) {
             throw new BusinessException("请选择要查询的同事");
         }
+        dto.setTargetUserId(targetIds.getFirst());
+        dto.setTargetUserIds(targetIds);
+        if (targetIds.size() == 1) {
+            return suggestSingle(dto, targetIds.getFirst());
+        }
+        return suggestMulti(dto, targetIds);
+    }
 
-        DingTalkScheduleRuleVO rule = dingTalkScheduleRuleService.loadOrDefault(dto.getTargetUserId());
+    private static List<Long> resolveSuggestTargetIds(DingTalkAssistantSuggestDTO dto) {
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        if (dto.getTargetUserIds() != null) {
+            for (Long id : dto.getTargetUserIds()) {
+                if (id != null) {
+                    ids.add(id);
+                }
+            }
+        }
+        if (dto.getTargetUserId() != null) {
+            ids.add(dto.getTargetUserId());
+        }
+        // 保证首位是 targetUserId（若有）
+        if (dto.getTargetUserId() != null && ids.size() > 1) {
+            List<Long> ordered = new ArrayList<>();
+            ordered.add(dto.getTargetUserId());
+            for (Long id : ids) {
+                if (!Objects.equals(id, dto.getTargetUserId())) {
+                    ordered.add(id);
+                }
+            }
+            return ordered;
+        }
+        return new ArrayList<>(ids);
+    }
+
+    private DingTalkAssistantSuggestVO suggestSingle(DingTalkAssistantSuggestDTO dto, Long targetUserId) {
+        DingTalkScheduleRuleVO rule = dingTalkScheduleRuleService.loadOrDefault(targetUserId);
         RuleDayHours hours = resolveDayHours(rule);
         ParsedIntent intent = resolveIntent(dto, rule, hours);
 
@@ -89,18 +127,26 @@ public class DingTalkAssistantService {
         if (endDay.isBefore(startDay)) {
             throw new BusinessException("结束日期不能早于开始日期");
         }
-        LocalDateTime rangeStart = startDay.atTime(hours.workStart());
-        LocalDateTime rangeEnd = endDay.atTime(hours.workEnd());
+        LocalDateTime rangeStart = intent.rangeStart();
+        LocalDateTime rangeEnd = intent.rangeEnd();
+        // 若未带具体时刻，落到工作时段边界
+        if (rangeStart.toLocalTime().equals(LocalTime.MIDNIGHT)) {
+            rangeStart = startDay.atTime(hours.workStart());
+        }
+        if (rangeEnd.toLocalTime().equals(LocalTime.MIDNIGHT)) {
+            rangeEnd = endDay.atTime(hours.workEnd());
+        }
 
         DingTalkBusyQueryDTO query = new DingTalkBusyQueryDTO();
-        query.setUserIds(List.of(dto.getTargetUserId()));
+        query.setUserIds(List.of(targetUserId));
         query.setStartTime(rangeStart);
         query.setEndTime(rangeEnd);
         List<DingTalkBusyUserVO> rows = busyService.query(query, hours.workStart(), hours.workEnd());
         DingTalkBusyUserVO user = rows.isEmpty() ? null : rows.getFirst();
 
         DingTalkAssistantSuggestVO vo = new DingTalkAssistantSuggestVO();
-        vo.setTargetUserId(dto.getTargetUserId());
+        vo.setTargetUserId(targetUserId);
+        vo.setTargetUserIds(List.of(targetUserId));
         vo.setDurationMin(duration);
         vo.setWorkStart(hours.workStartLabel());
         vo.setWorkEnd(hours.workEndLabel());
@@ -113,6 +159,7 @@ public class DingTalkAssistantService {
         vo.setRuleSummary(buildRuleSummary(null, hours, rule, intent));
         if (user == null) {
             vo.setTargetNickname("未知用户");
+            vo.setTargetNicknames(List.of("未知用户"));
             vo.setError("未查到该用户");
             vo.setBusySummary("未能查询到该用户的钉钉闲忙。");
             vo.setAdviceText("未查到该用户，请换人再试。");
@@ -120,7 +167,9 @@ public class DingTalkAssistantService {
             return vo;
         }
         vo.setTargetUsername(user.getUsername());
-        vo.setTargetNickname(StringUtils.hasText(user.getNickname()) ? user.getNickname() : user.getUsername());
+        String nick = StringUtils.hasText(user.getNickname()) ? user.getNickname() : user.getUsername();
+        vo.setTargetNickname(nick);
+        vo.setTargetNicknames(List.of(nick));
         vo.setRuleSummary(buildRuleSummary(vo.getTargetNickname(), hours, rule, intent));
         if (StringUtils.hasText(user.getError())) {
             vo.setError(user.getError());
@@ -141,7 +190,8 @@ public class DingTalkAssistantService {
         boolean searchedLookAhead = false;
         LocalDate displayStart = startDay;
         LocalDate displayEnd = endDay;
-        if (countSlots(dayGroups) == 0) {
+        // 用户钉死了具体日期/时段时，不再扩成 lookAhead
+        if (countSlots(dayGroups) == 0 && !intent.pinnedRange()) {
             LocalDate today = LocalDate.now();
             LocalDate expandEnd = today.plusDays(lookAhead - 1L);
             boolean askedCoversLookAhead = !startDay.isAfter(today) && !endDay.isBefore(expandEnd);
@@ -150,7 +200,7 @@ public class DingTalkAssistantService {
                 LocalDateTime expandRangeStart = today.atTime(hours.workStart());
                 LocalDateTime expandRangeEnd = expandEnd.atTime(hours.workEnd());
                 DingTalkBusyQueryDTO expandQuery = new DingTalkBusyQueryDTO();
-                expandQuery.setUserIds(List.of(dto.getTargetUserId()));
+                expandQuery.setUserIds(List.of(targetUserId));
                 expandQuery.setStartTime(expandRangeStart);
                 expandQuery.setEndTime(expandRangeEnd);
                 List<DingTalkBusyUserVO> expandRows = busyService.query(
@@ -169,6 +219,9 @@ public class DingTalkAssistantService {
             } else {
                 dayGroups = List.of();
             }
+        } else if (countSlots(dayGroups) == 0 && intent.pinnedRange()) {
+            searchedLookAhead = false;
+            dayGroups = List.of();
         }
 
         vo.setFreeWindows(windows);
@@ -189,6 +242,253 @@ public class DingTalkAssistantService {
         return vo;
     }
 
+    /** 多人：求共同连续空闲（交集），推荐时段供动作卡片预填 */
+    private DingTalkAssistantSuggestVO suggestMulti(DingTalkAssistantSuggestDTO dto, List<Long> targetIds) {
+        DingTalkScheduleRuleVO primaryRule = dingTalkScheduleRuleService.loadOrDefault(targetIds.getFirst());
+        ParsedIntent intent = resolveIntent(dto, primaryRule, resolveDayHours(primaryRule));
+        int duration = intent.durationMin();
+        if (duration < 15 || duration > 240) {
+            throw new BusinessException("期望时长须在 15～240 分钟之间");
+        }
+
+        List<DingTalkScheduleRuleVO> rules = new ArrayList<>();
+        List<RuleDayHours> hoursList = new ArrayList<>();
+        for (Long id : targetIds) {
+            DingTalkScheduleRuleVO rule = dingTalkScheduleRuleService.loadOrDefault(id);
+            rules.add(rule);
+            hoursList.add(resolveDayHours(rule));
+        }
+        RuleDayHours hours = mergeRestrictiveHours(hoursList);
+        DingTalkScheduleRuleVO ruleForSlots = primaryRule;
+
+        LocalDate startDay = intent.rangeStart().toLocalDate();
+        LocalDate endDay = intent.rangeEnd().toLocalDate();
+        if (endDay.isBefore(startDay)) {
+            throw new BusinessException("结束日期不能早于开始日期");
+        }
+
+        DingTalkAssistantSuggestVO vo = new DingTalkAssistantSuggestVO();
+        vo.setTargetUserId(targetIds.getFirst());
+        vo.setTargetUserIds(targetIds);
+        vo.setDurationMin(duration);
+        vo.setWorkStart(hours.workStartLabel());
+        vo.setWorkEnd(hours.workEndLabel());
+        vo.setLunchStart(hours.lunchStartLabel());
+        vo.setLunchEnd(hours.lunchEndLabel());
+        vo.setBufferMin(hours.bufferMin());
+        vo.setIntentAction(intent.action());
+        vo.setJobName(intent.jobName());
+        vo.setJobMatchNote(intent.jobMatchNote());
+
+        LocalDateTime rangeStart = intent.rangeStart();
+        LocalDateTime rangeEnd = intent.rangeEnd();
+        if (rangeStart.toLocalTime().equals(LocalTime.MIDNIGHT)) {
+            rangeStart = startDay.atTime(hours.workStart());
+        }
+        if (rangeEnd.toLocalTime().equals(LocalTime.MIDNIGHT)) {
+            rangeEnd = endDay.atTime(hours.workEnd());
+        }
+        DingTalkBusyQueryDTO query = new DingTalkBusyQueryDTO();
+        query.setUserIds(targetIds);
+        query.setStartTime(rangeStart);
+        query.setEndTime(rangeEnd);
+        List<DingTalkBusyUserVO> rows = busyService.query(query, hours.workStart(), hours.workEnd());
+        Map<Long, DingTalkBusyUserVO> byId = new LinkedHashMap<>();
+        for (DingTalkBusyUserVO row : rows) {
+            if (row != null && row.getUserId() != null) {
+                byId.put(row.getUserId(), row);
+            }
+        }
+
+        List<String> nicknames = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+        for (Long id : targetIds) {
+            DingTalkBusyUserVO user = byId.get(id);
+            if (user == null) {
+                nicknames.add("用户#" + id);
+                errors.add("用户#" + id + "：未查到");
+                continue;
+            }
+            String nick = StringUtils.hasText(user.getNickname()) ? user.getNickname() : user.getUsername();
+            nicknames.add(nick);
+            if (StringUtils.hasText(user.getError())) {
+                errors.add(nick + "：" + user.getError());
+            }
+        }
+        String who = String.join("、", nicknames);
+        vo.setTargetNickname(who);
+        vo.setTargetNicknames(nicknames);
+        vo.setTargetUsername(byId.containsKey(targetIds.getFirst()) ? byId.get(targetIds.getFirst()).getUsername() : null);
+        vo.setRuleSummary(buildRuleSummary(who, hours, primaryRule, intent) + "（多人共同空闲，工作时段取交集）");
+
+        if (!errors.isEmpty()) {
+            vo.setError(String.join("；", errors));
+            vo.setBusySummary("查询共同闲忙失败：" + String.join("；", errors));
+            vo.setAdviceText(vo.getError());
+            vo.setNextStepText("请确认上述同事均已绑定钉钉后重试。");
+            vo.setActions(List.of());
+            return vo;
+        }
+
+        List<DingTalkAssistantSuggestVO.FreeWindow> windows = null;
+        for (int i = 0; i < targetIds.size(); i++) {
+            DingTalkBusyUserVO user = byId.get(targetIds.get(i));
+            List<DingTalkBusySlotVO> slots = applyRuleToBusySlots(user.getSlots(), rules.get(i), hoursList.get(i));
+            List<DingTalkAssistantSuggestVO.FreeWindow> one = findFreeWindows(slots, duration, hoursList.get(i));
+            windows = windows == null ? one : intersectFreeWindows(windows, one, duration);
+        }
+        if (windows == null) {
+            windows = List.of();
+        }
+
+        List<DingTalkAssistantSuggestVO.DayGroup> dayGroups = buildDayGroups(
+                rangeStart, rangeEnd, windows, duration, ruleForSlots, hours, intent.action());
+
+        int lookAhead = resolveLookAheadDays(primaryRule);
+        boolean expanded = false;
+        boolean searchedLookAhead = false;
+        LocalDate displayStart = startDay;
+        LocalDate displayEnd = endDay;
+        if (countSlots(dayGroups) == 0 && !intent.pinnedRange()) {
+            LocalDate today = LocalDate.now();
+            LocalDate expandEnd = today.plusDays(lookAhead - 1L);
+            boolean askedCoversLookAhead = !startDay.isAfter(today) && !endDay.isBefore(expandEnd);
+            searchedLookAhead = askedCoversLookAhead;
+            if (!askedCoversLookAhead) {
+                LocalDateTime expandRangeStart = today.atTime(hours.workStart());
+                LocalDateTime expandRangeEnd = expandEnd.atTime(hours.workEnd());
+                DingTalkBusyQueryDTO expandQuery = new DingTalkBusyQueryDTO();
+                expandQuery.setUserIds(targetIds);
+                expandQuery.setStartTime(expandRangeStart);
+                expandQuery.setEndTime(expandRangeEnd);
+                List<DingTalkBusyUserVO> expandRows = busyService.query(
+                        expandQuery, hours.workStart(), hours.workEnd());
+                Map<Long, DingTalkBusyUserVO> expandById = new LinkedHashMap<>();
+                for (DingTalkBusyUserVO row : expandRows) {
+                    if (row != null && row.getUserId() != null) {
+                        expandById.put(row.getUserId(), row);
+                    }
+                }
+                boolean allOk = targetIds.stream().allMatch(id -> {
+                    DingTalkBusyUserVO u = expandById.get(id);
+                    return u != null && !StringUtils.hasText(u.getError());
+                });
+                if (allOk) {
+                    List<DingTalkAssistantSuggestVO.FreeWindow> expandWindows = null;
+                    for (int i = 0; i < targetIds.size(); i++) {
+                        DingTalkBusyUserVO user = expandById.get(targetIds.get(i));
+                        List<DingTalkBusySlotVO> slots = applyRuleToBusySlots(user.getSlots(), rules.get(i), hoursList.get(i));
+                        List<DingTalkAssistantSuggestVO.FreeWindow> one = findFreeWindows(slots, duration, hoursList.get(i));
+                        expandWindows = expandWindows == null ? one : intersectFreeWindows(expandWindows, one, duration);
+                    }
+                    windows = expandWindows == null ? List.of() : expandWindows;
+                    dayGroups = keepDaysWithSlots(buildDayGroups(
+                            expandRangeStart, expandRangeEnd, windows, duration, ruleForSlots, hours, intent.action()));
+                    expanded = countSlots(dayGroups) > 0;
+                    searchedLookAhead = true;
+                    displayStart = today;
+                    displayEnd = expandEnd;
+                }
+            } else {
+                dayGroups = List.of();
+            }
+        } else if (countSlots(dayGroups) == 0 && intent.pinnedRange()) {
+            searchedLookAhead = false;
+            dayGroups = List.of();
+        }
+
+        vo.setFreeWindows(windows);
+        vo.setDayGroups(dayGroups);
+        vo.setBusySummary("「" + who + "」共同空闲（" + displayStart + "～" + displayEnd + "，每段至少 "
+                + duration + " 分钟）：交集窗 " + windows.size() + " 段。");
+        SlotPick pick = firstSlot(dayGroups, duration);
+        boolean hasSlot = pick != null && pick.start() != null;
+        if (!hasSlot) {
+            dayGroups = List.of();
+            vo.setDayGroups(dayGroups);
+        }
+        vo.setAdviceText(buildAdvice(who, duration, dayGroups, hours, intent,
+                startDay, endDay, lookAhead, expanded, hasSlot, searchedLookAhead));
+        if (hasSlot && StringUtils.hasText(vo.getAdviceText()) && !vo.getAdviceText().contains("共同")) {
+            vo.setAdviceText(vo.getAdviceText().replaceFirst("有空", "都有空（共同空闲）"));
+        }
+        vo.setActions(hasSlot ? baseActions(vo, pick, duration, intent.action()) : List.of());
+        vo.setNextStepText(buildNextStepText(who, duration, dayGroups, pick, intent,
+                startDay, endDay, lookAhead, expanded, searchedLookAhead));
+        return vo;
+    }
+
+    private static RuleDayHours mergeRestrictiveHours(List<RuleDayHours> list) {
+        RuleDayHours first = list.getFirst();
+        LocalTime workStart = first.workStart();
+        LocalTime workEnd = first.workEnd();
+        LocalTime lunchStart = first.lunchStart();
+        LocalTime lunchEnd = first.lunchEnd();
+        int buffer = first.bufferMin();
+        int step = first.slotStepMin();
+        boolean denyHolidays = first.denyHolidays();
+        for (int i = 1; i < list.size(); i++) {
+            RuleDayHours h = list.get(i);
+            if (h.workStart().isAfter(workStart)) {
+                workStart = h.workStart();
+            }
+            if (h.workEnd().isBefore(workEnd)) {
+                workEnd = h.workEnd();
+            }
+            if (h.lunchStart().isBefore(lunchStart)) {
+                lunchStart = h.lunchStart();
+            }
+            if (h.lunchEnd().isAfter(lunchEnd)) {
+                lunchEnd = h.lunchEnd();
+            }
+            buffer = Math.max(buffer, h.bufferMin());
+            step = Math.max(step, h.slotStepMin());
+            denyHolidays = denyHolidays || h.denyHolidays();
+        }
+        if (!workStart.isBefore(workEnd)) {
+            return first;
+        }
+        return new RuleDayHours(workStart, workEnd, lunchStart, lunchEnd, buffer, step, denyHolidays);
+    }
+
+    private static List<DingTalkAssistantSuggestVO.FreeWindow> intersectFreeWindows(
+            List<DingTalkAssistantSuggestVO.FreeWindow> left,
+            List<DingTalkAssistantSuggestVO.FreeWindow> right,
+            int durationMin) {
+        List<DingTalkAssistantSuggestVO.FreeWindow> out = new ArrayList<>();
+        if (left == null || right == null || left.isEmpty() || right.isEmpty()) {
+            return out;
+        }
+        for (DingTalkAssistantSuggestVO.FreeWindow a : left) {
+            if (a == null || a.getStart() == null || a.getEnd() == null) {
+                continue;
+            }
+            for (DingTalkAssistantSuggestVO.FreeWindow b : right) {
+                if (b == null || b.getStart() == null || b.getEnd() == null) {
+                    continue;
+                }
+                LocalDateTime start = a.getStart().isAfter(b.getStart()) ? a.getStart() : b.getStart();
+                LocalDateTime end = a.getEnd().isBefore(b.getEnd()) ? a.getEnd() : b.getEnd();
+                if (!start.isBefore(end)) {
+                    continue;
+                }
+                long minutes = Duration.between(start, end).toMinutes();
+                if (minutes < durationMin) {
+                    continue;
+                }
+                DingTalkAssistantSuggestVO.FreeWindow w = new DingTalkAssistantSuggestVO.FreeWindow();
+                w.setStart(start);
+                w.setEnd(end);
+                w.setAvailableMin((int) minutes);
+                w.setLabel(start.format(DateTimeFormatter.ofPattern("MM-dd HH:mm")) + "–"
+                        + end.format(DateTimeFormatter.ofPattern("HH:mm")) + "（" + minutes + " 分钟）");
+                out.add(w);
+            }
+        }
+        out.sort(Comparator.comparing(DingTalkAssistantSuggestVO.FreeWindow::getStart));
+        return out;
+    }
+
     @Transactional
     public DingTalkAssistantActionResultVO createMeeting(DingTalkAssistantMeetingDTO dto) {
         validateBookableStart(dto.getStartTime());
@@ -207,7 +507,7 @@ public class DingTalkAssistantService {
         }
 
         CalendarPair calendars = createSharedCalendar(
-                querier, target, title, description, dto.getStartTime(), duration, location, online);
+                querier, collectMeetingTargets(dto), title, description, dto.getStartTime(), duration, location, online);
         if (!calendars.querierOk()) {
             throw new BusinessException(buildActionMessage("会议", calendars, false));
         }
@@ -555,12 +855,46 @@ public class DingTalkAssistantService {
      */
     private CalendarPair createSharedCalendar(BoundUser querier, BoundUser target, String title, String description,
                                               LocalDateTime start, int duration, String location, boolean online) {
-        List<String> attendees = List.of(target.unionId());
+        return createSharedCalendar(querier, List.of(target), title, description, start, duration, location, online);
+    }
+
+    private CalendarPair createSharedCalendar(BoundUser querier, List<BoundUser> targets, String title, String description,
+                                              LocalDateTime start, int duration, String location, boolean online) {
+        List<String> attendees = new ArrayList<>();
+        if (targets != null) {
+            for (BoundUser t : targets) {
+                if (t != null && StringUtils.hasText(t.unionId()) && !attendees.contains(t.unionId())) {
+                    attendees.add(t.unionId());
+                }
+            }
+        }
         DingTalkCalendarClient.CalendarCall call = dingTalk.createEvent(
                 querier.unionId(), title, description, start, duration, location, attendees, online);
         return new CalendarPair(
                 call.success(), call.eventId(), call.message(),
                 call.success(), null, null);
+    }
+
+    private List<BoundUser> collectMeetingTargets(DingTalkAssistantMeetingDTO dto) {
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        if (dto.getTargetUserId() != null) {
+            ids.add(dto.getTargetUserId());
+        }
+        if (dto.getAttendeeUserIds() != null) {
+            for (Long id : dto.getAttendeeUserIds()) {
+                if (id != null) {
+                    ids.add(id);
+                }
+            }
+        }
+        List<BoundUser> targets = new ArrayList<>();
+        for (Long id : ids) {
+            targets.add(requireBound(id, "被邀请人"));
+        }
+        if (targets.isEmpty()) {
+            throw new BusinessException("请选择会议对象");
+        }
+        return targets;
     }
 
     private boolean notifyQuerier(BoundUser querier, String title, String markdown) {
@@ -666,8 +1000,24 @@ public class DingTalkAssistantService {
                 if (cursor == null || windowEnd == null || !cursor.isBefore(windowEnd)) {
                     continue;
                 }
+                // 尊重用户钉死的查询下界（如「下午三点后」）
+                if (rangeStart != null && cursor.isBefore(rangeStart)) {
+                    cursor = ceilToSlot(rangeStart, hours);
+                    if (cursor == null || !cursor.isBefore(windowEnd)) {
+                        continue;
+                    }
+                }
+                if (rangeEnd != null && windowEnd.isAfter(rangeEnd)) {
+                    windowEnd = rangeEnd;
+                    if (!cursor.isBefore(windowEnd)) {
+                        continue;
+                    }
+                }
                 while (!cursor.plusMinutes(durationMin).isAfter(windowEnd)) {
                     LocalDateTime slotEnd = cursor.plusMinutes(durationMin);
+                    if (rangeEnd != null && slotEnd.isAfter(rangeEnd)) {
+                        break;
+                    }
                     if (slotEnd.toLocalTime().isAfter(hours.workEnd())
                             || cursor.toLocalTime().isBefore(hours.workStart())
                             || (hours.denyHolidays() && ChinaHoliday.isOffDay(cursor.toLocalDate()))
@@ -1148,8 +1498,9 @@ public class DingTalkAssistantService {
                 durationMin: 15~240 的整数或 null
                 startDate: yyyy-MM-dd 或 null（相对词「今天/明天/后天/本周/下周」请输出 null，由服务端自己算）
                 endDate: yyyy-MM-dd 或 null
+                earliestTime: HH:mm 或 null（如「下午三点后」→ 15:00；拿不准则 null）
                 规则：提到面试/邀约/候选人 → interview；开会/会议 → meeting；汇报 → report；只问有没有空 → busy_query。
-                今天是 %s。日期必须 ≥ 今天；拿不准就输出 null。
+                今天是 %s。日期必须 ≥ 今天；拿不准就输出 null。用户写了具体日期（如 10/9）时必须填 startDate=endDate。
                 """.formatted(today);
         String raw = aiChatService.chat(system, "用户原话：\n" + message);
         if (!StringUtils.hasText(raw)) {
@@ -1185,7 +1536,12 @@ public class DingTalkAssistantService {
                 }
             }
             duration = clampDuration(duration, action, rule);
-            return new ParsedIntent(action, jobName, null, duration, rangeStart, rangeEnd);
+            // 用户口语里已钉死日期/时段时，以启发式为准，避免 AI 扩成整段 lookAhead
+            if (fallback.pinnedRange()) {
+                return new ParsedIntent(action, jobName, null, duration,
+                        fallback.rangeStart(), fallback.rangeEnd(), true);
+            }
+            return new ParsedIntent(action, jobName, null, duration, rangeStart, rangeEnd, false);
         } catch (Exception e) {
             return null;
         }
@@ -1199,7 +1555,7 @@ public class DingTalkAssistantService {
                 action = DingTalkScheduleRuleService.ACTION_INTERVIEW;
             } else if (containsAny(msg, "汇报")) {
                 action = DingTalkScheduleRuleService.ACTION_REPORT;
-            } else if (containsAny(msg, "开会", "会议", "约个会")) {
+            } else if (containsAny(msg, "开会", "会议", "约个会", "参会")) {
                 action = DingTalkScheduleRuleService.ACTION_MEETING;
             } else {
                 action = "busy_query";
@@ -1214,18 +1570,21 @@ public class DingTalkAssistantService {
         }
         duration = clampDuration(duration, action, rule);
 
-        LocalDateTime[] range = resolveQueryRange(msg, dto.getStartTime(), dto.getEndTime(), rule, hours);
-        return new ParsedIntent(action, jobName, null, duration, range[0], range[1]);
+        LocalDateTime[] range = resolveQueryRange(msg, dto.getStartTime(), dto.getEndTime(), rule, hours, duration);
+        boolean pinned = isPinnedQueryRange(msg, dto.getStartTime(), dto.getEndTime());
+        return new ParsedIntent(action, jobName, null, duration, range[0], range[1], pinned);
     }
 
     /**
      * 解析查询日期范围。优先级：口语相对词 → 口语显式日期 → 入参（且未过期）→ lookAhead 默认。
+     * 支持「明天下午 3 点的会议，时长 1 小时」钉死到 [15:00, 16:00]。
      */
     private static LocalDateTime[] resolveQueryRange(String msg, LocalDateTime dtoStart, LocalDateTime dtoEnd,
-                                                     DingTalkScheduleRuleVO rule, RuleDayHours hours) {
+                                                     DingTalkScheduleRuleVO rule, RuleDayHours hours, int durationMin) {
         LocalDate today = LocalDate.now();
         int lookAhead = rule != null && rule.getLookAheadDays() > 0 ? rule.getLookAheadDays() : 7;
         lookAhead = Math.min(lookAhead, ChinaHoliday.BOOKING_MAX_DAYS);
+        int duration = durationMin > 0 ? durationMin : 60;
 
         LocalDateTime rangeStart = null;
         LocalDateTime rangeEnd = null;
@@ -1265,25 +1624,235 @@ public class DingTalkAssistantService {
         if (rangeStart == null || rangeEnd == null) {
             if (dtoStart != null && dtoEnd != null && !dtoEnd.isBefore(dtoStart)
                     && !dtoStart.toLocalDate().isBefore(today) && !dtoEnd.toLocalDate().isBefore(today)) {
-                rangeStart = dtoStart.toLocalDate().atTime(hours.workStart());
-                rangeEnd = dtoEnd.toLocalDate().atTime(hours.workEnd());
+                rangeStart = dtoStart;
+                rangeEnd = dtoEnd;
             } else {
                 rangeStart = today.atTime(hours.workStart());
                 rangeEnd = today.plusDays(lookAhead - 1L).atTime(hours.workEnd());
             }
         }
 
-        // 兜底：整段已过期则夹到今天起 lookAhead
+        LocalTime exact = extractExactTimeOfDay(msg);
+        LocalTime earliest = exact == null ? extractEarliestTimeOfDay(msg, hours) : null;
+        LocalTime latest = exact == null ? extractLatestTimeOfDay(msg, hours) : null;
+
+        if (exact != null) {
+            // 「明天下午 3 点的会议，时长 1 小时」→ 只查该整段
+            LocalDate day = rangeStart.toLocalDate();
+            rangeStart = day.atTime(exact);
+            LocalDateTime endAt = rangeStart.plusMinutes(duration);
+            LocalDateTime dayWorkEnd = day.atTime(hours.workEnd());
+            rangeEnd = endAt.isAfter(dayWorkEnd) ? dayWorkEnd : endAt;
+        } else {
+            if (earliest != null) {
+                LocalDateTime pinned = rangeStart.toLocalDate().atTime(earliest);
+                if (pinned.isAfter(rangeStart)) {
+                    rangeStart = pinned;
+                }
+                if (rangeStart.toLocalDate().equals(rangeEnd.toLocalDate())
+                        && rangeStart.toLocalTime().isBefore(earliest)) {
+                    rangeStart = rangeStart.toLocalDate().atTime(earliest);
+                }
+            }
+            if (latest != null) {
+                LocalDateTime pinned = rangeEnd.toLocalDate().atTime(latest);
+                if (pinned.isBefore(rangeEnd)) {
+                    rangeEnd = pinned;
+                }
+                if (rangeStart.toLocalDate().equals(rangeEnd.toLocalDate())
+                        && rangeEnd.toLocalTime().isAfter(latest)) {
+                    rangeEnd = rangeEnd.toLocalDate().atTime(latest);
+                }
+            }
+        }
+
         if (rangeEnd.toLocalDate().isBefore(today)) {
-            rangeStart = today.atTime(hours.workStart());
-            rangeEnd = today.plusDays(lookAhead - 1L).atTime(hours.workEnd());
+            if (!isPinnedQueryRange(msg, dtoStart, dtoEnd)) {
+                rangeStart = today.atTime(hours.workStart());
+                rangeEnd = today.plusDays(lookAhead - 1L).atTime(hours.workEnd());
+            }
         } else if (rangeStart.toLocalDate().isBefore(today)) {
             rangeStart = today.atTime(hours.workStart());
+            if (exact != null) {
+                rangeStart = today.atTime(exact);
+                LocalDateTime endAt = rangeStart.plusMinutes(duration);
+                LocalDateTime dayWorkEnd = today.atTime(hours.workEnd());
+                rangeEnd = endAt.isAfter(dayWorkEnd) ? dayWorkEnd : endAt;
+            } else if (earliest != null && rangeStart.toLocalTime().isBefore(earliest)) {
+                rangeStart = today.atTime(earliest);
+            }
         }
         if (rangeEnd.isBefore(rangeStart)) {
-            rangeEnd = rangeStart.toLocalDate().atTime(hours.workEnd());
+            rangeEnd = rangeStart.plusMinutes(duration);
+            LocalDateTime dayWorkEnd = rangeStart.toLocalDate().atTime(hours.workEnd());
+            if (rangeEnd.isAfter(dayWorkEnd)) {
+                rangeEnd = dayWorkEnd;
+            }
         }
         return new LocalDateTime[]{rangeStart, rangeEnd};
+    }
+
+    /** 用户是否钉死了具体日期/时段（不应再扩成 lookAhead） */
+    private static boolean isPinnedQueryRange(String msg, LocalDateTime dtoStart, LocalDateTime dtoEnd) {
+        if (StringUtils.hasText(msg)) {
+            if (msg.contains("今天") || msg.contains("明天") || msg.contains("后天")) {
+                return true;
+            }
+            if (extractDateRange(msg) != null || extractSingleDate(msg) != null) {
+                return true;
+            }
+            if (extractExactTimeOfDay(msg) != null
+                    || extractEarliestTimeOfDay(msg, null) != null
+                    || extractLatestTimeOfDay(msg, null) != null) {
+                return msg.contains("今天") || msg.contains("明天") || msg.contains("后天")
+                        || extractSingleDate(msg) != null;
+            }
+        }
+        return dtoStart != null && dtoEnd != null
+                && dtoStart.toLocalDate().equals(dtoEnd.toLocalDate());
+    }
+
+    /**
+     * 精确开会时刻：「下午 3 点」「15:00」「3点的会议」（不含 后/前）。
+     */
+    private static LocalTime extractExactTimeOfDay(String msg) {
+        if (!StringUtils.hasText(msg)) {
+            return null;
+        }
+        // 已带「后/前」的交给 earliest/latest，不算精确整点开会
+        if (Pattern.compile("[点时分](?:整)?\\s*(?:以后|之后|后|起|开始|以前|之前|前)").matcher(msg).find()
+                || Pattern.compile("[:：]\\d{2}\\s*(?:以后|之后|后|起|开始|以前|之前|前)").matcher(msg).find()) {
+            return null;
+        }
+        Matcher cn = Pattern.compile(
+                "(上午|下午|中午|晚上)?\\s*([0-9一二三四五六七八九十两]{1,3})\\s*[点时](?:整)?\\s*(半)?").matcher(msg);
+        if (cn.find()) {
+            Integer hour = parseSpokenHour(cn.group(2));
+            if (hour != null) {
+                return normalizeSpokenClock(cn.group(1), hour, cn.group(3) != null ? 30 : 0);
+            }
+        }
+        Matcher num = Pattern.compile("(?<!\\d)(\\d{1,2})[:：](\\d{2})(?!\\d)").matcher(msg);
+        if (num.find()) {
+            int h = Integer.parseInt(num.group(1));
+            int m = Integer.parseInt(num.group(2));
+            if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+                return LocalTime.of(h, m);
+            }
+        }
+        return null;
+    }
+
+    private static Integer parseSpokenHour(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        String t = raw.trim();
+        if (t.matches("\\d{1,2}")) {
+            return Integer.parseInt(t);
+        }
+        return switch (t) {
+            case "一", "壹" -> 1;
+            case "二", "两", "贰" -> 2;
+            case "三", "叁" -> 3;
+            case "四", "肆" -> 4;
+            case "五", "伍" -> 5;
+            case "六", "陆" -> 6;
+            case "七", "柒" -> 7;
+            case "八", "捌" -> 8;
+            case "九", "玖" -> 9;
+            case "十", "拾" -> 10;
+            case "十一" -> 11;
+            case "十二" -> 12;
+            default -> null;
+        };
+    }
+
+    /**
+     * 解析「三点后 / 15:00之后 / 下午」等下界时刻。
+     */
+    private static LocalTime extractEarliestTimeOfDay(String msg, RuleDayHours hours) {
+        if (!StringUtils.hasText(msg)) {
+            return null;
+        }
+        Matcher afterCn = Pattern.compile(
+                "(上午|下午|中午|晚上)?\\s*([0-9一二三四五六七八九十两]{1,3})\\s*[点时](?:整)?\\s*(半)?\\s*(?:以后|之后|后|起|开始)").matcher(msg);
+        if (afterCn.find()) {
+            Integer hour = parseSpokenHour(afterCn.group(2));
+            if (hour != null) {
+                return normalizeSpokenClock(afterCn.group(1), hour, afterCn.group(3) != null ? 30 : 0);
+            }
+        }
+        Matcher afterNum = Pattern.compile(
+                "(\\d{1,2})[:：](\\d{2})\\s*(?:以后|之后|后|起|开始)").matcher(msg);
+        if (afterNum.find()) {
+            int h = Integer.parseInt(afterNum.group(1));
+            int m = Integer.parseInt(afterNum.group(2));
+            if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+                return LocalTime.of(h, m);
+            }
+        }
+        if (msg.contains("下午") && !Pattern.compile("[0-9一二三四五六七八九十两]{1,3}\\s*[点时]").matcher(msg).find()) {
+            return hours != null && hours.lunchEnd() != null ? hours.lunchEnd() : LocalTime.of(13, 0);
+        }
+        if (msg.contains("上午") && msg.contains("后")
+                && !Pattern.compile("[0-9一二三四五六七八九十两]{1,3}\\s*[点时]").matcher(msg).find()) {
+            return hours != null ? hours.workStart() : LocalTime.of(9, 30);
+        }
+        return null;
+    }
+
+    /**
+     * 解析「五点前 / 17:00之前」等上界时刻。
+     */
+    private static LocalTime extractLatestTimeOfDay(String msg, RuleDayHours hours) {
+        if (!StringUtils.hasText(msg)) {
+            return null;
+        }
+        Matcher beforeCn = Pattern.compile(
+                "(上午|下午|中午|晚上)?\\s*([0-9一二三四五六七八九十两]{1,3})\\s*[点时](?:整)?\\s*(半)?\\s*(?:以前|之前|前)").matcher(msg);
+        if (beforeCn.find()) {
+            Integer hour = parseSpokenHour(beforeCn.group(2));
+            if (hour != null) {
+                return normalizeSpokenClock(beforeCn.group(1), hour, beforeCn.group(3) != null ? 30 : 0);
+            }
+        }
+        Matcher beforeNum = Pattern.compile(
+                "(\\d{1,2})[:：](\\d{2})\\s*(?:以前|之前|前)").matcher(msg);
+        if (beforeNum.find()) {
+            int h = Integer.parseInt(beforeNum.group(1));
+            int m = Integer.parseInt(beforeNum.group(2));
+            if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+                return LocalTime.of(h, m);
+            }
+        }
+        if (msg.contains("上午") && !Pattern.compile("[0-9一二三四五六七八九十两]{1,3}\\s*[点时]").matcher(msg).find()
+                && !msg.contains("下午")) {
+            return hours != null && hours.lunchStart() != null ? hours.lunchStart() : LocalTime.of(12, 0);
+        }
+        return null;
+    }
+
+    private static LocalTime normalizeSpokenClock(String period, int hour, int minute) {
+        int h = hour;
+        if (h == 12) {
+            if ("上午".equals(period)) {
+                h = 0;
+            }
+        } else if (h < 12) {
+            if ("下午".equals(period) || "晚上".equals(period)) {
+                h += 12;
+            } else if ("中午".equals(period) && h <= 2) {
+                h += 12;
+            }
+        }
+        if (h > 23) {
+            h = 23;
+        }
+        if (minute < 0 || minute > 59) {
+            minute = 0;
+        }
+        return LocalTime.of(h, minute);
     }
 
     private static boolean hasRelativeDayWord(String msg) {
@@ -1314,7 +1883,7 @@ public class DingTalkAssistantService {
             note = "岗位「" + intent.jobName() + "」匹配重要岗位面试频次规则";
         }
         return new ParsedIntent(intent.action(), intent.jobName(), note, intent.durationMin(),
-                intent.rangeStart(), intent.rangeEnd());
+                intent.rangeStart(), intent.rangeEnd(), intent.pinnedRange());
     }
 
     private static String matchInterviewJob(String jobName, DingTalkScheduleRuleVO rule) {
@@ -1390,14 +1959,22 @@ public class DingTalkAssistantService {
         if (msg.contains("半小时") || msg.contains("半个小时")) {
             return 30;
         }
-        if (msg.contains("一个半小时") || msg.contains("1.5小时")) {
+        if (msg.contains("一个半小时") || msg.contains("1.5小时") || msg.contains("1.5 小时")) {
             return 90;
         }
-        if (msg.contains("两小时") || msg.contains("2小时")) {
+        if (msg.contains("两小时") || msg.contains("2小时") || msg.contains("2 小时") || msg.contains("两个小时")) {
             return 120;
         }
-        if (msg.contains("一小时") || msg.contains("1小时")) {
+        if (msg.contains("一小时") || msg.contains("1小时") || msg.contains("1 小时") || msg.contains("一个小时")) {
             return 60;
+        }
+        Matcher timed = Pattern.compile("时长\\s*(\\d{1,3})\\s*分钟").matcher(msg);
+        if (timed.find()) {
+            return Integer.parseInt(timed.group(1));
+        }
+        Matcher timedHour = Pattern.compile("时长\\s*(\\d+(?:\\.\\d+)?)\\s*小时").matcher(msg);
+        if (timedHour.find()) {
+            return (int) Math.round(Double.parseDouble(timedHour.group(1)) * 60);
         }
         Matcher min = Pattern.compile("(\\d{1,3})\\s*分钟").matcher(msg);
         if (min.find()) {
@@ -1428,16 +2005,28 @@ public class DingTalkAssistantService {
     }
 
     private static LocalDate extractSingleDate(String msg) {
+        Matcher md = Pattern.compile("(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日?").matcher(msg);
+        if (md.find()) {
+            return safeDate(Integer.parseInt(md.group(1)), Integer.parseInt(md.group(2)));
+        }
         Matcher m = Pattern.compile("(?<!\\d)(\\d{1,2})[./-](\\d{1,2})(?!\\d)").matcher(msg);
         if (!m.find()) {
             return null;
         }
-        int y = LocalDate.now().getYear();
-        LocalDate d = LocalDate.of(y, Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)));
-        if (d.isBefore(LocalDate.now().minusDays(1))) {
-            d = d.plusYears(1);
+        return safeDate(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)));
+    }
+
+    private static LocalDate safeDate(int month, int day) {
+        try {
+            int y = LocalDate.now().getYear();
+            LocalDate d = LocalDate.of(y, month, day);
+            if (d.isBefore(LocalDate.now().minusDays(1))) {
+                d = d.plusYears(1);
+            }
+            return d;
+        } catch (Exception e) {
+            return null;
         }
-        return d;
     }
 
     private static int clampDuration(Integer duration, String action, DingTalkScheduleRuleVO rule) {
@@ -1535,7 +2124,10 @@ public class DingTalkAssistantService {
     }
 
     private record ParsedIntent(String action, String jobName, String jobMatchNote, int durationMin,
-                                LocalDateTime rangeStart, LocalDateTime rangeEnd) {
+                                LocalDateTime rangeStart, LocalDateTime rangeEnd, boolean pinnedRange) {
+        ParsedIntent withNote(String note) {
+            return new ParsedIntent(action, jobName, note, durationMin, rangeStart, rangeEnd, pinnedRange);
+        }
     }
 
     private record RuleDayHours(
@@ -1612,6 +2204,12 @@ public class DingTalkAssistantService {
         payload.put("targetUserId", vo.getTargetUserId());
         payload.put("targetNickname", vo.getTargetNickname());
         payload.put("targetUsername", vo.getTargetUsername());
+        if (vo.getTargetUserIds() != null && !vo.getTargetUserIds().isEmpty()) {
+            payload.put("targetUserIds", vo.getTargetUserIds());
+        }
+        if (vo.getTargetNicknames() != null && !vo.getTargetNicknames().isEmpty()) {
+            payload.put("targetNicknames", vo.getTargetNicknames());
+        }
         payload.put("durationMin", durationMin);
         if (pick != null && pick.start() != null) {
             payload.put("suggestedStart", pick.start().format(API_TIME));
