@@ -1,18 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  App,
-  AutoComplete,
-  Button,
-  Card,
-  Form,
-  Input,
-  InputNumber,
-  Select,
-  Space,
-  Tag,
-  TimePicker,
-  Typography,
-} from 'antd';
+import { AutoComplete, Button, Card, Form, Input, InputNumber, Select, Space, Tag, TimePicker, Typography } from 'antd';
 import { HolderOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { usePermission } from '@/hooks/usePermission';
@@ -200,9 +187,22 @@ function buildPayload(values: Record<string, unknown>): ScheduleRuleDTO {
   const forenoonEnd = (values.forenoonEnd as Dayjs)?.format?.('HH:mm') || DEFAULT_FORENOON_END;
   const lunchStart = (values.lunchStart as Dayjs)?.format?.('HH:mm') || DEFAULT_LUNCH_START;
   const lunchEnd = (values.lunchEnd as Dayjs)?.format?.('HH:mm') || DEFAULT_LUNCH_END;
+  const assertRange = (start: string, end: string, label: string) => {
+    if (end <= start) throw new Error(`${label}结束须晚于开始`);
+  };
+  assertRange(morningStart, morningEnd, '早晨时段');
+  assertRange(forenoonStart, forenoonEnd, '上午时段');
+  assertRange(lunchStart, lunchEnd, '午休时段');
   const workStart = morningStart;
   const workEnd = DEFAULT_WORK_END;
+  assertRange(workStart, workEnd, '工作时间');
   const mp = (values.meetingPriority || {}) as ReturnType<typeof defaultMeetingPriority>;
+  const preferRules = fromPreferRuleForms(mp.preferRules);
+  for (const r of preferRules) {
+    if (r.slotKind === 'RANGE' && r.startTime && r.endTime) {
+      assertRange(r.startTime, r.endTime, '偏好时间');
+    }
+  }
   return {
     enabled: true,
     secretaryEnabled: true,
@@ -227,7 +227,7 @@ function buildPayload(values: Record<string, unknown>): ScheduleRuleDTO {
       supervisorNames: mp.supervisorNames || [],
       coreProjectDeptIds: mp.coreProjectDeptIds || [],
       otherBizDeptIds: mp.otherBizDeptIds || [],
-      preferRules: fromPreferRuleForms(mp.preferRules),
+      preferRules,
       interviewFreq: {
         smallJobs: mp.interviewFreq?.smallJobs || [],
         smallJobsDailyMin: mp.interviewFreq?.smallJobsDailyMin ?? 2,
@@ -272,6 +272,7 @@ const TimePair = memo(function TimePair({
   label: string;
   hint?: string;
 }) {
+  const form = Form.useFormInstance();
   return (
     <div className='col-span-2 sm:col-span-4'>
       <div className='mb-0.5 text-xs font-medium text-neutral-600'>{label}</div>
@@ -280,25 +281,59 @@ const TimePair = memo(function TimePair({
         <Form.Item
           name={startName}
           className='!mb-0 w-1/2'
-          rules={[{ required: true, message: '必填' }]}
+          dependencies={[endName]}
+          rules={[
+            { required: true, message: '必填' },
+            {
+              validator: async (_, value: Dayjs | null) => {
+                const end = form.getFieldValue(endName) as Dayjs | null;
+                if (value && end && !end.isAfter(value)) {
+                  throw new Error(`${label}结束须晚于开始`);
+                }
+              },
+            },
+          ]}
         >
           <TimePicker
             format='HH:mm'
             minuteStep={5}
             className='w-full'
             needConfirm={false}
+            onChange={(v) => {
+              const end = form.getFieldValue(endName) as Dayjs | null;
+              if (v && end && !end.isAfter(v)) {
+                form.setFieldValue(endName, v.add(30, 'minute'));
+              }
+            }}
           />
         </Form.Item>
         <Form.Item
           name={endName}
           className='!mb-0 w-1/2'
-          rules={[{ required: true, message: '必填' }]}
+          dependencies={[startName]}
+          rules={[
+            { required: true, message: '必填' },
+            {
+              validator: async (_, value: Dayjs | null) => {
+                const start = form.getFieldValue(startName) as Dayjs | null;
+                if (value && start && !value.isAfter(start)) {
+                  throw new Error(`${label}结束须晚于开始`);
+                }
+              },
+            },
+          ]}
         >
           <TimePicker
             format='HH:mm'
             minuteStep={5}
             className='w-full'
             needConfirm={false}
+            onChange={(v) => {
+              const start = form.getFieldValue(startName) as Dayjs | null;
+              if (v && start && !v.isAfter(start)) {
+                form.setFieldValue(startName, v.subtract(30, 'minute'));
+              }
+            }}
           />
         </Form.Item>
       </Space.Compact>
@@ -589,37 +624,86 @@ const PreferRuleList = memo(function PreferRuleList({ disabled }: { disabled?: b
                       />
                     </Form.Item>
                     {isRange && (
-                      <>
-                        <Form.Item
-                          {...field}
-                          name={[field.name, 'startTime']}
-                          className='!mb-0 w-[100px]'
-                          rules={[{ required: true, message: '开始' }]}
-                        >
-                          <TimePicker
-                            format='HH:mm'
-                            minuteStep={5}
-                            className='w-full'
-                            needConfirm={false}
-                            disabled={disabled}
-                          />
-                        </Form.Item>
-                        <span className='shrink-0 text-xs text-neutral-400'>~</span>
-                        <Form.Item
-                          {...field}
-                          name={[field.name, 'endTime']}
-                          className='!mb-0 w-[100px]'
-                          rules={[{ required: true, message: '结束' }]}
-                        >
-                          <TimePicker
-                            format='HH:mm'
-                            minuteStep={5}
-                            className='w-full'
-                            needConfirm={false}
-                            disabled={disabled}
-                          />
-                        </Form.Item>
-                      </>
+                      <Form.Item
+                        noStyle
+                        shouldUpdate={(prev, cur) => {
+                          const p = prev?.meetingPriority?.preferRules?.[field.name];
+                          const c = cur?.meetingPriority?.preferRules?.[field.name];
+                          return p?.startTime !== c?.startTime || p?.endTime !== c?.endTime;
+                        }}
+                      >
+                        {({ getFieldValue, setFieldValue }) => {
+                          const startPath = ['meetingPriority', 'preferRules', field.name, 'startTime'] as const;
+                          const endPath = ['meetingPriority', 'preferRules', field.name, 'endTime'] as const;
+                          return (
+                            <>
+                              <Form.Item
+                                {...field}
+                                name={[field.name, 'startTime']}
+                                className='!mb-0 w-[100px]'
+                                dependencies={[[field.name, 'endTime']]}
+                                rules={[
+                                  { required: true, message: '开始' },
+                                  {
+                                    validator: async (_, value: Dayjs | null) => {
+                                      const end = getFieldValue(endPath) as Dayjs | null;
+                                      if (value && end && !end.isAfter(value)) {
+                                        throw new Error('结束须晚于开始');
+                                      }
+                                    },
+                                  },
+                                ]}
+                              >
+                                <TimePicker
+                                  format='HH:mm'
+                                  minuteStep={5}
+                                  className='w-full'
+                                  needConfirm={false}
+                                  disabled={disabled}
+                                  onChange={(v) => {
+                                    const end = getFieldValue(endPath) as Dayjs | null;
+                                    if (v && end && !end.isAfter(v)) {
+                                      setFieldValue(endPath, v.add(30, 'minute'));
+                                    }
+                                  }}
+                                />
+                              </Form.Item>
+                              <span className='shrink-0 text-xs text-neutral-400'>~</span>
+                              <Form.Item
+                                {...field}
+                                name={[field.name, 'endTime']}
+                                className='!mb-0 w-[100px]'
+                                dependencies={[[field.name, 'startTime']]}
+                                rules={[
+                                  { required: true, message: '结束' },
+                                  {
+                                    validator: async (_, value: Dayjs | null) => {
+                                      const start = getFieldValue(startPath) as Dayjs | null;
+                                      if (value && start && !value.isAfter(start)) {
+                                        throw new Error('结束须晚于开始');
+                                      }
+                                    },
+                                  },
+                                ]}
+                              >
+                                <TimePicker
+                                  format='HH:mm'
+                                  minuteStep={5}
+                                  className='w-full'
+                                  needConfirm={false}
+                                  disabled={disabled}
+                                  onChange={(v) => {
+                                    const start = getFieldValue(startPath) as Dayjs | null;
+                                    if (v && start && !v.isAfter(start)) {
+                                      setFieldValue(startPath, v.subtract(30, 'minute'));
+                                    }
+                                  }}
+                                />
+                              </Form.Item>
+                            </>
+                          );
+                        }}
+                      </Form.Item>
                     )}
                     {!disabled && (
                       <Button
@@ -657,7 +741,6 @@ const PreferRuleList = memo(function PreferRuleList({ disabled }: { disabled?: b
 });
 
 const ScheduleRulePage = memo(function ScheduleRulePage() {
-  const { message } = App.useApp();
   const { has } = usePermission();
   const canEdit = has('system:schedule-rule:edit');
   const [form] = Form.useForm();
@@ -725,19 +808,24 @@ const ScheduleRulePage = memo(function ScheduleRulePage() {
       setSaveStatus('idle');
       return;
     }
-    const payload = buildPayload(values);
+    let payload: ScheduleRuleDTO;
+    try {
+      payload = buildPayload(values);
+    } catch {
+      // 时段起止未调顺时先不提交，等用户改完再自动保存
+      setSaveStatus('idle');
+      return;
+    }
     const seq = ++seqRef.current;
     setSaveStatus('saving');
     try {
       await saveMyScheduleRuleApi(payload);
       if (seq === seqRef.current) setSaveStatus('saved');
     } catch {
-      if (seq === seqRef.current) {
-        setSaveStatus('error');
-        message.error('自动保存失败');
-      }
+      // 业务错误已由 request 拦截器 toast，这里只更新状态，避免重复「自动保存失败」
+      if (seq === seqRef.current) setSaveStatus('error');
     }
-  }, [canEdit, form, message]);
+  }, [canEdit, form]);
 
   const scheduleSave = useCallback(() => {
     if (!canEdit || !readyRef.current) return;
