@@ -1,6 +1,7 @@
 import request from '@/api/request';
 import { getToken } from '@/utils/auth';
 import { withBase } from '@/utils/basePath';
+import { resolveUploadUrl } from '@/utils/uploadUrl';
 
 export type TrainDoc = {
   id: number;
@@ -11,6 +12,10 @@ export type TrainDoc = {
   latestVersionNo?: number;
   latestVersionLabel?: string;
   latestFileName?: string;
+  /** /uploads/... */
+  latestFilePath?: string;
+  /** 公网标准下载地址 */
+  latestFileUrl?: string;
   versionCount?: number;
   status?: number;
   updateTime?: string;
@@ -22,6 +27,8 @@ export type TrainDocVersion = {
   versionNo: number;
   versionLabel?: string;
   fileName?: string;
+  filePath?: string;
+  fileUrl?: string;
   fileSize?: number;
   remark?: string;
   latest?: boolean;
@@ -164,7 +171,42 @@ export async function fetchTrainVersionFileApi(versionId: number) {
   return { blob: new Blob([buffer], { type: contentType || undefined }), contentType };
 }
 
-export async function downloadTrainVersionApi(versionId: number, fileName?: string) {
+/**
+ * 下载培训文档：优先走线上标准公网 /uploads 链接（本机与线上互通）；
+ * 无公网地址时再回退鉴权接口（接口在本机无文件时会 302 到公网）。
+ */
+export async function downloadTrainVersionApi(versionId: number, fileName?: string, filePathOrUrl?: string) {
+  const raw = (filePathOrUrl || '').trim();
+  const publicUrl = raw
+    ? /^https?:\/\//i.test(raw)
+      ? raw
+      : resolveUploadUrl(
+          raw.startsWith('/uploads/') ? raw : raw.includes('/uploads/') ? raw.slice(raw.indexOf('/uploads/')) : '',
+        )
+    : '';
+
+  if (publicUrl && publicUrl !== '#') {
+    try {
+      const res = await fetch(publicUrl, { redirect: 'follow' });
+      if (res.ok) {
+        const blob = await res.blob();
+        // 业务 JSON 误当文件时走回退
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const objectUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = objectUrl;
+          a.download = fileName || 'train.doc';
+          a.click();
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+      }
+    } catch {
+      // 公网拉失败再走接口
+    }
+  }
+
   const { blob } = await fetchTrainVersionFileApi(versionId);
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');

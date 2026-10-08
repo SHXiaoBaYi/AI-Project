@@ -15,6 +15,13 @@ public class TrainDocVersionVO {
     private Integer versionNo;
     private String versionLabel;
     private String fileName;
+
+    @Schema(description = "相对路径 /uploads/...")
+    private String filePath;
+
+    @Schema(description = "公网下载地址")
+    private String fileUrl;
+
     private Long fileSize;
     private String remark;
     private Boolean latest;

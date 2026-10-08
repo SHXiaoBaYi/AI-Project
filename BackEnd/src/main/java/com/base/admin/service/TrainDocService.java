@@ -87,7 +87,7 @@ public class TrainDocService {
         String cat = normalizeCategory(category);
         return jdbc.query("""
                 SELECT d.id, d.title, d.category, d.description, d.latest_version_id, d.status, d.update_time,
-                       v.version_no, v.version_label, v.file_name,
+                       v.version_no, v.version_label, v.file_name, v.file_path,
                        (SELECT COUNT(1) FROM train_doc_version x WHERE x.doc_id = d.id AND x.is_active = 1) version_count
                 FROM train_doc d
                 LEFT JOIN train_doc_version v ON v.id = d.latest_version_id AND v.is_active = 1
@@ -109,6 +109,9 @@ public class TrainDocService {
             vo.setLatestVersionNo(rs.wasNull() ? null : vn);
             vo.setLatestVersionLabel(rs.getString("version_label"));
             vo.setLatestFileName(rs.getString("file_name"));
+            String filePath = rs.getString("file_path");
+            vo.setLatestFilePath(filePath);
+            vo.setLatestFileUrl(StringUtils.hasText(filePath) ? fileStorage.toPublicUrl(filePath) : null);
             vo.setVersionCount(rs.getInt("version_count"));
             return vo;
         }, cat);
@@ -157,7 +160,7 @@ public class TrainDocService {
         }
         Long finalLatest = latestId;
         return jdbc.query("""
-                SELECT id, doc_id, version_no, version_label, file_name, file_size, remark, create_by, create_time
+                SELECT id, doc_id, version_no, version_label, file_name, file_path, file_size, remark, create_by, create_time
                 FROM train_doc_version
                 WHERE doc_id = ? AND is_active = 1
                 ORDER BY version_no DESC
@@ -168,6 +171,9 @@ public class TrainDocService {
             vo.setVersionNo(rs.getInt("version_no"));
             vo.setVersionLabel(rs.getString("version_label"));
             vo.setFileName(rs.getString("file_name"));
+            String filePath = rs.getString("file_path");
+            vo.setFilePath(filePath);
+            vo.setFileUrl(StringUtils.hasText(filePath) ? fileStorage.toPublicUrl(filePath) : null);
             long size = rs.getLong("file_size");
             vo.setFileSize(rs.wasNull() ? null : size);
             vo.setRemark(rs.getString("remark"));
@@ -366,17 +372,31 @@ public class TrainDocService {
     }
 
     public Path resolveVersionFile(Long versionId) {
+        return findVersionFile(versionId)
+                .orElseThrow(() -> new BusinessException("文件不存在或已丢失"));
+    }
+
+    /** 本机磁盘上的文件；没有则 empty（可能附件只在线上）。 */
+    public java.util.Optional<Path> findVersionFile(Long versionId) {
+        String path = versionFilePath(versionId);
+        Path file = fileStorage.resolveUploadPath(path);
+        return java.util.Optional.ofNullable(file);
+    }
+
+    /** 相对路径 /uploads/...；版本不存在则抛错。 */
+    public String versionFilePath(Long versionId) {
         String path = jdbc.query("""
                 SELECT file_path FROM train_doc_version WHERE id = ? AND is_active = 1
                 """, rs -> rs.next() ? rs.getString(1) : null, versionId);
         if (path == null) {
             throw new BusinessException("版本不存在");
         }
-        Path file = fileStorage.resolveUploadPath(path);
-        if (file == null) {
-            throw new BusinessException("文件不存在或已丢失");
-        }
-        return file;
+        return path;
+    }
+
+    /** 公网标准下载地址（本机/线上统一）。 */
+    public String versionPublicUrl(Long versionId) {
+        return fileStorage.toPublicUrl(versionFilePath(versionId));
     }
 
     public String versionFileName(Long versionId) {

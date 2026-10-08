@@ -18,6 +18,13 @@ public class TrainDocVO {
     private Integer latestVersionNo;
     private String latestVersionLabel;
     private String latestFileName;
+
+    @Schema(description = "最新版相对路径 /uploads/...")
+    private String latestFilePath;
+
+    @Schema(description = "最新版公网下载地址")
+    private String latestFileUrl;
+
     private Integer versionCount;
     private Integer status;
 

@@ -99,11 +99,10 @@ public class TrainDocController {
         return Result.ok(trainDocService.preview(versionId));
     }
 
-    @Operation(summary = "下载原文件")
+    @Operation(summary = "下载原文件（本机无文件时 302 到线上公网 uploads）")
     @GetMapping("/version/{versionId}/file")
     @RequiresPermission("train:doc:list")
-    public ResponseEntity<Resource> download(@PathVariable Long versionId, HttpServletResponse response) {
-        Path path = trainDocService.resolveVersionFile(versionId);
+    public ResponseEntity<?> download(@PathVariable Long versionId, HttpServletResponse response) {
         String fileName = trainDocService.versionFileName(versionId);
         String encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
         MediaType type = MediaType.APPLICATION_OCTET_STREAM;
@@ -115,10 +114,17 @@ public class TrainDocController {
         } else if (lower.endsWith(".pdf")) {
             type = MediaType.APPLICATION_PDF;
         }
-        // inline：便于前端 PDF iframe / 原文件预览；下载仍由前端 Blob 指定文件名
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + encoded)
-                .contentType(type)
-                .body(new FileSystemResource(path));
+        Path path = trainDocService.findVersionFile(versionId).orElse(null);
+        if (path != null) {
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encoded)
+                    .contentType(type)
+                    .body(new FileSystemResource(path));
+        }
+        // 本机磁盘无附件（共用线上库）：跳转公网标准 uploads 链接
+        String publicUrl = trainDocService.versionPublicUrl(versionId);
+        return ResponseEntity.status(302)
+                .header(HttpHeaders.LOCATION, publicUrl)
+                .build();
     }
 }
