@@ -2,15 +2,14 @@ import { memo, useEffect, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Card, Drawer, Form, Input, Modal, QRCode, Space, Spin, Tag, Typography, Upload } from 'antd';
 import { CopyOutlined, UploadOutlined } from '@ant-design/icons';
-import { renderAsync } from 'docx-preview';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import {
+  buildOfficeOnlineEmbedUrl,
   createTrainDocWithFileApi,
   deleteTrainDocApi,
   downloadTrainVersionApi,
-  fetchTrainVersionFileApi,
   getTrainAssistantEntryApi,
   listTrainDocsApi,
   listTrainVersionsApi,
@@ -23,19 +22,32 @@ import {
   type TrainDocPreview,
   type TrainDocVersion,
 } from '@/api/train';
+import { resolveUploadUrl } from '@/utils/uploadUrl';
+import { isLocalhostHost } from '@/utils/localhostAccess';
+
+function resolveTrainPreviewHtml(html?: string) {
+  if (!html) return '';
+  return html.replace(/src=["'](\/uploads\/[^"']+)["']/g, (_, path: string) => {
+    const src = isLocalhostHost() ? path : resolveUploadUrl(path);
+    return `src="${src}"`;
+  });
+}
+
+/** Office Online 只能拉取公网地址，本机 localhost 不可用 */
+function resolvePublicFileUrl(fileUrl?: string, filePath?: string) {
+  const raw = (fileUrl || filePath || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) {
+    if (/localhost|127\.0\.0\.1/i.test(raw)) return '';
+    return raw;
+  }
+  if (raw.startsWith('/uploads/')) {
+    return isLocalhostHost() ? '' : resolveUploadUrl(raw);
+  }
+  return '';
+}
 
 const TRAIN_ACCEPT = '.doc,.docx,.pdf,.txt,.md';
-
-async function blobLooksLikeDocx(blob: Blob) {
-  const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
-  // PK\x03\x04 — zip/docx
-  return head.length >= 2 && head[0] === 0x50 && head[1] === 0x4b;
-}
-
-async function blobLooksLikePdf(blob: Blob) {
-  const head = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
-  return head.length >= 4 && head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46;
-}
 
 const TrainDocPage = memo(function TrainDocPage() {
   const { message } = App.useApp();
@@ -55,12 +67,10 @@ const TrainDocPage = memo(function TrainDocPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [preview, setPreview] = useState<TrainDocPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewMode, setPreviewMode] = useState<'docx' | 'pdf' | 'html' | ''>('');
+  const [previewMode, setPreviewMode] = useState<'office' | 'pdf' | 'html' | ''>('');
   const [previewError, setPreviewError] = useState('');
+  const [officeEmbedUrl, setOfficeEmbedUrl] = useState('');
   const [pdfUrl, setPdfUrl] = useState<string>();
-  const [docxBlob, setDocxBlob] = useState<Blob | null>(null);
-  const docxRef = useRef<HTMLDivElement>(null);
-  const pdfUrlRef = useRef<string>();
 
   useEffect(() => {
     void getTrainAssistantEntryApi()
@@ -161,12 +171,8 @@ const TrainDocPage = memo(function TrainDocPage() {
   };
 
   const resetPreviewMedia = () => {
-    if (pdfUrlRef.current) {
-      URL.revokeObjectURL(pdfUrlRef.current);
-      pdfUrlRef.current = undefined;
-    }
+    setOfficeEmbedUrl('');
     setPdfUrl(undefined);
-    setDocxBlob(null);
     setPreviewMode('');
     setPreviewError('');
   };
@@ -177,9 +183,13 @@ const TrainDocPage = memo(function TrainDocPage() {
     setPreviewOpen(true);
     setPreviewLoading(true);
     try {
-      // 元信息轻量；docx/pdf 再拉原文件，避免后端把整份图文转 HTML 超时
       const data = await previewTrainVersionApi(versionId);
-      setPreview(data);
+      const publicUrl = resolvePublicFileUrl(data.fileUrl, data.filePath);
+      setPreview({
+        ...data,
+        fileUrl: publicUrl || data.fileUrl,
+        html: resolveTrainPreviewHtml(data.html),
+      });
       const name = (data.fileName || '').toLowerCase();
       const mode = (data.renderMode || '').toLowerCase();
 
@@ -189,77 +199,40 @@ const TrainDocPage = memo(function TrainDocPage() {
         return;
       }
 
-      const needFile =
-        mode === 'docx' || mode === 'pdf' || name.endsWith('.docx') || name.endsWith('.pdf') || name.endsWith('.doc');
-      if (!needFile) {
-        setPreviewMode('html');
+      // Word：Microsoft Office Online 嵌入公网文件链接
+      if (mode === 'office' || name.endsWith('.doc') || name.endsWith('.docx')) {
+        if (!publicUrl) {
+          setPreviewError(
+            isLocalhostHost()
+              ? '本机地址无法被 Office Online 访问。请在线上环境预览，或点右上角下载原文件。'
+              : '缺少公网文件地址，无法用 Office 预览。请检查上传公网根配置，或下载原文件查看。',
+          );
+          setPreviewMode(data.html ? 'html' : '');
+          return;
+        }
+        setOfficeEmbedUrl(buildOfficeOnlineEmbedUrl(publicUrl));
+        setPreviewMode('office');
         return;
       }
 
-      const { blob, contentType } = await fetchTrainVersionFileApi(versionId);
-      const ct = (contentType || '').toLowerCase();
-
-      if (mode === 'pdf' || name.endsWith('.pdf') || ct.includes('pdf') || (await blobLooksLikePdf(blob))) {
-        const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-        pdfUrlRef.current = url;
-        setPdfUrl(url);
-        setPreviewMode('pdf');
-        return;
-      }
-
-      if (
-        mode === 'docx' ||
-        name.endsWith('.docx') ||
-        ct.includes('wordprocessingml') ||
-        ct.includes('officedocument.word') ||
-        (await blobLooksLikeDocx(blob))
-      ) {
-        setDocxBlob(blob);
-        setPreviewMode('docx');
+      if (mode === 'pdf' || name.endsWith('.pdf')) {
+        if (publicUrl) {
+          setPdfUrl(publicUrl);
+          setPreviewMode('pdf');
+          return;
+        }
+        setPreviewError('PDF 缺少可访问地址，请下载原文件查看');
         return;
       }
 
       setPreviewMode('html');
     } catch (e) {
-      const tip = e instanceof Error ? e.message : '预览失败';
-      setPreviewError(
-        /timeout|超时|exceeded/i.test(tip)
-          ? '预览超时。大文档请确认线上已重新上传原文件；docx 将按原文件渲染，无需服务端转图。'
-          : tip,
-      );
+      setPreviewError(e instanceof Error ? e.message : '预览失败');
       setPreviewMode('html');
     } finally {
       setPreviewLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (!previewOpen || previewMode !== 'docx' || !docxBlob || !docxRef.current) return;
-    let cancelled = false;
-    const container = docxRef.current;
-    container.innerHTML = '';
-    setPreviewLoading(true);
-    renderAsync(docxBlob, container, undefined, {
-      className: 'train-docx-preview',
-      inWrapper: true,
-      ignoreWidth: false,
-      breakPages: true,
-    })
-      .then(() => {
-        if (!cancelled) setPreviewLoading(false);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPreviewLoading(false);
-          setPreviewError('原文件预览失败，已切换为文本预览');
-          setPreviewMode('html');
-        }
-      });
-    return () => {
-      cancelled = true;
-      container.innerHTML = '';
-    };
-  }, [docxBlob, previewMode, previewOpen]);
 
   const columns: ProColumnType<TrainDoc>[] = [
     {
@@ -646,10 +619,18 @@ const TrainDocPage = memo(function TrainDocPage() {
         {previewLoading ? (
           <div className='mb-2 flex shrink-0 items-center gap-2 text-sm text-neutral-400'>
             <Spin size='small' />
-            正在加载文档预览…
+            正在打开预览…
           </div>
         ) : null}
         {previewError ? <div className='mb-2 shrink-0 text-sm text-red-500'>{previewError}</div> : null}
+        {previewMode === 'office' && officeEmbedUrl ? (
+          <iframe
+            title='Office 在线预览'
+            src={officeEmbedUrl}
+            className='min-h-0 w-full flex-1 border-0'
+            allowFullScreen
+          />
+        ) : null}
         {previewMode === 'pdf' && pdfUrl ? (
           <iframe
             title='培训文档预览'
@@ -657,16 +638,10 @@ const TrainDocPage = memo(function TrainDocPage() {
             className='min-h-0 w-full flex-1 border-0'
           />
         ) : null}
-        {previewMode === 'docx' ? (
-          <div
-            ref={docxRef}
-            className='train-docx-host min-h-0 w-full flex-1 overflow-auto bg-[#f5f5f5] p-3 [&_.train-docx-preview]:mx-auto [&_.train-docx-preview]:bg-white [&_.train-docx-preview]:shadow-sm'
-          />
-        ) : null}
         {previewMode === 'html' ? (
           preview?.html ? (
             <div
-              className='prose min-h-0 max-w-none flex-1 overflow-auto rounded-md bg-white p-4 text-sm leading-7 text-neutral-800 [&_img]:my-3 [&_img]:block [&_img]:max-w-full'
+              className='prose min-h-0 max-w-none flex-1 overflow-x-hidden overflow-y-auto rounded-md bg-white p-4 text-sm leading-7 break-words text-neutral-800 [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-w-full'
               dangerouslySetInnerHTML={{ __html: preview.html }}
             />
           ) : !previewLoading ? (

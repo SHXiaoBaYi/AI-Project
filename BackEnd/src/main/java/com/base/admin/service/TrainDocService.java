@@ -239,8 +239,8 @@ public class TrainDocService {
     }
 
     /**
-     * 预览元信息：docx/pdf 只返回轻量字段，由前端拉原文件渲染（避免把几十张图打成 base64 HTML 导致超时）。
-     * 仅老版 .doc / 纯文本才回退 content_html。
+     * 预览元信息：Word 走 Office Online（公网 fileUrl）；PDF 直链；文本回退 HTML。
+     * 不再在预览时解压/转码大 docx（答疑抽图仍走 prepareIndexedDoc）。
      */
     public Map<String, Object> preview(Long versionId) {
         Map<String, Object> meta = jdbc.query("""
@@ -269,17 +269,6 @@ public class TrainDocService {
         String fileName = String.valueOf(meta.get("fileName"));
         String filePath = nullToEmpty(String.valueOf(meta.get("filePath")));
         String lower = fileName.toLowerCase(Locale.ROOT);
-        boolean zipDocx = looksLikeDocxZip(filePath);
-        String renderMode = "html";
-        if (lower.endsWith(".pdf")) {
-            renderMode = "pdf";
-        } else if (lower.endsWith(".docx") || zipDocx) {
-            renderMode = "docx";
-        } else if (lower.endsWith(".doc") && zipDocx) {
-            renderMode = "docx";
-        }
-        meta.put("renderMode", renderMode);
-
         Path path = fileStorage.resolveUploadPath(filePath);
         boolean fileReady = path != null && Files.isRegularFile(path);
         meta.put("fileReady", fileReady);
@@ -288,33 +277,77 @@ public class TrainDocService {
             log.warn("培训文档预览原文件缺失 versionId={} path={}", versionId, filePath);
         }
 
-        // docx/pdf：前端用原文件预览，接口不再生成/回传巨型图文 HTML
-        if ("docx".equals(renderMode) || "pdf".equals(renderMode)) {
+        String publicUrl = fileReady ? fileStorage.toPublicUrl(filePath) : "";
+        meta.put("fileUrl", nullToEmpty(publicUrl));
+        // 预览不需要把长文本带回前端
+        meta.put("text", "");
+
+        if (lower.endsWith(".pdf")) {
+            meta.put("renderMode", "pdf");
             meta.put("html", "");
-            // 文本可能很长，预览抽屉用不到，避免无意义传包
-            meta.put("text", "");
             return meta;
         }
 
-        // 老版二进制 .doc / txt：若库里已是纯文本预览则直接用；缺文件时无法再生成
+        boolean officeDoc = lower.endsWith(".doc") || lower.endsWith(".docx")
+                || lower.endsWith(".xls") || lower.endsWith(".xlsx")
+                || lower.endsWith(".ppt") || lower.endsWith(".pptx")
+                || looksLikeDocxZip(filePath);
+        if (officeDoc && fileReady && StringUtils.hasText(publicUrl)) {
+            meta.put("renderMode", "office");
+            meta.put("html", "");
+            return meta;
+        }
+
+        meta.put("renderMode", "html");
         String html = String.valueOf(meta.get("html"));
-        if ((!StringUtils.hasText(html) || html.contains("<pre ")) && fileReady) {
+        if ((!StringUtils.hasText(html) || !html.contains("<img")) && fileReady
+                && (lower.endsWith(".txt") || lower.endsWith(".md"))) {
             try {
-                byte[] bytes = Files.readAllBytes(path);
-                // 仅非 zip 的老 .doc 才走服务端 HTML；禁止再把整包图片打进 JSON
-                if (lower.endsWith(".doc") && !(bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K')) {
-                    String text = nullToEmpty(String.valueOf(meta.get("text")));
-                    if (!StringUtils.hasText(text)) {
-                        text = extractText(bytes, ".doc");
-                    }
-                    String light = toPreviewHtml(text);
-                    meta.put("html", light);
-                }
+                String text = extractText(Files.readAllBytes(path), lower.endsWith(".md") ? ".md" : ".txt");
+                meta.put("html", toPreviewHtml(text));
             } catch (Exception e) {
-                log.warn("培训文档轻量预览失败 versionId={}: {}", versionId, e.getMessage());
+                log.warn("文本预览失败 versionId={}: {}", versionId, e.getMessage());
             }
         }
         return meta;
+    }
+
+    /** 答疑用：把带 [图N] 的正文转成 HTML（图片 /uploads URL）。 */
+    private static String buildUrlPreviewHtml(IndexedDoc indexed) {
+        if (indexed == null) {
+            return "";
+        }
+        String plain = nullToEmpty(indexed.textForAi);
+        if (!StringUtils.hasText(plain) && indexed.images.isEmpty()) {
+            return "";
+        }
+        StringBuilder body = new StringBuilder();
+        String[] lines = plain.split("\\R", -1);
+        Pattern marker = Pattern.compile("\\[图(\\d+)\\]");
+        for (String line : lines) {
+            if (!StringUtils.hasText(line)) {
+                body.append("<p>&nbsp;</p>");
+                continue;
+            }
+            body.append("<p>");
+            Matcher m = marker.matcher(line);
+            int last = 0;
+            while (m.find()) {
+                body.append(escapeHtml(line.substring(last, m.start())));
+                int n = Integer.parseInt(m.group(1));
+                if (n >= 1 && n <= indexed.images.size()) {
+                    body.append("<img src=\"")
+                            .append(indexed.images.get(n - 1))
+                            .append("\" alt=\"培训配图")
+                            .append(n)
+                            .append("\" loading=\"lazy\" style=\"max-width:100%;height:auto;display:block;margin:10px 0;border-radius:6px;\" />");
+                }
+                last = m.end();
+            }
+            body.append(escapeHtml(line.substring(last)));
+            body.append("</p>");
+        }
+        return wrapPreviewHtml(body.toString());
     }
 
     private boolean looksLikeDocxZip(String filePath) {
@@ -578,7 +611,7 @@ public class TrainDocService {
         return list;
     }
 
-    /** 从原文件按阅读顺序抽取配图到磁盘，并生成带 [图N] 的检索正文。 */
+    /** 从原文件按阅读顺序抽取配图到磁盘，并生成带 [图N] 的检索正文。已抽过则直接复用缓存。 */
     private IndexedDoc prepareIndexedDoc(DocBundle doc) {
         IndexedDoc empty = new IndexedDoc();
         empty.textForAi = nullToEmpty(doc == null ? null : doc.text);
@@ -586,6 +619,17 @@ public class TrainDocService {
             return empty;
         }
         try {
+            String marker = "/uploads/train/img/" + doc.versionId + "/";
+            if (StringUtils.hasText(doc.html) && doc.html.contains(marker) && doc.html.contains("<img")) {
+                IndexedDoc fromHtml = indexHtmlImages(doc.html, doc.text);
+                if (!fromHtml.images.isEmpty()) {
+                    return fromHtml;
+                }
+            }
+            IndexedDoc cached = loadCachedIndexedFromDisk(doc.versionId, doc.text);
+            if (cached != null && !cached.images.isEmpty()) {
+                return cached;
+            }
             Path path = fileStorage.resolveUploadPath(doc.filePath);
             if (path == null || !Files.isRegularFile(path)) {
                 return empty;
@@ -606,11 +650,66 @@ public class TrainDocService {
                     return fromHtml;
                 }
             }
+            // 抽完后落库 URL 预览 HTML，下次预览/答疑直接复用，不必再解压整包
+            if (!indexed.images.isEmpty()) {
+                String rich = buildUrlPreviewHtml(indexed);
+                if (StringUtils.hasText(rich)) {
+                    doc.html = rich;
+                    jdbc.update("UPDATE train_doc_version SET content_html = ? WHERE id = ?", rich, doc.versionId);
+                }
+            }
             return indexed;
         } catch (Exception e) {
             log.warn("答疑配图索引失败 versionId={}: {}", doc.versionId, e.getMessage());
             return indexHtmlImages(doc.html, doc.text);
         }
+    }
+
+    /** 若磁盘已有抽好的配图，按序号装载，避免每次答疑/预览重复解压 7MB docx。 */
+    private IndexedDoc loadCachedIndexedFromDisk(long versionId, String fallbackText) {
+        Path dir = fileStorage.trainVersionImageDir(versionId);
+        if (!Files.isDirectory(dir)) {
+            return null;
+        }
+        try (var stream = Files.list(dir)) {
+            List<Path> files = stream
+                    .filter(Files::isRegularFile)
+                    .sorted((a, b) -> {
+                        int na = parseLeadingInt(a.getFileName().toString());
+                        int nb = parseLeadingInt(b.getFileName().toString());
+                        return Integer.compare(na, nb);
+                    })
+                    .toList();
+            if (files.isEmpty()) {
+                return null;
+            }
+            IndexedDoc indexed = new IndexedDoc();
+            StringBuilder ai = new StringBuilder(nullToEmpty(fallbackText));
+            for (Path f : files) {
+                String rel = fileStorage.toRelativeUploadPath(f);
+                if (!StringUtils.hasText(rel)) {
+                    continue;
+                }
+                indexed.images.add(rel);
+                ai.append(" [图").append(indexed.images.size()).append("] ");
+            }
+            if (indexed.images.isEmpty()) {
+                return null;
+            }
+            indexed.textForAi = ai.toString().trim();
+            fillImageContexts(indexed);
+            return indexed;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static int parseLeadingInt(String name) {
+        Matcher m = Pattern.compile("^(\\d+)").matcher(name == null ? "" : name);
+        if (m.find()) {
+            return Integer.parseInt(m.group(1));
+        }
+        return Integer.MAX_VALUE;
     }
 
     /**
@@ -620,6 +719,7 @@ public class TrainDocService {
         Path tmp = Files.createTempFile("train-docx-", ".docx");
         try {
             Files.write(tmp, bytes);
+            // 仅首次抽取时清空；已有缓存时不应走到这里
             fileStorage.clearTrainVersionImages(versionId);
             IndexedDoc indexed = new IndexedDoc();
             try (ZipFile zip = new ZipFile(tmp.toFile())) {
@@ -728,6 +828,10 @@ public class TrainDocService {
         IndexedDoc indexed = new IndexedDoc();
         if (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K') {
             return indexDocxPackage(bytes, versionId, fallbackText);
+        }
+        IndexedDoc diskCached = loadCachedIndexedFromDisk(versionId, fallbackText);
+        if (diskCached != null && !diskCached.images.isEmpty()) {
+            return diskCached;
         }
         fileStorage.clearTrainVersionImages(versionId);
         try (HWPFDocument wordDocument = new HWPFDocument(new ByteArrayInputStream(bytes))) {

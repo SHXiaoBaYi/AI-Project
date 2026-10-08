@@ -37,7 +37,9 @@ export type TrainDocPreview = {
   versionLabel?: string;
   fileName?: string;
   filePath?: string;
-  /** html | docx | pdf */
+  /** 公网可访问地址，供 Office Online 拉取 */
+  fileUrl?: string;
+  /** office | pdf | html | docx */
   renderMode?: string;
   /** 服务器上原文件是否存在 */
   fileReady?: boolean;
@@ -128,6 +130,13 @@ export function pickUploadFile(fileList: unknown): File | undefined {
 
 export function previewTrainVersionApi(versionId: number) {
   return request.get<unknown, TrainDocPreview>(`/train/doc/version/${versionId}/preview`);
+}
+
+/** Microsoft Office Online 嵌入预览（需公网可访问的文件 URL） */
+export function buildOfficeOnlineEmbedUrl(fileUrl: string) {
+  const src = String(fileUrl || '').trim();
+  if (!src) return '';
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(src)}`;
 }
 
 /** 拉取原文件二进制，供 docx-preview / PDF 预览 */
