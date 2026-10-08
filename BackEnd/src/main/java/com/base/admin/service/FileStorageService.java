@@ -134,6 +134,81 @@ public class FileStorageService {
             ".png", ".jpg", ".jpeg", ".gif", ".webp", ".zip", ".rar", ".7z",
             ".txt", ".md", ".csv");
 
+    private static final Set<String> TRAIN_EXT = Set.of(".doc", ".docx", ".pdf", ".txt", ".md");
+
+    /** 培训文档答疑配图目录：/uploads/train/img/{versionId}/ */
+    public Path trainVersionImageDir(long versionId) {
+        return Path.of(uploadDir, "train", "img", String.valueOf(versionId)).toAbsolutePath().normalize();
+    }
+
+    /** 清空某版本已抽取配图 */
+    public void clearTrainVersionImages(long versionId) {
+        Path dir = trainVersionImageDir(versionId);
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        try (var stream = Files.list(dir)) {
+            stream.forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                    // ignore
+                }
+            });
+        } catch (IOException ignored) {
+            // ignore
+        }
+    }
+
+    /**
+     * 保存培训文档抽取的配图，返回相对路径 /uploads/train/img/{versionId}/{n}.ext
+     */
+    public String saveTrainVersionImage(long versionId, int imageNo, byte[] bytes, String fileNameHint) {
+        if (bytes == null || bytes.length == 0) {
+            return null;
+        }
+        String ext = ".png";
+        if (StringUtils.hasText(fileNameHint) && fileNameHint.contains(".")) {
+            String e = fileNameHint.substring(fileNameHint.lastIndexOf('.')).toLowerCase(Locale.ROOT);
+            if (e.length() <= 8) {
+                ext = e;
+            }
+        }
+        try {
+            Path dir = trainVersionImageDir(versionId);
+            Files.createDirectories(dir);
+            String name = imageNo + ext;
+            Files.write(dir.resolve(name), bytes);
+            return "/uploads/train/img/" + versionId + "/" + name;
+        } catch (IOException e) {
+            throw new BusinessException("培训配图保存失败: " + e.getMessage());
+        }
+    }
+
+    /** 培训文档（收银操作等），返回绝对路径 */
+    public Path saveTrainDoc(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("请选择培训文档");
+        }
+        String original = file.getOriginalFilename() == null ? "train.doc" : file.getOriginalFilename();
+        String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')).toLowerCase(Locale.ROOT) : "";
+        if (!TRAIN_EXT.contains(ext)) {
+            throw new BusinessException("培训文档支持 doc / docx / pdf / txt");
+        }
+        try {
+            Path dir = Path.of(uploadDir, "train", "doc").toAbsolutePath().normalize();
+            Files.createDirectories(dir);
+            String name = UUID.randomUUID().toString().replace("-", "") + ext;
+            Path dest = dir.resolve(name);
+            try (var in = file.getInputStream()) {
+                Files.copy(in, dest);
+            }
+            return dest;
+        } catch (IOException e) {
+            throw new BusinessException("培训文档保存失败: " + e.getMessage());
+        }
+    }
+
     /** 候选人作品集附件，返回绝对路径 */
     public Path saveHrPortfolio(MultipartFile file) {
         if (file == null || file.isEmpty()) {

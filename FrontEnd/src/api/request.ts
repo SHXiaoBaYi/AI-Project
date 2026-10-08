@@ -26,7 +26,8 @@ let kicking = false;
 function isDingTalkBridgePath() {
   try {
     const path = window.location.pathname || '';
-    return path.includes('/dingtalk/bridge');
+    // 钉钉 H5 落地页：免登失败时不要踢去扫码登录
+    return path.includes('/dingtalk/bridge') || path.includes('/train/cashier-assistant');
   } catch {
     return false;
   }
