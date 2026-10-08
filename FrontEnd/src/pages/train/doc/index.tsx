@@ -53,20 +53,18 @@ const TrainDocPage = memo(function TrainDocPage() {
     }
   };
 
-  const downloadLatest = async (record: TrainDoc) => {
+  const downloadLatest = (record: TrainDoc) => {
+    if (record.latestFileUrl) {
+      window.open(record.latestFileUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (!record.latestVersionId) {
       message.warning('暂无已上传版本');
       return;
     }
-    try {
-      await downloadTrainVersionApi(
-        record.latestVersionId,
-        record.latestFileName,
-        record.latestFileUrl || record.latestFilePath,
-      );
-    } catch {
-      message.error('下载失败');
-    }
+    void downloadTrainVersionApi(record.latestVersionId, record.latestFileName, record.latestFilePath).catch(() =>
+      message.error('下载失败'),
+    );
   };
 
   const openDocEdit = (record?: TrainDoc) => {
@@ -176,7 +174,7 @@ const TrainDocPage = memo(function TrainDocPage() {
               label: '下载最新',
               perm: 'train:doc:list',
               disabled: !record.latestVersionId,
-              onClick: () => void downloadLatest(record),
+              onClick: () => downloadLatest(record),
             },
             {
               key: 'edit',
@@ -468,11 +466,15 @@ const TrainDocPage = memo(function TrainDocPage() {
                   type='link'
                   size='small'
                   perm='train:doc:list'
-                  onClick={() =>
-                    void downloadTrainVersionApi(row.id, row.fileName, row.fileUrl || row.filePath).catch(() =>
+                  onClick={() => {
+                    if (row.fileUrl) {
+                      window.open(row.fileUrl, '_blank', 'noopener,noreferrer');
+                      return;
+                    }
+                    void downloadTrainVersionApi(row.id, row.fileName, row.filePath).catch(() =>
                       message.error('下载失败'),
-                    )
-                  }
+                    );
+                  }}
                 >
                   下载
                 </PermissionButton>

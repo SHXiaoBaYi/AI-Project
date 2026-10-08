@@ -171,39 +171,18 @@ export async function fetchTrainVersionFileApi(versionId: number) {
   return { blob: new Blob([buffer], { type: contentType || undefined }), contentType };
 }
 
-/**
- * 下载培训文档：优先走线上标准公网 /uploads 链接（本机与线上互通）；
- * 无公网地址时再回退鉴权接口（接口在本机无文件时会 302 到公网）。
- */
+/** 有 fileUrl 直接 window.open；否则回退鉴权下载接口。 */
 export async function downloadTrainVersionApi(versionId: number, fileName?: string, filePathOrUrl?: string) {
   const raw = (filePathOrUrl || '').trim();
-  const publicUrl = raw
-    ? /^https?:\/\//i.test(raw)
+  if (raw) {
+    const url = /^https?:\/\//i.test(raw)
       ? raw
       : resolveUploadUrl(
           raw.startsWith('/uploads/') ? raw : raw.includes('/uploads/') ? raw.slice(raw.indexOf('/uploads/')) : '',
-        )
-    : '';
-
-  if (publicUrl && publicUrl !== '#') {
-    try {
-      const res = await fetch(publicUrl, { redirect: 'follow' });
-      if (res.ok) {
-        const blob = await res.blob();
-        // 业务 JSON 误当文件时走回退
-        const ct = res.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) {
-          const objectUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = objectUrl;
-          a.download = fileName || 'train.doc';
-          a.click();
-          URL.revokeObjectURL(objectUrl);
-          return;
-        }
-      }
-    } catch {
-      // 公网拉失败再走接口
+        );
+    if (url && url !== '#') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
     }
   }
 
