@@ -52,6 +52,7 @@ public class HrMasterService {
         StringBuilder sql = new StringBuilder("""
                 SELECT r.id, r.job_name, r.job_desc, r.salary_range, r.education_req, r.experience_req, r.skill_req,
                        r.status, r.location_code, r.headcount, r.target_text, r.priority,
+                       r.importance_level, r.urgency_level, r.difficulty_level,
                        r.received_date, r.onboard_date, r.dept_id, d.name dept_name,
                        (SELECT GROUP_CONCAT(COALESCE(u.nickname, o.alias) ORDER BY o.sort_no SEPARATOR '、')
                         FROM hr_requisition_owner o
@@ -325,27 +326,35 @@ public class HrMasterService {
         }
         Long requisitionId = dto.getId();
         if (requisitionId == null) {
+            Integer urgency = dto.getUrgencyLevel() != null ? dto.getUrgencyLevel()
+                    : (dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2);
             jdbc.update("""
                     INSERT INTO hr_requisition (job_name, job_desc, salary_range, education_req, experience_req, skill_req,
                                                status, location_code, dept_id, headcount, target_text, priority,
+                                               importance_level, urgency_level, difficulty_level,
                                                received_date, onboard_date, create_by, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
                     emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
-                    dto.getLocationCode(), dto.getDeptId(), headcount, target, dto.getPriority(), dto.getReceivedDate(),
-                    dto.getOnboardDate(), SecurityUtils.getCurrentUsername());
+                    dto.getLocationCode(), dto.getDeptId(), headcount, target, dto.getPriority(),
+                    dto.getImportanceLevel(), urgency, dto.getDifficultyLevel(),
+                    dto.getReceivedDate(), dto.getOnboardDate(), SecurityUtils.getCurrentUsername());
             requisitionId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         } else {
+            Integer urgency = dto.getUrgencyLevel() != null ? dto.getUrgencyLevel()
+                    : (dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2);
             int updated = jdbc.update("""
                     UPDATE hr_requisition
                     SET job_name = ?, job_desc = ?, salary_range = ?, education_req = ?, experience_req = ?, skill_req = ?,
                         location_code = ?, dept_id = ?, headcount = ?, target_text = ?,
-                        priority = ?, received_date = ?, onboard_date = ?
+                        priority = ?, importance_level = ?, urgency_level = ?, difficulty_level = ?,
+                        received_date = ?, onboard_date = ?
                     WHERE id = ? AND is_active = 1
                     """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
                     emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
-                    dto.getLocationCode(), dto.getDeptId(), headcount, target, dto.getPriority(), dto.getReceivedDate(),
-                    dto.getOnboardDate(), requisitionId);
+                    dto.getLocationCode(), dto.getDeptId(), headcount, target, dto.getPriority(),
+                    dto.getImportanceLevel(), urgency, dto.getDifficultyLevel(),
+                    dto.getReceivedDate(), dto.getOnboardDate(), requisitionId);
             if (updated == 0) {
                 throw new BusinessException("需求不存在");
             }

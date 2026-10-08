@@ -31,6 +31,23 @@ const PRIORITY = [
   { label: '常规', value: 3 },
 ];
 
+const IMPORTANCE = [
+  { label: '高', value: 1 },
+  { label: '中', value: 2 },
+  { label: '低', value: 3 },
+];
+
+const URGENCY = [
+  { label: '紧急', value: 1 },
+  { label: '常规', value: 2 },
+];
+
+const DIFFICULTY = [
+  { label: '高', value: 1 },
+  { label: '中', value: 2 },
+  { label: '低', value: 3 },
+];
+
 const LOCATIONS = [
   { label: '上海', value: 'SH' },
   { label: '新疆', value: 'XJ' },
@@ -68,6 +85,9 @@ interface Req {
   headcount: number;
   targetText?: string;
   priority?: number;
+  importanceLevel?: number;
+  urgencyLevel?: number;
+  difficultyLevel?: number;
   receivedDate?: string;
   onboardDate?: string;
   ownerNames?: string;
@@ -141,6 +161,11 @@ function mapRow(raw: Record<string, unknown>): Req {
     headcount: Number(raw.headcount ?? 1),
     targetText: textOf(raw.target_text)?.trim(),
     priority: raw.priority == null || raw.priority === '' ? undefined : Number(raw.priority),
+    importanceLevel:
+      raw.importance_level == null || raw.importance_level === '' ? undefined : Number(raw.importance_level),
+    urgencyLevel: raw.urgency_level == null || raw.urgency_level === '' ? undefined : Number(raw.urgency_level),
+    difficultyLevel:
+      raw.difficulty_level == null || raw.difficulty_level === '' ? undefined : Number(raw.difficulty_level),
     receivedDate: dateOf(raw.received_date),
     onboardDate: dateOf(raw.onboard_date),
     ownerNames: textOf(raw.owner_names),
@@ -257,6 +282,33 @@ const RequisitionPage = memo(function RequisitionPage() {
         width: 90,
         fieldProps: { options: PRIORITY, allowClear: true },
         render: (_, record) => PRIORITY.find((item) => item.value === record.priority)?.label || '—',
+      },
+      {
+        title: '重要性',
+        dataIndex: 'importanceLevel',
+        valueType: 'select',
+        width: 90,
+        search: false,
+        fieldProps: { options: IMPORTANCE, allowClear: true },
+        render: (_, record) => IMPORTANCE.find((item) => item.value === record.importanceLevel)?.label || '—',
+      },
+      {
+        title: '紧急程度',
+        dataIndex: 'urgencyLevel',
+        valueType: 'select',
+        width: 100,
+        search: false,
+        fieldProps: { options: URGENCY, allowClear: true },
+        render: (_, record) => URGENCY.find((item) => item.value === record.urgencyLevel)?.label || '—',
+      },
+      {
+        title: '难度',
+        dataIndex: 'difficultyLevel',
+        valueType: 'select',
+        width: 90,
+        search: false,
+        fieldProps: { options: DIFFICULTY, allowClear: true },
+        render: (_, record) => DIFFICULTY.find((item) => item.value === record.difficultyLevel)?.label || '—',
       },
       {
         title: '目标到岗',
@@ -586,6 +638,9 @@ const RequisitionPage = memo(function RequisitionPage() {
             headcount: form.headcount,
             targetText: form.targetText,
             priority: form.priority,
+            importanceLevel: form.importanceLevel,
+            urgencyLevel: form.urgencyLevel,
+            difficultyLevel: form.difficultyLevel,
             receivedDate: dateOf(form.receivedDate),
             onboardDate: form.onboardDate ? dateOf(form.onboardDate) : null,
             ownerUserIds: form.ownerUserIds || [],

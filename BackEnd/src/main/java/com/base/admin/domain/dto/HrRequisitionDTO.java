@@ -51,6 +51,15 @@ public class HrRequisitionDTO {
     @Schema(description = "优先级 1紧急 2优先 3常规")
     private Integer priority;
 
+    @Schema(description = "岗位重要性 1高 2中 3低")
+    private Integer importanceLevel;
+
+    @Schema(description = "紧急程度 1紧急 2常规")
+    private Integer urgencyLevel;
+
+    @Schema(description = "岗位难度 1高 2中 3低")
+    private Integer difficultyLevel;
+
     @NotNull
     @Schema(description = "需求接收日")
     private LocalDate receivedDate;

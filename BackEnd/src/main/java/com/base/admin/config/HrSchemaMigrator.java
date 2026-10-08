@@ -43,7 +43,18 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureInviteCcEventColumn();
         ensureCandidatePortfolioTable();
         ensureRequisitionCardColumns();
+        ensurePipelineSchema();
+        ensureKpiGradeColumns();
         log.info("招聘表结构、角色、用户和菜单已同步");
+    }
+
+    private void ensureKpiGradeColumns() {
+        addColumnIfMissing("hr_requisition", "importance_level",
+                "ALTER TABLE hr_requisition ADD COLUMN importance_level TINYINT NULL COMMENT '重要性1高2中3低' AFTER priority");
+        addColumnIfMissing("hr_requisition", "urgency_level",
+                "ALTER TABLE hr_requisition ADD COLUMN urgency_level TINYINT NULL COMMENT '紧急程度1紧急2常规' AFTER importance_level");
+        addColumnIfMissing("hr_requisition", "difficulty_level",
+                "ALTER TABLE hr_requisition ADD COLUMN difficulty_level TINYINT NULL COMMENT '难度1高2中3低' AFTER urgency_level");
     }
 
     private void ensureRequisitionCardColumns() {
@@ -55,6 +66,38 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 "ALTER TABLE hr_requisition ADD COLUMN experience_req VARCHAR(64) NULL COMMENT '经验要求' AFTER education_req");
         addColumnIfMissing("hr_requisition", "skill_req",
                 "ALTER TABLE hr_requisition ADD COLUMN skill_req VARCHAR(255) NULL COMMENT '技能要求' AFTER experience_req");
+    }
+
+    private void ensurePipelineSchema() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_phone_screen (
+                  id              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  application_id  BIGINT       NOT NULL                COMMENT '投递',
+                  called_at       DATETIME     NOT NULL                COMMENT '沟通时间',
+                  result          VARCHAR(16)  NOT NULL                COMMENT 'PASS/FAIL',
+                  interview_at    DATETIME     NULL                    COMMENT '约面时间',
+                  reject_reason   VARCHAR(255) NULL                    COMMENT '不合适原因',
+                  remark          VARCHAR(500) NULL                    COMMENT '备注',
+                  create_by       VARCHAR(50)  DEFAULT ''              COMMENT '创建者',
+                  create_time     DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  update_by       VARCHAR(50)  DEFAULT ''              COMMENT '更新者',
+                  update_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  is_active       TINYINT      NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+                  PRIMARY KEY (id),
+                  UNIQUE KEY uk_hr_phone_screen_app (application_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电话沟通'
+                """);
+        addColumnIfMissing("hr_offer", "salary_amount",
+                "ALTER TABLE hr_offer ADD COLUMN salary_amount DECIMAL(12,2) NULL COMMENT '最终offer金额' AFTER application_id");
+        jdbc.update("""
+                INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
+                ('SCREEN_FAIL', '初筛不合适', 21, 0, 1, 1, 1),
+                ('PHONE_PASS', '电话沟通合适', 25, 0, 1, 0, 1),
+                ('PHONE_FAIL', '电话沟通不合适', 26, 0, 1, 1, 1)
+                ON DUPLICATE KEY UPDATE stage_name = VALUES(stage_name), sort_no = VALUES(sort_no),
+                  funnel_visible = VALUES(funnel_visible), data_ready = VALUES(data_ready),
+                  terminal = VALUES(terminal), is_active = 1
+                """);
     }
 
     private void ensureCandidatePortfolioTable() {
@@ -147,10 +190,14 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(201, "招聘看板", boardParent == 0 ? 200 : boardParent, 4, "hr/board", "hr/board/index", "C", "hr:board:view", "DashboardOutlined", "漏斗、周期、HC、面试");
         menu(202, "招聘需求", 200, 1, "hr/requisition", "hr/requisition/index", "C", "hr:requisition:list", "ProfileOutlined", "HC与面试流程");
         menu(234, "岗位看板", 200, 2, "hr/job-board", "hr/job-board/index", "C", "hr:job-board:list", "AppstoreOutlined", "按部门分组的岗位信息卡片");
-        menu(203, "候选人", 200, 3, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "候选人与简历");
-        menu(220, "面试邀约记录", 200, 4, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
-        menu(221, "面试记录", 200, 5, "hr/record", "hr/record/index", "C", "hr:record:list", "FormOutlined", "各轮面试官评语");
-        menu(222, "我的面试", 200, 6, "hr/mine", "hr/mine/index", "C", "hr:interview:mine", "ScheduleOutlined", "面试官待面日程与结论");
+        menu(235, "简历流程", 200, 3, "hr/pipeline", "hr/pipeline/index", "C", "hr:pipeline:list", "PartitionOutlined", "单岗位简历全流程跟踪");
+        menu(236, "流程操作", 235, 1, "", "", "F", "hr:pipeline:edit", "#", "初筛/电话/待入职更新");
+        menu(237, "KPI看板", 200, 4, "hr/kpi", "hr/kpi/index", "C", "hr:kpi:view", "FundProjectionScreenOutlined", "岗位分级与招聘人员绩效");
+        menu(238, "KPI导出", 237, 1, "", "", "F", "hr:kpi:export", "#", "导出绩效报表");
+        menu(203, "候选人", 200, 5, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "候选人与简历");
+        menu(220, "面试邀约记录", 200, 6, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
+        menu(221, "面试记录", 200, 7, "hr/record", "hr/record/index", "C", "hr:record:list", "FormOutlined", "各轮面试官评语");
+        menu(222, "我的面试", 200, 8, "hr/mine", "hr/mine/index", "C", "hr:interview:mine", "ScheduleOutlined", "面试官待面日程与结论");
         menu(204, "部门管理", systemParent == 0 ? 200 : systemParent, 9, "hr/department", "hr/department/index", "C", "hr:dept:list", "BankOutlined", "部门树");
         jdbc.update("UPDATE sys_menu SET is_active = 0 WHERE menu_id IN (228, 229)");
         menu(218, "基础数据", 200, 6, "hr/base", "", "M", "", "DatabaseOutlined", "招聘字典");
@@ -184,12 +231,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234);
-        grant(plain, 200, 201, 209, 234);
-        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238);
+        grant(plain, 200, 201, 209, 234, 235, 237);
+        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235);
     }
 
     private int menuId(String name, String type) {

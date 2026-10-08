@@ -254,6 +254,228 @@ export function getHrJobCardsApi(data: HrJobCardQuery = {}) {
   return request.post<unknown, HrJobCardBoard>('/hr/requisition/cards', data);
 }
 
+export type HrPipelinePhase = 'SCREEN' | 'PHONE' | 'INTERVIEW' | 'ONBOARD';
+
+export type HrPipelineCandidate = {
+  applicationId: number;
+  displayName: string;
+  phone?: string;
+  email?: string;
+  currentStage?: string;
+  stageName?: string;
+  phase?: HrPipelinePhase;
+  screenResult?: string;
+  phoneResult?: string;
+  phoneCalledAt?: string;
+  phoneInterviewAt?: string;
+  phoneRejectReason?: string;
+  resumeName?: string;
+  portfolioCount?: number;
+  salaryAmount?: number;
+  onboardDate?: string;
+  submittedAt?: string;
+  latestInterviewConclusion?: string;
+  latestInterviewerName?: string;
+  latestInterviewAt?: string;
+};
+
+export type HrPipelineBoard = {
+  requisitionId: number;
+  jobName?: string;
+  deptName?: string;
+  phases: {
+    phase: HrPipelinePhase;
+    phaseLabel: string;
+    count: number;
+    candidates: HrPipelineCandidate[];
+  }[];
+};
+
+export type HrPipelineDetail = {
+  applicationId: number;
+  requisitionId?: number;
+  displayName: string;
+  phone?: string;
+  email?: string;
+  jobName?: string;
+  currentStage?: string;
+  stageName?: string;
+  phase?: HrPipelinePhase;
+  phaseLabel?: string;
+  screenResult?: string;
+  resumeName?: string;
+  submittedAt?: string;
+  phoneScreen?: {
+    calledAt?: string;
+    result?: string;
+    interviewAt?: string;
+    rejectReason?: string;
+    remark?: string;
+  };
+  offer?: { salaryAmount?: number; status?: string; offeredAt?: string };
+  onboard?: { onboardDate?: string; probationStatus?: string };
+  timeline?: {
+    stageCode?: string;
+    stageName?: string;
+    source?: string;
+    eventAt?: string;
+    summary?: string;
+  }[];
+  interviews?: {
+    roundNo?: number;
+    roundName?: string;
+    interviewerName?: string;
+    conclusion?: string;
+    failReason?: string;
+    comment?: string;
+    interviewedAt?: string;
+  }[];
+  documents?: {
+    id: number;
+    kind?: string;
+    fileName?: string;
+    createTime?: string;
+    downloadable?: boolean;
+  }[];
+};
+
+export type HrKpiGrain = 'day' | 'week' | 'month' | 'quarter';
+
+export type HrKpiQuery = {
+  startDate?: string;
+  endDate?: string;
+  grain?: HrKpiGrain;
+  ownerUserId?: number;
+  importanceLevel?: number;
+  urgencyLevel?: number;
+  difficultyLevel?: number;
+};
+
+export type HrKpiChartPoint = {
+  axis: string;
+  series: string;
+  value: number;
+};
+
+export type HrKpiRadarPoint = {
+  ownerName: string;
+  metric: string;
+  value: number;
+};
+
+export type HrKpiBoard = {
+  summary: {
+    openJobs?: number;
+    onboardedCount?: number;
+    onTimeRate?: number | null;
+    overdueCount?: number;
+    overdueCompletedCount?: number;
+    overQuotaCount?: number;
+    conversionRate?: number | null;
+    avgCycleDays?: number | null;
+  };
+  owners: {
+    ownerUserId?: number;
+    ownerName?: string;
+    openJobs?: number;
+    onboardedCount?: number;
+    onTimeRate?: number | null;
+    overdueCount?: number;
+    overdueCompletedCount?: number;
+    overQuotaCount?: number;
+    conversionRate?: number | null;
+    avgCycleDays?: number | null;
+  }[];
+  overdueJobs: {
+    id: number;
+    jobName?: string;
+    deptName?: string;
+    ownerNames?: string;
+    status?: string;
+    importanceLabel?: string;
+    urgencyLabel?: string;
+    difficultyLabel?: string;
+    headcount?: number;
+    arrived?: number;
+    receivedDate?: string;
+    targetDate?: string;
+    onboardDate?: string;
+    overdueDays?: number;
+    progressStatus?: string;
+  }[];
+  onboardings: {
+    applicationId: number;
+    candidateName?: string;
+    jobName?: string;
+    ownerNames?: string;
+    onboardDate?: string;
+    cycleDays?: number;
+  }[];
+  onboardTrend: HrKpiChartPoint[];
+  conversionFunnel: HrKpiChartPoint[];
+  stageCycle: HrKpiChartPoint[];
+  ownerRadar: HrKpiRadarPoint[];
+  gradeDistribution: HrKpiChartPoint[];
+};
+
+export function getHrKpiBoardApi(data: HrKpiQuery = {}) {
+  return request.post<unknown, HrKpiBoard>('/hr/kpi/board', data);
+}
+
+export async function downloadHrKpiApi(data: HrKpiQuery = {}, filename = '招聘KPI报表.xlsx') {
+  const token = getToken();
+  const res = await fetch(withBase('/api/hr/kpi/export'), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    throw new Error('导出失败');
+  }
+  const blob = await res.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const matched = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(disposition);
+  a.download = matched ? decodeURIComponent(matched[1]) : filename;
+  a.click();
+  window.URL.revokeObjectURL(objectUrl);
+}
+
+export function getHrPipelineBoardApi(requisitionId: number) {
+  return request.post<unknown, HrPipelineBoard>('/hr/pipeline/board', { requisitionId });
+}
+
+export function getHrPipelineDetailApi(applicationId: number) {
+  return request.get<unknown, HrPipelineDetail>(`/hr/pipeline/detail/${applicationId}`);
+}
+
+export function saveHrPipelineScreenApi(data: { applicationId: number; result: 'PASS' | 'FAIL'; remark?: string }) {
+  return request.post<unknown, void>('/hr/pipeline/screen', data);
+}
+
+export function saveHrPipelinePhoneApi(data: {
+  applicationId: number;
+  calledAt: string;
+  result: 'PASS' | 'FAIL';
+  interviewAt?: string;
+  rejectReason?: string;
+  remark?: string;
+}) {
+  return request.post<unknown, void>('/hr/pipeline/phone', data);
+}
+
+export function saveHrPipelineOnboardApi(data: {
+  applicationId: number;
+  subStatus: string;
+  salaryAmount?: number;
+  onboardDate?: string;
+  remark?: string;
+}) {
+  return request.post<unknown, void>('/hr/pipeline/onboard', data);
+}
+
 export function getHrApplicationsApi(data: HrBoardQuery = {}) {
   return request.post<unknown, Record<string, unknown>[]>('/hr/application/list', data);
 }
