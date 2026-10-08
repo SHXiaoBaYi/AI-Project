@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { App, Button, Input, Spin, Typography } from 'antd';
-import { AudioOutlined, SendOutlined } from '@ant-design/icons';
+import { App, Avatar, Button, Input, Spin, Typography } from 'antd';
+import { AudioOutlined, CustomerServiceOutlined, SendOutlined, UserOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { dingTalkSsoApi, getDingTalkLoginConfigApi } from '@/api/auth';
 import {
   askTrainAssistantApi,
@@ -80,9 +81,15 @@ type ChatMessage = {
   id: string;
   role: ChatRole;
   text: string;
+  /** 精确到秒，如 12:44:08 */
+  time: string;
   items?: TrainQaItem[];
   needOld?: boolean;
 };
+
+function nowTime() {
+  return dayjs().format('HH:mm:ss');
+}
 
 function isDingTalkClient() {
   const ua = navigator.userAgent || '';
@@ -207,8 +214,16 @@ export default function CashierAssistantPage() {
   const webkitRecRef = useRef<SpeechRecognitionLike | null>(null);
   const ran = useRef(false);
 
-  const push = useCallback((msg: Omit<ChatMessage, 'id'>) => {
-    setMessages((prev) => [...prev, { ...msg, id: uid() }]);
+  const push = useCallback((msg: Omit<ChatMessage, 'id' | 'time'> & { time?: string }) => {
+    setMessages((prev) => [...prev, { ...msg, id: uid(), time: msg.time || nowTime() }]);
+  }, []);
+
+  useEffect(() => {
+    const prev = document.title;
+    document.title = '小巴依收银答疑小助手';
+    return () => {
+      document.title = prev;
+    };
   }, []);
 
   useEffect(() => {
@@ -281,7 +296,7 @@ export default function CashierAssistantPage() {
         const welcome = info.hasDocument
           ? `你好，我是收银操作答疑小助手${localHint}。当前「${info.docTitle || '培训手册'}」最新版 ${info.latestVersionLabel || '—'}。可文字或语音提问。`
           : `你好，我是收银操作答疑小助手${localHint}。当前还没有上传培训文档，请联系管理员上传后再提问。`;
-        setMessages([{ id: uid(), role: 'assistant', text: welcome }]);
+        setMessages([{ id: uid(), role: 'assistant', text: welcome, time: nowTime() }]);
         setBoot('ready');
       } catch (err) {
         setBoot('error');
@@ -497,87 +512,105 @@ export default function CashierAssistantPage() {
         ref={listRef}
         className='min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4'
       >
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+        {messages.map((msg) => {
+          const isUser = msg.role === 'user';
+          return (
             <div
-              className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed shadow-sm ${
-                msg.role === 'user'
-                  ? 'rounded-br-md bg-[#1677ff] text-white'
-                  : 'rounded-bl-md border border-neutral-100 bg-white text-neutral-800'
-              }`}
+              key={msg.id}
+              className={`flex items-start gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
             >
-              <div className='whitespace-pre-wrap'>{msg.text}</div>
-              {msg.items?.length ? (
-                <div className='mt-2 space-y-2'>
-                  {msg.items.map((item, idx) => (
-                    <div
-                      key={`${msg.id}-${idx}`}
-                      className='rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-neutral-800'
-                    >
-                      <div className='mb-1 font-medium text-blue-700'>
-                        Q{idx + 1}. {item.question}
-                        {item.versionLabel ? (
-                          <span className='ml-2 text-xs font-normal text-neutral-400'>{item.versionLabel}</span>
-                        ) : null}
-                      </div>
-                      <div className='whitespace-pre-wrap text-neutral-700'>A. {item.answer}</div>
-                      {item.images?.length ? (
-                        <div className='mt-2 space-y-3'>
-                          {item.images.length > 1 ? (
-                            <div className='text-xs text-neutral-400'>相关配图 {item.images.length} 张</div>
-                          ) : null}
-                          {item.images.map((src, imgIdx) => (
-                            <img
-                              key={`${msg.id}-${idx}-img-${imgIdx}`}
-                              src={resolveTrainImageUrl(src)}
-                              alt={`培训配图 ${imgIdx + 1}/${item.images!.length}`}
-                              className='block w-full max-w-full rounded-md border border-neutral-200 bg-white'
-                              loading='lazy'
-                            />
-                          ))}
-                        </div>
-                      ) : item.answerHtml?.includes('<img') ? (
+              <Avatar
+                size={36}
+                className={`mt-0.5 shrink-0 ${isUser ? '!bg-[#1677ff]' : '!bg-[#13c2c2]'}`}
+                icon={isUser ? <UserOutlined /> : <CustomerServiceOutlined />}
+              />
+              <div className={`flex max-w-[78%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+                <div
+                  className={`rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed shadow-sm ${
+                    isUser
+                      ? 'rounded-br-md bg-[#1677ff] text-white'
+                      : 'rounded-bl-md border border-neutral-100 bg-white text-neutral-800'
+                  }`}
+                >
+                  <div className='whitespace-pre-wrap'>{msg.text}</div>
+                  {msg.items?.length ? (
+                    <div className='mt-2 space-y-2'>
+                      {msg.items.map((item, idx) => (
                         <div
-                          className='train-qa-rich mt-2 text-neutral-700 [&_img]:my-2.5 [&_img]:block [&_img]:max-w-full [&_img]:rounded-md'
-                          dangerouslySetInnerHTML={{
-                            __html: item.answerHtml.replace(
-                              /src=["'](\/uploads\/[^"']+)["']/g,
-                              (_, p1: string) => `src="${resolveTrainImageUrl(p1)}"`,
-                            ),
-                          }}
-                        />
-                      ) : null}
+                          key={`${msg.id}-${idx}`}
+                          className='rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-neutral-800'
+                        >
+                          <div className='mb-1 font-medium text-blue-700'>
+                            Q{idx + 1}. {item.question}
+                            {item.versionLabel ? (
+                              <span className='ml-2 text-xs font-normal text-neutral-400'>{item.versionLabel}</span>
+                            ) : null}
+                          </div>
+                          <div className='whitespace-pre-wrap text-neutral-700'>A. {item.answer}</div>
+                          {item.images?.length ? (
+                            <div className='mt-2 space-y-3'>
+                              {item.images.length > 1 ? (
+                                <div className='text-xs text-neutral-400'>相关配图 {item.images.length} 张</div>
+                              ) : null}
+                              {item.images.map((src, imgIdx) => (
+                                <img
+                                  key={`${msg.id}-${idx}-img-${imgIdx}`}
+                                  src={resolveTrainImageUrl(src)}
+                                  alt={`培训配图 ${imgIdx + 1}/${item.images!.length}`}
+                                  className='block w-full max-w-full rounded-md border border-neutral-200 bg-white'
+                                  loading='lazy'
+                                />
+                              ))}
+                            </div>
+                          ) : item.answerHtml?.includes('<img') ? (
+                            <div
+                              className='train-qa-rich mt-2 text-neutral-700 [&_img]:my-2.5 [&_img]:block [&_img]:max-w-full [&_img]:rounded-md'
+                              dangerouslySetInnerHTML={{
+                                __html: item.answerHtml.replace(
+                                  /src=["'](\/uploads\/[^"']+)["']/g,
+                                  (_, p1: string) => `src="${resolveTrainImageUrl(p1)}"`,
+                                ),
+                              }}
+                            />
+                          ) : null}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : null}
+                  {msg.needOld ? (
+                    <div className='mt-2 flex gap-2'>
+                      <Button
+                        size='small'
+                        type='primary'
+                        loading={sending}
+                        onClick={() => void ask(lastQuestionRef.current, true)}
+                      >
+                        检索旧版
+                      </Button>
+                      <Button
+                        size='small'
+                        disabled={sending}
+                        onClick={() =>
+                          push({ role: 'assistant', text: '好的，已取消旧版检索。你可以换个问法再试试。' })
+                        }
+                      >
+                        不用了
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-              {msg.needOld ? (
-                <div className='mt-2 flex gap-2'>
-                  <Button
-                    size='small'
-                    type='primary'
-                    loading={sending}
-                    onClick={() => void ask(lastQuestionRef.current, true)}
-                  >
-                    检索旧版
-                  </Button>
-                  <Button
-                    size='small'
-                    disabled={sending}
-                    onClick={() => push({ role: 'assistant', text: '好的，已取消旧版检索。你可以换个问法再试试。' })}
-                  >
-                    不用了
-                  </Button>
-                </div>
-              ) : null}
+                <div className={`mt-1 px-1 text-[11px] text-neutral-400 tabular-nums`}>{msg.time}</div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {sending ? (
-          <div className='flex justify-start'>
+          <div className='flex items-start gap-2'>
+            <Avatar
+              size={36}
+              className='mt-0.5 shrink-0 !bg-[#13c2c2]'
+              icon={<CustomerServiceOutlined />}
+            />
             <div className='rounded-2xl rounded-bl-md border border-neutral-100 bg-white px-3 py-2 text-sm text-neutral-400 shadow-sm'>
               正在从培训文档检索…
             </div>
