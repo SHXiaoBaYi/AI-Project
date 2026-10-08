@@ -72,6 +72,8 @@ export type TrainQaItem = {
   /** 相关配图 /uploads/... */
   images?: string[];
   versionLabel?: string;
+  calibrateId?: number;
+  fromCalibrate?: boolean;
 };
 
 export type TrainAssistantAskResult = {
@@ -80,6 +82,35 @@ export type TrainAssistantAskResult = {
   items?: TrainQaItem[];
   versionLabel?: string;
   hasOlderVersions?: boolean;
+  docId?: number;
+  versionId?: number;
+};
+
+export type TrainQaCalibrate = {
+  id: number;
+  docId?: number;
+  docTitle?: string;
+  versionId?: number;
+  versionLabel?: string;
+  latestVersion?: boolean;
+  category?: string;
+  userQuestion?: string;
+  aliases?: string;
+  topicTitle?: string;
+  answer?: string;
+  answerHtml?: string;
+  images?: string[];
+  status?: string;
+  hitCount?: number;
+  source?: string;
+  remark?: string;
+  updateBy?: string;
+  updateTime?: string;
+};
+
+export type TrainQaCalibratePage = {
+  total: number;
+  rows: TrainQaCalibrate[];
 };
 
 export function listTrainDocsApi(category = 'cashier') {
@@ -228,4 +259,61 @@ export function askTrainAssistantApi(data: { question: string; searchOld?: boole
     category: 'cashier',
     ...data,
   });
+}
+
+export function feedbackTrainAssistantApi(data: {
+  userQuestion: string;
+  accurate: boolean;
+  category?: string;
+  docId?: number;
+  versionId?: number;
+  calibrateId?: number;
+  topicTitle?: string;
+  answer?: string;
+  answerHtml?: string;
+  images?: string[];
+}) {
+  return request.post<unknown, number>('/train/assistant/feedback', {
+    category: 'cashier',
+    ...data,
+  });
+}
+
+export function listTrainQaCalibrateApi(params: {
+  pageNum?: number;
+  pageSize?: number;
+  category?: string;
+  docId?: number;
+  status?: string;
+  keyword?: string;
+  onlyLatest?: boolean;
+}) {
+  return request.get<unknown, TrainQaCalibratePage>('/train/qa/list', {
+    params: { category: 'cashier', ...params },
+  });
+}
+
+export function saveTrainQaCalibrateApi(data: {
+  id?: number;
+  docId?: number;
+  versionId?: number;
+  category?: string;
+  userQuestion: string;
+  aliases?: string;
+  topicTitle?: string;
+  answer?: string;
+  answerHtml?: string;
+  images?: string[];
+  status?: string;
+  remark?: string;
+}) {
+  return request.post<unknown, number>('/train/qa', { category: 'cashier', ...data });
+}
+
+export function deleteTrainQaCalibrateApi(id: number) {
+  return request.delete(`/train/qa/${id}`);
+}
+
+export function rerecognizeTrainQaCalibrateApi(id: number) {
+  return request.post<unknown, TrainQaCalibrate>(`/train/qa/${id}/rerecognize`);
 }

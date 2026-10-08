@@ -12,9 +12,9 @@ import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -68,7 +68,6 @@ import java.util.zip.ZipFile;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class TrainDocService {
 
     public static final String CATEGORY_CASHIER = "cashier";
@@ -79,9 +78,26 @@ public class TrainDocService {
     private final ObjectMapper objectMapper;
     private final DingTalkAppService dingTalkAppService;
     private final DingTalkProperties dingTalkProperties;
+    private final TrainQaCalibrateService trainQaCalibrateService;
 
     @Value("${xby.upload-public-base:}")
     private String uploadPublicBase;
+
+    public TrainDocService(JdbcTemplate jdbc,
+                           FileStorageService fileStorage,
+                           AiChatService aiChatService,
+                           ObjectMapper objectMapper,
+                           DingTalkAppService dingTalkAppService,
+                           DingTalkProperties dingTalkProperties,
+                           @Lazy TrainQaCalibrateService trainQaCalibrateService) {
+        this.jdbc = jdbc;
+        this.fileStorage = fileStorage;
+        this.aiChatService = aiChatService;
+        this.objectMapper = objectMapper;
+        this.dingTalkAppService = dingTalkAppService;
+        this.dingTalkProperties = dingTalkProperties;
+        this.trainQaCalibrateService = trainQaCalibrateService;
+    }
 
     public List<TrainDocVO> list(String category) {
         String cat = normalizeCategory(category);
@@ -241,7 +257,46 @@ public class TrainDocService {
                 blankToNull(remark), SecurityUtils.getCurrentUsername());
         Long versionId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         jdbc.update("UPDATE train_doc SET latest_version_id = ? WHERE id = ?", versionId, docId);
+        if (versionId != null) {
+            trainQaCalibrateService.markStaleForDocExceptVersion(docId, versionId);
+        }
         return versionId;
+    }
+
+    /** 后台「重新识别」：按指定文档版本跑答疑抽段（不走校准库）。 */
+    public List<TrainAssistantAskVO.QaItem> extractQaForVersion(String question, long docId, long versionId) {
+        if (!aiChatService.isEnabled()) {
+            throw new BusinessException("AI 未配置，请到「系统管理 → AI模型配置」填写可用模型");
+        }
+        DocBundle doc = loadDocVersion(docId, versionId);
+        if (doc == null) {
+            throw new BusinessException("文档版本不存在");
+        }
+        return aiExtractQa(question, doc);
+    }
+
+    private DocBundle loadDocVersion(long docId, long versionId) {
+        return jdbc.query("""
+                SELECT d.id doc_id, v.id version_id, v.version_label, v.content_text, v.content_html,
+                       v.file_path, v.file_name
+                FROM train_doc_version v
+                JOIN train_doc d ON d.id = v.doc_id AND d.is_active = 1
+                WHERE d.id = ? AND v.id = ? AND v.is_active = 1
+                """, rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            DocBundle b = new DocBundle();
+            b.docId = rs.getLong("doc_id");
+            b.versionId = rs.getLong("version_id");
+            b.versionLabel = rs.getString("version_label") == null ? "v" : rs.getString("version_label");
+            b.text = rs.getString("content_text");
+            b.html = rs.getString("content_html");
+            b.filePath = rs.getString("file_path");
+            b.fileName = rs.getString("file_name");
+            b.hasOlder = false;
+            return b;
+        }, docId, versionId);
     }
 
     /**
@@ -512,6 +567,20 @@ public class TrainDocService {
         }
         boolean searchOld = Boolean.TRUE.equals(dto.getSearchOld());
         if (!searchOld) {
+            // 人工校准优先：同意图 + 当前文档最新版已标记「准」的答案直接返回
+            TrainAssistantAskVO.QaItem calibrated = trainQaCalibrateService.findApprovedHit(
+                    question, latest.docId, latest.versionId, latest.versionLabel);
+            if (calibrated != null) {
+                TrainAssistantAskVO vo = new TrainAssistantAskVO();
+                vo.setStatus("HIT");
+                vo.setMessage("已命中人工校准答案");
+                vo.setItems(List.of(calibrated));
+                vo.setVersionLabel(latest.versionLabel);
+                vo.setHasOlderVersions(latest.hasOlder);
+                vo.setDocId(latest.docId);
+                vo.setVersionId(latest.versionId);
+                return vo;
+            }
             List<TrainAssistantAskVO.QaItem> hits = aiExtractQa(question, latest);
             if (!hits.isEmpty()) {
                 TrainAssistantAskVO vo = new TrainAssistantAskVO();
@@ -520,11 +589,15 @@ public class TrainDocService {
                 vo.setItems(hits);
                 vo.setVersionLabel(latest.versionLabel);
                 vo.setHasOlderVersions(latest.hasOlder);
+                vo.setDocId(latest.docId);
+                vo.setVersionId(latest.versionId);
                 return vo;
             }
             TrainAssistantAskVO vo = new TrainAssistantAskVO();
             vo.setHasOlderVersions(latest.hasOlder);
             vo.setVersionLabel(latest.versionLabel);
+            vo.setDocId(latest.docId);
+            vo.setVersionId(latest.versionId);
             if (latest.hasOlder) {
                 vo.setStatus("NEED_OLD");
                 vo.setMessage("暂时没有找到答案，是否检索旧版？");
@@ -570,23 +643,23 @@ public class TrainDocService {
                 ? indexed.textForAi.substring(0, 28000)
                 : indexed.textForAi;
         String system = """
-                你是收银操作培训答疑助手。根据「培训文档正文」找出与用户问题相关的「简易问答」条目。
-                文档以「问：」「问 」「问答N」起头划分条目；[图N] 是配图标记。
-                只输出 JSON 数组，不要 markdown，不要解释。格式：
-                [{"question":"文档中的问法原文","answer":"文档中的答法原文","imageRefs":[1,2,3]}]
-                规则：
-                1. 只摘录文档里已有的问答或可直接对应的说明，禁止编造。
-                2. 可返回 1~5 条最相关的；没有相关内容时返回 []。
-                3. question 尽量用文档里该条「问」的原文（便于定位）；answer 用对应「答」的要点，不要写 [图N]。
-                4. imageRefs 只能写「本条问」到「下一条问」之间出现的全部 [图N]（最多 10 个），禁止引用其他问答条目的图。
-                5. 该条问与下一条问之间确实没有配图时 imageRefs 用 []。
+                你是收银操作培训答疑助手。文档结构不规则：既有「问/答」，也有「主题-说明」。
+                你的任务只是识别用户意图对应文档里的哪一个「话题标题」，不要扩写、不要拼接其他话题。
+                [图N] 由服务端按原文图文混排，answer 里不要写图号。
+                只输出 JSON 数组，不要 markdown。格式：
+                [{"question":"文档中该话题标题原文","answer":"可留空或写该话题下第一句要点"}]
+                硬性规则：
+                1. 最多返回 1 条；没有把握时返回 []。
+                2. question 必须是文档里紧挨该说明的话题标题原文（如「问：…」「问题1：…」「三、支付方式」），禁止改写。
+                3. 禁止把多个话题、上下无关段落拼进同一条。
+                4. 禁止编造文档没有的内容。
                 """;
         String user = "用户问题：\n" + question + "\n\n培训文档正文（版本 " + doc.versionLabel + "）：\n" + clipped;
         String raw = aiChatService.chat(system, user);
-        return parseQaList(raw, doc.versionLabel, indexed);
+        return parseQaList(raw, question, doc.versionLabel, indexed);
     }
 
-    private List<TrainAssistantAskVO.QaItem> parseQaList(String raw, String versionLabel, IndexedDoc indexed) {
+    private List<TrainAssistantAskVO.QaItem> parseQaList(String raw, String userQuestion, String versionLabel, IndexedDoc indexed) {
         List<TrainAssistantAskVO.QaItem> list = new ArrayList<>();
         if (!StringUtils.hasText(raw)) {
             return list;
@@ -607,23 +680,37 @@ public class TrainDocService {
             if (!arr.isArray()) {
                 return list;
             }
+            TrainAssistantAskVO.QaItem best = null;
+            int bestScore = -1;
             for (JsonNode node : arr) {
                 String q = node.path("question").asText("").trim();
                 String a = node.path("answer").asText("").trim();
                 if (q.isEmpty() && a.isEmpty()) {
                     continue;
                 }
-                String answer = a.isEmpty() ? "（文档未给出明确答案，请查阅原文）" : a;
-                String question = q.isEmpty() ? "相关说明" : q;
-                List<Integer> refs = resolveImageRefs(node, question, answer, indexed);
-                List<String> imageUrls = toImageUrls(refs, indexed);
-                TrainAssistantAskVO.QaItem item = new TrainAssistantAskVO.QaItem();
-                item.setQuestion(question);
-                item.setAnswer(answer);
-                item.setImages(imageUrls);
-                item.setAnswerHtml(buildAnswerHtml(answer, imageUrls));
+                String topic = q.isEmpty() ? "相关说明" : q;
+                String hint = a.isEmpty() ? userQuestion : a;
+                SectionHit hit = locateStrictSection(topic, hint, userQuestion, indexed);
+                if (hit == null || hit.score < MIN_SECTION_SCORE) {
+                    continue;
+                }
+                TrainAssistantAskVO.QaItem item = materializeFromSection(hit, indexed);
                 item.setVersionLabel(versionLabel);
-                list.add(item);
+                if (hit.score > bestScore) {
+                    bestScore = hit.score;
+                    best = item;
+                }
+            }
+            // AI 未给出可用标题时，直接用用户问题在文档里严格切段
+            if (best == null) {
+                SectionHit hit = locateStrictSection(userQuestion, userQuestion, userQuestion, indexed);
+                if (hit != null && hit.score >= MIN_SECTION_SCORE) {
+                    best = materializeFromSection(hit, indexed);
+                    best.setVersionLabel(versionLabel);
+                }
+            }
+            if (best != null) {
+                list.add(best);
             }
         } catch (Exception e) {
             log.warn("解析答疑 JSON 失败: {}", e.getMessage());
@@ -987,66 +1074,237 @@ public class TrainDocService {
     }
 
     private static final int MAX_IMAGES_PER_ANSWER = 10;
+    /** 话题标题命中最低分；宁可不答，也不拼无关段。 */
+    private static final int MIN_SECTION_SCORE = 18;
 
     /**
-     * 「问： / 问 xxx / 问答N：」条目起头。不要求必须顶格，避免 HTML 抽正文后丢换行导致切不开。
+     * 话题起点（下一段即结束）：
+     * 问答形「问/问题N/问答N」；主题形「一、二、三、」「1.标题」「现金/组合支付」等短标题行。
      */
-    private static final Pattern QA_QUESTION_START = Pattern.compile(
-            "问答\\s*\\d+\\s*[：:：]|问\\s*[：:：]|问\\s+(?=\\S)");
+    private static final Pattern SECTION_START = Pattern.compile(
+            "问答\\s*\\d+\\s*[：:：]"
+                    + "|问题\\s*\\d+\\s*[：:：]"
+                    + "|问\\s*[：:：]"
+                    + "|问\\s+(?=\\S)"
+                    + "|(?:(?<=\\n)|^)\\s*[一二三四五六七八九十]+、[^\\n\\r]{1,40}"
+                    + "|(?:(?<=\\n)|^)\\s*\\d+[\\.、．][^\\n\\r]{1,40}"
+                    + "|(?:(?<=\\n)|^)\\s*(?:组合支付|现金支付|扫码支付|银行卡支付|微信[^\\n]{0,12}|支付宝[^\\n]{0,12})\\s*(?=\\n|$)");
+
+    private static final class SectionHit {
+        int from;
+        int to;
+        int score;
+        String title;
+        String bodyWithMarkers;
+    }
 
     /**
-     * 配图只取「当前问 → 下一问」；有问答结构时完全忽略 AI 的 imageRefs（避免一次甩出 10 张）。
+     * 严格切段：只认「话题标题」对齐意图，正文 = 该标题之后直到下一话题之前。
      */
-    private List<Integer> resolveImageRefs(JsonNode node, String question, String answer, IndexedDoc indexed) {
-        List<Integer> refs = new ArrayList<>();
-        if (indexed.images.isEmpty()) {
-            return refs;
-        }
+    private SectionHit locateStrictSection(String topic, String answerHint, String userQuestion, IndexedDoc indexed) {
         String plain = indexed.textForAi == null ? "" : indexed.textForAi;
-        List<Integer> starts = listQaQuestionStarts(plain);
-        if (!starts.isEmpty()) {
-            int[] span = locateQaSectionSpan(question, answer, plain, starts);
-            if (span != null) {
-                String window = plain.substring(span[0], span[1]);
-                Matcher m = Pattern.compile("\\[图(\\d+)\\]").matcher(window);
-                while (m.find()) {
-                    addRef(refs, Integer.parseInt(m.group(1)), indexed);
-                    if (refs.size() >= MAX_IMAGES_PER_ANSWER) {
+        if (!StringUtils.hasText(plain)) {
+            return null;
+        }
+        List<Integer> starts = listSectionStarts(plain);
+        if (starts.isEmpty()) {
+            return null;
+        }
+        String intent = compact(firstNonBlank(topic, userQuestion));
+        String userNorm = compact(userQuestion);
+        String hintNorm = compact(answerHint);
+        int bestIdx = -1;
+        int bestScore = 0;
+        for (int i = 0; i < starts.size(); i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+            // 过长段多半是切分失败，降低可信度
+            if (to - from > 6000) {
+                continue;
+            }
+            String sec = plain.substring(from, to);
+            String title = sectionTitle(sec);
+            String titleNorm = compact(title);
+            if (titleNorm.length() < 2) {
+                continue;
+            }
+            // 课程表里的纯表头（标题后几乎无说明）跳过
+            String bodyProbe = stripImageMarkers(trimSectionForDisplay(sec));
+            if (bodyProbe.length() < 4 && countMarkers(sec) == 0) {
+                continue;
+            }
+            int score = scoreTitleIntent(intent, userNorm, hintNorm, titleNorm);
+            if (score > bestScore) {
+                bestScore = score;
+                bestIdx = i;
+            }
+        }
+        if (bestIdx < 0) {
+            return null;
+        }
+        // 标题分不够时，再用「用户/提示原文」落点落入哪一段（仍不跨段）
+        if (bestScore < MIN_SECTION_SCORE) {
+            int[] needleHit = bestMatchSpan(plain, firstNonBlank(topic, userQuestion));
+            if (needleHit == null) {
+                needleHit = bestMatchSpan(plain, answerHint);
+            }
+            if (needleHit != null) {
+                int at = needleHit[0];
+                for (int i = 0; i < starts.size(); i++) {
+                    int from = starts.get(i);
+                    int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+                    if (at >= from && at < to) {
+                        String title = sectionTitle(plain.substring(from, to));
+                        int fallScore = Math.max(bestScore, scoreTitleIntent(intent, userNorm, hintNorm, compact(title)));
+                        // 落点命中标题关键词才接受
+                        if (fallScore >= MIN_SECTION_SCORE || keywordHitScore(intent, compact(title)) >= 2) {
+                            bestIdx = i;
+                            bestScore = Math.max(fallScore, MIN_SECTION_SCORE);
+                        }
                         break;
                     }
                 }
-                refs.sort(Integer::compareTo);
-                String head = window.length() > 60 ? window.substring(0, 60).replaceAll("\\s+", " ") : window.replaceAll("\\s+", " ");
-                log.info("答疑配图按问答切段 qStarts={} span=[{},{}) refs={} head={}",
-                        starts.size(), span[0], span[1], refs, head);
-                return refs;
             }
-            log.info("答疑配图未命中问答段 qStarts={} question={}", starts.size(), question);
-            return refs;
         }
-        // 文档没有「问」结构时，才用 AI 编号
-        for (String field : List.of("imageRefs", "images", "image_refs", "pics")) {
-            JsonNode refNode = node.path(field);
-            if (!refNode.isArray()) {
+        if (bestIdx < 0 || bestScore < MIN_SECTION_SCORE) {
+            return null;
+        }
+        int from = starts.get(bestIdx);
+        int to = bestIdx + 1 < starts.size() ? starts.get(bestIdx + 1) : plain.length();
+        String sec = plain.substring(from, to).trim();
+        SectionHit hit = new SectionHit();
+        hit.from = from;
+        hit.to = to;
+        hit.score = bestScore;
+        hit.title = sectionTitle(sec);
+        hit.bodyWithMarkers = trimSectionForDisplay(sec);
+        return hit;
+    }
+
+    private TrainAssistantAskVO.QaItem materializeFromSection(SectionHit hit, IndexedDoc indexed) {
+        TrainAssistantAskVO.QaItem item = new TrainAssistantAskVO.QaItem();
+        String title = StringUtils.hasText(hit.title) ? hit.title : "相关说明";
+        item.setQuestion(cleanTopicTitle(title));
+        String mixed = StringUtils.hasText(hit.bodyWithMarkers) ? hit.bodyWithMarkers : "";
+        // 再保险：若正文里又冒出下一个话题标记，截断（防止切分漏网）
+        mixed = cutAtNextTopic(mixed);
+        List<Integer> refs = extractMarkers(mixed, indexed);
+        item.setAnswer(stripImageMarkers(mixed).trim());
+        item.setImages(toImageUrls(refs, indexed));
+        item.setAnswerHtml(buildMixedAnswerHtml(mixed, indexed));
+        log.info("答疑严格切段 score={} span=[{},{}) title={} imgs={} bodyLen={}",
+                hit.score, hit.from, hit.to, item.getQuestion(), refs.size(),
+                item.getAnswer() == null ? 0 : item.getAnswer().length());
+        return item;
+    }
+
+    /** 标题对齐意图分：只看标题，不看正文（避免串段）。 */
+    private static int scoreTitleIntent(String intent, String userNorm, String hintNorm, String titleNorm) {
+        if (!StringUtils.hasText(titleNorm)) {
+            return 0;
+        }
+        int score = 0;
+        String titleCore = titleNorm.replaceFirst("^(?:问答\\d+|问题\\d+|问)[：:：]?", "")
+                .replaceFirst("^[一二三四五六七八九十\\d]+[、．.]", "");
+        for (String needle : List.of(intent, userNorm, hintNorm)) {
+            if (!StringUtils.hasText(needle) || needle.length() < 2) {
                 continue;
             }
-            for (JsonNode r : refNode) {
-                int n = 0;
-                if (r.isNumber()) {
-                    n = r.asInt(0);
-                } else {
-                    String s = r.asText("").trim();
-                    Matcher mm = Pattern.compile("(\\d+)").matcher(s);
-                    if (mm.find()) {
-                        n = Integer.parseInt(mm.group(1));
-                    }
-                }
-                addRef(refs, n, indexed);
+            if (titleNorm.contains(needle) || needle.contains(titleNorm) || titleCore.contains(needle) || needle.contains(titleCore)) {
+                score += 100;
+            }
+            score += keywordHitScore(needle, titleNorm) * 15;
+            score += overlapScore(needle, titleNorm);
+            score += keywordHitScore(needle, titleCore) * 10;
+        }
+        return score;
+    }
+
+    private static String sectionTitle(String sec) {
+        if (!StringUtils.hasText(sec)) {
+            return "";
+        }
+        int nl = indexOfNewline(sec);
+        String first = (nl < 0 ? sec : sec.substring(0, nl)).trim();
+        // 「问：xxx答：yyy」同一行时，标题只取到答之前
+        int ans = indexOfAnswerMark(first);
+        if (ans > 0) {
+            first = first.substring(0, ans).trim();
+        }
+        if (first.length() > 80) {
+            first = first.substring(0, 80);
+        }
+        return first;
+    }
+
+    private static String cleanTopicTitle(String title) {
+        if (!StringUtils.hasText(title)) {
+            return "相关说明";
+        }
+        return title.replaceAll("\\s*\\[图\\d+]\\s*", " ").trim();
+    }
+
+    private static String cutAtNextTopic(String body) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        // 正文内若又出现话题起点（从第二个字符后找），截到该处
+        Matcher m = SECTION_START.matcher(body);
+        if (m.find() && m.start() > 0) {
+            // 允许开头本身就是残留标题时跳过第一次零宽
+            int cut = m.start();
+            if (cut > 8) {
+                return body.substring(0, cut).trim();
+            }
+            if (m.find() && m.start() > 8) {
+                return body.substring(0, m.start()).trim();
             }
         }
-        refs.sort(Integer::compareTo);
-        if (refs.size() > MAX_IMAGES_PER_ANSWER) {
-            return new ArrayList<>(refs.subList(0, MAX_IMAGES_PER_ANSWER));
+        return body;
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (StringUtils.hasText(a)) {
+            return a;
+        }
+        return b == null ? "" : b;
+    }
+
+    private static int indexOfNewline(String s) {
+        int n1 = s.indexOf('\n');
+        int n2 = s.indexOf('\r');
+        if (n1 < 0) {
+            return n2;
+        }
+        if (n2 < 0) {
+            return n1;
+        }
+        return Math.min(n1, n2);
+    }
+
+    private static int countMarkers(String text) {
+        if (!StringUtils.hasText(text)) {
+            return 0;
+        }
+        Matcher m = Pattern.compile("\\[图\\d+]").matcher(text);
+        int n = 0;
+        while (m.find()) {
+            n++;
+        }
+        return n;
+    }
+
+    private static List<Integer> extractMarkers(String text, IndexedDoc indexed) {
+        List<Integer> refs = new ArrayList<>();
+        if (!StringUtils.hasText(text) || indexed.images.isEmpty()) {
+            return refs;
+        }
+        Matcher m = Pattern.compile("\\[图(\\d+)\\]").matcher(text);
+        while (m.find()) {
+            addRef(refs, Integer.parseInt(m.group(1)), indexed);
+            if (refs.size() >= MAX_IMAGES_PER_ANSWER) {
+                break;
+            }
         }
         return refs;
     }
@@ -1057,65 +1315,33 @@ public class TrainDocService {
         }
     }
 
-    /**
-     * 定位问答条目 [start, end)：从本条「问」到下一条「问」之前。
-     */
-    private static int[] locateQaSectionSpan(String question, String answer, String plain, List<Integer> starts) {
-        if (!StringUtils.hasText(plain) || starts == null || starts.isEmpty()) {
-            return null;
+    /** 问答形：去掉问句，只留「答」后正文；主题形：去掉标题行，只留紧随其后的说明。 */
+    private static String trimSectionForDisplay(String sec) {
+        if (!StringUtils.hasText(sec)) {
+            return "";
         }
-        int bestIdx = -1;
-        int bestScore = 0;
-        String qNorm = compact(question);
-        String aNorm = compact(answer);
-        for (int i = 0; i < starts.size(); i++) {
-            int from = starts.get(i);
-            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
-            String sec = plain.substring(from, to);
-            String secNorm = compact(sec);
-            // 只看条目问句头（到答：或前 100 字），避免整段配图上下文干扰打分
-            int ansPos = indexOfAnswerMark(sec);
-            String headRaw = ansPos > 0 ? sec.substring(0, ansPos) : sec.substring(0, Math.min(sec.length(), 100));
-            String head = compact(headRaw);
-            int score = 0;
-            if (StringUtils.hasText(qNorm) && qNorm.length() >= 2) {
-                score += overlapScore(qNorm, head) * 5;
-                if (head.contains(qNorm) || qNorm.contains(head.replaceFirst("^问[：:：]?", ""))) {
-                    score += 80;
-                }
-                // 关键词：问法里的实词出现在本条问头
-                score += keywordHitScore(qNorm, head) * 10;
-            }
-            if (StringUtils.hasText(aNorm) && aNorm.length() >= 4) {
-                String body = ansPos >= 0 ? compact(sec.substring(ansPos)) : secNorm;
-                score += overlapScore(aNorm, body);
-            }
-            if (score > bestScore) {
-                bestScore = score;
-                bestIdx = i;
-            }
+        int ansPos = indexOfAnswerMark(sec);
+        if (ansPos >= 0) {
+            String body = sec.substring(ansPos).replaceFirst("^答\\s*[：:：]\\s*", "").trim();
+            return StringUtils.hasText(body) ? body : "";
         }
-        if (bestIdx >= 0 && bestScore >= 6) {
-            int from = starts.get(bestIdx);
-            int to = bestIdx + 1 < starts.size() ? starts.get(bestIdx + 1) : plain.length();
-            return new int[]{from, to};
+        int nl = indexOfNewline(sec);
+        if (nl >= 0 && nl + 1 < sec.length()) {
+            return sec.substring(nl + 1).trim();
         }
-        int[] hit = bestMatchSpan(plain, StringUtils.hasText(question) ? question : answer);
-        if (hit == null && StringUtils.hasText(answer)) {
-            hit = bestMatchSpan(plain, answer);
+        // 单行「问：…」无答：则整段不输出正文
+        if (sec.matches("(?s)^\\s*(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：].*")) {
+            return "";
         }
-        if (hit == null) {
-            return null;
+        return sec;
+    }
+
+    private static String stripImageMarkers(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
         }
-        int at = hit[0];
-        for (int i = 0; i < starts.size(); i++) {
-            int from = starts.get(i);
-            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
-            if (at >= from && at < to) {
-                return new int[]{from, to};
-            }
-        }
-        return null;
+        return text.replaceAll("\\s*\\[图\\d+]\\s*", " ").replaceAll("[ \\t\\x0B\\f\\r]+", " ")
+                .replaceAll("\\n{3,}", "\n\n").trim();
     }
 
     private static int indexOfAnswerMark(String sec) {
@@ -1123,21 +1349,18 @@ public class TrainDocService {
         return m.find() ? m.start() : -1;
     }
 
-    /** 简单关键词命中：连续 2+ 字的片段。 */
     private static int keywordHitScore(String qNorm, String head) {
         if (qNorm.length() < 2 || head.isEmpty()) {
             return 0;
         }
         int hits = 0;
-        // 去常见虚词后取 2~4 字片
         String core = qNorm.replaceAll("[如何怎么怎样什么吗呢？?的了吗啊哦呀呗]|问[：:：]?", "");
         if (core.length() < 2) {
             core = qNorm;
         }
         for (int len = Math.min(4, core.length()); len >= 2; len--) {
             for (int i = 0; i + len <= core.length(); i++) {
-                String gram = core.substring(i, i + len);
-                if (head.contains(gram)) {
+                if (head.contains(core.substring(i, i + len))) {
                     hits++;
                 }
             }
@@ -1148,16 +1371,16 @@ public class TrainDocService {
         return Math.min(hits, 5);
     }
 
-    private static List<Integer> listQaQuestionStarts(String plain) {
+    private static List<Integer> listSectionStarts(String plain) {
         List<Integer> starts = new ArrayList<>();
         if (!StringUtils.hasText(plain)) {
             return starts;
         }
-        Matcher m = QA_QUESTION_START.matcher(plain);
+        Matcher m = SECTION_START.matcher(plain);
         while (m.find()) {
-            int qAt = m.start();
-            if (starts.isEmpty() || qAt > starts.get(starts.size() - 1)) {
-                starts.add(qAt);
+            int at = m.start();
+            if (starts.isEmpty() || at > starts.get(starts.size() - 1)) {
+                starts.add(at);
             }
         }
         return starts;
@@ -1248,16 +1471,35 @@ public class TrainDocService {
         return urls;
     }
 
-    private static String buildAnswerHtml(String answer, List<String> imageUrls) {
+    /** 把带 [图N] 的原文转成图文混排 HTML（图片插在原文位置）。 */
+    private static String buildMixedAnswerHtml(String textWithMarkers, IndexedDoc indexed) {
         StringBuilder html = new StringBuilder();
         html.append("<div class=\"train-qa-answer\" style=\"line-height:1.7;\">");
-        html.append("<div>").append(escapeHtml(answer).replace("\n", "<br/>")).append("</div>");
-        if (imageUrls != null) {
-            for (String url : imageUrls) {
+        if (!StringUtils.hasText(textWithMarkers)) {
+            html.append("</div>");
+            return html.toString();
+        }
+        Matcher m = Pattern.compile("\\[图(\\d+)\\]").matcher(textWithMarkers);
+        int last = 0;
+        while (m.find()) {
+            String before = textWithMarkers.substring(last, m.start());
+            if (StringUtils.hasText(before)) {
+                html.append(escapeHtml(before).replace("\n", "<br/>"));
+            }
+            int n = Integer.parseInt(m.group(1));
+            if (n >= 1 && n <= indexed.images.size()) {
+                String url = indexed.images.get(n - 1);
                 html.append("<img src=\"")
                         .append(url)
-                        .append("\" alt=\"培训配图\" style=\"max-width:100%;height:auto;display:block;margin:10px 0;border-radius:6px;\" />");
+                        .append("\" alt=\"培训配图")
+                        .append(n)
+                        .append("\" style=\"max-width:100%;height:auto;display:block;margin:10px 0;border-radius:6px;\" />");
             }
+            last = m.end();
+        }
+        String tail = textWithMarkers.substring(last);
+        if (StringUtils.hasText(tail)) {
+            html.append(escapeHtml(tail).replace("\n", "<br/>"));
         }
         html.append("</div>");
         return html.toString();

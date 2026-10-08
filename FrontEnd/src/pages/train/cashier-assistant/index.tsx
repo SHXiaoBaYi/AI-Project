@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { App, Avatar, Button, Input, Spin, Typography } from 'antd';
-import { AudioOutlined, CustomerServiceOutlined, SendOutlined, UserOutlined } from '@ant-design/icons';
+import {
+  AudioOutlined,
+  CustomerServiceOutlined,
+  DislikeOutlined,
+  LikeOutlined,
+  SendOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { dingTalkSsoApi, getDingTalkLoginConfigApi } from '@/api/auth';
 import {
   askTrainAssistantApi,
+  feedbackTrainAssistantApi,
   getTrainAssistantMetaApi,
   getTrainJsapiConfigApi,
   type TrainAssistantMeta,
@@ -85,6 +93,12 @@ type ChatMessage = {
   time: string;
   items?: TrainQaItem[];
   needOld?: boolean;
+  /** 对应的用户原问题（反馈用） */
+  userQuestion?: string;
+  docId?: number;
+  versionId?: number;
+  /** 本条已提交的反馈：accurate / inaccurate */
+  feedback?: 'accurate' | 'inaccurate';
 };
 
 function nowTime() {
@@ -329,12 +343,22 @@ export default function CashierAssistantPage() {
     try {
       const res = await askTrainAssistantApi({ question: q, searchOld, category: 'cashier' });
       if (res.status === 'HIT') {
-        push({ role: 'assistant', text: res.message || '已找到相关问答', items: res.items || [] });
+        push({
+          role: 'assistant',
+          text: res.message || '已找到相关问答',
+          items: res.items || [],
+          userQuestion: q,
+          docId: res.docId,
+          versionId: res.versionId,
+        });
       } else if (res.status === 'NEED_OLD') {
         push({
           role: 'assistant',
           text: res.message || '暂时没有找到答案，是否检索旧版？',
           needOld: true,
+          userQuestion: q,
+          docId: res.docId,
+          versionId: res.versionId,
         });
       } else {
         push({ role: 'assistant', text: res.message || '没有找到答案' });
@@ -344,6 +368,38 @@ export default function CashierAssistantPage() {
       push({ role: 'assistant', text: err instanceof Error ? err.message : '提问失败，请稍后再试' });
     } finally {
       setSending(false);
+    }
+  };
+
+  const submitFeedback = async (msg: ChatMessage, accurate: boolean) => {
+    if (!msg.items?.length || !msg.userQuestion || msg.feedback) return;
+    const item = msg.items[0];
+    try {
+      const id = await feedbackTrainAssistantApi({
+        userQuestion: msg.userQuestion,
+        accurate,
+        docId: msg.docId,
+        versionId: msg.versionId,
+        calibrateId: item.calibrateId,
+        topicTitle: item.question,
+        answer: item.answer,
+        answerHtml: item.answerHtml,
+        images: item.images,
+      });
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msg.id
+            ? {
+                ...m,
+                feedback: accurate ? 'accurate' : 'inaccurate',
+                items: m.items?.map((it, i) => (i === 0 ? { ...it, calibrateId: id || it.calibrateId } : it)),
+              }
+            : m,
+        ),
+      );
+      message.success(accurate ? '已标记为准确，下次同问题将优先用此答案' : '已标记为不准，可在后台校准或重新识别');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '反馈失败');
     }
   };
 
@@ -556,37 +612,72 @@ export default function CashierAssistantPage() {
                               <span className='ml-2 text-xs font-normal text-neutral-400'>{item.versionLabel}</span>
                             ) : null}
                           </div>
-                          <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap text-neutral-700'>
-                            A. {item.answer}
-                          </div>
-                          {item.images?.length ? (
-                            <div className='mt-2 min-w-0 space-y-3'>
-                              {item.images.length > 1 ? (
-                                <div className='text-xs text-neutral-400'>相关配图 {item.images.length} 张</div>
-                              ) : null}
-                              {item.images.map((src, imgIdx) => (
-                                <img
-                                  key={`${msg.id}-${idx}-img-${imgIdx}`}
-                                  src={resolveTrainImageUrl(src)}
-                                  alt={`培训配图 ${imgIdx + 1}/${item.images!.length}`}
-                                  className='block h-auto w-full max-w-full rounded-md border border-neutral-200 bg-white'
-                                  loading='lazy'
-                                />
-                              ))}
+                          {item.answerHtml ? (
+                            <div className='min-w-0'>
+                              <div className='mb-0.5 text-neutral-500'>A.</div>
+                              <div
+                                className='train-qa-rich min-w-0 overflow-hidden break-words text-neutral-700 [&_img]:my-2.5 [&_img]:block [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_img]:border [&_img]:border-neutral-200'
+                                dangerouslySetInnerHTML={{
+                                  __html: item.answerHtml.replace(
+                                    /src=["'](\/uploads\/[^"']+)["']/g,
+                                    (_, p1: string) => `src="${resolveTrainImageUrl(p1)}"`,
+                                  ),
+                                }}
+                              />
                             </div>
-                          ) : item.answerHtml?.includes('<img') ? (
-                            <div
-                              className='train-qa-rich mt-2 min-w-0 overflow-hidden break-words text-neutral-700 [&_img]:my-2.5 [&_img]:block [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md'
-                              dangerouslySetInnerHTML={{
-                                __html: item.answerHtml.replace(
-                                  /src=["'](\/uploads\/[^"']+)["']/g,
-                                  (_, p1: string) => `src="${resolveTrainImageUrl(p1)}"`,
-                                ),
-                              }}
-                            />
+                          ) : (
+                            <>
+                              <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap text-neutral-700'>
+                                A. {item.answer}
+                              </div>
+                              {item.images?.length ? (
+                                <div className='mt-2 min-w-0 space-y-3'>
+                                  {item.images.map((src, imgIdx) => (
+                                    <img
+                                      key={`${msg.id}-${idx}-img-${imgIdx}`}
+                                      src={resolveTrainImageUrl(src)}
+                                      alt={`培训配图 ${imgIdx + 1}/${item.images!.length}`}
+                                      className='block h-auto w-full max-w-full rounded-md border border-neutral-200 bg-white'
+                                      loading='lazy'
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                            </>
+                          )}
+                          {item.fromCalibrate ? (
+                            <div className='mt-1 text-xs text-emerald-600'>来自人工校准库</div>
                           ) : null}
                         </div>
                       ))}
+                      {msg.userQuestion && msg.items?.length ? (
+                        <div className='mt-2 flex flex-wrap items-center gap-2'>
+                          {msg.feedback ? (
+                            <span className='text-xs text-neutral-400'>
+                              已反馈：{msg.feedback === 'accurate' ? '准确' : '不准'}
+                            </span>
+                          ) : (
+                            <>
+                              <Button
+                                size='small'
+                                icon={<LikeOutlined />}
+                                disabled={sending}
+                                onClick={() => void submitFeedback(msg, true)}
+                              >
+                                准确
+                              </Button>
+                              <Button
+                                size='small'
+                                icon={<DislikeOutlined />}
+                                disabled={sending}
+                                onClick={() => void submitFeedback(msg, false)}
+                              >
+                                不准
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {msg.needOld ? (

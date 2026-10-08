@@ -64,6 +64,32 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                   KEY idx_train_doc_ver_doc (doc_id, is_active)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='培训文档版本'
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS train_qa_calibrate (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  doc_id BIGINT NOT NULL COMMENT '关联培训文档',
+                  version_id BIGINT NOT NULL COMMENT '关联文档版本；换版后旧记录不再优先命中',
+                  category VARCHAR(64) NOT NULL DEFAULT 'cashier',
+                  user_question VARCHAR(512) NOT NULL COMMENT '用户原问/标准问法',
+                  intent_norm VARCHAR(512) NOT NULL COMMENT '归一化意图键',
+                  aliases_json TEXT NULL COMMENT '同义问法 JSON 数组',
+                  topic_title VARCHAR(512) NULL COMMENT '文档话题标题',
+                  answer_text MEDIUMTEXT NULL COMMENT '答法纯文本',
+                  answer_html MEDIUMTEXT NULL COMMENT '答法图文 HTML',
+                  images_json TEXT NULL COMMENT '配图 URL JSON 数组',
+                  status VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT 'APPROVED准 REJECTED不准 PENDING待审 STALE过期',
+                  hit_count INT NOT NULL DEFAULT 0 COMMENT '校准命中次数',
+                  source VARCHAR(32) NULL COMMENT 'ASSISTANT_MARK/ADMIN_EDIT/RE_RECOGNIZE',
+                  remark VARCHAR(512) NULL,
+                  create_by VARCHAR(64) NULL,
+                  update_by VARCHAR(64) NULL,
+                  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  is_active TINYINT NOT NULL DEFAULT 1,
+                  KEY idx_train_qa_doc_ver (doc_id, version_id, status, is_active),
+                  KEY idx_train_qa_intent (intent_norm, version_id, status, is_active)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='培训答疑人工校准库'
+                """);
     }
 
     private void seedMenus() {
@@ -73,14 +99,17 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         menu(303, "文档编辑", 301, 2, "", "", "F", "train:doc:edit", "#", "");
         menu(304, "版本上传", 301, 3, "", "", "F", "train:doc:upload", "#", "");
         menu(305, "文档删除", 301, 4, "", "", "F", "train:doc:delete", "#", "");
+        menu(306, "答疑校准", 300, 2, "train/qa", "train/qa/index", "C", "train:qa:list", "CheckCircleOutlined", "人工校准准/不准答案");
+        menu(307, "校准编辑", 306, 1, "", "", "F", "train:qa:edit", "#", "");
+        menu(308, "重新识别", 306, 2, "", "", "F", "train:qa:recognize", "#", "");
 
         Long admin = roleId("admin");
         if (admin != null) {
-            grant(admin, 300, 301, 302, 303, 304, 305);
+            grant(admin, 300, 301, 302, 303, 304, 305, 306, 307, 308);
         }
         Long hrAdmin = roleId("hr_admin");
         if (hrAdmin != null) {
-            grant(hrAdmin, 300, 301, 302, 303, 304, 305);
+            grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308);
         }
     }
 

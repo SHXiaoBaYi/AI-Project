@@ -25,6 +25,12 @@ public class TrainAssistantAskVO {
     @Schema(description = "是否还有更旧版本可检索")
     private Boolean hasOlderVersions;
 
+    @Schema(description = "文档ID（反馈标记用）", example = "1")
+    private Long docId;
+
+    @Schema(description = "版本ID（反馈标记用）", example = "4")
+    private Long versionId;
+
     @Data
     @Schema(description = "问答条目")
     public static class QaItem {
@@ -42,5 +48,11 @@ public class TrainAssistantAskVO {
 
         @Schema(description = "来源版本标签")
         private String versionLabel;
+
+        @Schema(description = "校准库记录ID", example = "1", nullable = true)
+        private Long calibrateId;
+
+        @Schema(description = "是否来自人工校准库", example = "false")
+        private Boolean fromCalibrate;
     }
 }

@@ -3,11 +3,13 @@ package com.base.admin.controller;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.TrainAssistantAskDTO;
+import com.base.admin.domain.dto.TrainQaFeedbackDTO;
 import com.base.admin.domain.vo.TrainAssistantAskVO;
 import com.base.admin.domain.vo.TrainAssistantEntryVO;
 import com.base.admin.domain.vo.TrainAssistantMetaVO;
 import com.base.admin.service.DingTalkJsapiService;
 import com.base.admin.service.TrainDocService;
+import com.base.admin.service.TrainQaCalibrateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -23,6 +25,7 @@ import java.util.Map;
 public class TrainAssistantController {
 
     private final TrainDocService trainDocService;
+    private final TrainQaCalibrateService trainQaCalibrateService;
     private final DingTalkJsapiService dingTalkJsapiService;
 
     @Operation(summary = "长期有效扫码入口（管理端展示二维码）")
@@ -48,5 +51,11 @@ public class TrainAssistantController {
     @PostMapping("/ask")
     public Result<TrainAssistantAskVO> ask(@Valid @RequestBody TrainAssistantAskDTO dto) {
         return Result.ok(trainDocService.ask(dto));
+    }
+
+    @Operation(summary = "标记本次答案准/不准（准则入库优先命中）")
+    @PostMapping("/feedback")
+    public Result<Long> feedback(@Valid @RequestBody TrainQaFeedbackDTO dto) {
+        return Result.ok(trainQaCalibrateService.feedback(dto));
     }
 }
