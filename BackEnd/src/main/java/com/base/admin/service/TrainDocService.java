@@ -225,7 +225,8 @@ public class TrainDocService {
                 """, Integer.class, docId);
         int nextNo = (maxNo == null ? 0 : maxNo) + 1;
         String label = StringUtils.hasText(versionLabel) ? versionLabel.trim() : ("v" + nextNo);
-        String html = buildRichPreviewHtml(bytes, original);
+        // 预览走原文件；库内只存轻量文本 HTML，避免几十张图 base64 撑爆上传/预览
+        String html = toPreviewHtml(text);
         jdbc.update("""
                 INSERT INTO train_doc_version (doc_id, version_no, version_label, file_name, file_path,
                                               content_text, content_html, file_size, remark, create_by, is_active)
@@ -237,6 +238,10 @@ public class TrainDocService {
         return versionId;
     }
 
+    /**
+     * 预览元信息：docx/pdf 只返回轻量字段，由前端拉原文件渲染（避免把几十张图打成 base64 HTML 导致超时）。
+     * 仅老版 .doc / 纯文本才回退 content_html。
+     */
     public Map<String, Object> preview(Long versionId) {
         Map<String, Object> meta = jdbc.query("""
                 SELECT v.id, v.doc_id, v.version_no, v.version_label, v.file_name, v.file_path,
@@ -262,34 +267,52 @@ public class TrainDocService {
         }, versionId);
 
         String fileName = String.valueOf(meta.get("fileName"));
+        String filePath = nullToEmpty(String.valueOf(meta.get("filePath")));
         String lower = fileName.toLowerCase(Locale.ROOT);
+        boolean zipDocx = looksLikeDocxZip(filePath);
         String renderMode = "html";
         if (lower.endsWith(".pdf")) {
             renderMode = "pdf";
-        } else if (lower.endsWith(".docx") || looksLikeDocxZip(nullToEmpty(String.valueOf(meta.get("filePath"))))) {
+        } else if (lower.endsWith(".docx") || zipDocx) {
+            renderMode = "docx";
+        } else if (lower.endsWith(".doc") && zipDocx) {
             renderMode = "docx";
         }
         meta.put("renderMode", renderMode);
 
-        try {
-            Path path = fileStorage.resolveUploadPath(String.valueOf(meta.get("filePath")));
-            if (path != null && Files.isRegularFile(path)) {
+        Path path = fileStorage.resolveUploadPath(filePath);
+        boolean fileReady = path != null && Files.isRegularFile(path);
+        meta.put("fileReady", fileReady);
+        if (!fileReady) {
+            meta.put("fileMissing", true);
+            log.warn("培训文档预览原文件缺失 versionId={} path={}", versionId, filePath);
+        }
+
+        // docx/pdf：前端用原文件预览，接口不再生成/回传巨型图文 HTML
+        if ("docx".equals(renderMode) || "pdf".equals(renderMode)) {
+            meta.put("html", "");
+            // 文本可能很长，预览抽屉用不到，避免无意义传包
+            meta.put("text", "");
+            return meta;
+        }
+
+        // 老版二进制 .doc / txt：若库里已是纯文本预览则直接用；缺文件时无法再生成
+        String html = String.valueOf(meta.get("html"));
+        if ((!StringUtils.hasText(html) || html.contains("<pre ")) && fileReady) {
+            try {
                 byte[] bytes = Files.readAllBytes(path);
-                boolean word = lower.endsWith(".doc") || lower.endsWith(".docx")
-                        || (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K');
-                if (word) {
-                    if (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K') {
-                        meta.put("renderMode", "docx");
+                // 仅非 zip 的老 .doc 才走服务端 HTML；禁止再把整包图片打进 JSON
+                if (lower.endsWith(".doc") && !(bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K')) {
+                    String text = nullToEmpty(String.valueOf(meta.get("text")));
+                    if (!StringUtils.hasText(text)) {
+                        text = extractText(bytes, ".doc");
                     }
-                    String rich = buildRichPreviewHtml(bytes, fileName);
-                    if (StringUtils.hasText(rich)) {
-                        meta.put("html", rich);
-                        jdbc.update("UPDATE train_doc_version SET content_html = ? WHERE id = ?", rich, versionId);
-                    }
+                    String light = toPreviewHtml(text);
+                    meta.put("html", light);
                 }
+            } catch (Exception e) {
+                log.warn("培训文档轻量预览失败 versionId={}: {}", versionId, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("培训文档富预览生成失败 versionId={}: {}", versionId, e.getMessage());
         }
         return meta;
     }
@@ -300,8 +323,10 @@ public class TrainDocService {
             if (path == null || !Files.isRegularFile(path)) {
                 return false;
             }
-            byte[] head = Files.readAllBytes(path);
-            return head.length >= 2 && head[0] == 'P' && head[1] == 'K';
+            try (var in = Files.newInputStream(path)) {
+                byte[] head = in.readNBytes(4);
+                return head.length >= 2 && head[0] == 'P' && head[1] == 'K';
+            }
         } catch (Exception e) {
             return false;
         }

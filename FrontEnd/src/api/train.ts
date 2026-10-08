@@ -39,6 +39,9 @@ export type TrainDocPreview = {
   filePath?: string;
   /** html | docx | pdf */
   renderMode?: string;
+  /** 服务器上原文件是否存在 */
+  fileReady?: boolean;
+  fileMissing?: boolean;
   html?: string;
   text?: string;
 };

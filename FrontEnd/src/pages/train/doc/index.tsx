@@ -177,13 +177,29 @@ const TrainDocPage = memo(function TrainDocPage() {
     setPreviewOpen(true);
     setPreviewLoading(true);
     try {
+      // 元信息轻量；docx/pdf 再拉原文件，避免后端把整份图文转 HTML 超时
       const data = await previewTrainVersionApi(versionId);
       setPreview(data);
       const name = (data.fileName || '').toLowerCase();
+      const mode = (data.renderMode || '').toLowerCase();
+
+      if (data.fileMissing || data.fileReady === false) {
+        setPreviewError('原文件在服务器上不存在。若只在本地联调上传过，请在线上重新上传该版本。');
+        setPreviewMode(data.html ? 'html' : '');
+        return;
+      }
+
+      const needFile =
+        mode === 'docx' || mode === 'pdf' || name.endsWith('.docx') || name.endsWith('.pdf') || name.endsWith('.doc');
+      if (!needFile) {
+        setPreviewMode('html');
+        return;
+      }
+
       const { blob, contentType } = await fetchTrainVersionFileApi(versionId);
       const ct = (contentType || '').toLowerCase();
 
-      if (name.endsWith('.pdf') || ct.includes('pdf') || (await blobLooksLikePdf(blob))) {
+      if (mode === 'pdf' || name.endsWith('.pdf') || ct.includes('pdf') || (await blobLooksLikePdf(blob))) {
         const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
         pdfUrlRef.current = url;
         setPdfUrl(url);
@@ -191,8 +207,8 @@ const TrainDocPage = memo(function TrainDocPage() {
         return;
       }
 
-      // 原文件渲染：docx（含误后缀为 .doc 的 OOXML）才能保留配图
       if (
+        mode === 'docx' ||
         name.endsWith('.docx') ||
         ct.includes('wordprocessingml') ||
         ct.includes('officedocument.word') ||
@@ -203,10 +219,14 @@ const TrainDocPage = memo(function TrainDocPage() {
         return;
       }
 
-      // 老版 .doc / 纯文本：退回服务端 HTML
       setPreviewMode('html');
     } catch (e) {
-      setPreviewError(e instanceof Error ? e.message : '预览失败');
+      const tip = e instanceof Error ? e.message : '预览失败';
+      setPreviewError(
+        /timeout|超时|exceeded/i.test(tip)
+          ? '预览超时。大文档请确认线上已重新上传原文件；docx 将按原文件渲染，无需服务端转图。'
+          : tip,
+      );
       setPreviewMode('html');
     } finally {
       setPreviewLoading(false);

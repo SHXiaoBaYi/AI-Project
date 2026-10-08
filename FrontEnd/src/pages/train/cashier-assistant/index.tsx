@@ -221,8 +221,16 @@ export default function CashierAssistantPage() {
   useEffect(() => {
     const prev = document.title;
     document.title = '小巴依收银答疑小助手';
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflowX = html.style.overflowX;
+    const prevBodyOverflowX = body.style.overflowX;
+    html.style.overflowX = 'hidden';
+    body.style.overflowX = 'hidden';
     return () => {
       document.title = prev;
+      html.style.overflowX = prevHtmlOverflowX;
+      body.style.overflowX = prevBodyOverflowX;
     };
   }, []);
 
@@ -455,7 +463,7 @@ export default function CashierAssistantPage() {
 
   if (boot === 'loading') {
     return (
-      <div className='flex min-h-[100dvh] flex-col items-center justify-center gap-3 bg-[#f0f4f8] px-6'>
+      <div className='flex min-h-[100dvh] w-full max-w-full flex-col items-center justify-center gap-3 overflow-x-hidden bg-[#f0f4f8] px-6'>
         <Spin size='large' />
         <Typography.Text type='secondary'>{bootTip}</Typography.Text>
       </div>
@@ -465,7 +473,7 @@ export default function CashierAssistantPage() {
   if (boot === 'error') {
     const local = isLocalhostHost();
     return (
-      <div className='flex min-h-[100dvh] flex-col items-center justify-center gap-3 bg-[#f0f4f8] px-6 text-center'>
+      <div className='flex min-h-[100dvh] w-full max-w-full flex-col items-center justify-center gap-3 overflow-x-hidden bg-[#f0f4f8] px-6 text-center'>
         <Typography.Title
           level={4}
           className='!mb-0'
@@ -495,11 +503,11 @@ export default function CashierAssistantPage() {
   }
 
   return (
-    <div className='flex h-[100dvh] max-h-[100dvh] flex-col bg-[#eef2f6]'>
-      <header className='flex shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 py-3'>
-        <div>
-          <div className='text-base font-semibold text-neutral-900'>收银答疑小助手</div>
-          <div className='text-xs text-neutral-500'>
+    <div className='flex h-[100dvh] max-h-[100dvh] w-full max-w-full flex-col overflow-x-hidden bg-[#eef2f6]'>
+      <header className='flex w-full min-w-0 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 py-3'>
+        <div className='min-w-0'>
+          <div className='truncate text-base font-semibold text-neutral-900'>收银答疑小助手</div>
+          <div className='truncate text-xs text-neutral-500'>
             {isLocalhostHost() ? '本机联调' : '本企业员工专用'}
             {meta?.hasDocument
               ? ` · 最新版 ${meta.latestVersionLabel || '—'}${meta.hasOlderVersions ? ' · 可检索旧版' : ''}`
@@ -510,45 +518,49 @@ export default function CashierAssistantPage() {
 
       <div
         ref={listRef}
-        className='min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4'
+        className='min-h-0 w-full min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-3 py-4'
       >
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
           return (
             <div
               key={msg.id}
-              className={`flex items-start gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+              className={`flex w-full min-w-0 items-start gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
             >
               <Avatar
                 size={36}
                 className={`mt-0.5 shrink-0 ${isUser ? '!bg-[#1677ff]' : '!bg-[#13c2c2]'}`}
                 icon={isUser ? <UserOutlined /> : <CustomerServiceOutlined />}
               />
-              <div className={`flex max-w-[78%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+              <div
+                className={`flex max-w-[calc(100%-2.75rem)] min-w-0 flex-col ${isUser ? 'items-end' : 'items-start'}`}
+              >
                 <div
-                  className={`rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed shadow-sm ${
+                  className={`max-w-full min-w-0 overflow-hidden rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed break-words shadow-sm ${
                     isUser
                       ? 'rounded-br-md bg-[#1677ff] text-white'
                       : 'rounded-bl-md border border-neutral-100 bg-white text-neutral-800'
                   }`}
                 >
-                  <div className='whitespace-pre-wrap'>{msg.text}</div>
+                  <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap'>{msg.text}</div>
                   {msg.items?.length ? (
-                    <div className='mt-2 space-y-2'>
+                    <div className='mt-2 min-w-0 space-y-2'>
                       {msg.items.map((item, idx) => (
                         <div
                           key={`${msg.id}-${idx}`}
-                          className='rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-neutral-800'
+                          className='min-w-0 overflow-hidden rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-neutral-800'
                         >
-                          <div className='mb-1 font-medium text-blue-700'>
+                          <div className='mb-1 font-medium break-words text-blue-700'>
                             Q{idx + 1}. {item.question}
                             {item.versionLabel ? (
                               <span className='ml-2 text-xs font-normal text-neutral-400'>{item.versionLabel}</span>
                             ) : null}
                           </div>
-                          <div className='whitespace-pre-wrap text-neutral-700'>A. {item.answer}</div>
+                          <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap text-neutral-700'>
+                            A. {item.answer}
+                          </div>
                           {item.images?.length ? (
-                            <div className='mt-2 space-y-3'>
+                            <div className='mt-2 min-w-0 space-y-3'>
                               {item.images.length > 1 ? (
                                 <div className='text-xs text-neutral-400'>相关配图 {item.images.length} 张</div>
                               ) : null}
@@ -557,14 +569,14 @@ export default function CashierAssistantPage() {
                                   key={`${msg.id}-${idx}-img-${imgIdx}`}
                                   src={resolveTrainImageUrl(src)}
                                   alt={`培训配图 ${imgIdx + 1}/${item.images!.length}`}
-                                  className='block w-full max-w-full rounded-md border border-neutral-200 bg-white'
+                                  className='block h-auto w-full max-w-full rounded-md border border-neutral-200 bg-white'
                                   loading='lazy'
                                 />
                               ))}
                             </div>
                           ) : item.answerHtml?.includes('<img') ? (
                             <div
-                              className='train-qa-rich mt-2 text-neutral-700 [&_img]:my-2.5 [&_img]:block [&_img]:max-w-full [&_img]:rounded-md'
+                              className='train-qa-rich mt-2 min-w-0 overflow-hidden break-words text-neutral-700 [&_img]:my-2.5 [&_img]:block [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md'
                               dangerouslySetInnerHTML={{
                                 __html: item.answerHtml.replace(
                                   /src=["'](\/uploads\/[^"']+)["']/g,
@@ -578,7 +590,7 @@ export default function CashierAssistantPage() {
                     </div>
                   ) : null}
                   {msg.needOld ? (
-                    <div className='mt-2 flex gap-2'>
+                    <div className='mt-2 flex flex-wrap gap-2'>
                       <Button
                         size='small'
                         type='primary'
@@ -599,30 +611,31 @@ export default function CashierAssistantPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className={`mt-1 px-1 text-[11px] text-neutral-400 tabular-nums`}>{msg.time}</div>
+                <div className='mt-1 px-1 text-[11px] text-neutral-400 tabular-nums'>{msg.time}</div>
               </div>
             </div>
           );
         })}
         {sending ? (
-          <div className='flex items-start gap-2'>
+          <div className='flex w-full min-w-0 items-start gap-2'>
             <Avatar
               size={36}
               className='mt-0.5 shrink-0 !bg-[#13c2c2]'
               icon={<CustomerServiceOutlined />}
             />
-            <div className='rounded-2xl rounded-bl-md border border-neutral-100 bg-white px-3 py-2 text-sm text-neutral-400 shadow-sm'>
+            <div className='max-w-[calc(100%-2.75rem)] min-w-0 rounded-2xl rounded-bl-md border border-neutral-100 bg-white px-3 py-2 text-sm text-neutral-400 shadow-sm'>
               正在从培训文档检索…
             </div>
           </div>
         ) : null}
       </div>
 
-      <div className='shrink-0 border-t border-neutral-200 bg-white px-3 py-2'>
-        <div className='mx-auto flex max-w-3xl items-end gap-2'>
+      <div className='w-full min-w-0 shrink-0 border-t border-neutral-200 bg-white px-3 py-2'>
+        <div className='mx-auto flex w-full max-w-3xl min-w-0 items-end gap-2'>
           <Button
             shape='circle'
             size='large'
+            className='shrink-0'
             type={recording ? 'primary' : 'default'}
             danger={recording}
             icon={<AudioOutlined />}
@@ -642,12 +655,13 @@ export default function CashierAssistantPage() {
                 void ask(input);
               }
             }}
-            className='!rounded-xl'
+            className='!min-w-0 !flex-1 !rounded-xl'
           />
           <Button
             type='primary'
             shape='circle'
             size='large'
+            className='shrink-0'
             icon={<SendOutlined />}
             loading={sending}
             disabled={!input.trim() || !meta?.hasDocument || recording}
