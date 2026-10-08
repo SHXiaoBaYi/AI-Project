@@ -24,10 +24,12 @@ import com.base.admin.domain.dto.HrInterviewRecordDTO;
 import com.base.admin.domain.dto.HrInterviewVerdictDTO;
 import com.base.admin.domain.dto.HrInviteCreateDTO;
 import com.base.admin.domain.dto.HrInviteTransferDTO;
+import com.base.admin.domain.dto.HrJobCardQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrRequisitionStatusDTO;
 import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
+import com.base.admin.domain.vo.HrJobCardVO;
 import com.base.admin.service.HrInterviewRecordService;
 import com.base.admin.service.HrInviteService;
 import com.base.admin.service.HrMasterService;
@@ -81,6 +83,13 @@ public class HrMasterController {
     @RequiresPermission("hr:requisition:list")
     public Result<List<Map<String, Object>>> requisitions(@RequestBody(required = false) HrBoardQueryDTO query) {
         return Result.ok(masterService.requisitions(query));
+    }
+
+    @Operation(summary = "岗位信息卡片（按部门分组）")
+    @PostMapping("/requisition/cards")
+    @RequiresPermission("hr:job-board:list")
+    public Result<HrJobCardVO> jobCards(@RequestBody(required = false) HrJobCardQueryDTO query) {
+        return Result.ok(masterService.jobCards(query));
     }
 
     @Operation(summary = "新增招聘需求")

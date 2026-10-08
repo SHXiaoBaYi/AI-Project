@@ -1,0 +1,5 @@
+﻿设置“HasGrandTotals”时发生异常:“在此对象上找不到属性“HasGrandTotals”。请确认该属性存在并且可设置。”
+
+--- STACK ---
+在 <ScriptBlock>、D:\AI-XBY\AI-Project\jd-filed\scripts\build_jd_pivot.ps1 中: 第 372 行
+在 <ScriptBlock>、D:\AI-XBY\AI-Project\jd-filed\_scratch\driver.ps1 中: 第 4 行

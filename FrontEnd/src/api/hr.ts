@@ -204,6 +204,56 @@ export function getHrRequisitionsApi(data: HrBoardQuery = {}) {
   return request.post<unknown, Record<string, unknown>[]>('/hr/requisition/list', data);
 }
 
+export type HrJobCardStatus = 'PENDING' | 'ACTIVE' | 'CLOSED';
+
+export type HrJobCardQuery = {
+  deptId?: number;
+  cardStatus?: HrJobCardStatus;
+  priority?: number;
+};
+
+export type HrJobCard = {
+  id: number;
+  jobName: string;
+  salaryRange?: string;
+  educationReq?: string;
+  experienceReq?: string;
+  skillReq?: string;
+  resumeRequirement?: string;
+  jobSummary?: string;
+  receivedDate?: string;
+  targetText?: string;
+  onboardDate?: string;
+  ownerNames?: string;
+  ownerUserIds?: number[];
+  deptId?: number;
+  deptName?: string;
+  status?: string;
+  cardStatus?: HrJobCardStatus;
+  cardStatusLabel?: string;
+  priority?: number;
+  priorityLabel?: string;
+  headcount?: number;
+  candidateCount?: number;
+  locationCode?: string;
+};
+
+export type HrJobCardGroup = {
+  deptId?: number;
+  deptName: string;
+  jobCount: number;
+  jobs: HrJobCard[];
+};
+
+export type HrJobCardBoard = {
+  groups: HrJobCardGroup[];
+};
+
+/** 岗位信息卡片：按部门分组 */
+export function getHrJobCardsApi(data: HrJobCardQuery = {}) {
+  return request.post<unknown, HrJobCardBoard>('/hr/requisition/cards', data);
+}
+
 export function getHrApplicationsApi(data: HrBoardQuery = {}) {
   return request.post<unknown, Record<string, unknown>[]>('/hr/application/list', data);
 }

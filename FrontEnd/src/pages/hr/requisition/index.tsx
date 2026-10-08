@@ -57,6 +57,10 @@ interface Req {
   id: number;
   jobName: string;
   jobDesc?: string;
+  salaryRange?: string;
+  educationReq?: string;
+  experienceReq?: string;
+  skillReq?: string;
   status: string;
   locationCode: string;
   deptId?: number;
@@ -126,6 +130,10 @@ function mapRow(raw: Record<string, unknown>): Req {
     id: Number(raw.id),
     jobName: String(raw.job_name ?? ''),
     jobDesc: textOf(raw.job_desc),
+    salaryRange: textOf(raw.salary_range),
+    educationReq: textOf(raw.education_req),
+    experienceReq: textOf(raw.experience_req),
+    skillReq: textOf(raw.skill_req),
     status: String(raw.status ?? ''),
     locationCode: String(raw.location_code ?? ''),
     deptId: raw.dept_id == null ? undefined : Number(raw.dept_id),
@@ -288,6 +296,34 @@ const RequisitionPage = memo(function RequisitionPage() {
         hideInForm: true,
         ellipsis: true,
         render: (_, record) => record.interviewFlow || '未配置',
+      },
+      {
+        title: '薪资范围',
+        dataIndex: 'salaryRange',
+        search: false,
+        hideInTable: true,
+        fieldProps: { maxLength: 64, placeholder: '如 15k-25k / 面议' },
+      },
+      {
+        title: '学历要求',
+        dataIndex: 'educationReq',
+        search: false,
+        hideInTable: true,
+        fieldProps: { maxLength: 64, placeholder: '如 本科及以上' },
+      },
+      {
+        title: '经验要求',
+        dataIndex: 'experienceReq',
+        search: false,
+        hideInTable: true,
+        fieldProps: { maxLength: 64, placeholder: '如 3-5 年' },
+      },
+      {
+        title: '技能要求',
+        dataIndex: 'skillReq',
+        search: false,
+        hideInTable: true,
+        fieldProps: { maxLength: 255, placeholder: '如 Java / 数据分析' },
       },
       {
         title: '岗位职责',
@@ -541,6 +577,10 @@ const RequisitionPage = memo(function RequisitionPage() {
             id: editing?.id,
             jobName: form.jobName,
             jobDesc: form.jobDesc,
+            salaryRange: form.salaryRange,
+            educationReq: form.educationReq,
+            experienceReq: form.experienceReq,
+            skillReq: form.skillReq,
             locationCode: form.locationCode,
             deptId: form.deptId,
             headcount: form.headcount,

@@ -42,7 +42,19 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureFailReasonColumn();
         ensureInviteCcEventColumn();
         ensureCandidatePortfolioTable();
+        ensureRequisitionCardColumns();
         log.info("招聘表结构、角色、用户和菜单已同步");
+    }
+
+    private void ensureRequisitionCardColumns() {
+        addColumnIfMissing("hr_requisition", "salary_range",
+                "ALTER TABLE hr_requisition ADD COLUMN salary_range VARCHAR(64) NULL COMMENT '薪资范围' AFTER job_desc");
+        addColumnIfMissing("hr_requisition", "education_req",
+                "ALTER TABLE hr_requisition ADD COLUMN education_req VARCHAR(64) NULL COMMENT '学历要求' AFTER salary_range");
+        addColumnIfMissing("hr_requisition", "experience_req",
+                "ALTER TABLE hr_requisition ADD COLUMN experience_req VARCHAR(64) NULL COMMENT '经验要求' AFTER education_req");
+        addColumnIfMissing("hr_requisition", "skill_req",
+                "ALTER TABLE hr_requisition ADD COLUMN skill_req VARCHAR(255) NULL COMMENT '技能要求' AFTER experience_req");
     }
 
     private void ensureCandidatePortfolioTable() {
@@ -134,10 +146,11 @@ public class HrSchemaMigrator implements ApplicationRunner {
         }
         menu(201, "招聘看板", boardParent == 0 ? 200 : boardParent, 4, "hr/board", "hr/board/index", "C", "hr:board:view", "DashboardOutlined", "漏斗、周期、HC、面试");
         menu(202, "招聘需求", 200, 1, "hr/requisition", "hr/requisition/index", "C", "hr:requisition:list", "ProfileOutlined", "HC与面试流程");
-        menu(203, "候选人", 200, 2, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "候选人与简历");
-        menu(220, "面试邀约记录", 200, 3, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
-        menu(221, "面试记录", 200, 4, "hr/record", "hr/record/index", "C", "hr:record:list", "FormOutlined", "各轮面试官评语");
-        menu(222, "我的面试", 200, 5, "hr/mine", "hr/mine/index", "C", "hr:interview:mine", "ScheduleOutlined", "面试官待面日程与结论");
+        menu(234, "岗位看板", 200, 2, "hr/job-board", "hr/job-board/index", "C", "hr:job-board:list", "AppstoreOutlined", "按部门分组的岗位信息卡片");
+        menu(203, "候选人", 200, 3, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "候选人与简历");
+        menu(220, "面试邀约记录", 200, 4, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
+        menu(221, "面试记录", 200, 5, "hr/record", "hr/record/index", "C", "hr:record:list", "FormOutlined", "各轮面试官评语");
+        menu(222, "我的面试", 200, 6, "hr/mine", "hr/mine/index", "C", "hr:interview:mine", "ScheduleOutlined", "面试官待面日程与结论");
         menu(204, "部门管理", systemParent == 0 ? 200 : systemParent, 9, "hr/department", "hr/department/index", "C", "hr:dept:list", "BankOutlined", "部门树");
         jdbc.update("UPDATE sys_menu SET is_active = 0 WHERE menu_id IN (228, 229)");
         menu(218, "基础数据", 200, 6, "hr/base", "", "M", "", "DatabaseOutlined", "招聘字典");
@@ -171,12 +184,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232);
-        grant(plain, 200, 201, 209);
-        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234);
+        grant(plain, 200, 201, 209, 234);
+        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234);
     }
 
     private int menuId(String name, String type) {

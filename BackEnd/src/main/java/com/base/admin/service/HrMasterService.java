@@ -6,11 +6,13 @@ import com.base.admin.domain.dto.HrBoardViewDTO;
 import com.base.admin.domain.dto.HrDepartmentDTO;
 import com.base.admin.domain.dto.HrApplicationDTO;
 import com.base.admin.domain.dto.HrDingTalkBindDTO;
+import com.base.admin.domain.dto.HrJobCardQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.domain.dto.HrSchoolQueryDTO;
 import com.base.admin.domain.vo.HrDingTalkIdentityVO;
+import com.base.admin.domain.vo.HrJobCardVO;
 import com.base.admin.domain.vo.HrSchoolVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
@@ -22,11 +24,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Date;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -42,7 +50,8 @@ public class HrMasterService {
     public List<Map<String, Object>> requisitions(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
         StringBuilder sql = new StringBuilder("""
-                SELECT r.id, r.job_name, r.job_desc, r.status, r.location_code, r.headcount, r.target_text, r.priority,
+                SELECT r.id, r.job_name, r.job_desc, r.salary_range, r.education_req, r.experience_req, r.skill_req,
+                       r.status, r.location_code, r.headcount, r.target_text, r.priority,
                        r.received_date, r.onboard_date, r.dept_id, d.name dept_name,
                        (SELECT GROUP_CONCAT(COALESCE(u.nickname, o.alias) ORDER BY o.sort_no SEPARATOR '、')
                         FROM hr_requisition_owner o
@@ -117,6 +126,188 @@ public class HrMasterService {
         return jdbc.queryForList(sql.toString(), args.toArray());
     }
 
+    /**
+     * 岗位信息卡片：按部门分组。
+     * 卡片状态：OPEN 且无候选人→待招；OPEN 且有候选人→进行中；其余→已关闭。
+     */
+    public HrJobCardVO jobCards(HrJobCardQueryDTO query) {
+        HrJobCardQueryDTO q = query == null ? new HrJobCardQueryDTO() : query;
+        StringBuilder sql = new StringBuilder("""
+                SELECT r.id, r.job_name, r.job_desc, r.salary_range, r.education_req, r.experience_req, r.skill_req,
+                       r.status, r.location_code, r.headcount, r.target_text, r.priority,
+                       r.received_date, r.onboard_date, r.dept_id, d.name dept_name,
+                       (SELECT COUNT(1) FROM hr_application a
+                        WHERE a.requisition_id = r.id AND a.is_active = 1) candidate_count,
+                       (SELECT GROUP_CONCAT(COALESCE(u.nickname, o.alias) ORDER BY o.sort_no SEPARATOR '、')
+                        FROM hr_requisition_owner o
+                        LEFT JOIN sys_user u ON u.user_id = o.user_id
+                        WHERE o.requisition_id = r.id AND o.is_active = 1) owner_names,
+                       (SELECT GROUP_CONCAT(o.user_id ORDER BY o.sort_no)
+                        FROM hr_requisition_owner o
+                        WHERE o.requisition_id = r.id AND o.is_active = 1 AND o.user_id IS NOT NULL) owner_user_ids
+                FROM hr_requisition r
+                LEFT JOIN hr_department d ON d.id = r.dept_id
+                WHERE r.is_active = 1
+                """);
+        List<Object> args = new ArrayList<>();
+        if (q.getDeptId() != null) {
+            sql.append("""
+                     AND r.dept_id IN (
+                       SELECT id FROM hr_department
+                       WHERE is_active = 1 AND (id = ? OR CONCAT(',', ancestors, ',') LIKE CONCAT('%,', ?, ',%'))
+                     )
+                    """);
+            args.add(q.getDeptId());
+            args.add(String.valueOf(q.getDeptId()));
+        }
+        if (q.getPriority() != null) {
+            sql.append(" AND r.priority = ? ");
+            args.add(q.getPriority());
+        }
+        String cardStatus = q.getCardStatus() == null ? "" : q.getCardStatus().trim().toUpperCase(Locale.ROOT);
+        if ("PENDING".equals(cardStatus)) {
+            sql.append(" AND r.status = 'OPEN' AND NOT EXISTS (SELECT 1 FROM hr_application a WHERE a.requisition_id = r.id AND a.is_active = 1) ");
+        } else if ("ACTIVE".equals(cardStatus)) {
+            sql.append(" AND r.status = 'OPEN' AND EXISTS (SELECT 1 FROM hr_application a WHERE a.requisition_id = r.id AND a.is_active = 1) ");
+        } else if ("CLOSED".equals(cardStatus)) {
+            sql.append(" AND r.status IN ('DONE','STOPPED','ARCHIVED','PAUSED') ");
+        }
+        dataScope.apply(sql, args, "r", null);
+        sql.append(" ORDER BY COALESCE(d.sort_order, 9999), d.id, FIELD(r.priority,1,2,3), r.received_date DESC, r.id DESC");
+
+        List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), args.toArray());
+        LinkedHashMap<String, HrJobCardVO.DeptGroup> groups = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            HrJobCardVO.JobCard card = toJobCard(row);
+            String key = card.getDeptId() == null ? "_none" : String.valueOf(card.getDeptId());
+            HrJobCardVO.DeptGroup group = groups.computeIfAbsent(key, k -> {
+                HrJobCardVO.DeptGroup g = new HrJobCardVO.DeptGroup();
+                g.setDeptId(card.getDeptId());
+                g.setDeptName(card.getDeptName() == null || card.getDeptName().isBlank() ? "未分配部门" : card.getDeptName());
+                return g;
+            });
+            group.getJobs().add(card);
+        }
+        HrJobCardVO vo = new HrJobCardVO();
+        for (HrJobCardVO.DeptGroup g : groups.values()) {
+            g.setJobCount(g.getJobs().size());
+            vo.getGroups().add(g);
+        }
+        return vo;
+    }
+
+    private static HrJobCardVO.JobCard toJobCard(Map<String, Object> row) {
+        HrJobCardVO.JobCard card = new HrJobCardVO.JobCard();
+        card.setId(((Number) row.get("id")).longValue());
+        card.setJobName(stringOf(row.get("job_name")));
+        card.setSalaryRange(stringOf(row.get("salary_range")));
+        card.setEducationReq(stringOf(row.get("education_req")));
+        card.setExperienceReq(stringOf(row.get("experience_req")));
+        card.setSkillReq(stringOf(row.get("skill_req")));
+        card.setResumeRequirement(joinResumeReq(card.getEducationReq(), card.getExperienceReq(), card.getSkillReq()));
+        card.setJobSummary(summarize(stringOf(row.get("job_desc")), 120));
+        card.setReceivedDate(dateOf(row.get("received_date")));
+        card.setTargetText(stringOf(row.get("target_text")));
+        card.setOnboardDate(dateOf(row.get("onboard_date")));
+        card.setOwnerNames(stringOf(row.get("owner_names")));
+        card.setOwnerUserIds(parseIds(stringOf(row.get("owner_user_ids"))));
+        Object deptId = row.get("dept_id");
+        card.setDeptId(deptId == null ? null : ((Number) deptId).longValue());
+        card.setDeptName(stringOf(row.get("dept_name")));
+        String status = stringOf(row.get("status"));
+        card.setStatus(status);
+        int candidateCount = row.get("candidate_count") == null ? 0 : ((Number) row.get("candidate_count")).intValue();
+        card.setCandidateCount(candidateCount);
+        String phase = resolveCardStatus(status, candidateCount);
+        card.setCardStatus(phase);
+        card.setCardStatusLabel(switch (phase) {
+            case "PENDING" -> "待招";
+            case "ACTIVE" -> "进行中";
+            default -> "已关闭";
+        });
+        Object priority = row.get("priority");
+        Integer p = priority == null ? null : ((Number) priority).intValue();
+        card.setPriority(p);
+        card.setPriorityLabel(p == null ? null : switch (p) {
+            case 1 -> "紧急";
+            case 2 -> "优先";
+            case 3 -> "常规";
+            default -> String.valueOf(p);
+        });
+        Object headcount = row.get("headcount");
+        card.setHeadcount(headcount == null ? null : ((Number) headcount).intValue());
+        card.setLocationCode(stringOf(row.get("location_code")));
+        return card;
+    }
+
+    private static String resolveCardStatus(String status, int candidateCount) {
+        if ("OPEN".equalsIgnoreCase(status)) {
+            return candidateCount > 0 ? "ACTIVE" : "PENDING";
+        }
+        return "CLOSED";
+    }
+
+    private static String joinResumeReq(String education, String experience, String skill) {
+        return Arrays.asList(education, experience, skill).stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.joining(" / "));
+    }
+
+    private static String summarize(String text, int max) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String flat = text.replaceAll("\\s+", " ").trim();
+        if (flat.length() <= max) {
+            return flat;
+        }
+        return flat.substring(0, max) + "…";
+    }
+
+    private static String stringOf(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private static LocalDate dateOf(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof LocalDate d) {
+            return d;
+        }
+        if (value instanceof Date d) {
+            return d.toLocalDate();
+        }
+        if (value instanceof java.util.Date d) {
+            return new Date(d.getTime()).toLocalDate();
+        }
+        String text = String.valueOf(value).trim();
+        if (text.length() >= 10) {
+            return LocalDate.parse(text.substring(0, 10));
+        }
+        return null;
+    }
+
+    private static List<Long> parseIds(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return new ArrayList<>();
+        }
+        List<Long> ids = new ArrayList<>();
+        for (String part : csv.split(",")) {
+            try {
+                long id = Long.parseLong(part.trim());
+                if (id > 0) {
+                    ids.add(id);
+                }
+            } catch (NumberFormatException ignored) {
+                // skip
+            }
+        }
+        return ids;
+    }
+
     @Transactional
     public void saveRequisition(HrRequisitionDTO dto) {
         int headcount = dto.getHeadcount() == null || dto.getHeadcount() < 1 ? 1 : dto.getHeadcount();
@@ -135,20 +326,26 @@ public class HrMasterService {
         Long requisitionId = dto.getId();
         if (requisitionId == null) {
             jdbc.update("""
-                    INSERT INTO hr_requisition (job_name, job_desc, status, location_code, dept_id, headcount, target_text, priority, received_date, onboard_date, create_by, is_active)
-                    VALUES (?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                    """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), dto.getLocationCode(), dto.getDeptId(),
-                    headcount, target, dto.getPriority(), dto.getReceivedDate(), dto.getOnboardDate(),
-                    SecurityUtils.getCurrentUsername());
+                    INSERT INTO hr_requisition (job_name, job_desc, salary_range, education_req, experience_req, skill_req,
+                                               status, location_code, dept_id, headcount, target_text, priority,
+                                               received_date, onboard_date, create_by, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
+                    emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
+                    dto.getLocationCode(), dto.getDeptId(), headcount, target, dto.getPriority(), dto.getReceivedDate(),
+                    dto.getOnboardDate(), SecurityUtils.getCurrentUsername());
             requisitionId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         } else {
             int updated = jdbc.update("""
                     UPDATE hr_requisition
-                    SET job_name = ?, job_desc = ?, location_code = ?, dept_id = ?, headcount = ?, target_text = ?,
+                    SET job_name = ?, job_desc = ?, salary_range = ?, education_req = ?, experience_req = ?, skill_req = ?,
+                        location_code = ?, dept_id = ?, headcount = ?, target_text = ?,
                         priority = ?, received_date = ?, onboard_date = ?
                     WHERE id = ? AND is_active = 1
-                    """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), dto.getLocationCode(), dto.getDeptId(),
-                    headcount, target, dto.getPriority(), dto.getReceivedDate(), dto.getOnboardDate(), requisitionId);
+                    """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
+                    emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
+                    dto.getLocationCode(), dto.getDeptId(), headcount, target, dto.getPriority(), dto.getReceivedDate(),
+                    dto.getOnboardDate(), requisitionId);
             if (updated == 0) {
                 throw new BusinessException("需求不存在");
             }

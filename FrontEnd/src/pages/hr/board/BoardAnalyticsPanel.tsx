@@ -305,10 +305,14 @@ const progressColumns = [
   },
 ];
 
-export default function BoardAnalyticsPanel() {
+type BoardAnalyticsPanelProps = {
+  initialOwnerUserId?: number;
+};
+
+export default function BoardAnalyticsPanel({ initialOwnerUserId }: BoardAnalyticsPanelProps) {
   const [grain, setGrain] = useState<DemoBoardGrain>('week');
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('week'));
-  const [ownerUserId, setOwnerUserId] = useState<number | undefined>();
+  const [ownerUserId, setOwnerUserId] = useState<number | undefined>(initialOwnerUserId);
   const [jobCategory, setJobCategory] = useState<string | undefined>();
   const [channelCode, setChannelCode] = useState<string | undefined>();
   const [priority, setPriority] = useState<number | undefined>();
@@ -337,6 +341,12 @@ export default function BoardAnalyticsPanel() {
   });
 
   const clearCycle = () => setCycleJob(undefined);
+
+  useEffect(() => {
+    if (initialOwnerUserId) {
+      setOwnerUserId(initialOwnerUserId);
+    }
+  }, [initialOwnerUserId]);
 
   useEffect(() => {
     let cancelled = false;

@@ -23,6 +23,18 @@ public class HrRequisitionDTO {
     @Schema(description = "岗位职责")
     private String jobDesc;
 
+    @Schema(description = "薪资范围，如 15k-25k / 面议")
+    private String salaryRange;
+
+    @Schema(description = "学历要求")
+    private String educationReq;
+
+    @Schema(description = "经验要求")
+    private String experienceReq;
+
+    @Schema(description = "技能要求")
+    private String skillReq;
+
     @NotBlank
     @Schema(description = "工作地 SH/XJ")
     private String locationCode;

@@ -1,0 +1,39 @@
+{
+  "_说明": "看板指标映射表。板块布局写死在 build_jd_dashboard.ps1，本文件只承载「平台相关」的报表名通配与指标列名，换平台/换后台时只改这里。",
+  "platform": "京东",
+  "report_patterns": {
+    "trade":    "交易概况*",
+    "channel":  "流量来源*",
+    "product":  "商品明细*",
+    "ad":       "*推广*",
+    "target":   "经营目标*",
+    "prodchan": "商品渠道*"
+  },
+  "metrics": {
+    "gmv":            { "report": "trade",    "metric": "成交金额" },
+    "gmv_channel":    { "report": "channel",  "metric": "引入成交金额" },
+    "buyers_channel": { "report": "channel",  "metric": "引入成交客户数" },
+    "qty_channel":    { "report": "channel",  "metric": "引入成交商品件数" },
+    "gmv_product":    { "report": "product",  "metric": "成交金额" },
+    "qty_product":    { "report": "product",  "metric": "成交商品件数" },
+    "buyers_product": { "report": "product",  "metric": "成交客户数" },
+    "ad_cost":        { "report": "ad",       "metric": "花费" },
+    "ad_gmv":         { "report": "ad",       "metric": "全站交易额" },
+    "ad_roi":         { "report": "ad",       "metric": "全站投产比" },
+    "pc_gmv":         { "report": "prodchan", "metric": "成交金额" },
+    "pc_qty":         { "report": "prodchan", "metric": "成交商品件数" },
+    "pc_buyers":      { "report": "prodchan", "metric": "成交客户数" }
+  },
+  "target_columns": {
+    "period":   "月份",
+    "monthly":  "月度目标",
+    "budget":   "广告预算",
+    "roi":      "ROI目标",
+    "cost_cap": "费比上限"
+  },
+  "limits": {
+    "channels":    20,
+    "products":    30,
+    "trend_days":  62
+  }
+}
