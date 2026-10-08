@@ -54,9 +54,6 @@ public class HrRequisitionDTO {
     @Schema(description = "岗位重要性 1高 2中 3低")
     private Integer importanceLevel;
 
-    @Schema(description = "紧急程度 1紧急 2常规")
-    private Integer urgencyLevel;
-
     @Schema(description = "岗位难度 1高 2中 3低")
     private Integer difficultyLevel;
 

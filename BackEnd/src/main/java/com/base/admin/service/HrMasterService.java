@@ -326,8 +326,8 @@ public class HrMasterService {
         }
         Long requisitionId = dto.getId();
         if (requisitionId == null) {
-            Integer urgency = dto.getUrgencyLevel() != null ? dto.getUrgencyLevel()
-                    : (dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2);
+            // urgency_level 与 priority 同源：紧急=1，其余按常规=2 冗余同步，展示以 priority 为准
+            Integer urgency = dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2;
             jdbc.update("""
                     INSERT INTO hr_requisition (job_name, job_desc, salary_range, education_req, experience_req, skill_req,
                                                status, location_code, dept_id, headcount, target_text, priority,
@@ -341,8 +341,7 @@ public class HrMasterService {
                     dto.getReceivedDate(), dto.getOnboardDate(), SecurityUtils.getCurrentUsername());
             requisitionId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         } else {
-            Integer urgency = dto.getUrgencyLevel() != null ? dto.getUrgencyLevel()
-                    : (dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2);
+            Integer urgency = dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2;
             int updated = jdbc.update("""
                     UPDATE hr_requisition
                     SET job_name = ?, job_desc = ?, salary_range = ?, education_req = ?, experience_req = ?, skill_req = ?,

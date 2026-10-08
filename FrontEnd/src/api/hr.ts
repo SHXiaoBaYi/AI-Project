@@ -347,7 +347,7 @@ export type HrKpiQuery = {
   grain?: HrKpiGrain;
   ownerUserId?: number;
   importanceLevel?: number;
-  urgencyLevel?: number;
+  priority?: number;
   difficultyLevel?: number;
 };
 
@@ -393,7 +393,7 @@ export type HrKpiBoard = {
     ownerNames?: string;
     status?: string;
     importanceLabel?: string;
-    urgencyLabel?: string;
+    priorityLabel?: string;
     difficultyLabel?: string;
     headcount?: number;
     arrived?: number;

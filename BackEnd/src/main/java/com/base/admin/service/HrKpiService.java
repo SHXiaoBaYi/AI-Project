@@ -92,13 +92,17 @@ public class HrKpiService {
         int screened = countScreened(q);
         summary.setConversionRate(screened == 0 ? null : onboardings.size() * 1.0 / screened);
 
+        Map<Long, String> nicknameCache = loadNicknames(collectOwnerIds(jobs, onboardings));
         vo.setOverdueJobs(overdue.stream()
                 .sorted(Comparator.comparing((HrKpiBoardVO.JobRow r) -> r.getOverdueDays() == null ? 0 : r.getOverdueDays()).reversed())
+                .map(row -> sanitizeJobOwners(row, jobs, q.getOwnerUserId(), nicknameCache))
                 .toList());
-        vo.setOnboardings(onboardings.stream().map(this::toOnboardRow).toList());
-        vo.setOwners(buildOwners(jobs, onboardings, q));
+        vo.setOnboardings(onboardings.stream()
+                .map(o -> sanitizeOnboardOwners(toOnboardRow(o), o, q.getOwnerUserId(), nicknameCache))
+                .toList());
+        vo.setOwners(buildOwners(jobs, onboardings, q, nicknameCache));
         vo.setOnboardTrend(buildOnboardTrend(onboardings, q));
-        vo.setConversionFunnel(buildConversionFunnel(q, screened, onboardings.size()));
+        vo.setConversionFunnel(buildConversionFunnel(q));
         vo.setStageCycle(buildStageCycle(q));
         vo.setOwnerRadar(buildRadar(vo.getOwners()));
         vo.setGradeDistribution(buildGradeDistribution(jobs));
@@ -210,9 +214,9 @@ public class HrKpiService {
             sql.append(" AND r.importance_level = ? ");
             args.add(q.getImportanceLevel());
         }
-        if (q.getUrgencyLevel() != null) {
-            sql.append(" AND COALESCE(r.urgency_level, CASE WHEN r.priority = 1 THEN 1 ELSE 2 END) = ? ");
-            args.add(q.getUrgencyLevel());
+        if (q.getPriority() != null) {
+            sql.append(" AND r.priority = ? ");
+            args.add(q.getPriority());
         }
         if (q.getDifficultyLevel() != null) {
             sql.append(" AND r.difficulty_level = ? ");
@@ -230,8 +234,7 @@ public class HrKpiService {
             j.priority = rs.wasNull() ? null : p;
             int imp = rs.getInt("importance_level");
             j.importance = rs.wasNull() ? null : imp;
-            int urg = rs.getInt("urgency_level");
-            j.urgency = rs.wasNull() ? (j.priority != null && j.priority == 1 ? 1 : 2) : urg;
+            j.urgency = j.priority; // 紧急程度即优先级
             int dif = rs.getInt("difficulty_level");
             j.difficulty = rs.wasNull() ? null : dif;
             j.headcount = Math.max(1, rs.getInt("headcount"));
@@ -321,14 +324,17 @@ public class HrKpiService {
         return count == null ? 0 : count;
     }
 
-    private List<HrKpiBoardVO.OwnerRow> buildOwners(List<JobSnap> jobs, List<OnboardSnap> onboardings, HrKpiQueryDTO q) {
+    private List<HrKpiBoardVO.OwnerRow> buildOwners(List<JobSnap> jobs, List<OnboardSnap> onboardings,
+                                                    HrKpiQueryDTO q, Map<Long, String> nicknameCache) {
+        Long filterOwnerId = q.getOwnerUserId();
         Map<Long, HrKpiBoardVO.OwnerRow> map = new LinkedHashMap<>();
-        Map<Long, String> names = new HashMap<>();
         for (JobSnap job : jobs) {
             for (Long id : job.ownerIds) {
-                names.putIfAbsent(id, firstOwnerName(job.ownerNames));
+                if (filterOwnerId != null && !filterOwnerId.equals(id)) {
+                    continue;
+                }
                 HrKpiBoardVO.OwnerRow row = map.computeIfAbsent(id, this::emptyOwner);
-                row.setOwnerName(names.get(id));
+                row.setOwnerName(resolveOwnerName(id, job.ownerNames, job.ownerIds, nicknameCache));
                 if ("OPEN".equals(job.status)) {
                     row.setOpenJobs(row.getOpenJobs() + 1);
                 }
@@ -345,6 +351,9 @@ public class HrKpiService {
         Map<Long, Integer> cycleCnt = new HashMap<>();
         for (OnboardSnap o : onboardings) {
             for (Long id : o.ownerIds) {
+                if (filterOwnerId != null && !filterOwnerId.equals(id)) {
+                    continue;
+                }
                 onboardCnt.merge(id, 1, Integer::sum);
                 if (o.cycleDays != null) {
                     cycleSum.merge(id, o.cycleDays, Integer::sum);
@@ -352,7 +361,7 @@ public class HrKpiService {
                 }
                 HrKpiBoardVO.OwnerRow row = map.computeIfAbsent(id, this::emptyOwner);
                 if (!StringUtils.hasText(row.getOwnerName())) {
-                    row.setOwnerName(firstOwnerName(o.ownerNames));
+                    row.setOwnerName(resolveOwnerName(id, o.ownerNames, o.ownerIds, nicknameCache));
                 }
             }
         }
@@ -364,10 +373,8 @@ public class HrKpiService {
             int cs = cycleSum.getOrDefault(id, 0);
             int cc = cycleCnt.getOrDefault(id, 0);
             row.setAvgCycleDays(cc == 0 ? null : round1(cs * 1.0 / cc));
-            // rough conversion: screened for owner ≈ jobs' apps; use global if single owner filter
             int screened = countScreenedForOwner(q, id);
             row.setConversionRate(screened == 0 ? null : row.getOnboardedCount() * 1.0 / screened);
-            // on-time for owner jobs completed
             int finished = 0;
             int onTime = 0;
             int overdueDone = 0;
@@ -435,19 +442,41 @@ public class HrKpiService {
         return points;
     }
 
-    private List<HrKpiBoardVO.ChartPoint> buildConversionFunnel(HrKpiQueryDTO q, int screened, int onboarded) {
-        int entered = countEntered(q);
-        List<HrKpiBoardVO.ChartPoint> points = new ArrayList<>();
-        points.add(point("已录入", "转化", (double) entered));
-        points.add(point("初筛合适", "转化", (double) screened));
-        points.add(point("成功入职", "转化", (double) onboarded));
-        return points;
-    }
-
-    private int countEntered(HrKpiQueryDTO q) {
+    /**
+     * 漏斗：初筛 → 电话沟通 → 面试 → 待入职（区间内投递且到达该层的人数，含后续层）。
+     */
+    private List<HrKpiBoardVO.ChartPoint> buildConversionFunnel(HrKpiQueryDTO q) {
         StringBuilder sql = new StringBuilder("""
-                SELECT COUNT(1) FROM hr_application a
+                SELECT
+                  COUNT(1) screen_cnt,
+                  SUM(CASE WHEN
+                        a.screen_result = 'PASS'
+                        OR a.current_stage IN ('SCREEN_PASS','PHONE_FAIL','PHONE_PASS','INVITED','SHOW_UP',
+                            'FIRST_ROUND','SECOND_ROUND','FINAL','SALARY','BG_COLLECT','BG_CHECK','MEDICAL',
+                            'OFFER_PENDING','PENDING_ONBOARD','OFFER_SENT','OFFER_ACCEPTED','ONBOARDED')
+                        OR a.current_stage LIKE 'R%'
+                        OR EXISTS (SELECT 1 FROM hr_stage_event e WHERE e.application_id = a.id AND e.is_active = 1
+                                   AND e.stage_code IN ('SCREEN_PASS','PHONE_PASS','PHONE_FAIL'))
+                      THEN 1 ELSE 0 END) phone_cnt,
+                  SUM(CASE WHEN
+                        ps.result = 'PASS'
+                        OR a.current_stage IN ('PHONE_PASS','INVITED','SHOW_UP','FIRST_ROUND','SECOND_ROUND','FINAL',
+                            'SALARY','BG_COLLECT','BG_CHECK','MEDICAL','OFFER_PENDING','PENDING_ONBOARD',
+                            'OFFER_SENT','OFFER_ACCEPTED','ONBOARDED')
+                        OR a.current_stage LIKE 'R%'
+                        OR EXISTS (SELECT 1 FROM hr_stage_event e WHERE e.application_id = a.id AND e.is_active = 1
+                                   AND e.stage_code IN ('PHONE_PASS','INVITED','SHOW_UP','FIRST_ROUND','FINAL','PENDING_ONBOARD','ONBOARDED'))
+                      THEN 1 ELSE 0 END) interview_cnt,
+                  SUM(CASE WHEN
+                        a.current_stage IN ('SALARY','BG_COLLECT','BG_CHECK','MEDICAL','OFFER_PENDING','PENDING_ONBOARD',
+                            'OFFER_SENT','OFFER_ACCEPTED','ONBOARDED','FINAL')
+                        OR EXISTS (SELECT 1 FROM hr_stage_event e WHERE e.application_id = a.id AND e.is_active = 1
+                                   AND e.stage_code IN ('PENDING_ONBOARD','ONBOARDED','OFFER_PENDING','SALARY'))
+                        OR EXISTS (SELECT 1 FROM hr_onboard ob WHERE ob.application_id = a.id AND ob.is_active = 1)
+                      THEN 1 ELSE 0 END) onboard_cnt
+                FROM hr_application a
                 JOIN hr_requisition r ON r.id = a.requisition_id AND r.is_active = 1
+                LEFT JOIN hr_phone_screen ps ON ps.application_id = a.id AND ps.is_active = 1
                 WHERE a.is_active = 1 AND a.submitted_at BETWEEN ? AND ?
                 """);
         List<Object> args = new ArrayList<>();
@@ -457,9 +486,40 @@ public class HrKpiService {
             sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
             args.add(q.getOwnerUserId());
         }
+        if (q.getImportanceLevel() != null) {
+            sql.append(" AND r.importance_level = ? ");
+            args.add(q.getImportanceLevel());
+        }
+        if (q.getPriority() != null) {
+            sql.append(" AND r.priority = ? ");
+            args.add(q.getPriority());
+        }
+        if (q.getDifficultyLevel() != null) {
+            sql.append(" AND r.difficulty_level = ? ");
+            args.add(q.getDifficultyLevel());
+        }
         dataScope.apply(sql, args, "r", null);
-        Integer count = jdbc.queryForObject(sql.toString(), Integer.class, args.toArray());
-        return count == null ? 0 : count;
+        Map<String, Object> row = jdbc.queryForMap(sql.toString(), args.toArray());
+        List<HrKpiBoardVO.ChartPoint> points = new ArrayList<>();
+        points.add(point("初筛", "转化", toDouble(row.get("screen_cnt"))));
+        points.add(point("电话沟通", "转化", toDouble(row.get("phone_cnt"))));
+        points.add(point("面试", "转化", toDouble(row.get("interview_cnt"))));
+        points.add(point("待入职", "转化", toDouble(row.get("onboard_cnt"))));
+        return points;
+    }
+
+    private static double toDouble(Object v) {
+        if (v == null) {
+            return 0;
+        }
+        if (v instanceof Number n) {
+            return n.doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(v));
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private List<HrKpiBoardVO.ChartPoint> buildStageCycle(HrKpiQueryDTO q) {
@@ -510,14 +570,15 @@ public class HrKpiService {
         map.put("重要性-高", 0);
         map.put("重要性-中", 0);
         map.put("重要性-低", 0);
-        map.put("紧急-紧急", 0);
-        map.put("紧急-常规", 0);
+        map.put("优先级-紧急", 0);
+        map.put("优先级-优先", 0);
+        map.put("优先级-常规", 0);
         map.put("难度-高", 0);
         map.put("难度-中", 0);
         map.put("难度-低", 0);
         for (JobSnap j : jobs) {
             bump(map, "重要性-" + levelLabel(j.importance));
-            bump(map, "紧急-" + urgencyLabel(j.urgency));
+            bump(map, "优先级-" + priorityLabel(j.priority));
             bump(map, "难度-" + levelLabel(j.difficulty));
         }
         List<HrKpiBoardVO.ChartPoint> points = new ArrayList<>();
@@ -543,8 +604,8 @@ public class HrKpiService {
         row.setPriorityLabel(priorityLabel(j.priority));
         row.setImportanceLevel(j.importance);
         row.setImportanceLabel(levelLabel(j.importance));
-        row.setUrgencyLevel(j.urgency);
-        row.setUrgencyLabel(urgencyLabel(j.urgency));
+        row.setUrgencyLevel(j.priority);
+        row.setUrgencyLabel(priorityLabel(j.priority));
         row.setDifficultyLevel(j.difficulty);
         row.setDifficultyLabel(levelLabel(j.difficulty));
         row.setHeadcount(j.headcount);
@@ -635,12 +696,69 @@ public class HrKpiService {
         return ids;
     }
 
-    private static String firstOwnerName(String names) {
-        if (names == null || names.isBlank()) {
+    private static List<Long> collectOwnerIds(List<JobSnap> jobs, List<OnboardSnap> onboardings) {
+        List<Long> ids = new ArrayList<>();
+        for (JobSnap job : jobs) {
+            ids.addAll(job.ownerIds);
+        }
+        for (OnboardSnap o : onboardings) {
+            ids.addAll(o.ownerIds);
+        }
+        return ids.stream().distinct().toList();
+    }
+
+    private Map<Long, String> loadNicknames(List<Long> ids) {
+        Map<Long, String> map = new HashMap<>();
+        if (ids == null || ids.isEmpty()) {
+            return map;
+        }
+        String placeholders = String.join(",", ids.stream().map(id -> "?").toList());
+        jdbc.query("SELECT user_id, nickname FROM sys_user WHERE user_id IN (" + placeholders + ") AND is_active = 1",
+                rs -> {
+                    map.put(rs.getLong("user_id"), rs.getString("nickname"));
+                }, ids.toArray());
+        return map;
+    }
+
+    /** owner_ids 与 owner_names 同序（ORDER BY sort_no），按索引对齐；再回落昵称表。 */
+    private static String resolveOwnerName(Long id, String namesCsv, List<Long> ids, Map<Long, String> nicknameCache) {
+        if (id == null) {
             return "未指定";
         }
-        int idx = names.indexOf('、');
-        return idx < 0 ? names : names.substring(0, idx);
+        if (ids != null && namesCsv != null && !namesCsv.isBlank()) {
+            int idx = ids.indexOf(id);
+            if (idx >= 0) {
+                String[] parts = namesCsv.split("、", -1);
+                if (idx < parts.length && StringUtils.hasText(parts[idx])) {
+                    return parts[idx].trim();
+                }
+            }
+        }
+        String nick = nicknameCache == null ? null : nicknameCache.get(id);
+        return StringUtils.hasText(nick) ? nick.trim() : ("用户#" + id);
+    }
+
+    private static HrKpiBoardVO.JobRow sanitizeJobOwners(HrKpiBoardVO.JobRow row, List<JobSnap> jobs,
+                                                         Long filterOwnerId, Map<Long, String> nicknameCache) {
+        if (filterOwnerId == null || row == null) {
+            return row;
+        }
+        JobSnap snap = jobs.stream().filter(j -> j.id == row.getId()).findFirst().orElse(null);
+        if (snap != null) {
+            row.setOwnerNames(resolveOwnerName(filterOwnerId, snap.ownerNames, snap.ownerIds, nicknameCache));
+        } else {
+            row.setOwnerNames(resolveOwnerName(filterOwnerId, row.getOwnerNames(), List.of(filterOwnerId), nicknameCache));
+        }
+        return row;
+    }
+
+    private static HrKpiBoardVO.OnboardRow sanitizeOnboardOwners(HrKpiBoardVO.OnboardRow row, OnboardSnap snap,
+                                                                Long filterOwnerId, Map<Long, String> nicknameCache) {
+        if (filterOwnerId == null || row == null || snap == null) {
+            return row;
+        }
+        row.setOwnerNames(resolveOwnerName(filterOwnerId, snap.ownerNames, snap.ownerIds, nicknameCache));
+        return row;
     }
 
     private static String priorityLabel(Integer p) {
@@ -665,13 +783,6 @@ public class HrKpiService {
             case 3 -> "低";
             default -> String.valueOf(level);
         };
-    }
-
-    private static String urgencyLabel(Integer level) {
-        if (level == null) {
-            return "未评";
-        }
-        return level == 1 ? "紧急" : "常规";
     }
 
     private static String pct(Double rate) {

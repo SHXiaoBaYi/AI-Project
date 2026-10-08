@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import quarterOfYear from 'dayjs/plugin/quarterOfYear';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
+import { endOfIsoWeek, startOfIsoWeek } from '@/utils/geoBoardQuery';
 import {
   downloadHrKpiApi,
   getHrKpiBoardApi,
@@ -18,6 +19,7 @@ import {
 dayjs.extend(quarterOfYear);
 
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((mod) => ({ default: mod.Column })));
+const Funnel = lazy(() => import('@/components/geo/GeoAntCharts').then((mod) => ({ default: mod.Funnel })));
 const Line = lazy(() => import('@/components/geo/GeoAntCharts').then((mod) => ({ default: mod.Line })));
 const Radar = lazy(() => import('@/components/geo/GeoAntCharts').then((mod) => ({ default: mod.Radar })));
 
@@ -34,9 +36,10 @@ const IMPORTANCE = [
   { label: '低', value: 3 },
 ];
 
-const URGENCY = [
+const PRIORITY = [
   { label: '紧急', value: 1 },
-  { label: '常规', value: 2 },
+  { label: '优先', value: 2 },
+  { label: '常规', value: 3 },
 ];
 
 const DIFFICULTY = [
@@ -55,8 +58,22 @@ function num(value?: number | null, digits = 1) {
   return Number(value).toFixed(digits);
 }
 
+/** 与数据看板一致：按日近 1 个月，按周近 4 周，按月近 4 个月，按季近 4 季 */
+function rangeByGrain(grain: HrKpiGrain, pivot: Dayjs = dayjs()): [Dayjs, Dayjs] {
+  if (grain === 'day') {
+    return [pivot.subtract(1, 'month').startOf('day'), pivot.endOf('day')];
+  }
+  if (grain === 'week') {
+    return [startOfIsoWeek(pivot.subtract(3, 'week')), endOfIsoWeek(pivot)];
+  }
+  if (grain === 'month') {
+    return [pivot.subtract(3, 'month').startOf('month'), pivot.endOf('month')];
+  }
+  return [pivot.subtract(3, 'quarter').startOf('quarter'), pivot.endOf('quarter')];
+}
+
 function normalizeRange(grain: HrKpiGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
-  if (grain === 'week') return [start.startOf('week'), end.endOf('week')];
+  if (grain === 'week') return [startOfIsoWeek(start), endOfIsoWeek(end)];
   if (grain === 'month') return [start.startOf('month'), end.endOf('month')];
   if (grain === 'quarter') return [start.startOf('quarter'), end.endOf('quarter')];
   return [start.startOf('day'), end.endOf('day')];
@@ -75,14 +92,11 @@ function ChartFallback({ height = 280 }: { height?: number }) {
 
 export default function HrKpiPage() {
   const { message } = App.useApp();
-  const [grain, setGrain] = useState<HrKpiGrain>('month');
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => {
-    const end = dayjs();
-    return [end.startOf('month'), end.endOf('month')];
-  });
+  const [grain, setGrain] = useState<HrKpiGrain>('week');
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => rangeByGrain('week'));
   const [ownerUserId, setOwnerUserId] = useState<number | undefined>();
   const [importanceLevel, setImportanceLevel] = useState<number | undefined>();
-  const [urgencyLevel, setUrgencyLevel] = useState<number | undefined>();
+  const [priority, setPriority] = useState<number | undefined>();
   const [difficultyLevel, setDifficultyLevel] = useState<number | undefined>();
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [board, setBoard] = useState<HrKpiBoard | null>(null);
@@ -94,14 +108,34 @@ export default function HrKpiPage() {
     void getHrUsersApi('owner')
       .then((rows) => {
         setUsers(
-          (rows || []).map((row) => ({
-            value: Number(row.userId),
-            label: String(row.nickname || row.username || row.userId),
-          })),
+          (rows || [])
+            .map((row) => {
+              const item = row as { userId?: number; user_id?: number; nickname?: string; username?: string };
+              const value = Number(item.userId ?? item.user_id);
+              return {
+                value,
+                label: String(item.nickname || item.username || value),
+              };
+            })
+            .filter((item) => Number.isFinite(item.value) && item.value > 0),
         );
       })
       .catch(() => undefined);
   }, []);
+
+  const onGrainChange = (next: HrKpiGrain) => {
+    setGrain(next);
+    setRange(rangeByGrain(next));
+  };
+
+  const pickerProps =
+    grain === 'week'
+      ? { picker: 'week' as const }
+      : grain === 'month'
+        ? { picker: 'month' as const }
+        : grain === 'quarter'
+          ? { picker: 'quarter' as const }
+          : { picker: 'date' as const };
 
   const query = useMemo<HrKpiQuery>(() => {
     const [start, end] = normalizeRange(grain, range[0], range[1]);
@@ -111,10 +145,10 @@ export default function HrKpiPage() {
       endDate: end.format('YYYY-MM-DD'),
       ownerUserId,
       importanceLevel,
-      urgencyLevel,
+      priority,
       difficultyLevel,
     };
-  }, [difficultyLevel, grain, importanceLevel, ownerUserId, range, urgencyLevel]);
+  }, [difficultyLevel, grain, importanceLevel, ownerUserId, priority, range]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -146,7 +180,11 @@ export default function HrKpiPage() {
     [board?.gradeDistribution],
   );
   const funnel = useMemo(
-    () => (board?.conversionFunnel || []).map((item) => ({ ...item, value: Number(item.value) })),
+    () =>
+      (board?.conversionFunnel || []).map((item) => ({
+        stage: item.axis,
+        count: Number(item.value) || 0,
+      })),
     [board?.conversionFunnel],
   );
   const radar = useMemo(
@@ -168,21 +206,19 @@ export default function HrKpiPage() {
         >
           <Space wrap>
             <Radio.Group
+              value={grain}
               optionType='button'
               options={GRAIN_OPTIONS}
-              value={grain}
-              onChange={(e) => {
-                const next = e.target.value as HrKpiGrain;
-                setGrain(next);
-                setRange((prev) => normalizeRange(next, prev[0], prev[1]));
-              }}
+              onChange={(e) => onGrainChange(e.target.value)}
             />
             <DatePicker.RangePicker
+              {...pickerProps}
               value={range}
               allowClear={false}
-              onChange={(values) => {
-                if (!values?.[0] || !values?.[1]) return;
-                setRange(normalizeRange(grain, values[0], values[1]));
+              onChange={(value) => {
+                if (value?.[0] && value?.[1]) {
+                  setRange(normalizeRange(grain, value[0], value[1]));
+                }
               }}
             />
             <Select
@@ -205,11 +241,11 @@ export default function HrKpiPage() {
             />
             <Select
               allowClear
-              placeholder='紧急程度'
+              placeholder='优先级'
               className='min-w-[110px]'
-              options={URGENCY}
-              value={urgencyLevel}
-              onChange={setUrgencyLevel}
+              options={PRIORITY}
+              value={priority}
+              onChange={setPriority}
             />
             <Select
               allowClear
@@ -409,6 +445,18 @@ export default function HrKpiPage() {
                 seriesField='series'
                 isGroup
                 height={280}
+                label={{
+                  text: (datum: { value?: number }) => {
+                    const n = Number(datum?.value);
+                    if (!Number.isFinite(n)) return '';
+                    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+                  },
+                  position: 'top' as const,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fill: '#434343',
+                  dy: -2,
+                }}
               />
             </Suspense>
           </Card>
@@ -418,19 +466,28 @@ export default function HrKpiPage() {
           lg={12}
         >
           <Card
-            title='转化漏斗（筛选→入职）'
+            title='转化漏斗（初筛→待入职）'
             size='small'
             loading={loading}
           >
-            <Suspense fallback={<ChartFallback />}>
-              <Column
-                {...boardColumnChartProps}
-                data={funnel}
-                xField='axis'
-                yField='value'
-                seriesField='series'
-                height={280}
-              />
+            <Suspense fallback={<ChartFallback height={320} />}>
+              {funnel.some((item) => item.count > 0) ? (
+                <Funnel
+                  key={funnel.map((item) => `${item.stage}:${item.count}`).join('|')}
+                  data={funnel}
+                  xField='stage'
+                  yField='count'
+                  height={320}
+                  legend={false}
+                  label={{
+                    text: (datum: { stage?: string; count?: number }) => `${datum.stage ?? ''}  ${datum.count ?? 0}人`,
+                  }}
+                />
+              ) : (
+                <div className='flex h-[320px] items-center justify-center text-sm text-neutral-400'>
+                  当前范围内暂无漏斗数据
+                </div>
+              )}
             </Suspense>
           </Card>
         </Col>
@@ -585,8 +642,12 @@ export default function HrKpiPage() {
                   wrap
                 >
                   {row.importanceLabel ? <Tag>重要:{row.importanceLabel}</Tag> : null}
-                  {row.urgencyLabel ? (
-                    <Tag color={row.urgencyLabel === '紧急' ? 'red' : 'default'}>{row.urgencyLabel}</Tag>
+                  {row.priorityLabel ? (
+                    <Tag
+                      color={row.priorityLabel === '紧急' ? 'red' : row.priorityLabel === '优先' ? 'orange' : 'default'}
+                    >
+                      {row.priorityLabel}
+                    </Tag>
                   ) : null}
                   {row.difficultyLabel ? <Tag color='purple'>难度:{row.difficultyLabel}</Tag> : null}
                 </Space>
