@@ -525,13 +525,16 @@ export default function CashierAssistantPage() {
                       </div>
                       <div className='whitespace-pre-wrap text-neutral-700'>A. {item.answer}</div>
                       {item.images?.length ? (
-                        <div className='mt-2 space-y-2'>
+                        <div className='mt-2 space-y-3'>
+                          {item.images.length > 1 ? (
+                            <div className='text-xs text-neutral-400'>相关配图 {item.images.length} 张</div>
+                          ) : null}
                           {item.images.map((src, imgIdx) => (
                             <img
                               key={`${msg.id}-${idx}-img-${imgIdx}`}
                               src={resolveTrainImageUrl(src)}
-                              alt={`培训配图 ${imgIdx + 1}`}
-                              className='block max-w-full rounded-md'
+                              alt={`培训配图 ${imgIdx + 1}/${item.images!.length}`}
+                              className='block w-full max-w-full rounded-md border border-neutral-200 bg-white'
                               loading='lazy'
                             />
                           ))}

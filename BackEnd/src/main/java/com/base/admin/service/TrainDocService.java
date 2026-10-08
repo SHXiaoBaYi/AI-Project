@@ -495,12 +495,12 @@ public class TrainDocService {
                 你是收银操作培训答疑助手。根据「培训文档正文」找出与用户问题相关的「简易问答」条目。
                 文档中 [图N] 表示第 N 张配图（紧挨相关操作说明）。回答时必须带上相关配图编号。
                 只输出 JSON 数组，不要 markdown，不要解释。格式：
-                [{"question":"文档中的问法","answer":"文档中的答法","imageRefs":[1,2]}]
+                [{"question":"文档中的问法","answer":"文档中的答法","imageRefs":[1,2,3]}]
                 规则：
                 1. 只摘录文档里已有的问答或可直接对应的说明，禁止编造。
                 2. 可返回 1~5 条最相关的；没有相关内容时返回 []。
                 3. question/answer 用中文，尽量保留原文要点；answer 里不要写 [图N]。
-                4. 该条说明前后出现的 [图N] 必须填入 imageRefs（最多 4 个）；操作步骤类问题尤其要带图。
+                4. 同一操作步骤/同一段说明里出现的全部 [图N] 都必须写入 imageRefs（可连续多张，最多 10 个），不要只写一张。
                 5. 确实没有配图时 imageRefs 用 []。
                 """;
         String user = "用户问题：\n" + question + "\n\n培训文档正文（版本 " + doc.versionLabel + "）：\n" + clipped;
@@ -843,6 +843,8 @@ public class TrainDocService {
         return indexed;
     }
 
+    private static final int MAX_IMAGES_PER_ANSWER = 10;
+
     private static List<Integer> resolveImageRefs(JsonNode node, String question, String answer, IndexedDoc indexed) {
         List<Integer> refs = new ArrayList<>();
         if (indexed.images.isEmpty()) {
@@ -864,84 +866,199 @@ public class TrainDocService {
                         n = Integer.parseInt(mm.group(1));
                     }
                 }
-                if (n > 0 && n <= indexed.images.size() && !refs.contains(n)) {
-                    refs.add(n);
-                }
+                addRef(refs, n, indexed);
             }
         }
         // answer 里若残留 [图N]
         Matcher inAnswer = Pattern.compile("\\[图(\\d+)\\]").matcher(answer + " " + question);
         while (inAnswer.find()) {
-            int n = Integer.parseInt(inAnswer.group(1));
-            if (n > 0 && n <= indexed.images.size() && !refs.contains(n)) {
-                refs.add(n);
-            }
+            addRef(refs, Integer.parseInt(inAnswer.group(1)), indexed);
         }
+        // 无论 AI 是否已返回，都补齐同一段正文附近的全部配图（多图步骤常见只回 1 张）
+        mergeRefs(refs, findSectionImageRefs(question, answer, indexed), indexed);
         if (refs.isEmpty()) {
-            refs.addAll(findNearbyImageRefs(question, answer, indexed));
+            mergeRefs(refs, guessImageRefs(question + " " + answer, indexed), indexed);
         }
-        if (refs.isEmpty()) {
-            refs.addAll(guessImageRefs(question + " " + answer, indexed));
-        }
-        if (refs.size() > 4) {
-            return new ArrayList<>(refs.subList(0, 4));
+        // 把连续成簇的配图补全（如已有 5、7 → 补上中间的 6）
+        refs = expandImageClusters(refs, indexed);
+        refs.sort(Integer::compareTo);
+        if (refs.size() > MAX_IMAGES_PER_ANSWER) {
+            return new ArrayList<>(refs.subList(0, MAX_IMAGES_PER_ANSWER));
         }
         return refs;
     }
 
-    /** 在正文中定位问答文本，收集附近的 [图N]。 */
-    private static List<Integer> findNearbyImageRefs(String question, String answer, IndexedDoc indexed) {
+    private static void addRef(List<Integer> refs, int n, IndexedDoc indexed) {
+        if (n > 0 && n <= indexed.images.size() && !refs.contains(n)) {
+            refs.add(n);
+        }
+    }
+
+    private static void mergeRefs(List<Integer> target, List<Integer> extra, IndexedDoc indexed) {
+        if (extra == null) {
+            return;
+        }
+        for (Integer n : extra) {
+            if (n != null) {
+                addRef(target, n, indexed);
+            }
+        }
+    }
+
+    /**
+     * 在正文中定位问答所属段落窗口，收集窗口内全部 [图N]。
+     * 覆盖「一步多图 / 连续截图」场景。
+     */
+    private static List<Integer> findSectionImageRefs(String question, String answer, IndexedDoc indexed) {
         List<Integer> refs = new ArrayList<>();
         String plain = indexed.textForAi == null ? "" : indexed.textForAi;
         if (plain.isEmpty()) {
             return refs;
         }
-        int pos = bestMatchPos(plain, answer);
-        if (pos < 0) {
-            pos = bestMatchPos(plain, question);
+        int[] span = bestMatchSpan(plain, answer);
+        if (span == null) {
+            span = bestMatchSpan(plain, question);
         }
-        if (pos < 0) {
+        if (span == null) {
             return refs;
         }
-        int from = Math.max(0, pos - 280);
-        int to = Math.min(plain.length(), pos + Math.max(answer.length(), 40) + 480);
+        int matchStart = span[0];
+        int matchEnd = span[1];
+        // 向前扩到上一段空白，向后按答案长度再扩一截，尽量包住整段操作说明
+        int from = matchStart;
+        while (from > 0 && matchStart - from < 400) {
+            char c = plain.charAt(from - 1);
+            if (c == '\n' && from > 1 && plain.charAt(from - 2) == '\n') {
+                break;
+            }
+            from--;
+        }
+        from = Math.max(0, from - 80);
+        int answerPad = Math.min(1200, Math.max(answer == null ? 0 : answer.length() * 2, 360));
+        int to = Math.min(plain.length(), matchEnd + answerPad);
+        // 若窗口内后续仍是连续 [图N]，继续吃掉后面紧邻的配图
+        to = extendWindowThroughImageCluster(plain, to, indexed.images.size());
+
         String window = plain.substring(from, to);
         Matcher m = Pattern.compile("\\[图(\\d+)\\]").matcher(window);
         while (m.find()) {
-            int n = Integer.parseInt(m.group(1));
-            if (n > 0 && n <= indexed.images.size() && !refs.contains(n)) {
-                refs.add(n);
-            }
-            if (refs.size() >= 4) {
+            addRef(refs, Integer.parseInt(m.group(1)), indexed);
+            if (refs.size() >= MAX_IMAGES_PER_ANSWER) {
                 break;
             }
         }
         return refs;
     }
 
-    private static int bestMatchPos(String haystack, String needle) {
+    /** 若 to 之后紧挨着更多 [图N]（中间几乎只有空白），把窗口再往后扩。 */
+    private static int extendWindowThroughImageCluster(String plain, int to, int imageCount) {
+        int cursor = to;
+        int guard = 0;
+        while (cursor < plain.length() && guard++ < imageCount + 5) {
+            int next = plain.indexOf("[图", cursor);
+            if (next < 0 || next - cursor > 120) {
+                break;
+            }
+            String between = plain.substring(cursor, next).replaceAll("\\s+", "");
+            if (!between.isEmpty() && between.length() > 12) {
+                break;
+            }
+            Matcher m = Pattern.compile("^\\[图(\\d+)\\]").matcher(plain.substring(next));
+            if (!m.find()) {
+                break;
+            }
+            cursor = next + m.group(0).length();
+        }
+        return Math.min(plain.length(), Math.max(to, cursor));
+    }
+
+    /** 已选配图若编号连续成簇，把中间漏掉的编号也补上。 */
+    private static List<Integer> expandImageClusters(List<Integer> refs, IndexedDoc indexed) {
+        if (refs == null || refs.size() < 2) {
+            return refs == null ? new ArrayList<>() : new ArrayList<>(refs);
+        }
+        List<Integer> sorted = new ArrayList<>(refs);
+        sorted.sort(Integer::compareTo);
+        List<Integer> out = new ArrayList<>(sorted);
+        for (int i = 0; i < sorted.size() - 1; i++) {
+            int a = sorted.get(i);
+            int b = sorted.get(i + 1);
+            if (b - a <= 4) {
+                for (int n = a + 1; n < b; n++) {
+                    addRef(out, n, indexed);
+                }
+            }
+        }
+        // 单侧扩展：对每个已选图，若正文里前后紧邻还有图，一并纳入
+        String plain = indexed.textForAi == null ? "" : indexed.textForAi;
+        List<Integer> seed = new ArrayList<>(out);
+        for (Integer ref : seed) {
+            if (ref == null) {
+                continue;
+            }
+            String marker = "[图" + ref + "]";
+            int pos = plain.indexOf(marker);
+            if (pos < 0) {
+                continue;
+            }
+            // 向后
+            int after = pos + marker.length();
+            after = extendWindowThroughImageCluster(plain, after, indexed.images.size());
+            Matcher mAfter = Pattern.compile("\\[图(\\d+)\\]").matcher(plain.substring(pos, after));
+            while (mAfter.find()) {
+                addRef(out, Integer.parseInt(mAfter.group(1)), indexed);
+            }
+            // 向前：看 marker 前 100 字符内是否还有图
+            int before = Math.max(0, pos - 100);
+            String head = plain.substring(before, pos);
+            if (head.replaceAll("\\s+", "").length() <= 12) {
+                Matcher mBefore = Pattern.compile("\\[图(\\d+)\\]").matcher(head);
+                while (mBefore.find()) {
+                    addRef(out, Integer.parseInt(mBefore.group(1)), indexed);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** @return [start, end) in original haystack, or null */
+    private static int[] bestMatchSpan(String haystack, String needle) {
         if (!StringUtils.hasText(haystack) || !StringUtils.hasText(needle)) {
-            return -1;
+            return null;
         }
         String h = haystack.replaceAll("\\s+", "");
         String n = needle.replaceAll("\\s+", "");
         if (n.length() < 4) {
-            return -1;
+            return null;
         }
-        // 逐步缩短子串以提高命中率
-        int len = Math.min(n.length(), 48);
+        int bestAt = -1;
+        int bestLen = 0;
+        int len = Math.min(n.length(), 64);
         while (len >= 8) {
-            for (int i = 0; i + len <= n.length(); i += Math.max(1, len / 3)) {
+            for (int i = 0; i + len <= n.length(); i += Math.max(1, len / 4)) {
                 String sub = n.substring(i, i + len);
                 int at = h.indexOf(sub);
                 if (at >= 0) {
-                    // 映射回原串近似位置
-                    return Math.min(haystack.length() - 1, at);
+                    bestAt = at;
+                    bestLen = len;
+                    // 尽量用更长命中
+                    len = 0;
+                    break;
                 }
+            }
+            if (bestAt >= 0 && len == 0) {
+                break;
             }
             len -= 8;
         }
-        return -1;
+        if (bestAt < 0) {
+            return null;
+        }
+        int start = Math.min(haystack.length() - 1, bestAt);
+        // 粗略映射回原串长度：按无空白比例放大
+        double ratio = haystack.length() / (double) Math.max(1, h.length());
+        int end = Math.min(haystack.length(), start + (int) Math.ceil(bestLen * ratio) + 8);
+        return new int[]{start, Math.max(start + 1, end)};
     }
 
     private static List<Integer> guessImageRefs(String qaText, IndexedDoc indexed) {
@@ -963,7 +1080,7 @@ public class TrainDocService {
         }
         scores.sort((a, b) -> Integer.compare(b[1], a[1]));
         for (int[] s : scores) {
-            if (refs.size() >= 3) {
+            if (refs.size() >= 6) {
                 break;
             }
             refs.add(s[0]);
