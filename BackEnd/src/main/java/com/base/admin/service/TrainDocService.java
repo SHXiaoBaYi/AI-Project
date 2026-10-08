@@ -571,15 +571,15 @@ public class TrainDocService {
                 : indexed.textForAi;
         String system = """
                 你是收银操作培训答疑助手。根据「培训文档正文」找出与用户问题相关的「简易问答」条目。
-                文档中 [图N] 表示第 N 张配图（紧挨相关操作说明）。回答时必须带上相关配图编号。
+                文档以「问：」「问 」「问答N」起头划分条目；[图N] 是配图标记。
                 只输出 JSON 数组，不要 markdown，不要解释。格式：
-                [{"question":"文档中的问法","answer":"文档中的答法","imageRefs":[1,2,3]}]
+                [{"question":"文档中的问法原文","answer":"文档中的答法原文","imageRefs":[1,2,3]}]
                 规则：
                 1. 只摘录文档里已有的问答或可直接对应的说明，禁止编造。
                 2. 可返回 1~5 条最相关的；没有相关内容时返回 []。
-                3. question/answer 用中文，尽量保留原文要点；answer 里不要写 [图N]。
-                4. 同一操作步骤/同一段说明里出现的全部 [图N] 都必须写入 imageRefs（可连续多张，最多 10 个），不要只写一张。
-                5. 确实没有配图时 imageRefs 用 []。
+                3. question 尽量用文档里该条「问」的原文（便于定位）；answer 用对应「答」的要点，不要写 [图N]。
+                4. imageRefs 只能写「本条问」到「下一条问」之间出现的全部 [图N]（最多 10 个），禁止引用其他问答条目的图。
+                5. 该条问与下一条问之间确实没有配图时 imageRefs 用 []。
                 """;
         String user = "用户问题：\n" + question + "\n\n培训文档正文（版本 " + doc.versionLabel + "）：\n" + clipped;
         String raw = aiChatService.chat(system, user);
@@ -631,7 +631,12 @@ public class TrainDocService {
         return list;
     }
 
-    /** 从原文件按阅读顺序抽取配图到磁盘，并生成带 [图N] 的检索正文。已抽过则直接复用缓存。 */
+    private static final String INDEX_TEXT_FILE = "_index.txt";
+
+    /**
+     * 从原文件按阅读顺序抽配图。优先：磁盘 _index.txt 缓存 → 本地原文件重抽 → 最后才用库里 HTML。
+     * 不信任旧 content_html（易把配图堆错位置，导致答疑一次甩出 10 张无关图）。
+     */
     private IndexedDoc prepareIndexedDoc(DocBundle doc) {
         IndexedDoc empty = new IndexedDoc();
         empty.textForAi = nullToEmpty(doc == null ? null : doc.text);
@@ -639,88 +644,105 @@ public class TrainDocService {
             return empty;
         }
         try {
-            String marker = "/uploads/train/img/" + doc.versionId + "/";
-            if (StringUtils.hasText(doc.html) && doc.html.contains(marker) && doc.html.contains("<img")) {
-                IndexedDoc fromHtml = indexHtmlImages(doc.html, doc.text);
-                if (!fromHtml.images.isEmpty()) {
-                    return fromHtml;
-                }
-            }
-            IndexedDoc cached = loadCachedIndexedFromDisk(doc.versionId, doc.text);
+            IndexedDoc cached = loadCachedIndexedFromDisk(doc.versionId);
             if (cached != null && !cached.images.isEmpty()) {
                 return cached;
             }
             Path path = fileStorage.resolveUploadPath(doc.filePath);
-            if (path == null || !Files.isRegularFile(path)) {
-                return empty;
+            if (path != null && Files.isRegularFile(path)) {
+                byte[] bytes = Files.readAllBytes(path);
+                String lower = doc.fileName == null ? "" : doc.fileName.toLowerCase(Locale.ROOT);
+                IndexedDoc indexed;
+                if (lower.endsWith(".docx") || (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K')) {
+                    indexed = indexDocxPackage(bytes, doc.versionId, doc.text);
+                } else if (lower.endsWith(".doc")) {
+                    indexed = indexDocHwpf(bytes, doc.versionId, doc.text);
+                } else {
+                    indexed = indexHtmlImages(doc.html, doc.text);
+                }
+                if (!indexed.images.isEmpty()) {
+                    saveIndexedText(doc.versionId, indexed.textForAi);
+                    String rich = buildUrlPreviewHtml(indexed);
+                    if (StringUtils.hasText(rich)) {
+                        doc.html = rich;
+                        jdbc.update("UPDATE train_doc_version SET content_html = ? WHERE id = ?", rich, doc.versionId);
+                    }
+                    return indexed;
+                }
             }
-            byte[] bytes = Files.readAllBytes(path);
-            String lower = doc.fileName == null ? "" : doc.fileName.toLowerCase(Locale.ROOT);
-            IndexedDoc indexed;
-            if (lower.endsWith(".docx") || (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K')) {
-                indexed = indexDocxPackage(bytes, doc.versionId, doc.text);
-            } else if (lower.endsWith(".doc")) {
-                indexed = indexDocHwpf(bytes, doc.versionId, doc.text);
-            } else {
-                indexed = indexHtmlImages(doc.html, doc.text);
-            }
-            if (indexed.images.isEmpty() && StringUtils.hasText(doc.html)) {
+            // 本地没有原文件时，才退回 HTML（可能串图，仅兜底）
+            String marker = "/uploads/train/img/" + doc.versionId + "/";
+            if (StringUtils.hasText(doc.html) && doc.html.contains("<img")
+                    && (doc.html.contains(marker) || doc.html.contains("/uploads/train/img/"))) {
                 IndexedDoc fromHtml = indexHtmlImages(doc.html, doc.text);
                 if (!fromHtml.images.isEmpty()) {
+                    log.warn("答疑使用 HTML 兜底索引 versionId={} images={}（建议本机保留原文件以重抽）",
+                            doc.versionId, fromHtml.images.size());
                     return fromHtml;
                 }
             }
-            // 抽完后落库 URL 预览 HTML，下次预览/答疑直接复用，不必再解压整包
-            if (!indexed.images.isEmpty()) {
-                String rich = buildUrlPreviewHtml(indexed);
-                if (StringUtils.hasText(rich)) {
-                    doc.html = rich;
-                    jdbc.update("UPDATE train_doc_version SET content_html = ? WHERE id = ?", rich, doc.versionId);
-                }
-            }
-            return indexed;
+            return empty;
         } catch (Exception e) {
             log.warn("答疑配图索引失败 versionId={}: {}", doc.versionId, e.getMessage());
             return indexHtmlImages(doc.html, doc.text);
         }
     }
 
-    /** 若磁盘已有抽好的配图，按序号装载，避免每次答疑/预览重复解压 7MB docx。 */
-    private IndexedDoc loadCachedIndexedFromDisk(long versionId, String fallbackText) {
+    /** 读取带正确 [图N] 位置的磁盘缓存（_index.txt + 配图文件）。 */
+    private IndexedDoc loadCachedIndexedFromDisk(long versionId) {
         Path dir = fileStorage.trainVersionImageDir(versionId);
-        if (!Files.isDirectory(dir)) {
+        Path indexFile = dir.resolve(INDEX_TEXT_FILE);
+        if (!Files.isRegularFile(indexFile)) {
             return null;
         }
-        try (var stream = Files.list(dir)) {
-            List<Path> files = stream
-                    .filter(Files::isRegularFile)
-                    .sorted((a, b) -> {
-                        int na = parseLeadingInt(a.getFileName().toString());
-                        int nb = parseLeadingInt(b.getFileName().toString());
-                        return Integer.compare(na, nb);
-                    })
-                    .toList();
-            if (files.isEmpty()) {
+        try {
+            String text = Files.readString(indexFile, StandardCharsets.UTF_8);
+            if (!StringUtils.hasText(text) || !text.contains("[图")) {
                 return null;
             }
-            IndexedDoc indexed = new IndexedDoc();
-            StringBuilder ai = new StringBuilder(nullToEmpty(fallbackText));
-            for (Path f : files) {
-                String rel = fileStorage.toRelativeUploadPath(f);
-                if (!StringUtils.hasText(rel)) {
-                    continue;
+            try (var stream = Files.list(dir)) {
+                List<Path> files = stream
+                        .filter(Files::isRegularFile)
+                        .filter(p -> {
+                            String name = p.getFileName().toString();
+                            return !INDEX_TEXT_FILE.equals(name) && parseLeadingInt(name) < Integer.MAX_VALUE;
+                        })
+                        .sorted((a, b) -> Integer.compare(
+                                parseLeadingInt(a.getFileName().toString()),
+                                parseLeadingInt(b.getFileName().toString())))
+                        .toList();
+                if (files.isEmpty()) {
+                    return null;
                 }
-                indexed.images.add(rel);
-                ai.append(" [图").append(indexed.images.size()).append("] ");
+                IndexedDoc indexed = new IndexedDoc();
+                for (Path f : files) {
+                    String rel = fileStorage.toRelativeUploadPath(f);
+                    if (StringUtils.hasText(rel)) {
+                        indexed.images.add(rel);
+                    }
+                }
+                if (indexed.images.isEmpty()) {
+                    return null;
+                }
+                indexed.textForAi = text;
+                fillImageContexts(indexed);
+                return indexed;
             }
-            if (indexed.images.isEmpty()) {
-                return null;
-            }
-            indexed.textForAi = ai.toString().trim();
-            fillImageContexts(indexed);
-            return indexed;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private void saveIndexedText(long versionId, String textForAi) {
+        if (!StringUtils.hasText(textForAi)) {
+            return;
+        }
+        try {
+            Path dir = fileStorage.trainVersionImageDir(versionId);
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve(INDEX_TEXT_FILE), textForAi, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("保存答疑索引正文失败 versionId={}: {}", versionId, e.getMessage());
         }
     }
 
@@ -802,35 +824,7 @@ public class TrainDocService {
                         ai.append(" [图").append(indexed.images.size()).append("] ");
                     }
                 }
-                // 补漏：关系里仍有未挂到段落的媒体
-                for (Map.Entry<String, String> e : relTarget.entrySet()) {
-                    String target = e.getValue();
-                    if (!StringUtils.hasText(target) || usedTargets.contains(target)) {
-                        continue;
-                    }
-                    if (!target.toLowerCase(Locale.ROOT).contains("media/")) {
-                        continue;
-                    }
-                    String entryName = target.startsWith("/") ? target.substring(1) : "word/" + target.replaceFirst("^\\.\\./", "");
-                    if (!entryName.startsWith("word/")) {
-                        entryName = "word/" + entryName;
-                    }
-                    byte[] imgBytes = readZipEntryBytes(zip, entryName);
-                    if (imgBytes == null || imgBytes.length == 0) {
-                        continue;
-                    }
-                    String fileHint = entryName.contains("/")
-                            ? entryName.substring(entryName.lastIndexOf('/') + 1)
-                            : entryName;
-                    String url = fileStorage.saveTrainVersionImage(
-                            versionId, indexed.images.size() + 1, imgBytes, fileHint);
-                    if (!StringUtils.hasText(url)) {
-                        continue;
-                    }
-                    usedTargets.add(target);
-                    indexed.images.add(url);
-                    ai.append(" [图").append(indexed.images.size()).append("] ");
-                }
+                // 未挂到段落的媒体不再追加到文末，避免「问→下一问」区间被无关图污染
                 indexed.textForAi = !ai.isEmpty() ? ai.toString().trim() : nullToEmpty(fallbackText);
                 fillImageContexts(indexed);
                 return indexed;
@@ -849,7 +843,7 @@ public class TrainDocService {
         if (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K') {
             return indexDocxPackage(bytes, versionId, fallbackText);
         }
-        IndexedDoc diskCached = loadCachedIndexedFromDisk(versionId, fallbackText);
+        IndexedDoc diskCached = loadCachedIndexedFromDisk(versionId);
         if (diskCached != null && !diskCached.images.isEmpty()) {
             return diskCached;
         }
@@ -994,11 +988,43 @@ public class TrainDocService {
 
     private static final int MAX_IMAGES_PER_ANSWER = 10;
 
-    private static List<Integer> resolveImageRefs(JsonNode node, String question, String answer, IndexedDoc indexed) {
+    /**
+     * 「问： / 问 xxx / 问答N：」条目起头。不要求必须顶格，避免 HTML 抽正文后丢换行导致切不开。
+     */
+    private static final Pattern QA_QUESTION_START = Pattern.compile(
+            "问答\\s*\\d+\\s*[：:：]|问\\s*[：:：]|问\\s+(?=\\S)");
+
+    /**
+     * 配图只取「当前问 → 下一问」；有问答结构时完全忽略 AI 的 imageRefs（避免一次甩出 10 张）。
+     */
+    private List<Integer> resolveImageRefs(JsonNode node, String question, String answer, IndexedDoc indexed) {
         List<Integer> refs = new ArrayList<>();
         if (indexed.images.isEmpty()) {
             return refs;
         }
+        String plain = indexed.textForAi == null ? "" : indexed.textForAi;
+        List<Integer> starts = listQaQuestionStarts(plain);
+        if (!starts.isEmpty()) {
+            int[] span = locateQaSectionSpan(question, answer, plain, starts);
+            if (span != null) {
+                String window = plain.substring(span[0], span[1]);
+                Matcher m = Pattern.compile("\\[图(\\d+)\\]").matcher(window);
+                while (m.find()) {
+                    addRef(refs, Integer.parseInt(m.group(1)), indexed);
+                    if (refs.size() >= MAX_IMAGES_PER_ANSWER) {
+                        break;
+                    }
+                }
+                refs.sort(Integer::compareTo);
+                String head = window.length() > 60 ? window.substring(0, 60).replaceAll("\\s+", " ") : window.replaceAll("\\s+", " ");
+                log.info("答疑配图按问答切段 qStarts={} span=[{},{}) refs={} head={}",
+                        starts.size(), span[0], span[1], refs, head);
+                return refs;
+            }
+            log.info("答疑配图未命中问答段 qStarts={} question={}", starts.size(), question);
+            return refs;
+        }
+        // 文档没有「问」结构时，才用 AI 编号
         for (String field : List.of("imageRefs", "images", "image_refs", "pics")) {
             JsonNode refNode = node.path(field);
             if (!refNode.isArray()) {
@@ -1018,18 +1044,6 @@ public class TrainDocService {
                 addRef(refs, n, indexed);
             }
         }
-        // answer 里若残留 [图N]
-        Matcher inAnswer = Pattern.compile("\\[图(\\d+)\\]").matcher(answer + " " + question);
-        while (inAnswer.find()) {
-            addRef(refs, Integer.parseInt(inAnswer.group(1)), indexed);
-        }
-        // 无论 AI 是否已返回，都补齐同一段正文附近的全部配图（多图步骤常见只回 1 张）
-        mergeRefs(refs, findSectionImageRefs(question, answer, indexed), indexed);
-        if (refs.isEmpty()) {
-            mergeRefs(refs, guessImageRefs(question + " " + answer, indexed), indexed);
-        }
-        // 把连续成簇的配图补全（如已有 5、7 → 补上中间的 6）
-        refs = expandImageClusters(refs, indexed);
         refs.sort(Integer::compareTo);
         if (refs.size() > MAX_IMAGES_PER_ANSWER) {
             return new ArrayList<>(refs.subList(0, MAX_IMAGES_PER_ANSWER));
@@ -1043,131 +1057,114 @@ public class TrainDocService {
         }
     }
 
-    private static void mergeRefs(List<Integer> target, List<Integer> extra, IndexedDoc indexed) {
-        if (extra == null) {
-            return;
-        }
-        for (Integer n : extra) {
-            if (n != null) {
-                addRef(target, n, indexed);
-            }
-        }
-    }
-
     /**
-     * 在正文中定位问答所属段落窗口，收集窗口内全部 [图N]。
-     * 覆盖「一步多图 / 连续截图」场景。
+     * 定位问答条目 [start, end)：从本条「问」到下一条「问」之前。
      */
-    private static List<Integer> findSectionImageRefs(String question, String answer, IndexedDoc indexed) {
-        List<Integer> refs = new ArrayList<>();
-        String plain = indexed.textForAi == null ? "" : indexed.textForAi;
-        if (plain.isEmpty()) {
-            return refs;
+    private static int[] locateQaSectionSpan(String question, String answer, String plain, List<Integer> starts) {
+        if (!StringUtils.hasText(plain) || starts == null || starts.isEmpty()) {
+            return null;
         }
-        int[] span = bestMatchSpan(plain, answer);
-        if (span == null) {
-            span = bestMatchSpan(plain, question);
+        int bestIdx = -1;
+        int bestScore = 0;
+        String qNorm = compact(question);
+        String aNorm = compact(answer);
+        for (int i = 0; i < starts.size(); i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+            String sec = plain.substring(from, to);
+            String secNorm = compact(sec);
+            // 只看条目问句头（到答：或前 100 字），避免整段配图上下文干扰打分
+            int ansPos = indexOfAnswerMark(sec);
+            String headRaw = ansPos > 0 ? sec.substring(0, ansPos) : sec.substring(0, Math.min(sec.length(), 100));
+            String head = compact(headRaw);
+            int score = 0;
+            if (StringUtils.hasText(qNorm) && qNorm.length() >= 2) {
+                score += overlapScore(qNorm, head) * 5;
+                if (head.contains(qNorm) || qNorm.contains(head.replaceFirst("^问[：:：]?", ""))) {
+                    score += 80;
+                }
+                // 关键词：问法里的实词出现在本条问头
+                score += keywordHitScore(qNorm, head) * 10;
+            }
+            if (StringUtils.hasText(aNorm) && aNorm.length() >= 4) {
+                String body = ansPos >= 0 ? compact(sec.substring(ansPos)) : secNorm;
+                score += overlapScore(aNorm, body);
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                bestIdx = i;
+            }
         }
-        if (span == null) {
-            return refs;
+        if (bestIdx >= 0 && bestScore >= 6) {
+            int from = starts.get(bestIdx);
+            int to = bestIdx + 1 < starts.size() ? starts.get(bestIdx + 1) : plain.length();
+            return new int[]{from, to};
         }
-        int matchStart = span[0];
-        int matchEnd = span[1];
-        // 向前扩到上一段空白，向后按答案长度再扩一截，尽量包住整段操作说明
-        int from = matchStart;
-        while (from > 0 && matchStart - from < 400) {
-            char c = plain.charAt(from - 1);
-            if (c == '\n' && from > 1 && plain.charAt(from - 2) == '\n') {
+        int[] hit = bestMatchSpan(plain, StringUtils.hasText(question) ? question : answer);
+        if (hit == null && StringUtils.hasText(answer)) {
+            hit = bestMatchSpan(plain, answer);
+        }
+        if (hit == null) {
+            return null;
+        }
+        int at = hit[0];
+        for (int i = 0; i < starts.size(); i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+            if (at >= from && at < to) {
+                return new int[]{from, to};
+            }
+        }
+        return null;
+    }
+
+    private static int indexOfAnswerMark(String sec) {
+        Matcher m = Pattern.compile("答\\s*[：:：]").matcher(sec);
+        return m.find() ? m.start() : -1;
+    }
+
+    /** 简单关键词命中：连续 2+ 字的片段。 */
+    private static int keywordHitScore(String qNorm, String head) {
+        if (qNorm.length() < 2 || head.isEmpty()) {
+            return 0;
+        }
+        int hits = 0;
+        // 去常见虚词后取 2~4 字片
+        String core = qNorm.replaceAll("[如何怎么怎样什么吗呢？?的了吗啊哦呀呗]|问[：:：]?", "");
+        if (core.length() < 2) {
+            core = qNorm;
+        }
+        for (int len = Math.min(4, core.length()); len >= 2; len--) {
+            for (int i = 0; i + len <= core.length(); i++) {
+                String gram = core.substring(i, i + len);
+                if (head.contains(gram)) {
+                    hits++;
+                }
+            }
+            if (hits > 0) {
                 break;
             }
-            from--;
         }
-        from = Math.max(0, from - 80);
-        int answerPad = Math.min(1200, Math.max(answer == null ? 0 : answer.length() * 2, 360));
-        int to = Math.min(plain.length(), matchEnd + answerPad);
-        // 若窗口内后续仍是连续 [图N]，继续吃掉后面紧邻的配图
-        to = extendWindowThroughImageCluster(plain, to, indexed.images.size());
+        return Math.min(hits, 5);
+    }
 
-        String window = plain.substring(from, to);
-        Matcher m = Pattern.compile("\\[图(\\d+)\\]").matcher(window);
+    private static List<Integer> listQaQuestionStarts(String plain) {
+        List<Integer> starts = new ArrayList<>();
+        if (!StringUtils.hasText(plain)) {
+            return starts;
+        }
+        Matcher m = QA_QUESTION_START.matcher(plain);
         while (m.find()) {
-            addRef(refs, Integer.parseInt(m.group(1)), indexed);
-            if (refs.size() >= MAX_IMAGES_PER_ANSWER) {
-                break;
+            int qAt = m.start();
+            if (starts.isEmpty() || qAt > starts.get(starts.size() - 1)) {
+                starts.add(qAt);
             }
         }
-        return refs;
+        return starts;
     }
 
-    /** 若 to 之后紧挨着更多 [图N]（中间几乎只有空白），把窗口再往后扩。 */
-    private static int extendWindowThroughImageCluster(String plain, int to, int imageCount) {
-        int cursor = to;
-        int guard = 0;
-        while (cursor < plain.length() && guard++ < imageCount + 5) {
-            int next = plain.indexOf("[图", cursor);
-            if (next < 0 || next - cursor > 120) {
-                break;
-            }
-            String between = plain.substring(cursor, next).replaceAll("\\s+", "");
-            if (!between.isEmpty() && between.length() > 12) {
-                break;
-            }
-            Matcher m = Pattern.compile("^\\[图(\\d+)\\]").matcher(plain.substring(next));
-            if (!m.find()) {
-                break;
-            }
-            cursor = next + m.group(0).length();
-        }
-        return Math.min(plain.length(), Math.max(to, cursor));
-    }
-
-    /** 已选配图若编号连续成簇，把中间漏掉的编号也补上。 */
-    private static List<Integer> expandImageClusters(List<Integer> refs, IndexedDoc indexed) {
-        if (refs == null || refs.size() < 2) {
-            return refs == null ? new ArrayList<>() : new ArrayList<>(refs);
-        }
-        List<Integer> sorted = new ArrayList<>(refs);
-        sorted.sort(Integer::compareTo);
-        List<Integer> out = new ArrayList<>(sorted);
-        for (int i = 0; i < sorted.size() - 1; i++) {
-            int a = sorted.get(i);
-            int b = sorted.get(i + 1);
-            if (b - a <= 4) {
-                for (int n = a + 1; n < b; n++) {
-                    addRef(out, n, indexed);
-                }
-            }
-        }
-        // 单侧扩展：对每个已选图，若正文里前后紧邻还有图，一并纳入
-        String plain = indexed.textForAi == null ? "" : indexed.textForAi;
-        List<Integer> seed = new ArrayList<>(out);
-        for (Integer ref : seed) {
-            if (ref == null) {
-                continue;
-            }
-            String marker = "[图" + ref + "]";
-            int pos = plain.indexOf(marker);
-            if (pos < 0) {
-                continue;
-            }
-            // 向后
-            int after = pos + marker.length();
-            after = extendWindowThroughImageCluster(plain, after, indexed.images.size());
-            Matcher mAfter = Pattern.compile("\\[图(\\d+)\\]").matcher(plain.substring(pos, after));
-            while (mAfter.find()) {
-                addRef(out, Integer.parseInt(mAfter.group(1)), indexed);
-            }
-            // 向前：看 marker 前 100 字符内是否还有图
-            int before = Math.max(0, pos - 100);
-            String head = plain.substring(before, pos);
-            if (head.replaceAll("\\s+", "").length() <= 12) {
-                Matcher mBefore = Pattern.compile("\\[图(\\d+)\\]").matcher(head);
-                while (mBefore.find()) {
-                    addRef(out, Integer.parseInt(mBefore.group(1)), indexed);
-                }
-            }
-        }
-        return out;
+    private static String compact(String s) {
+        return s == null ? "" : s.replaceAll("\\s+", "");
     }
 
     /** @return [start, end) in original haystack, or null */
@@ -1190,7 +1187,6 @@ public class TrainDocService {
                 if (at >= 0) {
                     bestAt = at;
                     bestLen = len;
-                    // 尽量用更长命中
                     len = 0;
                     break;
                 }
@@ -1203,38 +1199,19 @@ public class TrainDocService {
         if (bestAt < 0) {
             return null;
         }
-        int start = Math.min(haystack.length() - 1, bestAt);
-        // 粗略映射回原串长度：按无空白比例放大
+        // 把无空白下标映射回原文下标
+        int origAt = 0;
+        int compactAt = 0;
+        while (origAt < haystack.length() && compactAt < bestAt) {
+            if (!Character.isWhitespace(haystack.charAt(origAt))) {
+                compactAt++;
+            }
+            origAt++;
+        }
+        int start = Math.min(haystack.length() - 1, origAt);
         double ratio = haystack.length() / (double) Math.max(1, h.length());
         int end = Math.min(haystack.length(), start + (int) Math.ceil(bestLen * ratio) + 8);
         return new int[]{start, Math.max(start + 1, end)};
-    }
-
-    private static List<Integer> guessImageRefs(String qaText, IndexedDoc indexed) {
-        List<Integer> refs = new ArrayList<>();
-        if (!StringUtils.hasText(qaText) || indexed.images.isEmpty()) {
-            return refs;
-        }
-        String needle = qaText.replaceAll("\\s+", "");
-        List<int[]> scores = new ArrayList<>();
-        for (int i = 0; i < indexed.contexts.size(); i++) {
-            String ctx = indexed.contexts.get(i).replaceAll("\\s+", "");
-            if (ctx.isEmpty()) {
-                continue;
-            }
-            int score = overlapScore(needle, ctx);
-            if (score >= 3) {
-                scores.add(new int[]{i + 1, score});
-            }
-        }
-        scores.sort((a, b) -> Integer.compare(b[1], a[1]));
-        for (int[] s : scores) {
-            if (refs.size() >= 6) {
-                break;
-            }
-            refs.add(s[0]);
-        }
-        return refs;
     }
 
     private static int overlapScore(String a, String b) {
