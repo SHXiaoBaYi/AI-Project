@@ -59,14 +59,20 @@ public class AiChatService {
     }
 
     public String chat(String systemPrompt, String userPrompt) {
-        return chat(systemPrompt, userPrompt, null);
+        return chat(systemPrompt, userPrompt, null, null);
+    }
+
+    public String chat(String systemPrompt, String userPrompt, String provider) {
+        return chat(systemPrompt, userPrompt, provider, null);
     }
 
     /**
      * 调用指定厂商的 OpenAI 兼容 chat/completions。
      * 优先使用系统管理中配置的 API Key；未配时回退到 xby.ai 配置文件。
+     *
+     * @param temperature 为空则默认 0.8；答疑意图识别等应传低温度减少瞎猜
      */
-    public String chat(String systemPrompt, String userPrompt, String provider) {
+    public String chat(String systemPrompt, String userPrompt, String provider, Double temperature) {
         String p = aiProperties.normalizeProvider(provider);
         if (aiProperties.isLocalProvider(p)) {
             throw new BusinessException("本地模板不走云端调用");
@@ -107,7 +113,7 @@ public class AiChatService {
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", model);
-            body.put("temperature", 0.8);
+            body.put("temperature", temperature != null ? temperature : 0.8);
             List<Map<String, String>> messages = new ArrayList<>();
             if (StringUtils.hasText(systemPrompt)) {
                 messages.add(Map.of("role", "system", "content", systemPrompt));

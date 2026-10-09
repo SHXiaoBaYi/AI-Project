@@ -55,6 +55,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -635,87 +636,348 @@ public class TrainDocService {
         return vo;
     }
 
+    /**
+     * 答疑意图：先按「用户原话 vs 话题标题」硬召回候选，再（必要时）让模型只在候选里选。
+     * 禁止把整篇正文扔给模型自由指题——短问如「登录」时模型会概率性乱指到无关话题。
+     */
     private List<TrainAssistantAskVO.QaItem> aiExtractQa(String question, DocBundle doc) {
         IndexedDoc indexed = prepareIndexedDoc(doc);
         log.info("答疑索引 versionId={} images={} textLen={}",
                 doc.versionId, indexed.images.size(), indexed.textForAi == null ? 0 : indexed.textForAi.length());
-        String clipped = indexed.textForAi.length() > 28000
-                ? indexed.textForAi.substring(0, 28000)
-                : indexed.textForAi;
-        String system = """
-                你是收银操作培训答疑助手。文档结构不规则：既有「问/答」，也有「主题-说明」。
-                你的任务只是识别用户意图对应文档里的哪一个「话题标题」，不要扩写、不要拼接其他话题。
-                [图N] 由服务端按原文图文混排，answer 里不要写图号。
-                只输出 JSON 数组，不要 markdown。格式：
-                [{"question":"文档中该话题标题原文","answer":"可留空或写该话题下第一句要点"}]
-                硬性规则：
-                1. 最多返回 1 条；没有把握时返回 []。
-                2. question 必须是文档里紧挨该说明的话题标题原文（如「问：…」「问题1：…」「三、支付方式」），禁止改写。
-                3. 禁止把多个话题、上下无关段落拼进同一条。
-                4. 禁止编造文档没有的内容。
-                """;
-        String user = "用户问题：\n" + question + "\n\n培训文档正文（版本 " + doc.versionLabel + "）：\n" + clipped;
-        String raw = aiChatService.chat(system, user);
-        return parseQaList(raw, question, doc.versionLabel, indexed);
+        List<TitleCandidate> candidates = recallTitleCandidates(question, indexed);
+        log.info("答疑标题召回 questionLen={} candidates={} top={}",
+                question == null ? 0 : question.trim().length(),
+                candidates.size(),
+                candidates.isEmpty() ? "-" : candidates.get(0).title);
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+        TitleCandidate chosen = resolveTitleCandidate(question, candidates);
+        if (chosen == null || !passesUserAlignment(question, chosen.title)) {
+            log.info("答疑意图未过用户对齐门控 question={} chosen={}",
+                    question, chosen == null ? null : chosen.title);
+            return List.of();
+        }
+        SectionHit hit = sectionHitFromCandidate(chosen, indexed);
+        if (hit == null) {
+            return List.of();
+        }
+        TrainAssistantAskVO.QaItem item = materializeFromSection(hit, indexed);
+        enrichImagesFromContexts(item, indexed);
+        item.setVersionLabel(doc.versionLabel);
+        return List.of(item);
     }
 
-    private List<TrainAssistantAskVO.QaItem> parseQaList(String raw, String userQuestion, String versionLabel, IndexedDoc indexed) {
-        List<TrainAssistantAskVO.QaItem> list = new ArrayList<>();
-        if (!StringUtils.hasText(raw)) {
-            return list;
+    private TitleCandidate resolveTitleCandidate(String question, List<TitleCandidate> candidates) {
+        if (candidates.size() == 1) {
+            return candidates.get(0);
         }
-        String text = raw.trim();
-        text = text.replaceFirst("^```json", "").replaceFirst("^```", "");
+        // 头部明显领先：不必再调模型
+        if (candidates.get(0).score >= candidates.get(1).score + 40
+                && candidates.get(0).score >= MIN_SECTION_SCORE + 20) {
+            return candidates.get(0);
+        }
+        TitleCandidate aiPick = pickTitleWithAi(question, candidates);
+        if (aiPick != null) {
+            return aiPick;
+        }
+        // 模型无把握：仅当第一名已够强才采用，避免歧义时硬答
+        return candidates.get(0).score >= MIN_SECTION_SCORE + 30 ? candidates.get(0) : null;
+    }
+
+    private TitleCandidate pickTitleWithAi(String question, List<TitleCandidate> candidates) {
+        StringBuilder catalog = new StringBuilder();
+        for (int i = 0; i < candidates.size(); i++) {
+            catalog.append(i + 1).append(". ").append(candidates.get(i).title).append('\n');
+        }
+        String system = """
+                你是收银培训答疑的意图分类器。只能从给定候选标题中选一个最贴近用户问题的。
+                只输出 JSON，不要 markdown。格式：{"index":1} 或没有把握时 {"index":0}
+                硬性规则：
+                1. index 必须是候选序号（从 1 开始），禁止编造标题。
+                2. 用户问题与所有候选都明显无关时，必须输出 {"index":0}。
+                3. 短词（如「登录」）必须与标题字面相关，禁止选无关的支付/结算类标题。
+                """;
+        String user = "用户问题：\n" + question + "\n\n候选标题：\n" + catalog;
+        try {
+            String raw = aiChatService.chat(system, user, null, 0.1);
+            Integer idx = parseCandidateIndex(raw, candidates.size());
+            if (idx == null || idx <= 0) {
+                return null;
+            }
+            return candidates.get(idx - 1);
+        } catch (Exception e) {
+            log.warn("答疑候选意图识别失败，回退规则: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private Integer parseCandidateIndex(String raw, int size) {
+        if (!StringUtils.hasText(raw) || size <= 0) {
+            return null;
+        }
+        String text = raw.trim()
+                .replaceFirst("^```json", "")
+                .replaceFirst("^```", "");
         if (text.endsWith("```")) {
             text = text.substring(0, text.length() - 3);
         }
         text = text.trim();
         try {
-            int start = text.indexOf('[');
-            int end = text.lastIndexOf(']');
-            if (start < 0 || end <= start) {
-                return list;
-            }
-            JsonNode arr = objectMapper.readTree(text.substring(start, end + 1));
-            if (!arr.isArray()) {
-                return list;
-            }
-            TrainAssistantAskVO.QaItem best = null;
-            int bestScore = -1;
-            for (JsonNode node : arr) {
-                String q = node.path("question").asText("").trim();
-                String a = node.path("answer").asText("").trim();
-                if (q.isEmpty() && a.isEmpty()) {
-                    continue;
+            int start = text.indexOf('{');
+            int end = text.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+                JsonNode node = objectMapper.readTree(text.substring(start, end + 1));
+                int index = node.path("index").asInt(-1);
+                if (index == 0) {
+                    return 0;
                 }
-                String topic = q.isEmpty() ? "相关说明" : q;
-                String hint = a.isEmpty() ? userQuestion : a;
-                SectionHit hit = locateStrictSection(topic, hint, userQuestion, indexed);
-                if (hit == null || hit.score < MIN_SECTION_SCORE) {
-                    continue;
-                }
-                TrainAssistantAskVO.QaItem item = materializeFromSection(hit, indexed);
-                item.setVersionLabel(versionLabel);
-                if (hit.score > bestScore) {
-                    bestScore = hit.score;
-                    best = item;
+                if (index >= 1 && index <= size) {
+                    return index;
                 }
             }
-            // AI 未给出可用标题时，直接用用户问题在文档里严格切段
-            if (best == null) {
-                SectionHit hit = locateStrictSection(userQuestion, userQuestion, userQuestion, indexed);
-                if (hit != null && hit.score >= MIN_SECTION_SCORE) {
-                    best = materializeFromSection(hit, indexed);
-                    best.setVersionLabel(versionLabel);
-                }
+        } catch (Exception ignored) {
+            // fallthrough
+        }
+        Matcher m = Pattern.compile("\"index\"\\s*:\\s*(\\d+)").matcher(text);
+        if (m.find()) {
+            int index = Integer.parseInt(m.group(1));
+            if (index == 0) {
+                return 0;
             }
-            if (best != null) {
-                list.add(best);
+            if (index >= 1 && index <= size) {
+                return index;
             }
-        } catch (Exception e) {
-            log.warn("解析答疑 JSON 失败: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    private List<TitleCandidate> recallTitleCandidates(String userQuestion, IndexedDoc indexed) {
+        String plain = indexed.textForAi == null ? "" : indexed.textForAi;
+        List<TitleCandidate> list = new ArrayList<>();
+        if (!StringUtils.hasText(plain) || !StringUtils.hasText(userQuestion)) {
+            return list;
+        }
+        List<Integer> starts = listSectionStarts(plain);
+        String userNorm = compact(userQuestion);
+        if (userNorm.length() < 2) {
+            return list;
+        }
+        for (int i = 0; i < starts.size(); i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+            if (to - from > 6000) {
+                continue;
+            }
+            String sec = plain.substring(from, to);
+            String title = sectionTitle(sec);
+            String titleNorm = compact(title);
+            if (titleNorm.length() < 2) {
+                continue;
+            }
+            String bodyProbe = stripImageMarkers(trimSectionForDisplay(sec));
+            if (bodyProbe.length() < 4 && countMarkers(sec) == 0) {
+                continue;
+            }
+            int score = scoreUserAgainstTitle(userNorm, titleNorm);
+            if (score >= MIN_SECTION_SCORE) {
+                list.add(new TitleCandidate(from, to, title, score));
+            }
+        }
+        // HTML 兜底常把「一、系统概述与登录」拆成无标记短行，SECTION_START 认不出 → 行级兜底
+        if (list.isEmpty() && userNorm.length() <= 8) {
+            list.addAll(recallLineTitleCandidates(userNorm, plain, starts));
+        }
+        list.sort(Comparator.comparingInt((TitleCandidate c) -> c.score).reversed());
+        if (list.size() > 12) {
+            return new ArrayList<>(list.subList(0, 12));
         }
         return list;
+    }
+
+    /**
+     * 短问行级召回：标题行本身含用户词（如单独一行「系统概述与登录」），
+     * 段落范围取到下一硬切点或一定长度内。
+     */
+    private List<TitleCandidate> recallLineTitleCandidates(String userNorm, String plain, List<Integer> hardStarts) {
+        List<TitleCandidate> list = new ArrayList<>();
+        Matcher line = Pattern.compile("(?m)^[\\t　 ]*([^\\n\\r]{2,40})$").matcher(plain);
+        while (line.find()) {
+            String title = line.group(1).trim();
+            if (!StringUtils.hasText(title) || title.length() > 40) {
+                continue;
+            }
+            String titleNorm = compact(title);
+            if (titleNorm.length() < 2 || !titleNorm.contains(userNorm)) {
+                continue;
+            }
+            // 跳过答句/过长说明
+            if (title.contains("答：") || title.contains("答:") || titleNorm.length() > 36) {
+                continue;
+            }
+            int score = scoreUserAgainstTitle(userNorm, titleNorm);
+            if (score < MIN_SECTION_SCORE) {
+                continue;
+            }
+            int from = line.start(1);
+            int to = plain.length();
+            for (int s : hardStarts) {
+                if (s > from + Math.min(8, title.length())) {
+                    to = s;
+                    break;
+                }
+            }
+            // 再看后续短行标题，避免吞掉下一章
+            Matcher next = Pattern.compile("(?m)^[\\t　 ]*([^\\n\\r]{2,40})$").matcher(plain);
+            next.region(from + title.length(), plain.length());
+            while (next.find()) {
+                String nxt = compact(next.group(1));
+                if (nxt.length() >= 2 && nxt.length() <= 24
+                        && (nxt.startsWith("二") || nxt.startsWith("三") || nxt.startsWith("四")
+                        || nxt.matches("^[一二三四五六七八九十\\d]+、.*")
+                        || nxt.matches("^\\d+[\\.、．].*")
+                        || nxt.startsWith("问题") || nxt.startsWith("问：") || nxt.startsWith("问:"))) {
+                    to = Math.min(to, next.start(1));
+                    break;
+                }
+                if (next.start(1) > from + 1500) {
+                    break;
+                }
+            }
+            to = Math.min(to, Math.min(plain.length(), from + 1500));
+            if (to - from < 8) {
+                continue;
+            }
+            list.add(new TitleCandidate(from, to, title, score));
+        }
+        return list;
+    }
+
+    /** 只用用户原话给标题打分（禁止用「模型返回的标题」自我加分）。 */
+    private static int scoreUserAgainstTitle(String userNorm, String titleNorm) {
+        int score = scoreTitleIntent(userNorm, userNorm, userNorm, titleNorm);
+        String titleCore = titleCoreOf(titleNorm);
+        // 短问字面包含：登录 ⊂ 如何登录收银 → 强命中
+        if (userNorm.length() >= 2 && userNorm.length() <= 8
+                && (titleNorm.contains(userNorm) || titleCore.contains(userNorm))) {
+            score = Math.max(score, 120);
+            // 「系统概述与登录」优于正文操作里的「一键登录」
+            if (titleCore.contains("系统") && titleCore.contains(userNorm)) {
+                score += 40;
+            }
+            if (titleNorm.contains("一键" + userNorm) && !titleCore.contains("系统")) {
+                score -= 50;
+            }
+        }
+        return score;
+    }
+
+    private static boolean passesUserAlignment(String userQuestion, String title) {
+        String userNorm = compact(userQuestion);
+        String titleNorm = compact(title);
+        if (userNorm.length() < 2 || titleNorm.length() < 2) {
+            return false;
+        }
+        int score = scoreUserAgainstTitle(userNorm, titleNorm);
+        if (score >= MIN_SECTION_SCORE) {
+            return true;
+        }
+        // 极短口令：必须标题字面含该词，否则一律不答
+        if (userNorm.length() <= 4) {
+            String titleCore = titleCoreOf(titleNorm);
+            return titleNorm.contains(userNorm) || titleCore.contains(userNorm);
+        }
+        return false;
+    }
+
+    private static String titleCoreOf(String titleNorm) {
+        return titleNorm.replaceFirst("^(?:问答\\d+|问题\\d+|问)[：:：]?", "")
+                .replaceFirst("^[一二三四五六七八九十\\d]+[、．.]", "");
+    }
+
+    private SectionHit sectionHitFromCandidate(TitleCandidate c, IndexedDoc indexed) {
+        String plain = indexed.textForAi == null ? "" : indexed.textForAi;
+        if (!StringUtils.hasText(plain) || c.from < 0 || c.to <= c.from || c.from >= plain.length()) {
+            return null;
+        }
+        int to = Math.min(c.to, plain.length());
+        String sec = plain.substring(c.from, to).trim();
+        if (!StringUtils.hasText(sec)) {
+            return null;
+        }
+        SectionHit hit = new SectionHit();
+        hit.from = c.from;
+        hit.to = to;
+        hit.score = c.score;
+        hit.title = StringUtils.hasText(c.title) ? c.title : sectionTitle(sec);
+        hit.bodyWithMarkers = trimSectionForDisplay(sec);
+        return hit;
+    }
+
+    /**
+     * content_text 切段没有 [图N] 时，按配图上下文与问答文本的重合度补图。
+     */
+    private void enrichImagesFromContexts(TrainAssistantAskVO.QaItem item, IndexedDoc indexed) {
+        if (item == null || indexed == null || indexed.images.isEmpty()) {
+            return;
+        }
+        if (item.getImages() != null && !item.getImages().isEmpty()) {
+            return;
+        }
+        String topic = compact(item.getQuestion());
+        String body = compact(item.getAnswer());
+        List<Integer> refs = new ArrayList<>();
+        for (int i = 0; i < indexed.images.size(); i++) {
+            String ctx = i < indexed.contexts.size() ? compact(indexed.contexts.get(i)) : "";
+            if (!StringUtils.hasText(ctx)) {
+                continue;
+            }
+            boolean hit = false;
+            if (topic.length() >= 2 && ctx.contains(topic)) {
+                hit = true;
+            } else if (body.length() >= 4) {
+                String probe = body.length() > 80 ? body.substring(0, 80) : body;
+                if (overlapScore(probe, ctx) >= 4 || keywordHitScore(probe, ctx) >= 2) {
+                    hit = true;
+                }
+            }
+            if (hit) {
+                refs.add(i + 1);
+            }
+            if (refs.size() >= MAX_IMAGES_PER_ANSWER) {
+                break;
+            }
+        }
+        if (refs.isEmpty()) {
+            return;
+        }
+        item.setImages(toImageUrls(refs, indexed));
+        if (!StringUtils.hasText(item.getAnswerHtml()) && StringUtils.hasText(item.getAnswer())) {
+            // 无混排 HTML 时仍保留纯文本；有图则前端走 images 列表
+            return;
+        }
+        if (StringUtils.hasText(item.getAnswer()) && !StringUtils.hasText(item.getAnswerHtml())) {
+            StringBuilder html = new StringBuilder();
+            html.append("<p>").append(escapeHtml(item.getAnswer()).replace("\n", "<br/>")).append("</p>");
+            for (String url : item.getImages()) {
+                html.append("<img src=\"").append(escapeHtml(url)).append("\" alt=\"配图\"/>");
+            }
+            item.setAnswerHtml(html.toString());
+        }
+    }
+
+    private static final class TitleCandidate {
+        final int from;
+        final int to;
+        final String title;
+        final int score;
+
+        TitleCandidate(int from, int to, String title, int score) {
+            this.from = from;
+            this.to = to;
+            this.title = title;
+            this.score = score;
+        }
     }
 
     private static final String INDEX_TEXT_FILE = "_index.txt";
@@ -763,16 +1025,57 @@ public class TrainDocService {
                     && (doc.html.contains(marker) || doc.html.contains("/uploads/train/img/"))) {
                 IndexedDoc fromHtml = indexHtmlImages(doc.html, doc.text);
                 if (!fromHtml.images.isEmpty()) {
-                    log.warn("答疑使用 HTML 兜底索引 versionId={} images={}（建议本机保留原文件以重抽）",
-                            doc.versionId, fromHtml.images.size());
+                    preferStructuredPlainText(fromHtml, doc.text);
+                    log.warn("答疑使用 HTML 兜底索引 versionId={} images={} textLen={}（建议本机保留原文件以重抽）",
+                            doc.versionId, fromHtml.images.size(),
+                            fromHtml.textForAi == null ? 0 : fromHtml.textForAi.length());
                     return fromHtml;
                 }
             }
             return empty;
         } catch (Exception e) {
             log.warn("答疑配图索引失败 versionId={}: {}", doc.versionId, e.getMessage());
-            return indexHtmlImages(doc.html, doc.text);
+            IndexedDoc fallback = indexHtmlImages(doc.html, doc.text);
+            preferStructuredPlainText(fallback, doc == null ? null : doc.text);
+            return fallback;
         }
+    }
+
+    /**
+     * HTML 抽正文常打乱「一、标题」换行，导致登录等章节进不了 SECTION_START。
+     * 切段优先改用结构更好的 content_text；配图列表与上下文仍保留自 HTML。
+     */
+    private void preferStructuredPlainText(IndexedDoc indexed, String contentText) {
+        if (indexed == null || !StringUtils.hasText(contentText)) {
+            return;
+        }
+        String htmlPlain = nullToEmpty(indexed.textForAi);
+        int htmlStarts = listSectionStarts(htmlPlain).size();
+        int textStarts = listSectionStarts(contentText).size();
+        boolean htmlHasLoginTitle = sectionTitlesContain(htmlPlain, "登录");
+        boolean textHasLoginTitle = sectionTitlesContain(contentText, "登录");
+        if (textStarts > htmlStarts || (textHasLoginTitle && !htmlHasLoginTitle) || textStarts >= htmlStarts + 2) {
+            log.info("答疑切段改用 content_text：htmlStarts={} textStarts={} htmlLoginTitle={} textLoginTitle={}",
+                    htmlStarts, textStarts, htmlHasLoginTitle, textHasLoginTitle);
+            indexed.textForAi = contentText;
+        }
+    }
+
+    private static boolean sectionTitlesContain(String plain, String needle) {
+        if (!StringUtils.hasText(plain) || !StringUtils.hasText(needle)) {
+            return false;
+        }
+        String n = compact(needle);
+        List<Integer> starts = listSectionStarts(plain);
+        for (int i = 0; i < starts.size(); i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+            String titleNorm = compact(sectionTitle(plain.substring(from, to)));
+            if (titleNorm.contains(n)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 读取带正确 [图N] 位置的磁盘缓存（_index.txt + 配图文件）。 */
