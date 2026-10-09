@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { App, Avatar, Button, Input, Spin, Typography } from 'antd';
+import { App, Avatar, Button, Image, Input, Spin, Typography } from 'antd';
 import {
   AudioOutlined,
   CustomerServiceOutlined,
@@ -30,6 +30,80 @@ function resolveTrainImageUrl(url?: string) {
   const path = url.startsWith('/uploads/') ? url : url.includes('/uploads/') ? url.slice(url.indexOf('/uploads/')) : '';
   if (path && isLocalhostHost()) return path;
   return resolveUploadUrl(url);
+}
+
+const IMAGE_PREVIEW = {
+  movable: true,
+  minScale: 0.5,
+  maxScale: 8,
+} as const;
+
+function extractImgSrc(tag: string) {
+  const m = tag.match(/\bsrc=["']([^"']+)["']/i);
+  return m?.[1] ?? '';
+}
+
+function extractImgAlt(tag: string) {
+  const m = tag.match(/\balt=["']([^"']*)["']/i);
+  return m?.[1] ?? '配图';
+}
+
+/** 图文 HTML：配图可点击预览、放大缩小；纯文本段落仍按 HTML 渲染 */
+function TrainQaRichHtml({ html }: { html: string }) {
+  const parts = html.split(/(<img\b[^>]*>)/gi);
+  const hasImg = parts.some((p) => /^<img\b/i.test(p));
+  if (!hasImg) {
+    return (
+      <div
+        className='train-qa-rich min-w-0 overflow-hidden break-words text-neutral-700'
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  }
+  return (
+    <div className='train-qa-rich min-w-0 overflow-hidden break-words text-neutral-700 [&_.ant-image]:my-2.5 [&_.ant-image]:block [&_.ant-image]:max-w-full [&_.ant-image_img]:h-auto [&_.ant-image_img]:w-full [&_.ant-image_img]:max-w-full [&_.ant-image_img]:cursor-zoom-in [&_.ant-image_img]:rounded-md [&_.ant-image_img]:border [&_.ant-image_img]:border-neutral-200'>
+      <Image.PreviewGroup preview={IMAGE_PREVIEW}>
+        {parts.map((part, i) => {
+          if (!/^<img\b/i.test(part)) {
+            return part ? (
+              <span
+                key={i}
+                dangerouslySetInnerHTML={{ __html: part }}
+              />
+            ) : null;
+          }
+          const src = resolveTrainImageUrl(extractImgSrc(part));
+          if (!src) return null;
+          return (
+            <Image
+              key={i}
+              src={src}
+              alt={extractImgAlt(part)}
+            />
+          );
+        })}
+      </Image.PreviewGroup>
+    </div>
+  );
+}
+
+function TrainQaImageList({ urls }: { urls: string[] }) {
+  const srcs = urls.map((u) => resolveTrainImageUrl(u)).filter(Boolean);
+  if (!srcs.length) return null;
+  return (
+    <Image.PreviewGroup preview={IMAGE_PREVIEW}>
+      <div className='mt-2 min-w-0 space-y-3'>
+        {srcs.map((src, imgIdx) => (
+          <Image
+            key={`${src}-${imgIdx}`}
+            src={src}
+            alt={`培训配图 ${imgIdx + 1}/${srcs.length}`}
+            className='block h-auto w-full max-w-full cursor-zoom-in rounded-md border border-neutral-200 bg-white'
+          />
+        ))}
+      </div>
+    </Image.PreviewGroup>
+  );
 }
 
 const DD_JSAPI = 'https://g.alicdn.com/dingding/dingtalk-jsapi/3.0.25/dingtalk.open.js';
@@ -186,6 +260,85 @@ function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 安卓/钉钉 WebView 常不支持 dvh，100dvh 失效后页面只跟内容等高，输入框无法贴底。用 visualViewport 锁全屏。 */
+function useCashierViewportBox() {
+  const [box, setBox] = useState({ top: 0, left: 0, width: '100%', height: '100%' });
+
+  useEffect(() => {
+    const sync = () => {
+      const vv = window.visualViewport;
+      if (vv) {
+        setBox({
+          top: vv.offsetTop,
+          left: vv.offsetLeft,
+          width: `${Math.round(vv.width)}px`,
+          height: `${Math.round(vv.height)}px`,
+        });
+        return;
+      }
+      setBox({
+        top: 0,
+        left: 0,
+        width: `${window.innerWidth}px`,
+        height: `${window.innerHeight}px`,
+      });
+    };
+    sync();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', sync);
+    vv?.addEventListener('scroll', sync);
+    window.addEventListener('resize', sync);
+    window.addEventListener('orientationchange', sync);
+    return () => {
+      vv?.removeEventListener('resize', sync);
+      vv?.removeEventListener('scroll', sync);
+      window.removeEventListener('resize', sync);
+      window.removeEventListener('orientationchange', sync);
+    };
+  }, []);
+
+  return box;
+}
+
+function lockCashierDocument() {
+  const html = document.documentElement;
+  const body = document.body;
+  const root = document.getElementById('root');
+  const meta = document.querySelector('meta[name="viewport"]');
+  const prev = {
+    htmlOverflow: html.style.overflow,
+    htmlHeight: html.style.height,
+    bodyOverflow: body.style.overflow,
+    bodyHeight: body.style.height,
+    bodyOverscroll: body.style.overscrollBehavior,
+    rootHeight: root?.style.height ?? '',
+    rootOverflow: root?.style.overflow ?? '',
+    viewport: meta?.getAttribute('content') ?? '',
+  };
+  html.style.overflow = 'hidden';
+  html.style.height = '100%';
+  body.style.overflow = 'hidden';
+  body.style.height = '100%';
+  body.style.overscrollBehavior = 'none';
+  if (root) {
+    root.style.height = '100%';
+    root.style.overflow = 'hidden';
+  }
+  meta?.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+  return () => {
+    html.style.overflow = prev.htmlOverflow;
+    html.style.height = prev.htmlHeight;
+    body.style.overflow = prev.bodyOverflow;
+    body.style.height = prev.bodyHeight;
+    body.style.overscrollBehavior = prev.bodyOverscroll;
+    if (root) {
+      root.style.height = prev.rootHeight;
+      root.style.overflow = prev.rootOverflow;
+    }
+    if (prev.viewport) meta?.setAttribute('content', prev.viewport);
+  };
+}
+
 function configDingTalkJsapi(cfg: {
   agentId: string;
   corpId: string;
@@ -227,6 +380,13 @@ export default function CashierAssistantPage() {
   const recordStartedAt = useRef(0);
   const webkitRecRef = useRef<SpeechRecognitionLike | null>(null);
   const ran = useRef(false);
+  const viewportBox = useCashierViewportBox();
+  const shellStyle = {
+    top: viewportBox.top,
+    left: viewportBox.left,
+    width: viewportBox.width,
+    height: viewportBox.height,
+  };
 
   const push = useCallback((msg: Omit<ChatMessage, 'id' | 'time'> & { time?: string }) => {
     setMessages((prev) => [...prev, { ...msg, id: uid(), time: msg.time || nowTime() }]);
@@ -235,16 +395,10 @@ export default function CashierAssistantPage() {
   useEffect(() => {
     const prev = document.title;
     document.title = '小巴依收银答疑小助手';
-    const html = document.documentElement;
-    const body = document.body;
-    const prevHtmlOverflowX = html.style.overflowX;
-    const prevBodyOverflowX = body.style.overflowX;
-    html.style.overflowX = 'hidden';
-    body.style.overflowX = 'hidden';
+    const unlock = lockCashierDocument();
     return () => {
       document.title = prev;
-      html.style.overflowX = prevHtmlOverflowX;
-      body.style.overflowX = prevBodyOverflowX;
+      unlock();
     };
   }, []);
 
@@ -519,7 +673,10 @@ export default function CashierAssistantPage() {
 
   if (boot === 'loading') {
     return (
-      <div className='flex min-h-[100dvh] w-full max-w-full flex-col items-center justify-center gap-3 overflow-x-hidden bg-[#f0f4f8] px-6'>
+      <div
+        className='fixed z-10 flex w-full max-w-full flex-col items-center justify-center gap-3 overflow-hidden bg-[#f0f4f8] px-6'
+        style={shellStyle}
+      >
         <Spin size='large' />
         <Typography.Text type='secondary'>{bootTip}</Typography.Text>
       </div>
@@ -529,7 +686,10 @@ export default function CashierAssistantPage() {
   if (boot === 'error') {
     const local = isLocalhostHost();
     return (
-      <div className='flex min-h-[100dvh] w-full max-w-full flex-col items-center justify-center gap-3 overflow-x-hidden bg-[#f0f4f8] px-6 text-center'>
+      <div
+        className='fixed z-10 flex w-full max-w-full flex-col items-center justify-center gap-3 overflow-hidden bg-[#f0f4f8] px-6 text-center'
+        style={shellStyle}
+      >
         <Typography.Title
           level={4}
           className='!mb-0'
@@ -559,7 +719,10 @@ export default function CashierAssistantPage() {
   }
 
   return (
-    <div className='flex h-[100dvh] max-h-[100dvh] w-full max-w-full flex-col overflow-x-hidden bg-[#eef2f6]'>
+    <div
+      className='fixed z-10 flex w-full max-w-full flex-col overflow-hidden bg-[#eef2f6]'
+      style={shellStyle}
+    >
       <header className='flex w-full min-w-0 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 py-3'>
         <div className='min-w-0'>
           <div className='truncate text-base font-semibold text-neutral-900'>收银答疑小助手</div>
@@ -615,34 +778,14 @@ export default function CashierAssistantPage() {
                           {item.answerHtml ? (
                             <div className='min-w-0'>
                               <div className='mb-0.5 text-neutral-500'>A.</div>
-                              <div
-                                className='train-qa-rich min-w-0 overflow-hidden break-words text-neutral-700 [&_img]:my-2.5 [&_img]:block [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_img]:border [&_img]:border-neutral-200'
-                                dangerouslySetInnerHTML={{
-                                  __html: item.answerHtml.replace(
-                                    /src=["'](\/uploads\/[^"']+)["']/g,
-                                    (_, p1: string) => `src="${resolveTrainImageUrl(p1)}"`,
-                                  ),
-                                }}
-                              />
+                              <TrainQaRichHtml html={item.answerHtml} />
                             </div>
                           ) : (
                             <>
                               <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap text-neutral-700'>
                                 A. {item.answer}
                               </div>
-                              {item.images?.length ? (
-                                <div className='mt-2 min-w-0 space-y-3'>
-                                  {item.images.map((src, imgIdx) => (
-                                    <img
-                                      key={`${msg.id}-${idx}-img-${imgIdx}`}
-                                      src={resolveTrainImageUrl(src)}
-                                      alt={`培训配图 ${imgIdx + 1}/${item.images!.length}`}
-                                      className='block h-auto w-full max-w-full rounded-md border border-neutral-200 bg-white'
-                                      loading='lazy'
-                                    />
-                                  ))}
-                                </div>
-                              ) : null}
+                              {item.images?.length ? <TrainQaImageList urls={item.images} /> : null}
                             </>
                           )}
                           {item.fromCalibrate ? (
@@ -721,7 +864,7 @@ export default function CashierAssistantPage() {
         ) : null}
       </div>
 
-      <div className='w-full min-w-0 shrink-0 border-t border-neutral-200 bg-white px-3 py-2'>
+      <div className='w-full min-w-0 shrink-0 border-t border-neutral-200 bg-white px-3 pt-2 pb-[max(8px,env(safe-area-inset-bottom,0px))]'>
         <div className='mx-auto flex w-full max-w-3xl min-w-0 items-end gap-2'>
           <Button
             shape='circle'
@@ -759,7 +902,7 @@ export default function CashierAssistantPage() {
             onClick={() => void ask(input)}
           />
         </div>
-        <div className='pt-1 pb-[env(safe-area-inset-bottom)] text-center text-[11px] text-neutral-400'>
+        <div className='pt-1 text-center text-[11px] text-neutral-400'>
           {recording ? '再次点击麦克风结束并转文字' : '钉钉企业员工专用 · 点麦克风可语音输入'}
         </div>
       </div>
