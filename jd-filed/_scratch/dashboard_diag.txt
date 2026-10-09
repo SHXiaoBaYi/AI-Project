@@ -1,7 +1,0 @@
-﻿FATAL: 对 COM 组件的调用返回了错误 HRESULT E_FAIL。
-STACK: 在 <ScriptBlock>、D:\AI-XBY\AI-Project\jd-filed\scripts\build_jd_dashboard.ps1 中: 第 414 行
-在 <ScriptBlock>、D:\AI-XBY\AI-Project\jd-filed\_scratch\driver_dash.ps1 中: 第 8 行
-复制 -> D:\AI-XBY\AI-Project\jd-filed\京东_奔养养_26-09-30_演示.xlsx
-报表解析：trade=交易概况, prodchan=, target=, channel=流量来源_流量结构分析_场域来源, product=商品明细, ad=全站营销_推广管理_单品推广
-未解析到的报表类型（对应板块会出空图，属预期）：prodchan, target
-演示模式：生成 9900 行随机数据（来源标注 演示数据(非真实)）

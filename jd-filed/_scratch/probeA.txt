@@ -1,7 +1,0 @@
-﻿I4 raw type=String val=[]
-G4 type=Double
-A) SetSourceData(G3:I63, PlotBy=2 arg) series=1
-B) SetSourceData(G3:H63) series=2
-   NewSeries() ok -> series=3
-   3rd series bound; count=3 type3=4 axis3=2
-C) SetSourceData(U4:W6) series=3
