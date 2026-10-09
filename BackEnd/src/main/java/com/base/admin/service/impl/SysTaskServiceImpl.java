@@ -167,15 +167,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         SysUser owner = requireUser(dto.getOwnerUserId(), "负责人");
         SysTask task = new SysTask();
         fillTask(task, dto, owner);
-        Long uid = SecurityUtils.getCurrentUserId();
-        if (uid != null) {
-            SysUser creator = userMapper.selectById(uid);
-            task.setCreatorUserId(uid);
-            task.setCreatorName(userDisplayName(creator));
-        } else {
-            task.setCreatorUserId(null);
-            task.setCreatorName(SecurityUtils.getCurrentUsername());
-        }
+        fillCreator(task);
         if (!StringUtils.hasText(task.getStatus())) {
             task.setStatus("未开始");
         }
@@ -925,6 +917,38 @@ public class SysTaskServiceImpl implements SysTaskService {
             return t;
         }
         return t.substring(0, Math.max(0, max - 1)) + "…";
+    }
+
+    /** 优先用登录用户；仅无登录上下文时才落成 system（后台刷数等） */
+    private void fillCreator(SysTask task) {
+        SysUser creator = resolveCurrentCreator();
+        if (creator != null) {
+            task.setCreatorUserId(creator.getUserId());
+            task.setCreatorName(userDisplayName(creator));
+            if (StringUtils.hasText(creator.getUsername())) {
+                task.setCreateBy(creator.getUsername());
+            }
+            return;
+        }
+        task.setCreatorUserId(null);
+        task.setCreatorName(SecurityUtils.getCurrentUsername());
+    }
+
+    private SysUser resolveCurrentCreator() {
+        Long uid = SecurityUtils.getCurrentUserId();
+        if (uid != null) {
+            SysUser user = userMapper.selectById(uid);
+            if (user != null) {
+                return user;
+            }
+        }
+        String username = SecurityUtils.getCurrentUsername();
+        if (!StringUtils.hasText(username) || "system".equals(username)) {
+            return null;
+        }
+        return userMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, username.trim())
+                .last("LIMIT 1"));
     }
 
     private void fillTask(SysTask task, SysTaskDTO dto, SysUser owner) {

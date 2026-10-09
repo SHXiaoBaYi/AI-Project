@@ -21,6 +21,8 @@ import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.PlacementTaskSyncService;
 import com.base.admin.service.SysTaskService;
 import com.base.admin.service.SysTaskTypeService;
+import com.base.admin.util.RobotSecurity;
+import com.base.admin.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -49,9 +51,12 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
     @Transactional(rollbackFor = Exception.class)
     public String syncUnassignedPlacementTasks() {
         ensureTaskTypes();
+        int repaired = repairSystemCreatedAutoTasks();
         Long fallbackUserId = resolveFallbackUserId();
         if (fallbackUserId == null) {
-            return "跳过：未找到可用系统用户作为任务负责人";
+            return repaired > 0
+                    ? "跳过新建：未找到可用系统用户作为任务负责人；已纠正创建人 " + repaired + " 条"
+                    : "跳过：未找到可用系统用户作为任务负责人";
         }
 
         List<GeoContentPlacement> placements = placementMapper.selectList(new LambdaQueryWrapper<GeoContentPlacement>()
@@ -66,6 +71,9 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         }
         String summary = "待分配发布人任务 +" + publisherCreated + "，待分配撰写人任务 +" + writerCreated
                 + "（投放共 " + placements.size() + " 条）";
+        if (repaired > 0) {
+            summary += "；纠正创建人 system " + repaired + " 条";
+        }
         log.info("投放待分配任务刷数完成: {}", summary);
         return summary;
     }
@@ -321,7 +329,10 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         dto.setBizId(p.getId());
         dto.setBizTitle(abbreviate(question, 180));
         dto.setRemark("由投放管理指定" + ("文章发布".equals(taskType) ? "发布人" : "撰写人") + "后自动生成");
-        taskService.create(dto);
+        if (!persistTaskAsOperator(p, dto)) {
+            log.warn("跳过自动生成执行任务：无可用操作人 placementId={} type={}", p.getId(), taskType);
+            return false;
+        }
         return true;
     }
 
@@ -350,7 +361,111 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         dto.setBizId(p.getId());
         dto.setBizTitle(abbreviate(question, 180));
         dto.setRemark("由投放管理待分配字段自动生成");
-        taskService.create(dto);
+        if (!persistTaskAsOperator(p, dto)) {
+            // 启动刷待分配缺口时可能没有登录用户，仍需建任务
+            taskService.create(dto);
+        }
+    }
+
+    /**
+     * 以当前登录用户创建任务；无登录上下文时回退到投放记录的 updateBy/createBy
+     *（指定撰写人/发布人的操作人就写在投放表上）。
+     */
+    private boolean persistTaskAsOperator(GeoContentPlacement p, SysTaskDTO dto) {
+        SysUser operator = resolveOperatorUser(p);
+        if (operator == null || operator.getUserId() == null) {
+            return false;
+        }
+        String username = StringUtils.hasText(operator.getUsername())
+                ? operator.getUsername() : userDisplayName(operator);
+        RobotSecurity.runAs(operator.getUserId(), username, () -> {
+            taskService.create(dto);
+            return null;
+        });
+        return true;
+    }
+
+    private SysUser resolveOperatorUser(GeoContentPlacement p) {
+        Long uid = SecurityUtils.getCurrentUserId();
+        if (uid != null) {
+            SysUser current = userMapper.selectById(uid);
+            if (current != null) {
+                return current;
+            }
+        }
+        String loginName = SecurityUtils.getCurrentUsername();
+        SysUser byLogin = findUserByLoginName(loginName);
+        if (byLogin != null) {
+            return byLogin;
+        }
+        if (p == null) {
+            return null;
+        }
+        SysUser byUpdate = findUserByLoginName(p.getUpdateBy());
+        if (byUpdate != null) {
+            return byUpdate;
+        }
+        return findUserByLoginName(p.getCreateBy());
+    }
+
+    private SysUser findUserByLoginName(String name) {
+        if (!StringUtils.hasText(name) || "system".equals(name.trim())) {
+            return null;
+        }
+        String key = name.trim();
+        SysUser byUsername = userMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, key)
+                .last("LIMIT 1"));
+        if (byUsername != null) {
+            return byUsername;
+        }
+        return userMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getNickname, key)
+                .last("LIMIT 1"));
+    }
+
+    /** 历史：启动刷数把「指定撰写人/发布人后自动生成」的任务写成了 system */
+    private int repairSystemCreatedAutoTasks() {
+        List<SysTask> rows = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getCreatorName, "system")
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .in(SysTask::getTaskType, List.of("文章撰写", "文章发布"))
+                .like(SysTask::getRemark, "由投放管理指定")
+                .isNotNull(SysTask::getBizId));
+        int fixed = 0;
+        for (SysTask task : rows) {
+            GeoContentPlacement placement = placementMapper.selectById(task.getBizId());
+            SysUser operator = resolveOperatorUser(placement);
+            if (operator == null || operator.getUserId() == null) {
+                continue;
+            }
+            String display = userDisplayName(operator);
+            String username = StringUtils.hasText(operator.getUsername())
+                    ? operator.getUsername() : display;
+            RobotSecurity.runAs(operator.getUserId(), username, () -> {
+                taskMapper.update(null, new LambdaUpdateWrapper<SysTask>()
+                        .eq(SysTask::getId, task.getId())
+                        .set(SysTask::getCreatorUserId, operator.getUserId())
+                        .set(SysTask::getCreatorName, display)
+                        .set(SysTask::getCreateBy, username));
+                return null;
+            });
+            fixed++;
+        }
+        if (fixed > 0) {
+            log.info("已纠正投放自动任务创建人 system → 实际操作人 {} 条", fixed);
+        }
+        return fixed;
+    }
+
+    private static String userDisplayName(SysUser user) {
+        if (user == null) {
+            return "";
+        }
+        if (StringUtils.hasText(user.getNickname())) {
+            return user.getNickname().trim();
+        }
+        return user.getUsername() == null ? "" : user.getUsername().trim();
     }
 
     private Long resolveFallbackUserId() {
