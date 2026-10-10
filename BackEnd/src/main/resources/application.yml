@@ -75,7 +75,14 @@ jwt:
   expiration: 43200000
 
 geo:
+  # 一次性样例刷数开关：需要时改 true，启动跑完立刻改回 false
   seed: false
+  content:
+    seed: false
+  daily:
+    ingest: false
+  # 空壳日监测清洗：一次性，默认关闭
+  cleanup-empty-daily: false
   board-persist:
     enabled: true
     on-startup: false
@@ -92,6 +99,15 @@ geo:
     content-weekly-cron: "0 15 2 ? * MON"
     # 每月 1 日 02:25 固化内容投放月报
     content-monthly-cron: "0 25 2 1 * ?"
+
+# 投放联动任务启动刷数：默认关闭。开启会导致用户删除的任务在重启后被重新生成。
+task:
+  placement-sync:
+    on-startup: false
+
+# 招聘 Excel 灌数：仅空库一次性使用
+hr:
+  seed: false
 
 dingtalk:
   # 页面「系统管理 → 钉钉应用配置」优先。这里仅在库里没有启用配置时作备用。

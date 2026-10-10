@@ -28,6 +28,10 @@ public class GeoSchemaMigrator implements ApplicationRunner {
     @Value("${geo.schema.migrate:true}")
     private boolean migrateEnabled;
 
+    /** 空壳日监测清洗：一次性开关，默认关闭，避免每次启动改业务数据 */
+    @Value("${geo.cleanup-empty-daily:false}")
+    private boolean cleanupEmptyDaily;
+
     @Override
     public void run(ApplicationArguments args) throws Exception {
         if (!migrateEnabled) {
@@ -63,7 +67,9 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureItemPublishTimeDateTime(connection);
             ensureGeoStaffRoles(connection);
             retireLegacyGeoRoles(connection);
-            cleanupEmptyUninspectedDailyBeforeToday(connection);
+            if (cleanupEmptyDaily) {
+                cleanupEmptyUninspectedDailyBeforeToday(connection);
+            }
         } catch (Exception e) {
             log.error("GEO schema migrate failed", e);
             throw e;
