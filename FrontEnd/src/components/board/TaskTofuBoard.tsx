@@ -11,6 +11,7 @@ import {
   type BoardTaskTofuQuery,
 } from '@/api/board';
 import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
+import { bindBoardColumnDrill, buildBoardDrillLookup } from '@/components/geo/boardChartDrill';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import type { DemoBoardGrain } from '@/constants/demoData';
 
@@ -147,7 +148,12 @@ function IndependentTaskTofuCard({
   grain: DemoBoardGrain;
   range: [Dayjs, Dayjs];
 }) {
-  const [level, setLevel] = useState('topic');
+  const rootLevel = def.contentPlatformThenTopic
+    ? 'contentPlatform'
+    : def.writerDrill || def.chartType.startsWith('employee')
+      ? 'writer'
+      : 'topic';
+  const [level, setLevel] = useState(rootLevel);
   const [drill, setDrill] = useState<DrillState>({});
   const [metricLabel, setMetricLabel] = useState(def.title);
   const [charts, setCharts] = useState<{ axis: string; series: string; value: number; key?: string }[]>([]);
@@ -176,7 +182,7 @@ function IndependentTaskTofuCard({
           aiPlatform: next.aiPlatform,
         };
         const data = await boardTaskTofuChartApi(query);
-        setLevel(data?.level || 'topic');
+        setLevel(data?.level || rootLevel);
         setMetricLabel(data?.metricLabel || def.title);
         setDrill({
           topicId: data?.topicId ?? next.topicId,
@@ -196,11 +202,13 @@ function IndependentTaskTofuCard({
         setLoading(false);
       }
     },
-    [def.chartType, def.title, grain, range],
+    [def.chartType, def.title, grain, range, rootLevel],
   );
 
   useEffect(() => {
     setDrill({});
+    setLevel(rootLevel);
+    setCharts([]);
     void load({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grain, range]);
@@ -237,17 +245,28 @@ function IndependentTaskTofuCard({
     (series?: string, drillKey?: string) => {
       const key = drillKey || series;
       if (!key) return;
-      if (level === 'topic') {
-        // 被引用内容发布平台看板：第2层已是话题，不再下钻
-        if (def.contentPlatformThenTopic) {
+      // 被引用内容发布平台：第1层点平台 → 第2层各话题；不依赖 level 字符串，避免状态未同步时点柱无效
+      if (def.contentPlatformThenTopic) {
+        if (drill.contentPlatform) {
           return;
         }
-        const id = Number(key);
+        void load({ contentPlatform: key });
+        return;
+      }
+      if (level === 'topic') {
+        let id = Number(key);
+        let topicName = series || key;
+        if (!Number.isFinite(id)) {
+          // 事件丢了 key 时：用系列名（话题名）从当前图数据反查
+          const hit = charts.find((p) => p.series === series || p.series === key || p.key === key);
+          id = Number(hit?.key);
+          topicName = hit?.series || topicName;
+        }
         if (!Number.isFinite(id)) {
           message.warning('无法识别话题');
           return;
         }
-        void load({ ...drill, topicId: id, topicName: series || key });
+        void load({ ...drill, topicId: id, topicName });
         return;
       }
       if (level === 'question') {
@@ -272,43 +291,35 @@ function IndependentTaskTofuCard({
         });
         return;
       }
-      if (level === 'contentPlatform') {
-        if (def.contentPlatformThenTopic) {
-          void load({ ...drill, contentPlatform: key });
-          return;
-        }
-        if (def.publishDetail) {
-          void openPublishDrawer(key, drill);
-        }
+      if (level === 'contentPlatform' && def.publishDetail) {
+        void openPublishDrawer(key, drill);
         return;
       }
       // aiPlatform leaf: no further drill
     },
-    [def.contentPlatformThenTopic, def.publishDetail, drill, level, load, openPublishDrawer],
+    [charts, def.contentPlatformThenTopic, def.publishDetail, drill, level, load, openPublishDrawer],
   );
 
   const clickRef = useRef(onSeriesClick);
   clickRef.current = onSeriesClick;
+  const drillLookupRef = useRef(new Map<string, string>());
 
   const bindChartClick = useCallback(
-    (plot: { chart?: { on: (event: string, handler: (evt: any) => void) => void } }) => {
-      const c = plot?.chart;
-      if (!c?.on) return;
-      c.on('element:click', (evt: any) => {
-        const raw = evt?.data?.data ?? evt?.data ?? {};
-        const datum = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined;
-        if (!datum) return;
-        const series = datum.fullSeries != null ? String(datum.fullSeries) : String(datum.series ?? '');
-        const key = datum.drillKey != null ? String(datum.drillKey) : undefined;
-        clickRef.current(series, key);
-      });
+    (plot: { chart?: { on?: (event: string, handler: (evt: unknown) => void) => void } }) => {
+      bindBoardColumnDrill(
+        plot,
+        (hit) => {
+          clickRef.current(hit.series, hit.drillKey);
+        },
+        drillLookupRef,
+      );
     },
     [],
   );
 
   const onBack = () => {
-    // 被引用内容发布平台：话题层 → 回平台层
-    if (def.contentPlatformThenTopic && level === 'topic' && drill.contentPlatform) {
+    // 被引用内容发布平台：第2层 → 回第1层
+    if (def.contentPlatformThenTopic && drill.contentPlatform) {
       void load({});
       return;
     }
@@ -362,15 +373,18 @@ function IndependentTaskTofuCard({
     series: p.series,
     fullSeries: p.series,
     value: p.value,
-    drillKey: p.key,
+    drillKey: p.key ?? p.series,
+    key: p.key ?? p.series,
   }));
-  const citeTable = def.tableDrill ? buildCiteTable(charts) : null;
+  drillLookupRef.current = buildBoardDrillLookup(chartData);
+  const citeTable = def.tableDrill || def.contentPlatformThenTopic ? buildCiteTable(charts) : null;
+  const atPlatformTopicLeaf = !!def.contentPlatformThenTopic && !!drill.contentPlatform;
 
   const isEmployeeRootChart = def.writerDrill || def.chartType.startsWith('employee');
   const showBack =
     level === 'question' ||
     (level === 'employee' && !isEmployeeRootChart) ||
-    (level === 'topic' && !!drill.contentPlatform && !!def.contentPlatformThenTopic) ||
+    atPlatformTopicLeaf ||
     (level === 'contentPlatform' && !!def.publishDetail) ||
     level === 'aiPlatform';
 
@@ -382,9 +396,10 @@ function IndependentTaskTofuCard({
           ? '撰写人'
           : '话题',
     },
-    ...(drill.contentPlatform && def.contentPlatformThenTopic ? [{ title: drill.contentPlatform }] : []),
+    ...(drill.contentPlatform && def.contentPlatformThenTopic
+      ? [{ title: drill.contentPlatform }, { title: '各话题' }]
+      : []),
     ...(drill.topicName && !def.contentPlatformThenTopic ? [{ title: drill.topicName }] : []),
-    ...(drill.topicName && def.contentPlatformThenTopic && level === 'topic' ? [{ title: '各话题' }] : []),
     ...(drill.targetQuestion
       ? [{ title: drill.targetQuestion.length > 14 ? `${drill.targetQuestion.slice(0, 13)}…` : drill.targetQuestion }]
       : []),
@@ -450,9 +465,19 @@ function IndependentTaskTofuCard({
         {def.hint} · {metricLabel} · 横轴=日期
       </div>
       <Suspense fallback={<ChartFallback />}>
-        <BoardColumnScrollArea data={chartData}>
+        <BoardColumnScrollArea
+          data={chartData}
+          onSeriesDrill={
+            def.tableDrill
+              ? undefined
+              : (name) => {
+                  const key = drillLookupRef.current.get(name) || name;
+                  onSeriesClick(name, key);
+                }
+          }
+        >
           <Column
-            key={`${def.chartType}-${level}-${chartData.length}-${drill.topicId || ''}-${drill.targetQuestion || ''}`}
+            key={`${def.chartType}-${level}-${chartData.length}-${drill.contentPlatform || ''}-${drill.topicId || ''}-${drill.targetQuestion || ''}-${drill.writerUserId || ''}`}
             data={chartData}
             xField='axis'
             yField='value'
@@ -541,20 +566,63 @@ function IndependentTaskTofuCard({
           ]}
         />
       ) : null}
+      {def.contentPlatformThenTopic ? (
+        <Table<CiteTableRow>
+          className='mt-3'
+          size='small'
+          bordered
+          pagination={false}
+          rowKey='drillKey'
+          scroll={{ x: 'max-content', y: 280 }}
+          locale={{ emptyText: '暂无数据' }}
+          dataSource={citeTable?.rows || []}
+          columns={[
+            {
+              title: atPlatformTopicLeaf ? '话题' : '内容发布平台',
+              dataIndex: 'series',
+              width: 160,
+              fixed: 'left',
+              render: (name: string, row) =>
+                atPlatformTopicLeaf ? (
+                  <span className='font-medium'>{name}</span>
+                ) : (
+                  <Button
+                    type='link'
+                    size='small'
+                    className='px-0'
+                    onClick={() => onSeriesClick(name, row.drillKey)}
+                  >
+                    {name}
+                  </Button>
+                ),
+            },
+            ...(citeTable?.axes || []).map((axis) => ({
+              title: formatAxis(axis),
+              dataIndex: axis,
+              width: 100,
+              align: 'right' as const,
+              render: (value: unknown) => {
+                const n = typeof value === 'number' ? value : Number(value);
+                return Number.isFinite(n) ? n : '-';
+              },
+            })),
+          ]}
+        />
+      ) : null}
       <div className='mt-1 text-xs text-neutral-400'>
         {def.tableDrill
           ? level === 'writer' || level === 'employee'
             ? '环比/同比可能为负，请点击表格中的撰写人姓名下钻，图表不可下钻'
             : '已到最细层级'
-          : level === 'contentPlatform' && def.publishDetail
-            ? '点击柱体查看该内容平台发布明细'
-            : level === 'contentPlatform' && def.contentPlatformThenTopic
-              ? '点击柱体查看该平台在各话题的被引用次数'
-              : level === 'topic' && def.contentPlatformThenTopic
+          : def.contentPlatformThenTopic
+            ? atPlatformTopicLeaf
+              ? '第2层：该平台在各话题被引用次数 · 已到最细层级'
+              : '第1层：各内容发布平台被引用次数 · 点柱 / 双击图例 / 点表格平台名均可下钻'
+            : level === 'contentPlatform' && def.publishDetail
+              ? '点击柱体或双击图例查看该内容平台发布明细'
+              : level === 'aiPlatform'
                 ? '已到最细层级'
-                : level === 'aiPlatform'
-                  ? '已到最细层级'
-                  : '点击柱体下钻下一级'}
+                : '点柱或双击图例下钻下一级'}
       </div>
 
       <Drawer
@@ -583,7 +651,7 @@ export function TaskTofuBoard({ grain, range }: { grain: DemoBoardGrain; range: 
   return (
     <div className='flex flex-col gap-3'>
       <div className='text-xs text-neutral-400'>
-        六个看板相互独立；页顶日期筛选统一生效。环比、同比可能为负，只点表格下钻；其余看板点击柱体下钻
+        六个看板相互独立；页顶日期筛选统一生效。环比、同比可能为负，只点表格下钻；其余看板点柱或双击图例下钻
       </div>
       <Row gutter={[12, 12]}>
         {CHARTS.map((def) => (

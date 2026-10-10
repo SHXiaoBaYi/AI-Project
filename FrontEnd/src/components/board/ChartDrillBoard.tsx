@@ -17,6 +17,7 @@ import {
   useHiddenBoardSeries,
 } from '@/components/geo/BoardChartLegend';
 import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
+import { bindBoardColumnDrill, buildBoardDrillLookup } from '@/components/geo/boardChartDrill';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import { demoRangeByGrain } from '@/constants/demoData';
 
@@ -137,6 +138,7 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
   const [stack, setStack] = useState<BoardChartStackItem[]>([]);
   const [data, setData] = useState<BoardChartDrill | null>(null);
   const [loading, setLoading] = useState(false);
+  const drillLookupRef = useRef(new Map<string, string>());
 
   const load = useCallback(
     async (nextStack: BoardChartStackItem[], clickKey?: string) => {
@@ -180,6 +182,9 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
         // 用完整 seriesKey 着色，避免短标签撞名把多根柱合成一根
         series: p.seriesKey || p.series,
         seriesKey: p.seriesKey || p.series,
+        fullSeries: p.series || p.seriesKey,
+        drillKey: p.seriesKey || p.series,
+        key: p.seriesKey || p.series,
         drillable: p.drillable !== false && !!data?.chartDrillable,
       }));
   }, [data]);
@@ -187,6 +192,7 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
   const lineSeries = useMemo(() => uniqueBoardSeries(timeSeriesData), [timeSeriesData]);
   const { hidden: lineHidden, toggle: toggleLineSeries } = useHiddenBoardSeries(lineSeries);
   const lineChartData = useMemo(() => filterBoardSeries(timeSeriesData, lineHidden), [timeSeriesData, lineHidden]);
+  drillLookupRef.current = buildBoardDrillLookup(timeSeriesData);
 
   const onSeriesDrill = useCallback(
     (payload?: { seriesKey?: string; series?: string; key?: string; drillable?: boolean }) => {
@@ -221,24 +227,19 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
   drillRef.current = onSeriesDrill;
 
   const bindChartDrill = useCallback(
-    (plot: { chart?: { on: (event: string, handler: (evt: any) => void) => void } }) => {
-      const chart = plot?.chart;
-      if (!chart?.on) return;
-      chart.on('element:click', (evt: any) => {
-        const raw = evt?.data?.data ?? evt?.data ?? {};
-        const datum = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined;
-        if (!datum) return;
-        // 分组柱：每根柱带独立 series / seriesKey
-        const seriesKey = String(datum.seriesKey ?? datum.key ?? '');
-        const series = String(datum.series ?? datum.color ?? '');
-        const drillable = datum.drillable !== false;
-        if (!seriesKey && !series) return;
-        drillRef.current({
-          seriesKey: seriesKey || undefined,
-          series: series || undefined,
-          drillable,
-        });
-      });
+    (plot: { chart?: { on?: (event: string, handler: (evt: unknown) => void) => void } }) => {
+      bindBoardColumnDrill(
+        plot,
+        (hit) => {
+          drillRef.current({
+            seriesKey: hit.drillKey,
+            series: hit.series,
+            key: hit.drillKey,
+            drillable: true,
+          });
+        },
+        drillLookupRef,
+      );
     },
     [],
   );
@@ -416,11 +417,21 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
         </Suspense>
 
         <div className='mt-6 mb-2 text-sm font-medium text-neutral-700'>
-          分组柱状图（X 轴=日期；点击分组中某一根柱下钻该系列，日期范围不变
+          分组柱状图（X 轴=日期；点柱或双击图例下钻该系列，日期范围不变
           {data?.axisField ? ` · 当前按${axisFieldLabel(data.axisField)}` : ''}）
         </div>
         <Suspense fallback={<ChartFallback />}>
-          <BoardColumnScrollArea data={timeSeriesData}>
+          <BoardColumnScrollArea
+            data={timeSeriesData}
+            onSeriesDrill={
+              data?.chartDrillable
+                ? (name) => {
+                    const key = drillLookupRef.current.get(name) || name;
+                    onSeriesDrill({ seriesKey: key, series: name, key, drillable: true });
+                  }
+                : undefined
+            }
+          >
             <Column
               key={`col-${chartRenderKey}`}
               data={timeSeriesData}

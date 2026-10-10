@@ -69,15 +69,18 @@ export function useHiddenBoardSeries(series: string[]) {
   return { hidden, toggle };
 }
 
-/** 图例在图表外：每项 100px，超出省略，悬停看全名；点击切换对应系列 */
+/** 图例在图表外：每项 100px，超出省略，悬停看全名；单击显隐，双击下钻（若提供 onDrill） */
 export function BoardChartLegend({
   series,
   hidden,
   onToggle,
+  onDrill,
 }: {
   series: string[];
   hidden?: ReadonlySet<string>;
   onToggle?: (name: string) => void;
+  /** 双击图例项下钻，作为柱体难点中时的备用入口 */
+  onDrill?: (name: string) => void;
 }) {
   if (!series.length) return null;
   return (
@@ -87,12 +90,18 @@ export function BoardChartLegend({
         return (
           <Tooltip
             key={name}
-            title={name}
+            title={onDrill ? `${name}（单击显隐 · 双击下钻）` : name}
           >
             <button
               type='button'
               aria-pressed={!off}
               onClick={() => onToggle?.(name)}
+              onDoubleClick={(e) => {
+                if (!onDrill) return;
+                e.preventDefault();
+                e.stopPropagation();
+                onDrill(name);
+              }}
               className={`inline-flex h-5 w-[100px] cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-left ${off ? 'opacity-35' : ''}`}
             >
               <span

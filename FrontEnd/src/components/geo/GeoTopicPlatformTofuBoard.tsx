@@ -5,6 +5,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import { getGeoNegativeDailyApi, getGeoTopicPlatformChartsApi } from '@/api/geo';
 import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
+import { bindBoardColumnDrill, buildBoardDrillLookup } from '@/components/geo/boardChartDrill';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
 import type { GeoBoardQuery, GeoChartPoint, GeoDailyVO, GeoTopicPlatformCharts } from '@/types/geo';
 import type { DemoBoardGrain } from '@/constants/demoData';
@@ -163,12 +164,18 @@ function IndependentTofuCard({
       const key = drillKey || series;
       if (!key) return;
       if (level === 'topic') {
-        const id = Number(key);
+        let id = Number(key);
+        let name = series || key;
+        if (!Number.isFinite(id) || id <= 0) {
+          const hit = charts.find((p) => p.series === series || p.series === key || p.key === key);
+          id = Number(hit?.key);
+          name = hit?.series || name;
+        }
         if (!Number.isFinite(id) || id <= 0) {
           message.warning('无法识别话题');
           return;
         }
-        void load({ topicId: id, topicName: series || key });
+        void load({ topicId: id, topicName: name });
         return;
       }
       if (level === 'platform') {
@@ -179,24 +186,22 @@ function IndependentTofuCard({
         void openNegativeDrawer(series || key);
       }
     },
-    [enableNegativeDetail, level, load, openNegativeDrawer, topicId, topicName],
+    [charts, enableNegativeDetail, level, load, openNegativeDrawer, topicId, topicName],
   );
 
   const drillRef = useRef(onSeriesClick);
   drillRef.current = onSeriesClick;
+  const drillLookupRef = useRef(new Map<string, string>());
 
   const bindChartClick = useCallback(
-    (plot: { chart?: { on: (event: string, handler: (evt: any) => void) => void } }) => {
-      const c = plot?.chart;
-      if (!c?.on) return;
-      c.on('element:click', (evt: any) => {
-        const raw = evt?.data?.data ?? evt?.data ?? {};
-        const datum = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined;
-        if (!datum) return;
-        const series = datum.fullSeries != null ? String(datum.fullSeries) : String(datum.series ?? '');
-        const drillKey = datum.drillKey != null ? String(datum.drillKey) : undefined;
-        drillRef.current(series, drillKey);
-      });
+    (plot: { chart?: { on?: (event: string, handler: (evt: unknown) => void) => void } }) => {
+      bindBoardColumnDrill(
+        plot,
+        (hit) => {
+          drillRef.current(hit.series, hit.drillKey);
+        },
+        drillLookupRef,
+      );
     },
     [],
   );
@@ -216,8 +221,10 @@ function IndependentTofuCard({
     series: p.series,
     fullSeries: p.series,
     value: p.value,
-    drillKey: p.key,
+    drillKey: p.key ?? p.series,
+    key: p.key ?? p.series,
   }));
+  drillLookupRef.current = buildBoardDrillLookup(chartData);
 
   const negColumns: ColumnsType<GeoDailyVO> = [
     { title: '日期', dataIndex: 'inspectDate', width: 110 },
@@ -261,7 +268,13 @@ function IndependentTofuCard({
       />
       <div className='mb-2 text-xs text-neutral-400'>{hint}</div>
       <Suspense fallback={<ChartFallback />}>
-        <BoardColumnScrollArea data={chartData}>
+        <BoardColumnScrollArea
+          data={chartData}
+          onSeriesDrill={(name) => {
+            const key = drillLookupRef.current.get(name) || name;
+            onSeriesClick(name, key);
+          }}
+        >
           <Column
             key={`${metric}-${level}-${topicId || 'root'}-${platform || ''}-${chartData.length}`}
             data={chartData}
@@ -313,7 +326,7 @@ export function GeoTopicPlatformTofuBoard({ grain, range }: { grain: DemoBoardGr
   return (
     <div className='flex flex-col gap-3'>
       <div className='text-xs text-neutral-400'>
-        统一下钻：话题 → AI平台 → 测试词/问题/负面内容；露出率类话题层取各平台率算术平均
+        统一下钻：话题 → AI平台 → 测试词/问题/负面内容；点柱或双击图例均可下钻；露出率类话题层取各平台率算术平均
       </div>
       <Row gutter={[12, 12]}>
         <Col

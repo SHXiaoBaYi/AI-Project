@@ -49,13 +49,15 @@ export const boardColumnChartProps = {
       paddingOuter: 0.12,
     },
   },
-  /** 固定柱宽 30px，组内不再额外 inset 拉开 */
+  /** 固定柱宽 30px，组内不再额外 inset 拉开；矮柱也保留可点高度 */
   style: {
     maxWidth: BOARD_COLUMN_WIDTH,
     minWidth: BOARD_COLUMN_WIDTH,
     inset: 0,
+    minHeight: 4,
+    cursor: 'pointer',
   },
-  /** 白字显示在柱体内，更醒目 */
+  /** 白字显示在柱体内；禁止文字抢点击，否则同层有的柱能下钻、点到字的柱不行 */
   label: {
     text: formatColumnValue,
     position: 'inside' as const,
@@ -64,5 +66,9 @@ export const boardColumnChartProps = {
     fill: '#ffffff',
     textAlign: 'center' as const,
     transform: [{ type: 'overlapHide' }],
+    style: {
+      pointerEvents: 'none',
+      cursor: 'pointer',
+    },
   },
 };
