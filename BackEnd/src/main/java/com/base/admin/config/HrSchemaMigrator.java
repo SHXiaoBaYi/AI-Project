@@ -326,6 +326,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private void seedProofTaskType(int sort, String name, String remark) {
+        // 仅补缺失；已逻辑删除的行仍占 type_name，不再 INSERT / 不把 is_active 刷回 1
         jdbc.update("""
                 INSERT INTO sys_task_type (type_name, sort_order, remark, require_proof, biz_type, assign_field, spawn_task_type, is_active)
                 SELECT ?, ?, ?, 1, '', '', '', 1
@@ -334,8 +335,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 """, name, sort, remark, name);
         jdbc.update("""
                 UPDATE sys_task_type
-                SET require_proof = 1, sort_order = ?, remark = ?, biz_type = '', assign_field = '', spawn_task_type = '', is_active = 1
-                WHERE type_name = ?
+                SET require_proof = 1, sort_order = ?, remark = ?, biz_type = '', assign_field = '', spawn_task_type = ''
+                WHERE type_name = ? AND is_active = 1
                 """, sort, remark, name);
     }
 

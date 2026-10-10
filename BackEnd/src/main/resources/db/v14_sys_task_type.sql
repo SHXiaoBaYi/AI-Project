@@ -1,4 +1,5 @@
 -- 任务类型基础配置；历史「投放」迁移为「文章发布」
+-- 种子仅补缺失行；已存在（含逻辑删除 is_active=0）绝不 UPDATE is_active，避免发版把用户删掉的类型刷回来
 
 CREATE TABLE IF NOT EXISTS sys_task_type (
   id           BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -14,18 +15,25 @@ CREATE TABLE IF NOT EXISTS sys_task_type (
   UNIQUE KEY uk_type_name (type_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务类型基础配置';
 
-INSERT INTO sys_task_type (id, type_name, sort_order, remark, is_active)
-VALUES
-(1, '日常', 1, '默认日常事务', 1),
-(2, '文章发布', 2, '原「投放」已更名', 1),
-(3, '文件撰写', 3, '', 1),
-(4, '账号', 4, '', 1),
-(5, '其它', 99, '', 1)
-ON DUPLICATE KEY UPDATE
-  type_name = VALUES(type_name),
-  sort_order = VALUES(sort_order),
-  remark = VALUES(remark),
-  is_active = 1;
+INSERT INTO sys_task_type (type_name, sort_order, remark, is_active)
+SELECT '日常', 1, '默认日常事务', 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = '日常');
+
+INSERT INTO sys_task_type (type_name, sort_order, remark, is_active)
+SELECT '文章发布', 2, '原「投放」已更名', 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = '文章发布');
+
+INSERT INTO sys_task_type (type_name, sort_order, remark, is_active)
+SELECT '文件撰写', 3, '', 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = '文件撰写');
+
+INSERT INTO sys_task_type (type_name, sort_order, remark, is_active)
+SELECT '账号', 4, '', 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = '账号');
+
+INSERT INTO sys_task_type (type_name, sort_order, remark, is_active)
+SELECT '其它', 99, '', 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = '其它');
 
 -- 历史任务类型数据迁移
 UPDATE sys_task SET task_type = '文章发布' WHERE task_type = '投放' AND is_active = 1;
