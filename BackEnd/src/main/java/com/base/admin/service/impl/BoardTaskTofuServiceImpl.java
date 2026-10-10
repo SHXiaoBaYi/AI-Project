@@ -76,7 +76,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         vo.setWriterName(trimToNull(q.getWriterName()));
         vo.setContentPlatform(trimToNull(q.getContentPlatform()));
         vo.setAiPlatform(trimToNull(q.getAiPlatform()));
-        vo.setMetricLabel(metricLabel(chartType));
+        vo.setMetricLabel(metricLabel(chartType, level, q));
         if (q.getTopicId() != null) {
             vo.setTopicName(data.topicNames.getOrDefault(q.getTopicId(), "话题#" + q.getTopicId()));
         }
@@ -441,10 +441,16 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                 }
                 yield "writer";
             }
-            // 被引用内容发布平台数：内容发布平台 → 该平台在各话题的被引用次数
+            // 被引用内容发布平台数（三级，横轴始终=日期）：
+            // 第1层 各内容平台被引用次数汇总
+            // 第2层 该内容平台下各 AI 平台引用次数
+            // 第3层 该内容平台 + 该 AI 下各话题引用次数
             case "topicCiteCount" -> {
-                if (StringUtils.hasText(q.getContentPlatform())) {
+                if (StringUtils.hasText(q.getContentPlatform()) && StringUtils.hasText(q.getAiPlatform())) {
                     yield "topic";
+                }
+                if (StringUtils.hasText(q.getContentPlatform())) {
+                    yield "aiPlatform";
                 }
                 yield "contentPlatform";
             }
@@ -597,14 +603,24 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         return List.of("day", "week", "month", "year").contains(g) ? g : "week";
     }
 
-    private static String metricLabel(String chartType) {
+    private static String metricLabel(String chartType, String level, BoardTaskTofuQueryDTO q) {
         return switch (chartType) {
             case "publishCount" -> "发布数量";
             case "citeRate" -> "被收录文章/发布文章%";
             case "employeeCiteCompare" -> "被收录文章/产出文章%";
             case "employeeCiteMom" -> "收录率环比(pp)";
             case "employeeCiteYoy" -> "收录率同比(pp)";
-            case "topicCiteCount" -> "内容平台被引用次数";
+            case "topicCiteCount" -> {
+                if ("topic".equals(level)
+                        && StringUtils.hasText(q.getContentPlatform())
+                        && StringUtils.hasText(q.getAiPlatform())) {
+                    yield q.getContentPlatform().trim() + " · " + q.getAiPlatform().trim() + " · 各话题引用次数";
+                }
+                if ("aiPlatform".equals(level) && StringUtils.hasText(q.getContentPlatform())) {
+                    yield q.getContentPlatform().trim() + " · 各AI平台引用次数";
+                }
+                yield "各内容平台被引用次数";
+            }
             default -> "指标";
         };
     }

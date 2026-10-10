@@ -5,8 +5,9 @@ import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import { getGeoNegativeDailyApi, getGeoTopicPlatformChartsApi } from '@/api/geo';
 import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
-import { bindBoardColumnDrill, buildBoardDrillLookup } from '@/components/geo/boardChartDrill';
+import { bindBoardColumnDrill, buildBoardDrillLookup, resolveBoardSeriesName } from '@/components/geo/boardChartDrill';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
+import { uniqueBoardSeries } from '@/components/geo/BoardChartLegend';
 import type { GeoBoardQuery, GeoChartPoint, GeoDailyVO, GeoTopicPlatformCharts } from '@/types/geo';
 import type { DemoBoardGrain } from '@/constants/demoData';
 
@@ -191,16 +192,25 @@ function IndependentTofuCard({
 
   const drillRef = useRef(onSeriesClick);
   drillRef.current = onSeriesClick;
+  const chartsRef = useRef(charts);
+  chartsRef.current = charts;
   const drillLookupRef = useRef(new Map<string, string>());
+  const seriesOrderRef = useRef<string[]>([]);
 
   const bindChartClick = useCallback(
     (plot: { chart?: { on?: (event: string, handler: (evt: unknown) => void) => void } }) => {
       bindBoardColumnDrill(
         plot,
         (hit) => {
-          drillRef.current(hit.series, hit.drillKey);
+          const name =
+            resolveBoardSeriesName(hit.series, hit.drillKey, chartsRef.current, seriesOrderRef.current) ||
+            (seriesOrderRef.current.includes(hit.series) ? hit.series : undefined);
+          if (!name) return;
+          const key = drillLookupRef.current.get(name) || name;
+          drillRef.current(name, key);
         },
         drillLookupRef,
+        seriesOrderRef,
       );
     },
     [],
@@ -216,15 +226,16 @@ function IndependentTofuCard({
     }
   };
 
+  // 下钻键只用 drillKey，不要写 key（G2 会把 key 当系列名）
   const chartData = (charts || []).map((p) => ({
     axis: formatAxis(p.axis),
     series: p.series,
     fullSeries: p.series,
     value: p.value,
     drillKey: p.key ?? p.series,
-    key: p.key ?? p.series,
   }));
   drillLookupRef.current = buildBoardDrillLookup(chartData);
+  seriesOrderRef.current = uniqueBoardSeries(chartData);
 
   const negColumns: ColumnsType<GeoDailyVO> = [
     { title: '日期', dataIndex: 'inspectDate', width: 110 },

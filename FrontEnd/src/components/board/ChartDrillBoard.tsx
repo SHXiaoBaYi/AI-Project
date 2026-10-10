@@ -139,6 +139,7 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
   const [data, setData] = useState<BoardChartDrill | null>(null);
   const [loading, setLoading] = useState(false);
   const drillLookupRef = useRef(new Map<string, string>());
+  const seriesOrderRef = useRef<string[]>([]);
 
   const load = useCallback(
     async (nextStack: BoardChartStackItem[], clickKey?: string) => {
@@ -184,7 +185,6 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
         seriesKey: p.seriesKey || p.series,
         fullSeries: p.series || p.seriesKey,
         drillKey: p.seriesKey || p.series,
-        key: p.seriesKey || p.series,
         drillable: p.drillable !== false && !!data?.chartDrillable,
       }));
   }, [data]);
@@ -193,6 +193,7 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
   const { hidden: lineHidden, toggle: toggleLineSeries } = useHiddenBoardSeries(lineSeries);
   const lineChartData = useMemo(() => filterBoardSeries(timeSeriesData, lineHidden), [timeSeriesData, lineHidden]);
   drillLookupRef.current = buildBoardDrillLookup(timeSeriesData);
+  seriesOrderRef.current = uniqueBoardSeries(timeSeriesData);
 
   const onSeriesDrill = useCallback(
     (payload?: { seriesKey?: string; series?: string; key?: string; drillable?: boolean }) => {
@@ -231,14 +232,21 @@ export default function ChartDrillBoard({ domain, title, grain: grainProp, range
       bindBoardColumnDrill(
         plot,
         (hit) => {
+          const order = seriesOrderRef.current;
+          let name = hit.series;
+          if (name && /^\d+$/.test(name) && order[Number(name)]) {
+            name = order[Number(name)];
+          }
+          const key = drillLookupRef.current.get(name) || hit.drillKey || name;
           drillRef.current({
-            seriesKey: hit.drillKey,
-            series: hit.series,
-            key: hit.drillKey,
+            seriesKey: key,
+            series: name,
+            key,
             drillable: true,
           });
         },
         drillLookupRef,
+        seriesOrderRef,
       );
     },
     [],
