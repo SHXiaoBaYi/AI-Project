@@ -82,6 +82,9 @@ export type BoardTaskTofuQuery = {
   targetQuestion?: string;
   publisherUserId?: number;
   publisherName?: string;
+  /** 撰写人（员工AI收录对比下钻） */
+  writerUserId?: number;
+  writerName?: string;
   contentPlatform?: string;
   aiPlatform?: string;
 };
@@ -97,6 +100,8 @@ export type BoardTaskTofuChart = {
   targetQuestion?: string;
   publisherUserId?: number;
   publisherName?: string;
+  writerUserId?: number;
+  writerName?: string;
   contentPlatform?: string;
   aiPlatform?: string;
   chart?: { axis: string; series: string; value: number; key?: string }[];

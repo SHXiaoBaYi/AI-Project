@@ -13,7 +13,7 @@ public class BoardTaskTofuChartVO {
     @Schema(description = "图表类型")
     private String chartType;
 
-    @Schema(description = "当前层级 topic/question/employee/contentPlatform/aiPlatform")
+    @Schema(description = "当前层级 topic/question/employee/writer/contentPlatform/aiPlatform")
     private String level;
 
     @Schema(description = "系列字段（与 level 一致）")
@@ -34,11 +34,17 @@ public class BoardTaskTofuChartVO {
     @Schema(description = "目标问题")
     private String targetQuestion;
 
-    @Schema(description = "员工用户ID")
+    @Schema(description = "发布人用户ID")
     private Long publisherUserId;
 
-    @Schema(description = "员工名称")
+    @Schema(description = "发布人名称")
     private String publisherName;
+
+    @Schema(description = "撰写人用户ID", example = "2")
+    private Long writerUserId;
+
+    @Schema(description = "撰写人名称", example = "甄德明")
+    private String writerName;
 
     @Schema(description = "内容发布平台")
     private String contentPlatform;

@@ -45,6 +45,8 @@ type DrillState = {
   targetQuestion?: string;
   publisherUserId?: number;
   publisherName?: string;
+  writerUserId?: number;
+  writerName?: string;
   contentPlatform?: string;
   aiPlatform?: string;
 };
@@ -57,6 +59,10 @@ type ChartDef = {
   publishDetail?: boolean;
   /** 环比/同比可为负，只允许点表格下钻，不响应柱体点击 */
   tableDrill?: boolean;
+  /** 员工收录：按撰写人下钻 */
+  writerDrill?: boolean;
+  /** 被引用内容发布平台：平台 → 话题 */
+  contentPlatformThenTopic?: boolean;
 };
 
 type CiteTableRow = {
@@ -102,29 +108,33 @@ const CHARTS: ChartDef[] = [
   {
     chartType: 'citeRate',
     title: '话题被AI收录率',
-    hint: '话题 → 目标问题 → 员工 → AI平台',
+    hint: '第1层：各话题被收录文章/发布文章 · 第2层：各AI平台收录率',
   },
   {
     chartType: 'employeeCiteCompare',
     title: '员工AI收录对比',
-    hint: '员工 → AI平台',
+    hint: '第1层：撰写人 被收录/产出 · 第2层：各AI平台收录率',
+    writerDrill: true,
   },
   {
     chartType: 'employeeCiteMom',
     title: '员工AI收录环比',
-    hint: '员工 → AI平台 · 百分点，可为负 · 点表格下钻',
+    hint: '撰写人 → AI平台 · 百分点，可为负 · 点表格下钻',
     tableDrill: true,
+    writerDrill: true,
   },
   {
     chartType: 'employeeCiteYoy',
     title: '员工AI收录同比',
-    hint: '员工 → AI平台 · 百分点，可为负 · 点表格下钻',
+    hint: '撰写人 → AI平台 · 百分点，可为负 · 点表格下钻',
     tableDrill: true,
+    writerDrill: true,
   },
   {
     chartType: 'topicCiteCount',
-    title: '话题被AI平台引用数',
-    hint: '话题 → 目标问题 → AI平台',
+    title: '被引用内容发布平台数',
+    hint: '第1层：各内容发布平台被引用次数 · 第2层：该平台在各话题被引用次数',
+    contentPlatformThenTopic: true,
   },
 ];
 
@@ -160,6 +170,8 @@ function IndependentTaskTofuCard({
           targetQuestion: next.targetQuestion,
           publisherUserId: next.publisherUserId,
           publisherName: next.publisherName,
+          writerUserId: next.writerUserId,
+          writerName: next.writerName,
           contentPlatform: next.contentPlatform,
           aiPlatform: next.aiPlatform,
         };
@@ -172,6 +184,8 @@ function IndependentTaskTofuCard({
           targetQuestion: data?.targetQuestion || next.targetQuestion,
           publisherUserId: data?.publisherUserId ?? next.publisherUserId,
           publisherName: data?.publisherName || next.publisherName,
+          writerUserId: data?.writerUserId ?? next.writerUserId,
+          writerName: data?.writerName || next.writerName,
           contentPlatform: data?.contentPlatform || next.contentPlatform,
           aiPlatform: data?.aiPlatform || next.aiPlatform,
         });
@@ -224,16 +238,29 @@ function IndependentTaskTofuCard({
       const key = drillKey || series;
       if (!key) return;
       if (level === 'topic') {
+        // 被引用内容发布平台看板：第2层已是话题，不再下钻
+        if (def.contentPlatformThenTopic) {
+          return;
+        }
         const id = Number(key);
         if (!Number.isFinite(id)) {
           message.warning('无法识别话题');
           return;
         }
-        void load({ topicId: id, topicName: series || key });
+        void load({ ...drill, topicId: id, topicName: series || key });
         return;
       }
       if (level === 'question') {
         void load({ ...drill, targetQuestion: key });
+        return;
+      }
+      if (level === 'writer') {
+        const uid = key.startsWith('n:') ? undefined : Number(key);
+        void load({
+          ...drill,
+          writerUserId: Number.isFinite(uid as number) ? (uid as number) : undefined,
+          writerName: series || (key.startsWith('n:') ? key.slice(2) : key),
+        });
         return;
       }
       if (level === 'employee') {
@@ -245,13 +272,19 @@ function IndependentTaskTofuCard({
         });
         return;
       }
-      if (level === 'contentPlatform' && def.publishDetail) {
-        void openPublishDrawer(key, drill);
+      if (level === 'contentPlatform') {
+        if (def.contentPlatformThenTopic) {
+          void load({ ...drill, contentPlatform: key });
+          return;
+        }
+        if (def.publishDetail) {
+          void openPublishDrawer(key, drill);
+        }
         return;
       }
       // aiPlatform leaf: no further drill
     },
-    [def.publishDetail, drill, level, load, openPublishDrawer],
+    [def.contentPlatformThenTopic, def.publishDetail, drill, level, load, openPublishDrawer],
   );
 
   const clickRef = useRef(onSeriesClick);
@@ -274,6 +307,21 @@ function IndependentTaskTofuCard({
   );
 
   const onBack = () => {
+    // 被引用内容发布平台：话题层 → 回平台层
+    if (def.contentPlatformThenTopic && level === 'topic' && drill.contentPlatform) {
+      void load({});
+      return;
+    }
+    // 员工收录：AI平台层 → 回撰写人层
+    if (level === 'aiPlatform' && (drill.writerUserId != null || !!drill.writerName)) {
+      void load({});
+      return;
+    }
+    // 话题收录率：AI平台层 → 回话题层
+    if (level === 'aiPlatform' && drill.topicId != null && def.chartType === 'citeRate') {
+      void load({});
+      return;
+    }
     if (
       level === 'contentPlatform' ||
       (level === 'aiPlatform' && (drill.publisherUserId != null || !!drill.publisherName))
@@ -318,21 +366,31 @@ function IndependentTaskTofuCard({
   }));
   const citeTable = def.tableDrill ? buildCiteTable(charts) : null;
 
-  const isEmployeeRootChart = def.chartType.startsWith('employee');
+  const isEmployeeRootChart = def.writerDrill || def.chartType.startsWith('employee');
   const showBack =
     level === 'question' ||
     (level === 'employee' && !isEmployeeRootChart) ||
-    level === 'contentPlatform' ||
+    (level === 'topic' && !!drill.contentPlatform && !!def.contentPlatformThenTopic) ||
+    (level === 'contentPlatform' && !!def.publishDetail) ||
     level === 'aiPlatform';
 
   const crumbs = [
-    { title: def.chartType.startsWith('employee') ? '员工' : '话题' },
-    ...(drill.topicName ? [{ title: drill.topicName }] : []),
+    {
+      title: def.contentPlatformThenTopic
+        ? '内容发布平台'
+        : def.writerDrill || def.chartType.startsWith('employee')
+          ? '撰写人'
+          : '话题',
+    },
+    ...(drill.contentPlatform && def.contentPlatformThenTopic ? [{ title: drill.contentPlatform }] : []),
+    ...(drill.topicName && !def.contentPlatformThenTopic ? [{ title: drill.topicName }] : []),
+    ...(drill.topicName && def.contentPlatformThenTopic && level === 'topic' ? [{ title: '各话题' }] : []),
     ...(drill.targetQuestion
       ? [{ title: drill.targetQuestion.length > 14 ? `${drill.targetQuestion.slice(0, 13)}…` : drill.targetQuestion }]
       : []),
     ...(drill.publisherName ? [{ title: drill.publisherName }] : []),
-    ...(level === 'contentPlatform' ? [{ title: '内容平台' }] : []),
+    ...(drill.writerName ? [{ title: drill.writerName }] : []),
+    ...(level === 'contentPlatform' && def.publishDetail ? [{ title: '内容平台' }] : []),
     ...(level === 'aiPlatform' ? [{ title: 'AI平台' }] : []),
   ];
 
@@ -447,12 +505,12 @@ function IndependentTaskTofuCard({
           dataSource={citeTable?.rows || []}
           columns={[
             {
-              title: level === 'aiPlatform' ? 'AI平台' : '员工',
+              title: level === 'aiPlatform' ? 'AI平台' : '撰写人',
               dataIndex: 'series',
               width: 140,
               fixed: 'left',
               render: (name: string, row) =>
-                level === 'employee' ? (
+                level === 'writer' || level === 'employee' ? (
                   <Button
                     type='link'
                     size='small'
@@ -485,14 +543,18 @@ function IndependentTaskTofuCard({
       ) : null}
       <div className='mt-1 text-xs text-neutral-400'>
         {def.tableDrill
-          ? level === 'employee'
-            ? '环比/同比可能为负，请点击表格中的员工姓名下钻，图表不可下钻'
+          ? level === 'writer' || level === 'employee'
+            ? '环比/同比可能为负，请点击表格中的撰写人姓名下钻，图表不可下钻'
             : '已到最细层级'
           : level === 'contentPlatform' && def.publishDetail
             ? '点击柱体查看该内容平台发布明细'
-            : level === 'aiPlatform'
-              ? '已到最细层级'
-              : '点击柱体下钻下一级'}
+            : level === 'contentPlatform' && def.contentPlatformThenTopic
+              ? '点击柱体查看该平台在各话题的被引用次数'
+              : level === 'topic' && def.contentPlatformThenTopic
+                ? '已到最细层级'
+                : level === 'aiPlatform'
+                  ? '已到最细层级'
+                  : '点击柱体下钻下一级'}
       </div>
 
       <Drawer
