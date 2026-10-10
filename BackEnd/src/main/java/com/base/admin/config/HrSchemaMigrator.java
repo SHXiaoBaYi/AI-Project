@@ -90,13 +90,13 @@ public class HrSchemaMigrator implements ApplicationRunner {
         addColumnIfMissing("hr_offer", "salary_amount",
                 "ALTER TABLE hr_offer ADD COLUMN salary_amount DECIMAL(12,2) NULL COMMENT '最终offer金额' AFTER application_id");
         jdbc.update("""
-                INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
+                INSERT IGNORE INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
                 ('SCREEN_FAIL', '初筛不合适', 21, 0, 1, 1, 1),
                 ('PHONE_PASS', '电话沟通合适', 25, 0, 1, 0, 1),
                 ('PHONE_FAIL', '电话沟通不合适', 26, 0, 1, 1, 1)
                 ON DUPLICATE KEY UPDATE stage_name = VALUES(stage_name), sort_no = VALUES(sort_no),
                   funnel_visible = VALUES(funnel_visible), data_ready = VALUES(data_ready),
-                  terminal = VALUES(terminal), is_active = 1
+                  terminal = VALUES(terminal)
                 """);
     }
 
@@ -171,7 +171,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
                     "SELECT COUNT(1) FROM sys_user_role WHERE user_id = ? AND role_id = ?",
                     Integer.class, userId, roleId);
             if (linked == null || linked == 0) {
-                jdbc.update("INSERT INTO sys_user_role (user_id, role_id, is_active) VALUES (?, ?, 1)", userId, roleId);
+                jdbc.update("INSERT IGNORE INTO sys_user_role (user_id, role_id, is_active) VALUES (?, ?, 1)", userId, roleId);
             }
         }
     }
@@ -256,16 +256,14 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 ON DUPLICATE KEY UPDATE
                   menu_name = VALUES(menu_name), parent_id = VALUES(parent_id), sort_order = VALUES(sort_order),
                   path = VALUES(path), component = VALUES(component), menu_type = VALUES(menu_type),
-                  perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark), is_active = 1
+                  perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark)
                 """, id, name, parent, sort, path, component, type, perms, icon, remark);
     }
 
     private void grant(long roleId, int... menuIds) {
         for (int menuId : menuIds) {
             jdbc.update("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active) VALUES (?, ?, 1)
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """, roleId, menuId);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active) VALUES (?, ?, 1);""", roleId, menuId);
         }
     }
 
@@ -359,12 +357,17 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private void alias(String alias, String displayName, Long userId) {
+        // 仅补缺失；已逻辑删除的 alias 不复活
         jdbc.update("""
                 INSERT INTO hr_owner_alias (alias, display_name, user_id, create_by, is_active)
-                VALUES (?, ?, ?, 'hr-seed', 1)
-                ON DUPLICATE KEY UPDATE display_name = VALUES(display_name),
-                  user_id = COALESCE(hr_owner_alias.user_id, VALUES(user_id)), is_active = 1
-                """, alias, displayName, userId);
+                SELECT ?, ?, ?, 'hr-seed', 1 FROM DUAL
+                WHERE NOT EXISTS (SELECT 1 FROM hr_owner_alias WHERE alias = ?)
+                """, alias, displayName, userId, alias);
+        jdbc.update("""
+                UPDATE hr_owner_alias
+                SET display_name = ?, user_id = COALESCE(user_id, ?)
+                WHERE alias = ? AND is_active = 1
+                """, displayName, userId, alias);
     }
 
     private Long userIdByNickname(String nickname) {

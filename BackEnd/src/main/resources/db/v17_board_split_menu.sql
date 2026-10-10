@@ -12,7 +12,7 @@ SET menu_name = '数据看板',
     remark = 'GEO/员工收录/任务看板父菜单'
 WHERE menu_id = 160;
 
-INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
 VALUES
 (161, 'GEO看板', 160, 1, 'board/geo', 'board/geo/index', 'C', 'board:view', 'FundOutlined', 0, 0, 'GEO主题/人维图表下钻', 1),
 (162, '员工收录看板', 160, 2, 'board/task', 'board/task/index', 'C', 'board:view', 'ProfileOutlined', 0, 0, '员工发布/收录六个豆腐块看板', 1),
@@ -26,32 +26,25 @@ ON DUPLICATE KEY UPDATE
   perms = VALUES(perms),
   icon = VALUES(icon),
   remark = VALUES(remark),
-  menu_type = VALUES(menu_type),
-  is_active = 1;
+  menu_type = VALUES(menu_type);
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, 161, 1 FROM DUAL
-ON DUPLICATE KEY UPDATE is_active = 1;
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+SELECT 1, 161, 1 FROM DUAL;
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, 162, 1 FROM DUAL
-ON DUPLICATE KEY UPDATE is_active = 1;
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+SELECT 1, 162, 1 FROM DUAL;
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, 163, 1 FROM DUAL
-ON DUPLICATE KEY UPDATE is_active = 1;
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+SELECT 1, 163, 1 FROM DUAL;
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
 SELECT DISTINCT role_id, 161, 1 FROM sys_role_menu
-WHERE menu_id = 160 AND IFNULL(is_active, 1) = 1
-ON DUPLICATE KEY UPDATE is_active = 1;
+WHERE menu_id = 160 AND IFNULL(is_active, 1) = 1;
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
 SELECT DISTINCT role_id, 162, 1 FROM sys_role_menu
-WHERE menu_id = 160 AND IFNULL(is_active, 1) = 1
-ON DUPLICATE KEY UPDATE is_active = 1;
+WHERE menu_id = 160 AND IFNULL(is_active, 1) = 1;
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
 SELECT DISTINCT role_id, 163, 1 FROM sys_role_menu
-WHERE menu_id = 160 AND IFNULL(is_active, 1) = 1
-ON DUPLICATE KEY UPDATE is_active = 1;
+WHERE menu_id = 160 AND IFNULL(is_active, 1) = 1;

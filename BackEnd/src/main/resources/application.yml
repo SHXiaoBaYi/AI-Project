@@ -74,6 +74,8 @@ jwt:
   # 登录有效期 12 小时（毫秒）；超时后 JWT 与在线会话同时失效，需重新扫码登录
   expiration: 43200000
 
+# 约定：业务样例/灌数一律一次性开关（默认 false）。Schema Migrator 只补表结构与「缺失」主数据，
+# 禁止 ON DUPLICATE 把 is_active 刷回 1，避免用户删除的数据在重启/发版后复活。
 geo:
   # 一次性样例刷数开关：需要时改 true，启动跑完立刻改回 false
   seed: false

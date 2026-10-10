@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS sys_task_assignee (
   KEY idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务执行人';
 
-INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
 VALUES
 (150, '任务', 0, 4, '/task', '', 'M', '', 'CheckSquareOutlined', 0, 0, '任务中心', 1),
 (151, '任务管理', 150, 1, 'task/list', 'task/list/index', 'C', 'task:list', 'ProfileOutlined', 0, 0, '全部任务增删改查', 1),
@@ -68,9 +68,7 @@ ON DUPLICATE KEY UPDATE
   component = VALUES(component),
   perms = VALUES(perms),
   icon = VALUES(icon),
-  remark = VALUES(remark),
-  is_active = 1;
+  remark = VALUES(remark);
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 150 AND 155
-ON DUPLICATE KEY UPDATE is_active = 1;
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 150 AND 155;

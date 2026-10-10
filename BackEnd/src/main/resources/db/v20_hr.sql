@@ -417,11 +417,12 @@ CREATE TABLE IF NOT EXISTS hr_board_view (
   UNIQUE KEY uk_hr_board_view (user_id, view_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='看板保存视图';
 
+-- 字典种子：仅补缺失 / 更新文案；不把 is_active 刷回 1（避免用户删除后发版复活）
 INSERT INTO hr_channel (channel_code, channel_name, is_active) VALUES
 ('BOSS', 'BOSS', 1),
 ('LIEPIN', '猎聘', 1),
 ('HEADHUNTER', '猎头', 1)
-ON DUPLICATE KEY UPDATE channel_name = VALUES(channel_name), is_active = 1;
+ON DUPLICATE KEY UPDATE channel_name = VALUES(channel_name);
 
 INSERT INTO hr_reject_reason (reason_code, reason_name, sort_no, is_active) VALUES
 ('SKILL', '能力不符', 1, 1),
@@ -429,7 +430,7 @@ INSERT INTO hr_reject_reason (reason_code, reason_name, sort_no, is_active) VALU
 ('CANDIDATE_QUIT', '候选人放弃', 3, 1),
 ('JOB_PAUSED', '岗位暂停', 4, 1),
 ('OTHER', '其他', 5, 1)
-ON DUPLICATE KEY UPDATE reason_name = VALUES(reason_name), is_active = 1;
+ON DUPLICATE KEY UPDATE reason_name = VALUES(reason_name), sort_no = VALUES(sort_no);
 
 INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
 ('ENTERED', '已录入', 10, 0, 1, 0, 1),
@@ -468,7 +469,7 @@ INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_
 ('R5_DISPUTE', '五面待商榷', 98, 0, 1, 0, 1),
 ('R5_FAIL', '五面未通过', 99, 0, 1, 1, 1)
 ON DUPLICATE KEY UPDATE stage_name = VALUES(stage_name), sort_no = VALUES(sort_no),
-  funnel_visible = VALUES(funnel_visible), data_ready = VALUES(data_ready), terminal = VALUES(terminal), is_active = 1;
+  funnel_visible = VALUES(funnel_visible), data_ready = VALUES(data_ready), terminal = VALUES(terminal);
 
 INSERT INTO hr_stage_map (source_field, source_value, stage_code, is_active) VALUES
 ('resume_status', '通过', 'SCREEN_PASS', 1),
@@ -478,7 +479,7 @@ INSERT INTO hr_stage_map (source_field, source_value, stage_code, is_active) VAL
 ('progress', '面试未通过', 'FIRST_FAIL', 1),
 ('progress', '候选人拒绝', 'CANDIDATE_REJECT', 1),
 ('progress', '已入职', 'ONBOARDED', 1)
-ON DUPLICATE KEY UPDATE stage_code = VALUES(stage_code), is_active = 1;
+ON DUPLICATE KEY UPDATE stage_code = VALUES(stage_code);
 
 CREATE TABLE IF NOT EXISTS hr_requisition_round (
   id                  BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -634,7 +635,7 @@ INSERT INTO hr_target_option (name, sort_no, create_by, is_active) VALUES
 ('尽快', 2, 'hr-seed', 1),
 ('7月-尽快', 3, 'hr-seed', 1),
 ('常规节奏持续招聘', 4, 'hr-seed', 1)
-ON DUPLICATE KEY UPDATE is_active = 1;
+ON DUPLICATE KEY UPDATE sort_no = VALUES(sort_no);
 
 CREATE TABLE IF NOT EXISTS hr_fail_reason (
   id           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -655,4 +656,4 @@ INSERT INTO hr_fail_reason (name, sort_no, create_by, is_active) VALUES
 ('候选人放弃', 3, 'hr-seed', 1),
 ('岗位暂停', 4, 'hr-seed', 1),
 ('其他', 5, 'hr-seed', 1)
-ON DUPLICATE KEY UPDATE is_active = 1;
+ON DUPLICATE KEY UPDATE sort_no = VALUES(sort_no);

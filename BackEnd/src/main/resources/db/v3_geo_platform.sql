@@ -13,9 +13,13 @@ CREATE TABLE IF NOT EXISTS geo_platform (
   UNIQUE KEY uk_platform_name (platform_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO监测平台基础数据';
 
+-- 仅补缺失；已逻辑删除的平台不复活
+INSERT IGNORE INTO geo_platform (platform_name, sort_order, is_active)
+SELECT '豆包', 1, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM geo_platform WHERE platform_name = '豆包');
 INSERT INTO geo_platform (platform_name, sort_order, is_active)
-VALUES ('豆包', 1, 1), ('DS', 2, 1), ('小红书', 3, 1)
-ON DUPLICATE KEY UPDATE is_active = 1;
+SELECT 'DS', 2, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM geo_platform WHERE platform_name = 'DS');
+INSERT INTO geo_platform (platform_name, sort_order, is_active)
+SELECT '小红书', 3, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM geo_platform WHERE platform_name = '小红书');
 
 UPDATE sys_menu SET sort_order = 0 WHERE menu_name = '工作台' OR path IN ('workbench', '/workbench');
 
@@ -25,7 +29,7 @@ VALUES
 (114, '平台新增', 113, 1, '', '', 'F', 'geo:platform:add', '#', 0, 0, '', 1),
 (115, '平台修改', 113, 2, '', '', 'F', 'geo:platform:edit', '#', 0, 0, '', 1),
 (116, '平台删除', 113, 3, '', '', 'F', 'geo:platform:delete', '#', 0, 0, '', 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), path = VALUES(path), perms = VALUES(perms), is_active = 1;
+ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), path = VALUES(path), perms = VALUES(perms);
 
 UPDATE sys_menu SET sort_order = 1 WHERE menu_id = 101;
 UPDATE sys_menu SET sort_order = 2 WHERE menu_id = 113;
@@ -33,6 +37,5 @@ UPDATE sys_menu SET sort_order = 3 WHERE menu_id = 102;
 UPDATE sys_menu SET sort_order = 4 WHERE menu_id = 103;
 UPDATE sys_menu SET sort_order = 5 WHERE menu_id = 104;
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 113 AND 116
-ON DUPLICATE KEY UPDATE is_active = 1;
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 113 AND 116;

@@ -41,7 +41,7 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
         Integer count = jdbc.queryForObject("SELECT COUNT(1) FROM sys_dingtalk_app WHERE id = 1", Integer.class);
         if (count == null || count == 0) {
             jdbc.update("""
-                    INSERT INTO sys_dingtalk_app (id, app_id, agent_id, client_id, client_secret, enabled, create_by, is_active)
+                    INSERT IGNORE INTO sys_dingtalk_app (id, app_id, agent_id, client_id, client_secret, enabled, create_by, is_active)
                     VALUES (1, '', '', '', '', 0, 'system', 1)
                     """);
             log.info("已创建空的钉钉应用配置，请到「系统管理 → 钉钉应用配置」填写");
@@ -120,35 +120,26 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                   component = VALUES(component),
                   perms = VALUES(perms),
                   icon = VALUES(icon),
-                  remark = VALUES(remark),
-                  is_active = 1
+                  remark = VALUES(remark)
                 """);
         jdbc.update("""
-                INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (142, 143, 144, 145, 146, 147, 148, 149)
-                ON DUPLICATE KEY UPDATE is_active = 1
-                """);
+                INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (142, 143, 144, 145, 146, 147, 148, 149);""");
         jdbc.update("""
-                INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                 SELECT DISTINCT rm.role_id, m.menu_id, 1
                 FROM sys_role_menu rm
                 CROSS JOIN (SELECT 148 AS menu_id UNION ALL SELECT 149) m
-                WHERE rm.is_active = 1
-                ON DUPLICATE KEY UPDATE is_active = 1
-                """);
+                WHERE rm.is_active = 1;""");
         jdbc.update("""
-                INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                SELECT DISTINCT role_id, 144, 1 FROM sys_role_menu WHERE menu_id = 220 AND is_active = 1
-                ON DUPLICATE KEY UPDATE is_active = 1
-                """);
+                INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                SELECT DISTINCT role_id, 144, 1 FROM sys_role_menu WHERE menu_id = 220 AND is_active = 1;""");
         jdbc.update("""
-                INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                 SELECT DISTINCT role_id, m.menu_id, 1
                 FROM sys_role_menu rm
                 CROSS JOIN (SELECT 145 AS menu_id UNION ALL SELECT 146 UNION ALL SELECT 147) m
-                WHERE rm.menu_id = 144 AND rm.is_active = 1
-                ON DUPLICATE KEY UPDATE is_active = 1
-                """);
+                WHERE rm.menu_id = 144 AND rm.is_active = 1;""");
         log.info("钉钉应用配置表与菜单已同步");
     }
 

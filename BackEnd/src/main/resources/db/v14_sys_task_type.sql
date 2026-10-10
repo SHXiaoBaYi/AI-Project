@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS sys_task_type (
   UNIQUE KEY uk_type_name (type_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务类型基础配置';
 
-INSERT INTO sys_task_type (type_name, sort_order, remark, is_active)
+INSERT IGNORE INTO sys_task_type (type_name, sort_order, remark, is_active)
 SELECT '日常', 1, '默认日常事务', 1 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = '日常');
 
@@ -52,9 +52,7 @@ ON DUPLICATE KEY UPDATE
   component = VALUES(component),
   perms = VALUES(perms),
   icon = VALUES(icon),
-  remark = VALUES(remark),
-  is_active = 1;
+  remark = VALUES(remark);
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 156 AND 159
-ON DUPLICATE KEY UPDATE is_active = 1;
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 156 AND 159;

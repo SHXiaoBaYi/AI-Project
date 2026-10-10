@@ -148,7 +148,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         try (Statement st = connection.createStatement()) {
             // 仅有旧角色、尚无任一正式 GEO 角色的用户 → 挂上运营录入
             int users = st.executeUpdate("""
-                    INSERT INTO sys_user_role (user_id, role_id, is_active)
+                    INSERT IGNORE INTO sys_user_role (user_id, role_id, is_active)
                     SELECT DISTINCT ur.user_id, %d, 1
                     FROM sys_user_role ur
                     WHERE ur.role_id IN (%s) AND ur.is_active = 1
@@ -157,24 +157,18 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                         WHERE x.user_id = ur.user_id
                           AND x.role_id IN (%d, %d)
                           AND x.is_active = 1
-                      )
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """.formatted(opsId, legacyIn, opsId, mgmtId));
+                      );""".formatted(opsId, legacyIn, opsId, mgmtId));
             // 旧角色菜单并入两个正式角色
             int menusOps = st.executeUpdate("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                     SELECT %d, rm.menu_id, 1
                     FROM sys_role_menu rm
-                    WHERE rm.role_id IN (%s) AND rm.is_active = 1
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """.formatted(opsId, legacyIn));
+                    WHERE rm.role_id IN (%s) AND rm.is_active = 1;""".formatted(opsId, legacyIn));
             int menusMgmt = st.executeUpdate("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                     SELECT %d, rm.menu_id, 1
                     FROM sys_role_menu rm
-                    WHERE rm.role_id IN (%s) AND rm.is_active = 1
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """.formatted(mgmtId, legacyIn));
+                    WHERE rm.role_id IN (%s) AND rm.is_active = 1;""".formatted(mgmtId, legacyIn));
             int unlinkUsers = st.executeUpdate(
                     "UPDATE sys_user_role SET is_active = 0 WHERE role_id IN (" + legacyIn + ") AND is_active = 1");
             int unlinkMenus = st.executeUpdate(
@@ -220,7 +214,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         }
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
-                    INSERT INTO sys_role (role_name, role_key, sort_order, status, remark, is_active)
+                    INSERT IGNORE INTO sys_role (role_name, role_key, sort_order, status, remark, is_active)
                     VALUES ('%s', '%s', %d, 0, '%s', 1)
                     """.formatted(
                     roleName.replace("'", "''"),
@@ -355,11 +349,19 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         try (Statement statement = connection.createStatement()) {
             for (String name : contentPlatforms) {
                 String safe = name.replace("'", "''");
+                // 仅补缺失；已逻辑删除的平台不把 is_active 刷回 1
                 statement.execute("""
                         INSERT INTO geo_platform (platform_name, platform_type, sort_order, is_active)
-                        VALUES ('%s', '内容发布平台', %d, 1)
-                        ON DUPLICATE KEY UPDATE is_active = 1, sort_order = VALUES(sort_order)
-                        """.formatted(safe, sort));
+                        SELECT '%s', '内容发布平台', %d, 1 FROM DUAL
+                        WHERE NOT EXISTS (
+                          SELECT 1 FROM geo_platform
+                          WHERE platform_name = '%s' AND platform_type = '内容发布平台'
+                        )
+                        """.formatted(safe, sort, safe));
+                statement.execute("""
+                        UPDATE geo_platform SET sort_order = %d
+                        WHERE platform_name = '%s' AND platform_type = '内容发布平台' AND is_active = 1
+                        """.formatted(sort, safe));
                 sort++;
             }
         }
@@ -425,13 +427,11 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     VALUES
                     (125, '内容投放新增', 122, 3, '', '', 'F', 'geo:content:add', '#', 0, 0, '', 1),
                     (126, '内容投放修改', 122, 4, '', '', 'F', 'geo:content:edit', '#', 0, 0, '', 1)
-                    ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), perms = VALUES(perms), is_active = 1
+                    ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), perms = VALUES(perms)
                     """);
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (125, 126)
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (125, 126);""");
         }
     }
 
@@ -478,16 +478,14 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         }
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
-                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
                     (127, '生成相似问题', 122, 5, '', '', 'F', 'geo:content:generate', '#', 0, 0, '', 1)
-                    ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), perms = VALUES(perms), is_active = 1
+                    ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), perms = VALUES(perms)
                     """);
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id = 127
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id = 127;""");
         }
     }
 
@@ -638,12 +636,11 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                         perms = 'geo:content:list',
                         icon = 'SendOutlined',
                         remark = '管理视角：目标问题生成、分配发布人、投放进度',
-                        sort_order = 8,
-                        is_active = 1
-                    WHERE menu_id = 122
+                        sort_order = 8
+                    WHERE menu_id = 122 AND is_active = 1
                     """);
             statement.execute("""
-                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
                     (128, '我的投放', 100, 9, 'geo/content-placement-work', '', 'C', 'geo:content:work', 'FormOutlined', 0, 0,
                      '一线视角：维护本人话题/目标问题的平台投放与引用详情', 1)
@@ -652,14 +649,11 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                       perms = VALUES(perms),
                       icon = VALUES(icon),
                       remark = VALUES(remark),
-                      sort_order = VALUES(sort_order),
-                      is_active = 1
+                      sort_order = VALUES(sort_order)
                     """);
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (122, 128)
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (122, 128);""");
         }
         log.info("已同步内容投放管理/我的投放双视角菜单");
     }
@@ -668,7 +662,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
     private void ensureArticleBoardMenu(Connection connection) throws Exception {
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
-                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
                     (129, '数据看板', 100, 7, 'geo/article-board', '', 'C', 'geo:article:list', 'FundOutlined', 0, 0,
                      'AI露出情况与文章发布/收录情况聚合看板', 1)
@@ -677,14 +671,11 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                       perms = VALUES(perms),
                       icon = VALUES(icon),
                       remark = VALUES(remark),
-                      sort_order = VALUES(sort_order),
-                      is_active = 1
+                      sort_order = VALUES(sort_order)
                     """);
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id = 129
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id = 129;""");
         }
         log.info("已同步数据看板菜单");
     }
@@ -717,7 +708,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         try (Statement statement = connection.createStatement()) {
             // 目录 path 使用 geo/xxx 前缀，避免与叶子绝对路径冲突（路由层会扁平化目录）
             statement.execute("""
-                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
                     (130, '基础配置', 100, 1, 'geo/config', '', 'M', '', 'AppstoreOutlined', 0, 0, '话题/平台主数据', 1),
                     (131, 'AI露出', 100, 2, 'geo/expose', '', 'M', '', 'RadarChartOutlined', 0, 0, '日监测数据与露出看板', 1),
@@ -729,33 +720,32 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                       path = VALUES(path),
                       menu_type = VALUES(menu_type),
                       icon = VALUES(icon),
-                      remark = VALUES(remark),
-                      is_active = 1
+                      remark = VALUES(remark)
                     """);
 
-            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 1, menu_name = '话题管理', is_active = 1 WHERE menu_id = 101");
-            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 2, menu_name = '平台管理', is_active = 1 WHERE menu_id = 113");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 1, menu_name = '话题管理' WHERE menu_id = 101");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 2, menu_name = '平台管理' WHERE menu_id = 113");
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 130, sort_order = 3, menu_name = '平台账号管理',
-                      path = 'geo/platform-account', perms = 'geo:platformAccount:list', icon = 'IdcardOutlined', is_active = 1
+                      path = 'geo/platform-account', perms = 'geo:platformAccount:list', icon = 'IdcardOutlined'
                     WHERE menu_id = 133
                     """);
 
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 131, sort_order = 1, menu_name = '日监测数据',
-                      path = 'geo/daily', perms = 'geo:daily:list', icon = 'CalendarOutlined', is_active = 1
+                      path = 'geo/daily', perms = 'geo:daily:list', icon = 'CalendarOutlined'
                     WHERE menu_id = 102
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 131, sort_order = 2, menu_name = '露出看板',
                       path = 'geo/expose-board', perms = 'geo:expose:list', icon = 'LineChartOutlined',
-                      remark = '日/周/月/年露出经营看板（已结束周期读落库快照）', is_active = 1
+                      remark = '日/周/月/年露出经营看板（已结束周期读落库快照）'
                     WHERE menu_id = 117
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 131, sort_order = 3, menu_name = '全年目标',
                       path = 'geo/yearly-target', perms = 'geo:yearly:list', icon = 'DashboardOutlined',
-                      remark = '全年目标配置与达成查看', is_active = 1
+                      remark = '全年目标配置与达成查看'
                     WHERE menu_id = 104
                     """);
 
@@ -771,12 +761,12 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 132, sort_order = 2, menu_name = '投放管理',
                       path = 'geo/content-placement-manage', perms = 'geo:content:list',
-                      remark = '目标问题生成、分配发布人与投放进度', is_active = 1
+                      remark = '目标问题生成、分配发布人与投放进度'
                     WHERE menu_id = 122
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 132, sort_order = 3,
-                      path = 'geo/content-placement-work', perms = 'geo:content:work', is_active = 1
+                      path = 'geo/content-placement-work', perms = 'geo:content:work'
                     WHERE menu_id = 128
                     """);
             statement.executeUpdate("""
@@ -788,10 +778,8 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             statement.executeUpdate("UPDATE sys_menu SET parent_id = 117, is_active = 0 WHERE menu_id IN (120, 121)");
 
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (130, 131, 132, 117, 129)
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (130, 131, 132, 117, 129);""");
         }
         log.info("已同步 GEO 菜单三分域与露出看板合并");
     }
@@ -841,19 +829,19 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             statement.executeUpdate("""
                     UPDATE sys_menu SET menu_name = '平台账号新增', parent_id = 133, sort_order = 1,
                       path = '', component = '', menu_type = 'F', perms = 'geo:platformAccount:add',
-                      icon = '#', visible = 0, status = 0, is_active = 1
+                      icon = '#', visible = 0, status = 0
                     WHERE menu_id = 134 AND (path = 'geo/article' OR perms = 'geo:article:list' OR menu_type = 'C')
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET menu_name = '平台账号修改', parent_id = 133, sort_order = 2,
                       path = '', component = '', menu_type = 'F', perms = 'geo:platformAccount:edit',
-                      icon = '#', visible = 0, status = 0, is_active = 1
+                      icon = '#', visible = 0, status = 0
                     WHERE menu_id = 135 AND (perms LIKE 'geo:article:%' OR parent_id = 134 OR parent_id = 170)
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET menu_name = '平台账号删除', parent_id = 133, sort_order = 3,
                       path = '', component = '', menu_type = 'F', perms = 'geo:platformAccount:delete',
-                      icon = '#', visible = 0, status = 0, is_active = 1
+                      icon = '#', visible = 0, status = 0
                     WHERE menu_id = 136 AND (perms LIKE 'geo:article:%' OR parent_id = 134 OR parent_id = 170)
                     """);
             statement.executeUpdate("""
@@ -862,7 +850,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
 
             statement.execute("""
-                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
                     (170, '文章列表', 132, 1, 'geo/article', '', 'C', 'geo:article:list', 'FileTextOutlined', 0, 0,
                      '按发布人/撰写人/话题/目标问题检索各平台发布文章，可改状态与链接', 1)
@@ -877,8 +865,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                       icon = 'FileTextOutlined',
                       visible = 0,
                       status = 0,
-                      remark = VALUES(remark),
-                      is_active = 1
+                      remark = VALUES(remark)
                     """);
             statement.execute("""
                     INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
@@ -890,8 +877,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                       menu_name = VALUES(menu_name),
                       parent_id = 170,
                       menu_type = 'F',
-                      perms = VALUES(perms),
-                      is_active = 1
+                      perms = VALUES(perms)
                     """);
             // 无对应页面的 article-board 占位入口：停用
             statement.executeUpdate("""
@@ -901,28 +887,24 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 132, sort_order = 2, menu_name = '投放管理',
-                      path = 'geo/content-placement-manage', is_active = 1
+                      path = 'geo/content-placement-manage'
                     WHERE menu_id = 122
                     """);
             statement.executeUpdate("""
                     UPDATE sys_menu SET parent_id = 132, sort_order = 3,
-                      path = 'geo/content-placement-work', is_active = 1
+                      path = 'geo/content-placement-work'
                     WHERE menu_id = 128
                     """);
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                     SELECT rm.role_id, m.menu_id, 1
                     FROM sys_role_menu rm
                     CROSS JOIN sys_menu m
                     WHERE rm.menu_id = 122 AND rm.is_active = 1
-                      AND m.menu_id IN (170, 171, 172, 173)
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                      AND m.menu_id IN (170, 171, 172, 173);""");
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (170, 171, 172, 173)
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (170, 171, 172, 173);""");
         }
         log.info("已同步文章列表菜单 menu_id=170 path=geo/article");
     }
@@ -931,7 +913,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
     private void ensureDailyComboMenu(Connection connection) throws Exception {
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
-                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
                     (174, '组合趋势', 131, 2, 'geo/daily-combo', '', 'C', 'geo:daily:list', 'LineChartOutlined', 0, 0,
                      '按话题×关键字×平台查看日期明细与折线趋势', 1)
@@ -946,8 +928,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                       icon = 'LineChartOutlined',
                       visible = 0,
                       status = 0,
-                      remark = VALUES(remark),
-                      is_active = 1
+                      remark = VALUES(remark)
                     """);
             // 露出看板 / 全年目标顺延
             statement.executeUpdate("""
@@ -957,17 +938,13 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     UPDATE sys_menu SET sort_order = 4 WHERE menu_id = 104 AND parent_id = 131
                     """);
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                     SELECT rm.role_id, 174, 1
                     FROM sys_role_menu rm
-                    WHERE rm.menu_id = 102 AND rm.is_active = 1
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    WHERE rm.menu_id = 102 AND rm.is_active = 1;""");
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, 174, 1 FROM DUAL
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, 174, 1 FROM DUAL;""");
         }
         log.info("已同步组合趋势菜单 menu_id=174 path=geo/daily-combo");
     }
