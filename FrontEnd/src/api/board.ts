@@ -207,3 +207,83 @@ export function boardTaskOpsPersonRateApi(data: BoardTaskOpsDrillQuery) {
 export function boardTaskOpsDrillApi(data: BoardTaskOpsDrillQuery) {
   return request.post<unknown, PageResult<BoardTaskOpsRow>>('/board/work/drill', data);
 }
+
+export type BoardGeoTaskDim = 'topic' | 'writer' | 'taskType';
+
+export type BoardGeoTaskQuery = {
+  startDate?: string;
+  endDate?: string;
+  grain?: string;
+  /** 撰写人用户ID */
+  filterUserIds?: number[];
+  topicIds?: number[];
+  taskTypes?: string[];
+};
+
+export type BoardGeoTaskSummary = {
+  grain?: string;
+  startDate?: string;
+  endDate?: string;
+  dueCount: number;
+  overdueCount: number;
+  doneCount: number;
+  rangeCompleted: number;
+  rangeTotal: number;
+  completionRate: number;
+};
+
+export type BoardGeoTaskAggRow = {
+  dimKey: string;
+  name: string;
+  topicId?: number | null;
+  writerUserId?: number | null;
+  taskType?: string;
+  doneCount: number;
+  totalCount: number;
+  completionRate: number;
+  openCount: number;
+  dueCount: number;
+  overdueCount: number;
+};
+
+export type BoardGeoTaskDrillQuery = BoardGeoTaskQuery & {
+  dim: BoardGeoTaskDim;
+  topicId?: number;
+  writerUserId?: number;
+  taskType?: string;
+  subFilter?: string;
+  pageNum?: number;
+  pageSize?: number;
+};
+
+export type BoardGeoTaskRow = {
+  id: number;
+  title: string;
+  taskType?: string;
+  status?: string;
+  priority?: number;
+  progress?: number;
+  topicName?: string;
+  writerName?: string;
+  ownerName?: string;
+  assigneeNames?: string;
+  targetQuestion?: string;
+  planEndTime?: string;
+  actualEndTime?: string;
+  overdue?: boolean;
+  overdueDays?: number | null;
+  timingTag?: string | null;
+  timingLabel?: string | null;
+};
+
+export function boardGeoTaskSummaryApi(data?: BoardGeoTaskQuery) {
+  return request.post<unknown, BoardGeoTaskSummary>('/board/geo-work/summary', data ?? {});
+}
+
+export function boardGeoTaskAggApi(data: BoardGeoTaskQuery & { dim: BoardGeoTaskDim }) {
+  return request.post<unknown, BoardGeoTaskAggRow[]>('/board/geo-work/agg', data);
+}
+
+export function boardGeoTaskDrillApi(data: BoardGeoTaskDrillQuery) {
+  return request.post<unknown, PageResult<BoardGeoTaskRow>>('/board/geo-work/drill', data);
+}
