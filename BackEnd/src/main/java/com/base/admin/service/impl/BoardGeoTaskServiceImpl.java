@@ -47,8 +47,9 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
     private static final WeekFields ISO = WeekFields.ISO;
     private static final Set<String> OPEN = Set.of("待分配", "未开始", "待处理", "进行中");
     private static final Set<String> FALLBACK_GEO_TYPES = Set.of(
-            "文章撰写",
-            "文章发布",
+            Constants.TASK_TYPE_GEO_WRITE,
+            Constants.TASK_TYPE_GEO_PUBLISH,
+            Constants.TASK_TYPE_GEO_REVIEW,
             Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER,
             Constants.TASK_TYPE_GEO_ASSIGN_WRITER
     );

@@ -34,6 +34,7 @@ public class TaskSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v16_task_flow.sql"));
             ensureRequireProofColumn(connection);
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v18_task_complete_proof.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v24_geo_review_task.sql"));
         } catch (Exception e) {
             log.error("Task schema migrate failed", e);
             throw e;

@@ -366,6 +366,11 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
 
         placement.setContentStatus(Constants.CONTENT_STATUS_PENDING_REVIEW);
         placementMapper.updateById(placement);
+
+        String bizTitle = StringUtils.hasText(placement.getContentTitle())
+                ? placement.getContentTitle().trim()
+                : nz(placement.getTargetQuestion());
+        taskService.createGeoReviewTasks(review.getId(), placement.getId(), bizTitle, new ArrayList<>(reviewerIds));
         return review.getId();
     }
 
@@ -408,11 +413,14 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         // 审核决定前若缺文章快照，先按当前正文补上（此时稿面应仍是提审稿）
         fillArticleSnapshotIfMissing(review, placement);
 
+        taskService.completeGeoReviewTask(review.getId(), uid, displayName(uid));
+
         if ("reject".equals(action)) {
             review.setStatus("rejected");
             reviewMapper.updateById(review);
             placement.setContentStatus(Constants.CONTENT_STATUS_REVISING);
             placementMapper.updateById(placement);
+            taskService.cancelPendingGeoReviewTasks(review.getId(), "文章已退回修改，取消其余审核任务");
             return;
         }
 
@@ -430,6 +438,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             reviewMapper.updateById(review);
             placement.setContentStatus(Constants.CONTENT_STATUS_REVISING);
             placementMapper.updateById(placement);
+            taskService.cancelPendingGeoReviewTasks(review.getId(), "本轮审核未通过，取消其余审核任务");
             return;
         }
 
@@ -445,6 +454,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                 ? placement.getOwnerName().trim()
                 : displayName(writerId);
         taskService.completeGeoWriteTasksByReview(placement.getId(), writerId, writerName);
+        taskService.cancelPendingGeoReviewTasks(review.getId(), "本轮审核已全部通过");
     }
 
     /** 把投放主表当前正文写入审核轮次作为文章快照 */

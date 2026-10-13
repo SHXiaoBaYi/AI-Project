@@ -69,6 +69,7 @@ import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoTopicService;
 import com.base.admin.service.PlacementTaskSyncService;
 import com.base.admin.service.SysAiProviderService;
+import com.base.admin.service.SysTaskService;
 import com.base.admin.util.ExcelCellUtils;
 import com.base.admin.util.GeoExcelTemplateWriter;
 import com.base.admin.util.GeoImportProgress;
@@ -80,6 +81,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -133,6 +135,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final SysTaskFileMapper taskFileMapper;
     private final FileStorageService fileStorageService;
     private final DataScopeFilter dataScopeFilter;
+    private final ObjectProvider<SysTaskService> taskServiceProvider;
 
     @Override
     public PageResult<GeoContentPlacementListVO> list(GeoContentPlacementQueryDTO query) {
@@ -411,6 +414,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             markSharedArticlesNeedRevision(placement.getId());
         }
         refreshPlacementContentRollup(placement.getId());
+        if (StringUtils.hasText(nextTitle) || StringUtils.hasText(nextBody)) {
+            SysTaskService taskService = taskServiceProvider.getIfAvailable();
+            if (taskService != null) {
+                taskService.markGeoWriteDrafted(placement.getId());
+            }
+        }
         return toDraftVo(requirePlacement(placement.getId()));
     }
 
@@ -425,6 +434,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         bundle.setTargetQuestion(placement.getTargetQuestion());
         bundle.setShared(toDraftVo(placement));
         bundle.setArticles(items.stream().map(item -> toArticleVo(placement, item, opinions)).toList());
+        if (StringUtils.hasText(placement.getContentTitle()) || StringUtils.hasText(placement.getContentBody())) {
+            SysTaskService taskService = taskServiceProvider.getIfAvailable();
+            if (taskService != null) {
+                taskService.markGeoWriteDrafted(placement.getId());
+            }
+        }
         return bundle;
     }
 

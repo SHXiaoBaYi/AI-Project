@@ -90,10 +90,20 @@ public class Constants {
 
     /** 任务关联业务：GEO内容投放 */
     public static final String TASK_BIZ_GEO_CONTENT_PLACEMENT = "geo_content_placement";
+    /** 任务关联业务：GEO文章审核轮次 */
+    public static final String TASK_BIZ_GEO_CONTENT_REVIEW = "geo_content_review";
+    /** 任务类型：文章撰写 */
+    public static final String TASK_TYPE_GEO_WRITE = "文章撰写";
+    /** 任务类型：审核文章 */
+    public static final String TASK_TYPE_GEO_REVIEW = "审核文章";
+    /** 任务类型：文章发布 */
+    public static final String TASK_TYPE_GEO_PUBLISH = "文章发布";
     /** 任务类型：待分配发布人 */
     public static final String TASK_TYPE_GEO_ASSIGN_PUBLISHER = "GEO文章待分配发布人";
     /** 任务类型：待分配撰写人 */
     public static final String TASK_TYPE_GEO_ASSIGN_WRITER = "GEO文章待分配撰写人";
+    /** 撰写任务：已有正文时的进度 */
+    public static final int TASK_PROGRESS_WRITE_DRAFTED = 50;
     /** 分配回写字段：发布人 */
     public static final String TASK_ASSIGN_FIELD_PUBLISHER = "publisher";
     /** 分配回写字段：撰写人 */
