@@ -104,6 +104,12 @@ public class Constants {
     public static final String TASK_TYPE_GEO_ASSIGN_WRITER = "GEO文章待分配撰写人";
     /** 撰写任务：已有正文时的进度 */
     public static final int TASK_PROGRESS_WRITE_DRAFTED = 50;
+    /**
+     * 在线撰写功能上线时间（含当日）。
+     * 「我的撰写记录」仅展示此时间之后新建的投放，避免历史指定撰写人数据涌入。
+     */
+    public static final java.time.LocalDateTime GEO_ONLINE_WRITE_LAUNCH_AT =
+            java.time.LocalDateTime.of(2026, 10, 13, 0, 0, 0);
     /** 分配回写字段：发布人 */
     public static final String TASK_ASSIGN_FIELD_PUBLISHER = "publisher";
     /** 分配回写字段：撰写人 */

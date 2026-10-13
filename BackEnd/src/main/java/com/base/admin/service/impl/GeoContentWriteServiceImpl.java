@@ -55,7 +55,9 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
     public List<GeoContentWritingRowVO> listMyWritings(GeoContentWritingQueryDTO query) {
         Long uid = requireUserId();
         LambdaQueryWrapper<GeoContentPlacement> qw = new LambdaQueryWrapper<GeoContentPlacement>()
-                .eq(GeoContentPlacement::getOwnerUserId, uid);
+                .eq(GeoContentPlacement::getOwnerUserId, uid)
+                // 仅在线撰写上线后新建的投放，不含历史上已指定撰写人的旧数据
+                .ge(GeoContentPlacement::getCreateTime, Constants.GEO_ONLINE_WRITE_LAUNCH_AT);
         if (query != null) {
             if (query.getTopicId() != null) {
                 qw.eq(GeoContentPlacement::getTopicId, query.getTopicId());
