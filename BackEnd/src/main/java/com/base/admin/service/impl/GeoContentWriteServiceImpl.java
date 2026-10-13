@@ -104,17 +104,15 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             return List.of();
         }
         List<Long> placementIds = rows.stream().map(GeoContentPlacement::getId).toList();
+        List<GeoContentReview> allReviews = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
+                .in(GeoContentReview::getPlacementId, placementIds)
+                .orderByAsc(GeoContentReview::getId));
+        Map<Long, List<GeoContentReview>> reviewsByPlacement = allReviews.stream()
+                .collect(Collectors.groupingBy(GeoContentReview::getPlacementId));
         Map<Long, GeoContentReview> pendingByPlacement = latestPendingByPlacement(placementIds);
         Map<Long, GeoContentReview> latestByPlacement = latestReviewByPlacement(placementIds);
-        Map<Long, List<GeoContentReviewer>> reviewersByReview = Map.of();
-        if (!latestByPlacement.isEmpty()) {
-            List<Long> latestIds = latestByPlacement.values().stream().map(GeoContentReview::getId).toList();
-            reviewersByReview = reviewerMapper.selectList(new LambdaQueryWrapper<GeoContentReviewer>()
-                            .in(GeoContentReviewer::getReviewId, latestIds)
-                            .orderByAsc(GeoContentReviewer::getId))
-                    .stream()
-                    .collect(Collectors.groupingBy(GeoContentReviewer::getReviewId));
-        }
+        Map<Long, List<GeoContentReviewer>> reviewersByReview = loadReviewersByReviewIds(
+                allReviews.stream().map(GeoContentReview::getId).toList());
         List<GeoContentWritingRowVO> result = new ArrayList<>();
         for (GeoContentPlacement p : rows) {
             GeoContentWritingRowVO vo = new GeoContentWritingRowVO();
@@ -129,16 +127,38 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             vo.setContentVersion(p.getContentVersion() == null ? 0L : p.getContentVersion());
             vo.setContentUpdatedAt(p.getContentUpdatedAt());
             vo.setCreateTime(p.getCreateTime());
+            List<GeoContentReview> history = reviewsByPlacement.getOrDefault(p.getId(), List.of());
+            int nextStage = nextReviewStage(history);
+            if (Constants.CONTENT_STATUS_QUEUE.equals(vo.getContentStatus())
+                    || Constants.CONTENT_STATUS_PUBLISHED.equals(vo.getContentStatus())
+                    || Constants.CONTENT_STATUS_PENDING_REVIEW.equals(vo.getContentStatus())) {
+                nextStage = 0;
+            }
+            vo.setNextStageNo(nextStage > 0 ? nextStage : null);
+            GeoContentReviewer stage1Reviewer = firstReviewerOfStage(history, Constants.CONTENT_REVIEW_STAGE1, reviewersByReview);
+            if (stage1Reviewer != null) {
+                vo.setStage1ReviewerUserId(stage1Reviewer.getUserId());
+                vo.setStage1ReviewerName(nz(stage1Reviewer.getUserName()));
+            }
+            if (nextStage > 0) {
+                GeoContentReviewer locked = lockedReviewer(history, nextStage, reviewersByReview);
+                if (locked != null) {
+                    vo.setLockedReviewerUserId(locked.getUserId());
+                    vo.setLockedReviewerName(nz(locked.getUserName()));
+                }
+            }
             GeoContentReview pending = pendingByPlacement.get(p.getId());
             if (pending != null) {
                 vo.setCurrentReviewId(pending.getId());
                 vo.setCurrentRoundNo(pending.getRoundNo());
+                vo.setCurrentStageNo(reviewStageOf(pending));
             }
             GeoContentReview latest = latestByPlacement.get(p.getId());
             if (latest != null) {
                 vo.setLatestReviewId(latest.getId());
                 vo.setLatestReviewStatus(latest.getStatus());
                 vo.setLatestRoundNo(latest.getRoundNo());
+                vo.setLatestStageNo(reviewStageOf(latest));
                 List<GeoContentReviewer> reviewers = reviewersByReview.getOrDefault(latest.getId(), List.of());
                 List<GeoContentReviewerItemVO> items = new ArrayList<>();
                 StringBuilder summary = new StringBuilder();
@@ -328,41 +348,56 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             throw new BusinessException("已有进行中的审核，请等待审核完成或退回后再发起");
         }
         if (Constants.CONTENT_STATUS_QUEUE.equals(status) || Constants.CONTENT_STATUS_PUBLISHED.equals(status)) {
-            throw new BusinessException("待投放/已发布文章不可再发起审核，请到「文章列表」维护投放");
+            throw new BusinessException("待投放/已发布文章不可再发起审核，请到「投放管理」维护投放");
         }
         String title = nz(placement.getContentTitle());
         String body = nz(placement.getContentBody());
         if (!StringUtils.hasText(title) && !StringUtils.hasText(body)) {
             throw new BusinessException("请先撰写并保存文章内容再发起审核");
         }
-        LinkedHashSet<Long> reviewerIds = new LinkedHashSet<>();
-        for (Long id : dto.getReviewerUserIds()) {
-            if (id != null && id > 0) {
-                reviewerIds.add(id);
+        List<GeoContentReview> history = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
+                .eq(GeoContentReview::getPlacementId, placement.getId())
+                .orderByAsc(GeoContentReview::getId));
+        int stageNo = nextReviewStage(history);
+        if (stageNo == 0) {
+            throw new BusinessException("当前不能发起审核");
+        }
+        if (stageNo < 0) {
+            throw new BusinessException("两阶段审核均已通过，请到「投放管理」维护投放");
+        }
+        Map<Long, List<GeoContentReviewer>> reviewersByReview = loadReviewersByReviewIds(
+                history.stream().map(GeoContentReview::getId).toList());
+        GeoContentReviewer locked = lockedReviewer(history, stageNo, reviewersByReview);
+        Long reviewerId;
+        if (locked != null && locked.getUserId() != null) {
+            reviewerId = locked.getUserId();
+        } else {
+            reviewerId = resolveReviewerUserId(dto);
+            if (reviewerId == null) {
+                throw new BusinessException(stageNo == Constants.CONTENT_REVIEW_STAGE2 ? "请选择二审审核人" : "请选择一审审核人");
             }
         }
-        if (reviewerIds.isEmpty()) {
-            throw new BusinessException("请至少选择一位审核人");
-        }
-        if (reviewerIds.contains(uid)) {
+        if (Objects.equals(reviewerId, uid)) {
             throw new BusinessException("不能将自己设为审核人");
         }
-        Map<Long, SysUser> users = loadUsers(new ArrayList<>(reviewerIds));
-        for (Long id : reviewerIds) {
-            if (!users.containsKey(id)) {
-                throw new BusinessException("审核人不存在：" + id);
+        if (stageNo == Constants.CONTENT_REVIEW_STAGE2) {
+            GeoContentReviewer stage1 = firstReviewerOfStage(history, Constants.CONTENT_REVIEW_STAGE1, reviewersByReview);
+            if (stage1 != null && Objects.equals(reviewerId, stage1.getUserId())) {
+                throw new BusinessException("二审审核人不能与一审是同一人");
             }
         }
+        Map<Long, SysUser> users = loadUsers(List.of(reviewerId));
+        SysUser reviewer = users.get(reviewerId);
+        if (reviewer == null) {
+            throw new BusinessException("审核人不存在：" + reviewerId);
+        }
 
-        Integer maxRound = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
-                        .eq(GeoContentReview::getPlacementId, placement.getId())
-                        .orderByDesc(GeoContentReview::getRoundNo)
-                        .last("LIMIT 1"))
-                .stream()
-                .findFirst()
+        Integer maxRound = history.stream()
                 .map(GeoContentReview::getRoundNo)
+                .filter(Objects::nonNull)
+                .max(Comparator.naturalOrder())
                 .orElse(0);
-        int roundNo = (maxRound == null ? 0 : maxRound) + 1;
+        int roundNo = maxRound + 1;
 
         String submitterName = StringUtils.hasText(placement.getOwnerName())
                 ? placement.getOwnerName().trim()
@@ -371,26 +406,25 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         GeoContentReview review = new GeoContentReview();
         review.setPlacementId(placement.getId());
         review.setRoundNo(roundNo);
+        review.setStageNo(stageNo);
         review.setStatus("pending");
         review.setSubmitterUserId(uid);
         review.setSubmitterName(submitterName);
         review.setSubmitRemark(dto.getRemark() == null ? "" : dto.getRemark().trim());
         applyArticleSnapshot(review, placement);
         reviewMapper.insert(review);
-        // 再写一次，避免个别环境下 insert 未带上 LONGTEXT 正文
         ensureArticleSnapshotPersisted(review.getId(), placement);
 
-        for (Long reviewerId : reviewerIds) {
-            SysUser user = users.get(reviewerId);
-            GeoContentReviewer row = new GeoContentReviewer();
-            row.setReviewId(review.getId());
-            row.setPlacementId(placement.getId());
-            row.setUserId(reviewerId);
-            row.setUserName(displayName(user));
-            row.setResult("pending");
-            row.setCommentText("");
-            reviewerMapper.insert(row);
-        }
+        GeoContentReviewer row = new GeoContentReviewer();
+        row.setReviewId(review.getId());
+        row.setPlacementId(placement.getId());
+        row.setUserId(reviewerId);
+        row.setUserName(locked != null && StringUtils.hasText(locked.getUserName())
+                ? locked.getUserName().trim()
+                : displayName(reviewer));
+        row.setResult("pending");
+        row.setCommentText("");
+        reviewerMapper.insert(row);
 
         placement.setContentStatus(Constants.CONTENT_STATUS_PENDING_REVIEW);
         placementMapper.updateById(placement);
@@ -398,7 +432,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         String bizTitle = StringUtils.hasText(placement.getContentTitle())
                 ? placement.getContentTitle().trim()
                 : nz(placement.getTargetQuestion());
-        taskService.createGeoReviewTasks(review.getId(), placement.getId(), bizTitle, new ArrayList<>(reviewerIds));
+        taskService.createGeoReviewTasks(review.getId(), placement.getId(), bizTitle, List.of(reviewerId), stageNo);
         return review.getId();
     }
 
@@ -472,9 +506,17 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
 
         review.setStatus("approved");
         reviewMapper.updateById(review);
+        int stageNo = reviewStageOf(review);
+        if (stageNo == Constants.CONTENT_REVIEW_STAGE1) {
+            placement.setContentStatus(Constants.CONTENT_STATUS_STAGE1_PASSED);
+            placementMapper.updateById(placement);
+            taskService.markGeoWriteStage1Passed(placement.getId());
+            taskService.cancelPendingGeoReviewTasks(review.getId(), "一审已通过");
+            return;
+        }
         placement.setContentStatus(Constants.CONTENT_STATUS_QUEUE);
+        placement.setPlacementProgress(Constants.CONTENT_AGG_PENDING);
         placementMapper.updateById(placement);
-        // 待投放：文章列表落一条可维护发布平台/链接/时间的记录
         placementService.ensureQueueArticleItems(placement.getId());
 
         Long writerId = placement.getOwnerUserId();
@@ -482,7 +524,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                 ? placement.getOwnerName().trim()
                 : displayName(writerId);
         taskService.completeGeoWriteTasksByReview(placement.getId(), writerId, writerName);
-        taskService.cancelPendingGeoReviewTasks(review.getId(), "本轮审核已全部通过");
+        taskService.cancelPendingGeoReviewTasks(review.getId(), "二审已通过");
     }
 
     /** 把投放主表当前正文写入审核轮次作为文章快照 */
@@ -575,6 +617,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             vo.setReviewId(review.getId());
             vo.setPlacementId(review.getPlacementId());
             vo.setRoundNo(review.getRoundNo());
+            vo.setStageNo(reviewStageOf(review));
             vo.setStatus(review.getStatus());
             vo.setTopicName(p == null ? "" : nz(p.getTopicName()));
             vo.setTargetQuestion(p == null ? "" : nz(p.getTargetQuestion()));
@@ -654,6 +697,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         vo.setReviewId(review.getId());
         vo.setEntryType("review");
         vo.setRoundNo(review.getRoundNo());
+        vo.setStageNo(reviewStageOf(review));
         vo.setStatus(review.getStatus());
         vo.setSubmitterName(nz(review.getSubmitterName()));
         vo.setSubmitRemark(nz(review.getSubmitRemark()));
@@ -777,6 +821,105 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             return user.getNickname().trim();
         }
         return StringUtils.hasText(user.getUsername()) ? user.getUsername() : String.valueOf(user.getUserId());
+    }
+
+    private static int reviewStageOf(GeoContentReview review) {
+        if (review != null && review.getStageNo() != null && review.getStageNo() == Constants.CONTENT_REVIEW_STAGE2) {
+            return Constants.CONTENT_REVIEW_STAGE2;
+        }
+        return Constants.CONTENT_REVIEW_STAGE1;
+    }
+
+    private static GeoContentReview lastOfStage(List<GeoContentReview> history, int stage) {
+        GeoContentReview last = null;
+        if (history == null) {
+            return null;
+        }
+        for (GeoContentReview review : history) {
+            if (reviewStageOf(review) == stage) {
+                last = review;
+            }
+        }
+        return last;
+    }
+
+    /**
+     * @return 1/2 可发起；0 当前不能发起；-2 两阶段均已通过
+     */
+    private static int nextReviewStage(List<GeoContentReview> history) {
+        List<GeoContentReview> rows = history == null ? List.of() : history;
+        if (rows.stream().anyMatch(r -> "pending".equals(r.getStatus()))) {
+            return 0;
+        }
+        GeoContentReview last1 = lastOfStage(rows, Constants.CONTENT_REVIEW_STAGE1);
+        GeoContentReview last2 = lastOfStage(rows, Constants.CONTENT_REVIEW_STAGE2);
+        if (last1 == null || "rejected".equals(last1.getStatus())) {
+            return Constants.CONTENT_REVIEW_STAGE1;
+        }
+        if (!"approved".equals(last1.getStatus())) {
+            return Constants.CONTENT_REVIEW_STAGE1;
+        }
+        if (last2 == null || "rejected".equals(last2.getStatus())) {
+            return Constants.CONTENT_REVIEW_STAGE2;
+        }
+        if ("approved".equals(last2.getStatus())) {
+            return -2;
+        }
+        return 0;
+    }
+
+    private static GeoContentReviewer firstReviewerOfStage(
+            List<GeoContentReview> history, int stage, Map<Long, List<GeoContentReviewer>> byReview) {
+        if (history == null) {
+            return null;
+        }
+        for (GeoContentReview review : history) {
+            if (reviewStageOf(review) != stage) {
+                continue;
+            }
+            List<GeoContentReviewer> people = byReview.getOrDefault(review.getId(), List.of());
+            if (!people.isEmpty()) {
+                return people.get(0);
+            }
+        }
+        return null;
+    }
+
+    private static GeoContentReviewer lockedReviewer(
+            List<GeoContentReview> history, int stage, Map<Long, List<GeoContentReviewer>> byReview) {
+        if (history == null || history.isEmpty()) {
+            return null;
+        }
+        List<GeoContentReview> ofStage = history.stream().filter(r -> reviewStageOf(r) == stage).toList();
+        if (ofStage.isEmpty()) {
+            return null;
+        }
+        for (int i = ofStage.size() - 1; i >= 0; i--) {
+            List<GeoContentReviewer> people = byReview.getOrDefault(ofStage.get(i).getId(), List.of());
+            for (GeoContentReviewer person : people) {
+                if ("rejected".equals(person.getResult())) {
+                    return person;
+                }
+            }
+        }
+        return firstReviewerOfStage(ofStage, stage, byReview);
+    }
+
+    private static Long resolveReviewerUserId(GeoContentSubmitReviewDTO dto) {
+        if (dto == null) {
+            return null;
+        }
+        if (dto.getReviewerUserId() != null && dto.getReviewerUserId() > 0) {
+            return dto.getReviewerUserId();
+        }
+        if (dto.getReviewerUserIds() != null) {
+            for (Long id : dto.getReviewerUserIds()) {
+                if (id != null && id > 0) {
+                    return id;
+                }
+            }
+        }
+        return null;
     }
 
     private static String resultLabel(String result) {

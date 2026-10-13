@@ -38,7 +38,7 @@ public interface SysTaskService {
     void complete(Long id, SysTaskCompleteDTO dto);
 
     /**
-     * 文章审核通过后自动完成「文章撰写」任务（无需证明附件）。
+     * 二审通过后自动完成「文章撰写」任务（无需证明附件）。
      * completerUserId 记为撰写人。
      */
     void completeGeoWriteTasksByReview(Long placementId, Long writerUserId, String writerName);
@@ -46,10 +46,14 @@ public interface SysTaskService {
     /** 撰写正文已有内容时，将关联「文章撰写」任务进度标为 50%，状态改为进行中 */
     void markGeoWriteDrafted(Long placementId);
 
+    /** 一审通过：关联「文章撰写」任务进度标为 80%，仍不完成 */
+    void markGeoWriteStage1Passed(Long placementId);
+
     /**
-     * 发起多人审核后，为每位审核人生成「审核文章」任务（biz=审核轮次）。
+     * 发起审核后，为该阶段审核人生成「审核文章」任务（biz=审核轮次）。
      */
-    void createGeoReviewTasks(Long reviewId, Long placementId, String bizTitle, java.util.List<Long> reviewerUserIds);
+    void createGeoReviewTasks(Long reviewId, Long placementId, String bizTitle,
+                              java.util.List<Long> reviewerUserIds, int stageNo);
 
     /** 审核人提交通过/退回后，完成其对应「审核文章」任务 */
     void completeGeoReviewTask(Long reviewId, Long reviewerUserId, String reviewerName);

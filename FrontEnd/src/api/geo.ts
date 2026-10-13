@@ -434,7 +434,8 @@ export function getGeoReviewRecordsApi(params?: {
 
 export function submitGeoContentMultiReviewApi(data: {
   placementId: number;
-  reviewerUserIds: number[];
+  reviewerUserId?: number;
+  reviewerUserIds?: number[];
   remark?: string;
 }) {
   return request.post<unknown, number>('/geo/content-write/submit-review', data);

@@ -10,7 +10,7 @@ import com.base.admin.domain.vo.GeoContentWritingRowVO;
 
 import java.util.List;
 
-/** 撰写人视角的在线撰写与多人审核 */
+/** 撰写人视角的在线撰写与两阶段串行审核 */
 public interface GeoContentWriteService {
 
     List<GeoContentWritingRowVO> listMyWritings(GeoContentWritingQueryDTO query);

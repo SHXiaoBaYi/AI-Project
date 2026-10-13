@@ -242,13 +242,11 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 .eq(platformName != null, GeoContentPlacementItem::getPlatformName, platformName)
                 .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter);
         var snap = dataScopeFilter.snapshot();
+        // 文章列表只展示已选发布平台的明细；审核通过的空占位不再出现在这里
+        iw.and(w -> w.isNotNull(GeoContentPlacementItem::getPlatformName)
+                .ne(GeoContentPlacementItem::getPlatformName, ""));
         if (!snap.globalAll() && snap.geoEnabled() && !snap.geoPlatformNames().isEmpty()) {
-            // 审核通过自动生成的待投放明细平台可能为空，仍需在文章列表可见以便补填
-            iw.and(w -> w.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames())
-                    .or()
-                    .eq(GeoContentPlacementItem::getPlatformName, "")
-                    .or()
-                    .isNull(GeoContentPlacementItem::getPlatformName));
+            iw.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames());
         }
         if (query.getPublishTimeStart() != null) {
             iw.ge(GeoContentPlacementItem::getPublishTime, query.getPublishTimeStart().atStartOfDay());
@@ -389,7 +387,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         String lockStatus = placement.getContentStatus();
         if (Constants.CONTENT_STATUS_QUEUE.equals(lockStatus)
                 || Constants.CONTENT_STATUS_PUBLISHED.equals(lockStatus)) {
-            throw new BusinessException("待投放/已发布文章请到「文章列表」维护投放，不可再改稿");
+            throw new BusinessException("待投放/已发布文章请到「投放管理」维护投放，不可再改稿");
         }
         if (Constants.CONTENT_STATUS_PENDING_REVIEW.equals(lockStatus)
                 && hasPendingContentReview(placement.getId())) {
@@ -406,7 +404,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         String prevBody = placement.getContentBody() == null ? "" : placement.getContentBody();
         boolean changed = !nextTitle.equals(prevTitle) || !nextBody.equals(prevBody);
         String nextStatus = lockStatus;
-        if (!StringUtils.hasText(nextStatus) || Constants.CONTENT_STATUS_PENDING_REVIEW.equals(nextStatus)) {
+        if (!StringUtils.hasText(nextStatus)
+                || (Constants.CONTENT_STATUS_PENDING_REVIEW.equals(nextStatus) && !hasPendingContentReview(placement.getId()))) {
             nextStatus = Constants.CONTENT_STATUS_DRAFTING;
         }
         long nextVersion = currentVersion + 1;
@@ -733,8 +732,9 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             return;
         }
         String cur = current.getContentStatus();
-        // 撰写多人审核链路：待审/待投放/已发布 由审核与投放回写，不被平台文章内部状态覆盖
+        // 撰写审核链路：待审/一审已过/待投放/已发布 由审核与投放回写，不被平台文章内部状态覆盖
         if (Constants.CONTENT_STATUS_PENDING_REVIEW.equals(cur)
+                || Constants.CONTENT_STATUS_STAGE1_PASSED.equals(cur)
                 || Constants.CONTENT_STATUS_QUEUE.equals(cur)
                 || Constants.CONTENT_STATUS_PUBLISHED.equals(cur)) {
             syncPublishedFromItems(current);
@@ -1296,42 +1296,11 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     @Override
     @Transactional
     public void ensureQueueArticleItems(Long placementId) {
-        GeoContentPlacement placement = requirePlacement(placementId);
-        List<GeoContentPlacementItem> items = listPlacementItems(placementId);
-        if (items.isEmpty()) {
-            GeoContentPlacementItem item = new GeoContentPlacementItem();
-            item.setPlacementId(placementId);
-            String title = StringUtils.hasText(placement.getContentTitle())
-                    ? placement.getContentTitle().trim()
-                    : nz(placement.getTargetQuestion());
-            item.setTitle(StringUtils.hasText(title) ? title : "待投放文章");
-            item.setPlatformName("");
-            item.setContentForm(Constants.CONTENT_FORM_ARTICLE);
-            item.setPublishStatus(Constants.CONTENT_PUBLISH_PENDING);
-            item.setPublishUrl("");
-            item.setPublishTime(null);
-            item.setContentMode(Constants.CONTENT_MODE_SHARED);
-            item.setContentStatus(Constants.CONTENT_STATUS_APPROVED);
-            item.setContentFormat(Constants.CONTENT_FORMAT_LAKE);
-            item.setContentVersion(0L);
-            item.setSortOrder(0);
-            item.setRemark("审核通过自动生成，请补充发布平台、投放链接与发布时间");
-            itemMapper.insert(item);
-            syncPlacementDerived(placementId);
-            return;
-        }
-        boolean changed = false;
-        for (GeoContentPlacementItem item : items) {
-            String status = nz(item.getPublishStatus());
-            if (!StringUtils.hasText(status) || Constants.CONTENT_PUBLISH_NONE.equals(status)) {
-                item.setPublishStatus(Constants.CONTENT_PUBLISH_PENDING);
-                itemMapper.updateById(item);
-                changed = true;
-            }
-        }
-        if (changed) {
-            syncPlacementDerived(placementId);
-        }
+        GeoContentPlacement patch = new GeoContentPlacement();
+        patch.setId(placementId);
+        patch.setContentStatus(Constants.CONTENT_STATUS_QUEUE);
+        patch.setPlacementProgress(Constants.CONTENT_AGG_PENDING);
+        placementMapper.updateById(patch);
     }
 
     @Override
@@ -1894,6 +1863,10 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 .orElse("");
         String progress = aggregateStatus(items.stream().map(GeoContentPlacementItem::getPublishStatus).toList());
         GeoContentPlacement placement = requirePlacement(placementId);
+        if (Constants.CONTENT_STATUS_QUEUE.equals(placement.getContentStatus())
+                && Constants.CONTENT_AGG_NONE.equals(progress)) {
+            progress = Constants.CONTENT_AGG_PENDING;
+        }
         placement.setTitle(title);
         placement.setPlacementProgress(progress);
         placementMapper.updateById(placement);
@@ -1996,9 +1969,14 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setContentStatus(StringUtils.hasText(entity.getContentStatus())
                 ? entity.getContentStatus()
                 : Constants.CONTENT_STATUS_DRAFTING);
+        vo.setContentTitle(entity.getContentTitle());
         String progress = StringUtils.hasText(entity.getPlacementProgress())
                 ? entity.getPlacementProgress()
                 : aggregateStatus(items.stream().map(GeoContentPlacementItem::getPublishStatus).toList());
+        if (Constants.CONTENT_STATUS_QUEUE.equals(entity.getContentStatus())
+                && (Constants.CONTENT_AGG_NONE.equals(progress) || !StringUtils.hasText(progress))) {
+            progress = Constants.CONTENT_AGG_PENDING;
+        }
         vo.setAggregateStatus(progress);
         vo.setPublishProgress(publishProgress(items.size(), success));
         vo.setCreateTime(entity.getCreateTime());

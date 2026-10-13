@@ -17,8 +17,11 @@ public class GeoContentReviewRoundVO {
     @Schema(description = "条目类型：draft=当前稿 review=某轮提审快照", example = "review")
     private String entryType;
 
-    @Schema(description = "第几轮；当前稿为空", example = "1", nullable = true)
+    @Schema(description = "第几轮提审；当前稿为空", example = "1", nullable = true)
     private Integer roundNo;
+
+    @Schema(description = "审核阶段 1=一审 2=二审；当前稿为空", example = "1", nullable = true)
+    private Integer stageNo;
 
     @Schema(description = "pending/approved/rejected；当前稿为空", example = "rejected", nullable = true)
     private String status;

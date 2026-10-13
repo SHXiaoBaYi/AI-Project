@@ -19,6 +19,7 @@ const STATUS_LABEL: Record<string, { text: string; color: string }> = {
   pending_review: { text: '待审核', color: 'processing' },
   revising: { text: '修改中', color: 'warning' },
   approved: { text: '已通过', color: 'success' },
+  stage1_passed: { text: '一审已通过', color: 'success' },
   queue: { text: '待投放', color: 'cyan' },
   published: { text: '已发布', color: 'green' },
 };
@@ -500,7 +501,9 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 )
               ) : null}
               {mode === 'write' ? (
-                <span className='text-xs text-neutral-400'>保存后可在「我的撰写记录」指定多人审核</span>
+                <span className='text-xs text-neutral-400'>
+                  保存后在「我的撰写记录」发起一审/二审（串行，每阶段 1 人）
+                </span>
               ) : null}
             </div>
             <div className='border-b border-neutral-100 px-4 py-2'>

@@ -132,6 +132,13 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
       render: (_, r) => r.reviewerSummary || '-',
     },
     {
+      title: '阶段',
+      dataIndex: 'stageNo',
+      width: 80,
+      search: false,
+      render: (_, r) => (r.stageNo === 2 ? '二审' : '一审'),
+    },
+    {
       title: '轮次',
       dataIndex: 'roundNo',
       width: 70,

@@ -1,6 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Form, Input, Modal, Select, Tag, Typography } from 'antd';
+import { useSelector } from 'react-redux';
+import type { RootState } from '@/store';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
@@ -18,6 +20,7 @@ const STATUS_META: Record<string, { text: string; color: string }> = {
   pending_review: { text: '待审核', color: 'processing' },
   revising: { text: '修改中', color: 'warning' },
   approved: { text: '已通过', color: 'success' },
+  stage1_passed: { text: '一审已通过', color: 'success' },
   queue: { text: '待投放', color: 'cyan' },
   published: { text: '已发布', color: 'green' },
 };
@@ -36,8 +39,15 @@ const RESULT_META: Record<string, { text: string; color: string }> = {
   rejected: { text: '退回', color: 'error' },
 };
 
+function stageText(stageNo?: number | null) {
+  if (stageNo === 2) return '二审';
+  if (stageNo === 1) return '一审';
+  return '';
+}
+
 const MyWritingsPage = memo(function MyWritingsPage() {
   const { message } = App.useApp();
+  const currentUserId = useSelector((state: RootState) => state.user.userInfo?.userId);
   const actionRef = useRef<ActionType>(null);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
   const [topics, setTopics] = useState<GeoTopic[]>([]);
@@ -106,12 +116,15 @@ const MyWritingsPage = memo(function MyWritingsPage() {
               },
               {
                 key: 'submit',
-                label: '发起审核',
+                label: record.nextStageNo === 2 ? '发起二审' : '发起一审',
                 perm: 'geo:write:mine',
-                disabled: locked || record.contentStatus === 'pending_review',
+                disabled: locked || !record.nextStageNo,
                 onClick: () => {
                   setSubmitting(record);
                   submitForm.resetFields();
+                  submitForm.setFieldsValue({
+                    reviewerUserId: record.lockedReviewerUserId ?? undefined,
+                  });
                   setSubmitOpen(true);
                 },
               },
@@ -176,7 +189,8 @@ const MyWritingsPage = memo(function MyWritingsPage() {
                 color={meta.color}
                 className='mr-0'
               >
-                第{r.latestRoundNo ?? '-'}轮 · {meta.text}
+                {stageText(r.latestStageNo) ? `${stageText(r.latestStageNo)} · ` : ''}第{r.latestRoundNo ?? '-'}轮 ·{' '}
+                {meta.text}
               </Tag>
             </div>
             {r.rejectSummary ? (
@@ -236,7 +250,8 @@ const MyWritingsPage = memo(function MyWritingsPage() {
             key='hint'
             className='text-sm text-neutral-500'
           >
-            审核通过后自动进入文章列表维护投放；待投放/已发布不可再改稿
+            固定两阶段串行审核，每阶段 1 人；一审通过后才能发二审，撰写任务进度
+            80%；二审通过后任务完成并进入投放管理待投放。打回后仍由原审核人复审。
           </span>,
         ]}
       />
@@ -279,7 +294,8 @@ const MyWritingsPage = memo(function MyWritingsPage() {
         {reviewRow?.latestReviewStatus ? (
           <div className='mb-3'>
             <Tag color={(REVIEW_STATUS_META[reviewRow.latestReviewStatus] || { color: 'default' }).color}>
-              第{reviewRow.latestRoundNo ?? '-'}轮 ·{' '}
+              {stageText(reviewRow.latestStageNo) ? `${stageText(reviewRow.latestStageNo)} · ` : ''}第
+              {reviewRow.latestRoundNo ?? '-'}轮 ·{' '}
               {(REVIEW_STATUS_META[reviewRow.latestReviewStatus] || { text: reviewRow.latestReviewStatus }).text}
             </Tag>
           </div>
@@ -313,13 +329,13 @@ const MyWritingsPage = memo(function MyWritingsPage() {
         )}
         {reviewRow?.latestReviewStatus === 'rejected' || reviewRow?.contentStatus === 'revising' ? (
           <div className='mt-4'>
-            <Typography.Text type='secondary'>请按意见修改后，再点「发起审核」。</Typography.Text>
+            <Typography.Text type='secondary'>请按意见修改后，再交给打回人复审（不可换人）。</Typography.Text>
           </div>
         ) : null}
       </Modal>
 
       <Modal
-        title='发起多人审核'
+        title={submitting?.nextStageNo === 2 ? '发起二审' : '发起一审'}
         open={submitOpen}
         destroyOnHidden
         onCancel={() => {
@@ -333,10 +349,10 @@ const MyWritingsPage = memo(function MyWritingsPage() {
           try {
             await submitGeoContentMultiReviewApi({
               placementId: submitting.placementId,
-              reviewerUserIds: values.reviewerUserIds,
+              reviewerUserId: values.reviewerUserId,
               remark: values.remark,
             });
-            message.success('已发起审核');
+            message.success(submitting.nextStageNo === 2 ? '已发起二审' : '已发起一审');
             setSubmitOpen(false);
             setSubmitting(null);
             submitForm.resetFields();
@@ -349,9 +365,24 @@ const MyWritingsPage = memo(function MyWritingsPage() {
         <p className='mb-3 text-sm text-neutral-500'>
           {submitting?.topicName || '话题'} · {submitting?.contentTitle || submitting?.targetQuestion || ''}
         </p>
+        {submitting?.nextStageNo === 2 ? (
+          <p className='mb-3 text-xs text-neutral-500'>
+            一审已通过{submitting.stage1ReviewerName ? `（${submitting.stage1ReviewerName}）` : ''}
+            ，请指定另一位二审人。
+          </p>
+        ) : (
+          <p className='mb-3 text-xs text-neutral-500'>
+            每阶段仅 1 人审核。一审通过后撰写任务进度为 80%，二审通过后才完成。
+          </p>
+        )}
         {submitting?.rejectSummary ? (
           <div className='mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800'>
             上一轮退回意见：{submitting.rejectSummary}
+          </div>
+        ) : null}
+        {submitting?.lockedReviewerUserId ? (
+          <div className='mb-3 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600'>
+            本阶段由打回人复审，不可更换：{submitting.lockedReviewerName || submitting.lockedReviewerUserId}
           </div>
         ) : null}
         <Form
@@ -359,16 +390,29 @@ const MyWritingsPage = memo(function MyWritingsPage() {
           layout='vertical'
         >
           <Form.Item
-            name='reviewerUserIds'
+            name='reviewerUserId'
             label='审核人'
-            rules={[{ required: true, message: '请选择至少一位审核人' }]}
+            rules={[{ required: true, message: '请选择一位审核人' }]}
           >
             <Select
-              mode='multiple'
-              options={userOptions}
+              disabled={!!submitting?.lockedReviewerUserId}
+              options={userOptions.filter((opt) => {
+                if (currentUserId != null && opt.value === currentUserId) return false;
+                if (
+                  submitting?.nextStageNo === 2 &&
+                  submitting.stage1ReviewerUserId != null &&
+                  opt.value === submitting.stage1ReviewerUserId
+                ) {
+                  return false;
+                }
+                if (submitting?.lockedReviewerUserId != null) {
+                  return opt.value === submitting.lockedReviewerUserId;
+                }
+                return true;
+              })}
               showSearch
               optionFilterProp='label'
-              placeholder='可多选'
+              placeholder='请选择 1 人'
             />
           </Form.Item>
           <Form.Item

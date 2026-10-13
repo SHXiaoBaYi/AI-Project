@@ -97,8 +97,8 @@ public interface GeoContentPlacementService {
     Long createItem(GeoContentPlacementItemDTO dto);
 
     /**
-     * 审核通过进入待投放：若尚无文章列表明细则新建一条（待填发布平台/链接/时间）；
-     * 已有明细则把「未投放」统一标为「待投放」。
+     * 审核通过进入待投放：主表稿件状态=queue、投放进度=待投放，在「投放管理」可见；
+     * 不再自动往文章列表插入空平台明细。
      */
     void ensureQueueArticleItems(Long placementId);
 

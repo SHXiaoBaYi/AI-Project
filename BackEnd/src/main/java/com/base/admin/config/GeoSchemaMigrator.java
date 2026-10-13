@@ -62,7 +62,8 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureContentArticleReview(connection);
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v22_geo_content_review.sql"));
             ensureContentReviewSnapshot(connection);
-            backfillQueueArticleItems(connection);
+            ensureContentReviewStage(connection);
+            cleanupQueueArticlePlaceholders(connection);
             ensureArticleBoardMenu(connection);
             ensureDailyUniqueKeyWithTermType(connection);
             ensureGeoMenuRestructure(connection);
@@ -1086,51 +1087,31 @@ public class GeoSchemaMigrator implements ApplicationRunner {
 
     /** 审核轮次保存提审时正文快照，供历史对照 */
     /**
-     * 历史「待投放」稿件若尚无文章列表明细，补一条便于填写发布平台/链接/时间。
+     * 审核通过改为回到投放管理待投放，清掉历史上自动插入文章列表的空平台占位。
      */
-    private void backfillQueueArticleItems(Connection connection) throws Exception {
+    private void cleanupQueueArticlePlaceholders(Connection connection) throws Exception {
         if (!tableExists(connection, "geo_content_placement")
                 || !tableExists(connection, "geo_content_placement_item")
                 || !columnExists(connection, "geo_content_placement", "content_status")) {
             return;
         }
         try (Statement statement = connection.createStatement()) {
-            int n = statement.executeUpdate("""
-                    INSERT INTO geo_content_placement_item (
-                      placement_id, title, platform_name, content_form, publish_status,
-                      publish_url, sort_order, remark, content_mode, content_status,
-                      content_format, content_version, is_active, create_time, update_time
-                    )
-                    SELECT
-                      p.id,
-                      CASE
-                        WHEN p.content_title IS NOT NULL AND TRIM(p.content_title) <> '' THEN TRIM(p.content_title)
-                        WHEN p.target_question IS NOT NULL AND TRIM(p.target_question) <> '' THEN TRIM(p.target_question)
-                        ELSE '待投放文章'
-                      END,
-                      '',
-                      '图文',
-                      '待投放',
-                      '',
-                      0,
-                      '审核通过自动生成（历史回填），请补充发布平台、投放链接与发布时间',
-                      'shared',
-                      'approved',
-                      'text/lake',
-                      0,
-                      1,
-                      NOW(),
-                      NOW()
-                    FROM geo_content_placement p
-                    WHERE p.is_active = 1
-                      AND p.content_status = 'queue'
-                      AND NOT EXISTS (
-                        SELECT 1 FROM geo_content_placement_item i
-                        WHERE i.placement_id = p.id AND i.is_active = 1
-                      )
+            int removed = statement.executeUpdate("""
+                    UPDATE geo_content_placement_item
+                    SET is_active = 0, update_time = NOW()
+                    WHERE is_active = 1
+                      AND (platform_name IS NULL OR TRIM(platform_name) = '')
+                      AND remark LIKE '%审核通过自动生成%'
                     """);
-            if (n > 0) {
-                log.info("已回填 {} 条待投放文章列表明细", n);
+            int queued = statement.executeUpdate("""
+                    UPDATE geo_content_placement
+                    SET placement_progress = '待投放', update_time = NOW()
+                    WHERE is_active = 1
+                      AND content_status = 'queue'
+                      AND (placement_progress IS NULL OR placement_progress = '' OR placement_progress = '未投放')
+                    """);
+            if (removed > 0 || queued > 0) {
+                log.info("已清理待投放空平台明细 {} 条，回写投放管理待投放 {} 条", removed, queued);
             }
         }
     }
@@ -1172,6 +1153,25 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             }
             log.info("已为 geo_content_review 增加 content_body");
         }
+    }
+
+    /** 两阶段串行审核：1=一审 2=二审；历史轮次默认一审 */
+    private void ensureContentReviewStage(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_review")) {
+            return;
+        }
+        if (columnExists(connection, "geo_content_review", "stage_no")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    ALTER TABLE geo_content_review
+                      ADD COLUMN stage_no INT NOT NULL DEFAULT 1
+                      COMMENT '审核阶段 1=一审 2=二审'
+                      AFTER round_no
+                    """);
+        }
+        log.info("已为 geo_content_review 增加 stage_no");
     }
 
     /**

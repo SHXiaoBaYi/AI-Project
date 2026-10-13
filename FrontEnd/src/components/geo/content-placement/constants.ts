@@ -20,6 +20,20 @@ export const SOURCE_COLOR: Record<string, string> = {
 
 export { isHttpUrl, canOpenExternalInApp, resolveExternalUrl } from '@/utils/externalUrl';
 
+/** 投放管理里是否能打开在线撰写稿（审核通过的待投放也算） */
+export function hasOnlineArticle(record: { contentStatus?: string; contentTitle?: string }) {
+  const status = record.contentStatus || '';
+  return (
+    Boolean(record.contentTitle) ||
+    status === 'pending_review' ||
+    status === 'revising' ||
+    status === 'approved' ||
+    status === 'stage1_passed' ||
+    status === 'queue' ||
+    status === 'published'
+  );
+}
+
 export const derivePlacementProgress = (list: { publishStatus?: string }[]) => {
   const platformCount = list.length;
   const successCount = list.filter((i) => i.publishStatus === '投放成功').length;

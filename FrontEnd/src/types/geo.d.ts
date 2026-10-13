@@ -495,6 +495,8 @@ export interface GeoContentPlacementListItem {
   proofFileCount?: number;
   /** drafting / pending_review / revising / approved / queue */
   contentStatus?: string;
+  /** 在线撰写正文标题 */
+  contentTitle?: string;
   remark?: string;
   createTime?: string;
 }
@@ -554,9 +556,16 @@ export interface GeoContentWritingRow {
   contentVersion?: number;
   currentReviewId?: number | null;
   currentRoundNo?: number | null;
+  currentStageNo?: number | null;
+  nextStageNo?: number | null;
+  lockedReviewerUserId?: number | null;
+  lockedReviewerName?: string;
+  stage1ReviewerUserId?: number | null;
+  stage1ReviewerName?: string;
   latestReviewId?: number | null;
   latestReviewStatus?: string | null;
   latestRoundNo?: number | null;
+  latestStageNo?: number | null;
   reviewerSummary?: string;
   rejectSummary?: string;
   reviewers?: GeoContentReviewerItem[];
@@ -576,6 +585,7 @@ export interface GeoContentReviewRow {
   reviewId: number;
   placementId: number;
   roundNo?: number;
+  stageNo?: number;
   status?: string;
   topicName?: string;
   targetQuestion?: string;
@@ -593,6 +603,7 @@ export interface GeoContentReviewRound {
   /** draft=当前稿 review=某轮提审快照 */
   entryType?: 'draft' | 'review' | string;
   roundNo?: number | null;
+  stageNo?: number | null;
   status?: string | null;
   submitterName?: string;
   submitRemark?: string;

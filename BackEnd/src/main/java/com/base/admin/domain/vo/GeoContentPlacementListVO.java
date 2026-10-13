@@ -70,6 +70,9 @@ public class GeoContentPlacementListVO {
     @Schema(description = "稿件状态 drafting/pending_review/revising/approved/queue", example = "drafting")
     private String contentStatus;
 
+    @Schema(description = "在线撰写正文标题", example = "中秋送礼指南")
+    private String contentTitle;
+
     @Schema(description = "备注")
     private String remark;
 

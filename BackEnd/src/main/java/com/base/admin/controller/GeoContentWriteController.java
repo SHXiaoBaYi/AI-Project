@@ -60,7 +60,7 @@ public class GeoContentWriteController {
         return Result.ok(writeService.getReviewCompare(placementId));
     }
 
-    @Operation(summary = "撰写人发起多人审核")
+    @Operation(summary = "撰写人发起两阶段串行审核（每阶段 1 人）")
     @PostMapping("/submit-review")
     @RequiresPermission("geo:write:mine")
     @Log(title = "GEO文章发起审核", businessType = 2)

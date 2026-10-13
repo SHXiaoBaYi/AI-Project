@@ -9,7 +9,8 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PlacementExecutionPanel from '@/components/geo/content-placement/PlacementExecutionPanel';
 import PlacementProofFilesModal from '@/components/geo/content-placement/PlacementProofFilesModal';
-import { AGG_COLOR, SOURCE_COLOR } from '@/components/geo/content-placement/constants';
+import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { AGG_COLOR, SOURCE_COLOR, hasOnlineArticle } from '@/components/geo/content-placement/constants';
 import {
   createGeoContentPlacementApi,
   deleteGeoContentPlacementApi,
@@ -67,6 +68,8 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const [currentPlacement, setCurrentPlacement] = useState<GeoContentPlacementListItem | null>(null);
   const [proofOpen, setProofOpen] = useState(false);
   const [proofPlacement, setProofPlacement] = useState<GeoContentPlacementListItem | null>(null);
+  const [articleOpen, setArticleOpen] = useState(false);
+  const [articlePlacementId, setArticlePlacementId] = useState<number | null>(null);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sourceRecord, setSourceRecord] = useState<GeoContentPlacementListItem | null>(null);
   const [generatingId, setGeneratingId] = useState<number | null>(null);
@@ -290,6 +293,15 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       formItemProps: { rules: [{ required: true, message: '请输入目标问题' }] },
     },
     {
+      title: '正文标题',
+      dataIndex: 'contentTitle',
+      ellipsis: true,
+      width: 200,
+      search: false,
+      hideInForm: true,
+      render: (v) => v || '-',
+    },
+    {
       title: '来源',
       dataIndex: 'source',
       width: 160,
@@ -329,6 +341,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
           pending_review: { text: '待审核', color: 'processing' },
           revising: { text: '修改中', color: 'warning' },
           approved: { text: '已通过', color: 'success' },
+          stage1_passed: { text: '一审已通过', color: 'success' },
           queue: { text: '待投放', color: 'cyan' },
           published: { text: '已发布', color: 'green' },
         };
@@ -409,6 +422,16 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
         <ActionButtons
           maxVisible={4}
           items={[
+            {
+              key: 'article',
+              label: '查看文章',
+              perm: 'geo:content:list',
+              disabled: !hasOnlineArticle(record),
+              onClick: () => {
+                setArticlePlacementId(record.id);
+                setArticleOpen(true);
+              },
+            },
             {
               key: 'progress',
               label: '进度详情',
@@ -820,6 +843,16 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
           setDrawerOpen(false);
           setCurrentPlacement(null);
           actionRef.current?.reload();
+        }}
+      />
+
+      <GeoContentWriteDrawer
+        open={articleOpen}
+        placementId={articlePlacementId}
+        mode='review'
+        onClose={() => {
+          setArticleOpen(false);
+          setArticlePlacementId(null);
         }}
       />
 

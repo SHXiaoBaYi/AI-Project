@@ -77,9 +77,15 @@ public class Constants {
     public static final String CONTENT_STATUS_REVISING = "revising";
     /** 稿件状态：已通过 */
     public static final String CONTENT_STATUS_APPROVED = "approved";
-    /** 稿件状态：待投放（审核通过，进入文章列表维护投放） */
+    /** 稿件状态：一审已通过，可发起二审 */
+    public static final String CONTENT_STATUS_STAGE1_PASSED = "stage1_passed";
+    /** 稿件状态：待投放（审核通过，回到投放管理维护投放） */
     public static final String CONTENT_STATUS_QUEUE = "queue";
-    /** 稿件状态：已发布（文章列表已有投放成功记录） */
+    /** 文章审核阶段：一审 */
+    public static final int CONTENT_REVIEW_STAGE1 = 1;
+    /** 文章审核阶段：二审 */
+    public static final int CONTENT_REVIEW_STAGE2 = 2;
+    /** 稿件状态：已发布（投放管理中已有投放成功记录） */
     public static final String CONTENT_STATUS_PUBLISHED = "published";
     /** 在线正文格式（一期锁定） */
     public static final String CONTENT_FORMAT_LAKE = "text/lake";
@@ -104,6 +110,8 @@ public class Constants {
     public static final String TASK_TYPE_GEO_ASSIGN_WRITER = "GEO文章待分配撰写人";
     /** 撰写任务：已有正文时的进度 */
     public static final int TASK_PROGRESS_WRITE_DRAFTED = 50;
+    /** 撰写任务：一审通过后的进度（二审通过才 100%） */
+    public static final int TASK_PROGRESS_WRITE_STAGE1_PASSED = 80;
     /**
      * 在线撰写功能上线时间（含当日）。
      * 「我的撰写记录」排除上线前仅因指定撰写人而存在的历史投放；

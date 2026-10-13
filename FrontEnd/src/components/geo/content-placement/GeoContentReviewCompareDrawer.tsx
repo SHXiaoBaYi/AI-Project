@@ -30,9 +30,15 @@ function versionKeyOf(round: GeoContentReviewRound): VersionKey {
   return `review:${round.reviewId!}`;
 }
 
+function stageText(stageNo?: number | null) {
+  if (stageNo === 2) return '二审';
+  if (stageNo === 1) return '一审';
+  return '';
+}
+
 function labelOf(round: GeoContentReviewRound, latestRoundNo?: number | null) {
-  const base = `第${round.roundNo ?? '-'}轮提审稿`;
-  // 最新一轮提审稿就是当前稿
+  const stage = stageText(round.stageNo);
+  const base = `${stage ? `${stage}·` : ''}第${round.roundNo ?? '-'}轮提审稿`;
   if (latestRoundNo != null && round.roundNo === latestRoundNo) {
     return `${base}（当前稿）`;
   }

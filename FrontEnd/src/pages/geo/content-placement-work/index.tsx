@@ -7,7 +7,8 @@ import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PlacementExecutionPanel from '@/components/geo/content-placement/PlacementExecutionPanel';
 import PlacementProofFilesModal from '@/components/geo/content-placement/PlacementProofFilesModal';
-import { AGG_COLOR } from '@/components/geo/content-placement/constants';
+import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { AGG_COLOR, hasOnlineArticle } from '@/components/geo/content-placement/constants';
 import { getGeoContentPlacementListApi, getGeoTopicOptionsApi } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoTopic } from '@/types/geo';
 import { GEO_CONTENT_AGG_STATUS } from '@/constants/geo';
@@ -18,6 +19,7 @@ const CONTENT_STATUS_TAG: Record<string, { text: string; color: string }> = {
   pending_review: { text: '待审核', color: 'processing' },
   revising: { text: '修改中', color: 'warning' },
   approved: { text: '已通过', color: 'success' },
+  stage1_passed: { text: '一审已通过', color: 'success' },
   queue: { text: '待投放', color: 'cyan' },
   published: { text: '已发布', color: 'green' },
 };
@@ -31,6 +33,8 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
   const [currentPlacement, setCurrentPlacement] = useState<GeoContentPlacementListItem | null>(null);
   const [proofOpen, setProofOpen] = useState(false);
   const [proofPlacement, setProofPlacement] = useState<GeoContentPlacementListItem | null>(null);
+  const [articleOpen, setArticleOpen] = useState(false);
+  const [articlePlacementId, setArticlePlacementId] = useState<number | null>(null);
 
   useEffect(() => {
     void getGeoTopicOptionsApi().then(setTopics);
@@ -69,6 +73,15 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
       ellipsis: true,
       width: 240,
       hideInForm: true,
+    },
+    {
+      title: '正文标题',
+      dataIndex: 'contentTitle',
+      ellipsis: true,
+      width: 200,
+      search: false,
+      hideInForm: true,
+      render: (v) => v || '-',
     },
     {
       title: '发布人',
@@ -162,6 +175,16 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
         <ActionButtons
           items={[
             {
+              key: 'article',
+              label: '查看文章',
+              perm: 'geo:content:work',
+              disabled: !hasOnlineArticle(record),
+              onClick: () => {
+                setArticlePlacementId(record.id);
+                setArticleOpen(true);
+              },
+            },
+            {
               key: 'work',
               label: '维护投放/引用',
               perm: 'geo:content:work',
@@ -219,6 +242,16 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
         }}
         onChanged={(next) => {
           setCurrentPlacement((prev) => (prev ? { ...prev, ...next } : prev));
+        }}
+      />
+
+      <GeoContentWriteDrawer
+        open={articleOpen}
+        placementId={articlePlacementId}
+        mode='review'
+        onClose={() => {
+          setArticleOpen(false);
+          setArticlePlacementId(null);
         }}
       />
 

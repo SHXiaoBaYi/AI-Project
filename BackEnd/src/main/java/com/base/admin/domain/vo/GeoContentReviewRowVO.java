@@ -17,8 +17,11 @@ public class GeoContentReviewRowVO {
     @Schema(description = "投放主表ID", example = "10")
     private Long placementId;
 
-    @Schema(description = "第几轮", example = "1")
+    @Schema(description = "第几轮提审", example = "1")
     private Integer roundNo;
+
+    @Schema(description = "审核阶段 1=一审 2=二审", example = "1")
+    private Integer stageNo;
 
     @Schema(description = "轮次状态 pending/approved/rejected", example = "pending")
     private String status;

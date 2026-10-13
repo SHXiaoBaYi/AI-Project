@@ -38,6 +38,24 @@ public class GeoContentWritingRowVO {
     @Schema(description = "当前进行中的审核轮次", example = "1", nullable = true)
     private Integer currentRoundNo;
 
+    @Schema(description = "当前进行中的审核阶段 1/2", example = "1", nullable = true)
+    private Integer currentStageNo;
+
+    @Schema(description = "下一步可发起的阶段 1/2；空表示不能发起", example = "1", nullable = true)
+    private Integer nextStageNo;
+
+    @Schema(description = "退回重提时锁定的审核人用户ID", example = "3", nullable = true)
+    private Long lockedReviewerUserId;
+
+    @Schema(description = "退回重提时锁定的审核人", example = "李四")
+    private String lockedReviewerName;
+
+    @Schema(description = "一审审核人用户ID", example = "3", nullable = true)
+    private Long stage1ReviewerUserId;
+
+    @Schema(description = "一审审核人", example = "李四")
+    private String stage1ReviewerName;
+
     @Schema(description = "最近一轮审核ID（含已退回/已通过）", example = "1", nullable = true)
     private Long latestReviewId;
 
@@ -46,6 +64,9 @@ public class GeoContentWritingRowVO {
 
     @Schema(description = "最近一轮审核轮次", example = "2", nullable = true)
     private Integer latestRoundNo;
+
+    @Schema(description = "最近一轮审核阶段 1/2", example = "1", nullable = true)
+    private Integer latestStageNo;
 
     @Schema(description = "最近一轮审核人摘要，如 张三✓ 李四✗")
     private String reviewerSummary;
