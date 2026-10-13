@@ -1,6 +1,7 @@
 package com.base.admin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.Constants;
 import com.base.admin.common.PageResult;
@@ -21,6 +22,7 @@ import com.base.admin.domain.dto.GeoContentPublisherWeekQueryDTO;
 import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
 import com.base.admin.domain.entity.GeoContentPeriodStat;
 import com.base.admin.domain.entity.GeoContentPlacement;
+import com.base.admin.domain.entity.GeoContentReview;
 import com.base.admin.domain.entity.GeoContentPlacementCite;
 import com.base.admin.domain.entity.GeoContentPlacementItem;
 import com.base.admin.domain.entity.GeoContentReviewNote;
@@ -58,6 +60,7 @@ import com.base.admin.mapper.GeoContentPeriodStatMapper;
 import com.base.admin.mapper.GeoContentPlacementCiteMapper;
 import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
+import com.base.admin.mapper.GeoContentReviewMapper;
 import com.base.admin.mapper.GeoContentReviewNoteMapper;
 import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
@@ -123,6 +126,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentPlacementItemMapper itemMapper;
     private final GeoContentPlacementCiteMapper citeMapper;
+    private final GeoContentReviewMapper contentReviewMapper;
     private final GeoContentReviewNoteMapper reviewNoteMapper;
     private final GeoContentPeriodStatMapper contentPeriodStatMapper;
     private final SysUserMapper userMapper;
@@ -384,11 +388,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         GeoContentPlacement placement = requirePlacement(dto.getPlacementId());
         String lockStatus = placement.getContentStatus();
         if (Constants.CONTENT_STATUS_QUEUE.equals(lockStatus)
-                || Constants.CONTENT_STATUS_PUBLISHED.equals(lockStatus)
-                || Constants.CONTENT_STATUS_PENDING_REVIEW.equals(lockStatus)) {
-            throw new BusinessException(Constants.CONTENT_STATUS_PENDING_REVIEW.equals(lockStatus)
-                    ? "审核中不可修改正文"
-                    : "待投放/已发布文章请到「文章列表」维护投放，不可再改稿");
+                || Constants.CONTENT_STATUS_PUBLISHED.equals(lockStatus)) {
+            throw new BusinessException("待投放/已发布文章请到「文章列表」维护投放，不可再改稿");
+        }
+        if (Constants.CONTENT_STATUS_PENDING_REVIEW.equals(lockStatus)
+                && hasPendingContentReview(placement.getId())) {
+            throw new BusinessException("审核中不可修改正文");
         }
         long currentVersion = placement.getContentVersion() == null ? 0L : placement.getContentVersion();
         Long clientVersion = dto.getContentVersion();
@@ -400,27 +405,47 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         String prevTitle = placement.getContentTitle() == null ? "" : placement.getContentTitle();
         String prevBody = placement.getContentBody() == null ? "" : placement.getContentBody();
         boolean changed = !nextTitle.equals(prevTitle) || !nextBody.equals(prevBody);
-        placement.setContentTitle(nextTitle);
-        placement.setContentBody(nextBody);
-        placement.setContentFormat(Constants.CONTENT_FORMAT_LAKE);
-        if (!StringUtils.hasText(placement.getContentStatus())) {
-            placement.setContentStatus(Constants.CONTENT_STATUS_DRAFTING);
+        String nextStatus = lockStatus;
+        if (!StringUtils.hasText(nextStatus) || Constants.CONTENT_STATUS_PENDING_REVIEW.equals(nextStatus)) {
+            nextStatus = Constants.CONTENT_STATUS_DRAFTING;
         }
-        placement.setContentVersion(currentVersion + 1);
-        placement.setContentUpdatedBy(SecurityUtils.getCurrentUsername());
-        placement.setContentUpdatedAt(LocalDateTime.now());
-        placementMapper.updateById(placement);
+        long nextVersion = currentVersion + 1;
+        LocalDateTime now = LocalDateTime.now();
+        String editor = SecurityUtils.getCurrentUsername();
+        // 显式 SET LONGTEXT，避免 updateById 在个别环境下漏写正文
+        placementMapper.update(null, new LambdaUpdateWrapper<GeoContentPlacement>()
+                .eq(GeoContentPlacement::getId, placement.getId())
+                .set(GeoContentPlacement::getContentTitle, nextTitle)
+                .set(GeoContentPlacement::getContentBody, nextBody)
+                .set(GeoContentPlacement::getContentFormat, Constants.CONTENT_FORMAT_LAKE)
+                .set(GeoContentPlacement::getContentStatus, nextStatus)
+                .set(GeoContentPlacement::getContentVersion, nextVersion)
+                .set(GeoContentPlacement::getContentUpdatedBy, editor)
+                .set(GeoContentPlacement::getContentUpdatedAt, now));
+        GeoContentPlacement saved = requirePlacement(placement.getId());
+        String savedBody = saved.getContentBody() == null ? "" : saved.getContentBody();
+        if (!nextBody.equals(savedBody)) {
+            log.warn("统一稿正文回读不一致 placementId={} sentLen={} savedLen={}",
+                    placement.getId(), nextBody.length(), savedBody.length());
+            placementMapper.update(null, new LambdaUpdateWrapper<GeoContentPlacement>()
+                    .eq(GeoContentPlacement::getId, placement.getId())
+                    .set(GeoContentPlacement::getContentBody, nextBody));
+            saved = requirePlacement(placement.getId());
+            savedBody = saved.getContentBody() == null ? "" : saved.getContentBody();
+            if (!nextBody.equals(savedBody)) {
+                throw new BusinessException("正文保存失败，请重试");
+            }
+        }
         if (changed) {
             markSharedArticlesNeedRevision(placement.getId());
         }
-        refreshPlacementContentRollup(placement.getId());
         if (StringUtils.hasText(nextTitle) || StringUtils.hasText(nextBody)) {
             SysTaskService taskService = taskServiceProvider.getIfAvailable();
             if (taskService != null) {
                 taskService.markGeoWriteDrafted(placement.getId());
             }
         }
-        return toDraftVo(requirePlacement(placement.getId()));
+        return toDraftVo(saved);
     }
 
     @Override
@@ -695,6 +720,13 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
     }
 
+    private boolean hasPendingContentReview(Long placementId) {
+        Long n = contentReviewMapper.selectCount(new LambdaQueryWrapper<GeoContentReview>()
+                .eq(GeoContentReview::getPlacementId, placementId)
+                .eq(GeoContentReview::getStatus, "pending"));
+        return n != null && n > 0;
+    }
+
     private void refreshPlacementContentRollup(Long placementId) {
         GeoContentPlacement current = placementMapper.selectById(placementId);
         if (current == null) {
@@ -712,9 +744,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         String rollup = Constants.CONTENT_STATUS_DRAFTING;
         if (!items.isEmpty()) {
             List<String> statuses = items.stream().map(GeoContentPlacementServiceImpl::articleStatus).toList();
-            if (statuses.stream().anyMatch(Constants.CONTENT_STATUS_PENDING_REVIEW::equals)) {
-                rollup = Constants.CONTENT_STATUS_PENDING_REVIEW;
-            } else if (statuses.stream().anyMatch(Constants.CONTENT_STATUS_REVISING::equals)) {
+            if (statuses.stream().anyMatch(Constants.CONTENT_STATUS_REVISING::equals)) {
                 rollup = Constants.CONTENT_STATUS_REVISING;
             } else if (statuses.stream().anyMatch(Constants.CONTENT_STATUS_DRAFTING::equals)) {
                 rollup = Constants.CONTENT_STATUS_DRAFTING;

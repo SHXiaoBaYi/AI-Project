@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { withBase } from '@/utils/basePath';
 import {
   LAKE_SCHEME,
@@ -16,11 +16,20 @@ type Props = {
   uploadImage?: (file: File) => Promise<string>;
 };
 
+export type LakexEditorHostHandle = {
+  /** 编辑器未就绪时返回 null，避免把空串当成「用户清空了正文」 */
+  getLake: () => string | null;
+};
+
 /**
  * 挂载本仓库镜像的 Lakex 编辑器（非 iframe 语雀站点）。
  * 内容格式固定 text/lake。
+ * 外部换稿请靠 key 重挂载，不要用 value effect 回写，否则会冲掉正在输入的内容。
  */
-export function LakexEditorHost({ value, readOnly, onChange, onReady, onError, uploadImage }: Props) {
+export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function LakexEditorHost(
+  { value, readOnly, onChange, onReady, onError, uploadImage },
+  ref,
+) {
   const rootRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<LakexEditorInstance | null>(null);
   const onChangeRef = useRef(onChange);
@@ -29,6 +38,14 @@ export function LakexEditorHost({ value, readOnly, onChange, onReady, onError, u
 
   onChangeRef.current = onChange;
   valueRef.current = value;
+
+  useImperativeHandle(ref, () => ({
+    getLake: () => {
+      const editor = editorRef.current;
+      if (!editor?.getDocument) return null;
+      return editor.getDocument(LAKE_SCHEME, { includeMeta: true }) ?? '';
+    },
+  }));
 
   useEffect(() => {
     let disposed = false;
@@ -85,15 +102,9 @@ export function LakexEditorHost({ value, readOnly, onChange, onReady, onError, u
         lastSetRef.current = initial;
         editor.setDocument?.(LAKE_SCHEME, initial);
 
-        let mute = 3;
         if (typeof editor.on === 'function' && !readOnly) {
           const off = editor.on('contentchange', () => {
             const next = editor.getDocument?.(LAKE_SCHEME, { includeMeta: true }) ?? '';
-            if (mute > 0) {
-              mute -= 1;
-              lastSetRef.current = next;
-              return;
-            }
             if (next === lastSetRef.current) return;
             lastSetRef.current = next;
             onChangeRef.current?.(next);
@@ -119,18 +130,9 @@ export function LakexEditorHost({ value, readOnly, onChange, onReady, onError, u
       editorRef.current = null;
       if (rootRef.current) rootRef.current.innerHTML = '';
     };
-    // 仅挂载一次；外部 value 变化由下方 effect 同步
+    // 仅挂载一次；换稿靠父组件 key 重挂载
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readOnly]);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor?.setDocument) return;
-    const current = editor.getDocument?.(LAKE_SCHEME, { includeMeta: true }) ?? '';
-    if (value === current) return;
-    lastSetRef.current = value || '';
-    editor.setDocument(LAKE_SCHEME, value || '');
-  }, [value]);
 
   return (
     <div
@@ -138,4 +140,4 @@ export function LakexEditorHost({ value, readOnly, onChange, onReady, onError, u
       className='lakex-host h-full w-full overflow-auto bg-white'
     />
   );
-}
+});

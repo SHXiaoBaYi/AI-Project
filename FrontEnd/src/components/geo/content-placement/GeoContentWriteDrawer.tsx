@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Drawer, Input, Select, Space, Spin, Tag, Typography, message } from 'antd';
-import { LakexEditorHost } from '@/components/lakex/LakexEditorHost';
+import { LakexEditorHost, type LakexEditorHostHandle } from '@/components/lakex/LakexEditorHost';
 import {
   addGeoContentArticleOpinionApi,
   addGeoContentPlatformArticleApi,
@@ -57,7 +57,9 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const bodyRef = useRef('');
   const titleRef = useRef('');
   const flushingRef = useRef(false);
+  const pendingRetryRef = useRef(false);
   const activeRef = useRef<ActiveKey>('shared');
+  const editorHostRef = useRef<LakexEditorHostHandle | null>(null);
 
   bodyRef.current = body;
   titleRef.current = contentTitle;
@@ -138,11 +140,18 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const persist = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (placementId == null || !bundle || mode !== 'write') return null;
-      if (flushingRef.current) return null;
+      if (flushingRef.current) {
+        pendingRetryRef.current = true;
+        return null;
+      }
       const current = activeRef.current;
       const row = typeof current === 'number' ? bundle.articles.find((item) => item.itemId === current) : undefined;
       const editingShared = current === 'shared' || row?.contentMode !== 'custom';
       if (!editingShared && row && !row.editable) return null;
+      const lake = editorHostRef.current?.getLake();
+      if (lake != null) {
+        bodyRef.current = lake;
+      }
       flushingRef.current = true;
       setSaveState('saving');
       setSaveError('');
@@ -182,6 +191,12 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         return null;
       } finally {
         flushingRef.current = false;
+        if (pendingRetryRef.current) {
+          pendingRetryRef.current = false;
+          window.setTimeout(() => {
+            void persist({ silent: true });
+          }, 0);
+        }
       }
     },
     [bundle, mode, placementId],
@@ -200,7 +215,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const selectTarget = async (next: ActiveKey) => {
     if (next === active) return;
     clearTimer();
-    if (saveState === 'dirty') await persist({ silent: true });
+    if (mode === 'write') await persist({ silent: true });
     setEditorReady(false);
     setActive(next);
     if (!bundle) return;
@@ -214,7 +229,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
 
   const handleClose = async () => {
     clearTimer();
-    if (saveState === 'dirty') await persist({ silent: true });
+    if (mode === 'write') await persist({ silent: true });
     onClose();
   };
 
@@ -237,6 +252,10 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
 
   const switchMode = async (contentMode: 'shared' | 'custom') => {
     if (!article) return;
+    const lake = editorHostRef.current?.getLake();
+    if (lake != null) {
+      bodyRef.current = lake;
+    }
     setActing(true);
     try {
       const next = await saveGeoContentItemDraftApi({
@@ -504,6 +523,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 </div>
               )}
               <LakexEditorHost
+                ref={editorHostRef}
                 key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}`}
                 value={body}
                 readOnly={readOnly && !sharedEditable}
