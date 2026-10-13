@@ -1,0 +1,592 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Drawer, Input, Select, Space, Spin, Tag, Typography, message } from 'antd';
+import { LakexEditorHost } from '@/components/lakex/LakexEditorHost';
+import {
+  addGeoContentArticleOpinionApi,
+  addGeoContentPlatformArticleApi,
+  getGeoContentArticleBundleApi,
+  getGeoPlatformOptionsApi,
+  decideGeoContentReviewApi,
+  saveGeoContentDraftApi,
+  saveGeoContentItemDraftApi,
+  uploadGeoScreenshotApi,
+} from '@/api/geo';
+import { GEO_PLATFORM_TYPE_CONTENT } from '@/constants/geo';
+import type { GeoContentArticle, GeoContentArticleBundle, GeoPlatform } from '@/types/geo';
+
+const STATUS_LABEL: Record<string, { text: string; color: string }> = {
+  drafting: { text: '草稿', color: 'default' },
+  pending_review: { text: '待审核', color: 'processing' },
+  revising: { text: '修改中', color: 'warning' },
+  approved: { text: '已通过', color: 'success' },
+  queue: { text: '待投放', color: 'cyan' },
+  published: { text: '已发布', color: 'green' },
+};
+
+type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
+type ActiveKey = 'shared' | number;
+
+type Props = {
+  open: boolean;
+  placementId: number | null;
+  /** write=撰写改稿；review=只读查看（待审核/审核记录） */
+  mode: 'write' | 'review';
+  /** 待审核时传入，用于在抽屉内通过/退回 */
+  reviewId?: number | null;
+  onClose: () => void;
+};
+
+function statusMeta(status?: string) {
+  return STATUS_LABEL[status || 'drafting'] || STATUS_LABEL.drafting;
+}
+
+export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null, onClose }: Props) {
+  const [loading, setLoading] = useState(false);
+  const [editorReady, setEditorReady] = useState(false);
+  const [bundle, setBundle] = useState<GeoContentArticleBundle | null>(null);
+  const [active, setActive] = useState<ActiveKey>('shared');
+  const [body, setBody] = useState('');
+  const [contentTitle, setContentTitle] = useState('');
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [saveError, setSaveError] = useState('');
+  const [opinion, setOpinion] = useState('');
+  const [acting, setActing] = useState(false);
+  const [platforms, setPlatforms] = useState<GeoPlatform[]>([]);
+  const versionRef = useRef(0);
+  const timerRef = useRef<number | null>(null);
+  const bodyRef = useRef('');
+  const titleRef = useRef('');
+  const flushingRef = useRef(false);
+  const activeRef = useRef<ActiveKey>('shared');
+
+  bodyRef.current = body;
+  titleRef.current = contentTitle;
+  activeRef.current = active;
+
+  const article = useMemo(
+    () => (typeof active === 'number' ? bundle?.articles.find((row) => row.itemId === active) : undefined),
+    [active, bundle],
+  );
+  const usingShared = active === 'shared' || article?.contentMode !== 'custom';
+  const readOnly =
+    mode === 'review' ||
+    (active !== 'shared' && article != null && !article.editable && article.contentMode === 'custom');
+  const sharedEditable = mode === 'write' && (active === 'shared' || article?.contentMode !== 'custom');
+
+  const clearTimer = () => {
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const applyShared = (data: GeoContentArticleBundle) => {
+    setContentTitle(data.shared.contentTitle || '');
+    setBody(data.shared.contentBody || '');
+    versionRef.current = data.shared.contentVersion ?? 0;
+  };
+
+  const applyArticle = (row: GeoContentArticle, data: GeoContentArticleBundle) => {
+    if (row.contentMode === 'custom') {
+      setContentTitle(row.contentTitle || '');
+      setBody(row.contentBody || '');
+      versionRef.current = row.contentVersion ?? 0;
+      return;
+    }
+    setContentTitle(data.shared.contentTitle || '');
+    setBody(data.shared.contentBody || '');
+    versionRef.current = data.shared.contentVersion ?? 0;
+  };
+
+  const load = useCallback(async (id: number, prefer?: ActiveKey) => {
+    setLoading(true);
+    setEditorReady(false);
+    setSaveState('idle');
+    setSaveError('');
+    try {
+      const data = await getGeoContentArticleBundleApi(id);
+      setBundle(data);
+      const next = prefer ?? 'shared';
+      setActive(next);
+      if (next === 'shared') {
+        applyShared(data);
+      } else {
+        const row = data.articles.find((item) => item.itemId === next);
+        if (row) applyArticle(row, data);
+        else applyShared(data);
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '加载文章失败');
+      setBundle(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || placementId == null) return;
+    setOpinion('');
+    void load(placementId, 'shared');
+    if (mode === 'write') {
+      void getGeoPlatformOptionsApi(GEO_PLATFORM_TYPE_CONTENT)
+        .then(setPlatforms)
+        .catch(() => setPlatforms([]));
+    }
+    return () => clearTimer();
+  }, [open, placementId, mode, load]);
+
+  const persist = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (placementId == null || !bundle || mode !== 'write') return null;
+      if (flushingRef.current) return null;
+      const current = activeRef.current;
+      const row = typeof current === 'number' ? bundle.articles.find((item) => item.itemId === current) : undefined;
+      const editingShared = current === 'shared' || row?.contentMode !== 'custom';
+      if (!editingShared && row && !row.editable) return null;
+      flushingRef.current = true;
+      setSaveState('saving');
+      setSaveError('');
+      try {
+        if (editingShared) {
+          const next = await saveGeoContentDraftApi({
+            placementId,
+            contentTitle: titleRef.current,
+            contentBody: bodyRef.current,
+            contentVersion: versionRef.current,
+          });
+          versionRef.current = next.contentVersion ?? versionRef.current + 1;
+          setBundle((prev) => (prev ? { ...prev, shared: next } : prev));
+        } else if (row) {
+          const next = await saveGeoContentItemDraftApi({
+            itemId: row.itemId,
+            contentMode: 'custom',
+            contentTitle: titleRef.current,
+            contentBody: bodyRef.current,
+            contentVersion: versionRef.current,
+          });
+          versionRef.current = next.contentVersion ?? versionRef.current + 1;
+          setBundle((prev) =>
+            prev
+              ? { ...prev, articles: prev.articles.map((item) => (item.itemId === next.itemId ? next : item)) }
+              : prev,
+          );
+        }
+        setSaveState('saved');
+        if (!opts?.silent) message.success('已保存');
+        return true;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '保存失败';
+        setSaveState('error');
+        setSaveError(msg);
+        if (!opts?.silent) message.error(msg);
+        return null;
+      } finally {
+        flushingRef.current = false;
+      }
+    },
+    [bundle, mode, placementId],
+  );
+
+  const scheduleSave = useCallback(() => {
+    if (mode !== 'write') return;
+    if (active !== 'shared' && article?.contentMode === 'custom' && !article.editable) return;
+    setSaveState('dirty');
+    clearTimer();
+    timerRef.current = window.setTimeout(() => {
+      void persist({ silent: true });
+    }, 1200);
+  }, [active, article?.contentMode, article?.editable, mode, persist]);
+
+  const selectTarget = async (next: ActiveKey) => {
+    if (next === active) return;
+    clearTimer();
+    if (saveState === 'dirty') await persist({ silent: true });
+    setEditorReady(false);
+    setActive(next);
+    if (!bundle) return;
+    if (next === 'shared') applyShared(bundle);
+    else {
+      const row = bundle.articles.find((item) => item.itemId === next);
+      if (row) applyArticle(row, bundle);
+    }
+    setSaveState('idle');
+  };
+
+  const handleClose = async () => {
+    clearTimer();
+    if (saveState === 'dirty') await persist({ silent: true });
+    onClose();
+  };
+
+  const replaceArticle = (next: GeoContentArticle) => {
+    setBundle((prev) =>
+      prev ? { ...prev, articles: prev.articles.map((item) => (item.itemId === next.itemId ? next : item)) } : prev,
+    );
+    if (active === next.itemId) {
+      if (next.contentMode === 'custom') {
+        setContentTitle(next.contentTitle || '');
+        setBody(next.contentBody || '');
+        versionRef.current = next.contentVersion ?? 0;
+      } else if (bundle) {
+        setContentTitle(bundle.shared.contentTitle || '');
+        setBody(bundle.shared.contentBody || '');
+        versionRef.current = bundle.shared.contentVersion ?? 0;
+      }
+    }
+  };
+
+  const switchMode = async (contentMode: 'shared' | 'custom') => {
+    if (!article) return;
+    setActing(true);
+    try {
+      const next = await saveGeoContentItemDraftApi({
+        itemId: article.itemId,
+        contentMode,
+        contentTitle: contentMode === 'custom' ? titleRef.current : undefined,
+        contentBody: contentMode === 'custom' ? bodyRef.current : undefined,
+        contentVersion: article.contentVersion,
+      });
+      replaceArticle(next);
+      message.success(contentMode === 'custom' ? '已改为该平台独立稿' : '已改回统一稿');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '切换失败');
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const usedPlatforms = new Set((bundle?.articles ?? []).map((row) => row.platformName));
+  const platformOptions = platforms
+    .filter((item) => item.platformName && !usedPlatforms.has(item.platformName))
+    .map((item) => ({ label: item.platformName, value: item.platformName }));
+
+  const headerStatus = article ? statusMeta(article.contentStatus) : null;
+  const saveHint =
+    saveState === 'saving'
+      ? '保存中…'
+      : saveState === 'saved'
+        ? '已自动保存'
+        : saveState === 'dirty'
+          ? '有未保存更改'
+          : saveState === 'error'
+            ? `保存失败：${saveError}`
+            : '';
+
+  return (
+    <Drawer
+      open={open}
+      width='95vw'
+      placement='right'
+      maskClosable={false}
+      keyboard={false}
+      destroyOnHidden
+      onClose={() => {
+        void handleClose();
+      }}
+      styles={{
+        body: { padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+        header: { paddingBlock: 12 },
+      }}
+      title={
+        <div className='flex min-w-0 flex-col'>
+          <span className='font-medium'>{mode === 'review' ? '审核文章' : '撰写文章'}</span>
+          <span className='truncate text-xs font-normal text-neutral-500'>
+            {bundle?.topicName || '话题'} · {bundle?.targetQuestion || '目标问题'}
+          </span>
+        </div>
+      }
+      extra={
+        <Space>
+          <Typography.Text
+            type={saveState === 'error' ? 'danger' : 'secondary'}
+            className='text-xs'
+          >
+            {saveHint}
+          </Typography.Text>
+          {mode === 'write' ? (
+            <Button
+              type='primary'
+              loading={saveState === 'saving'}
+              onClick={() => void persist()}
+            >
+              保存
+            </Button>
+          ) : null}
+          {mode === 'review' && reviewId != null ? (
+            <>
+              <Button
+                type='primary'
+                loading={acting}
+                onClick={() => {
+                  void (async () => {
+                    setActing(true);
+                    try {
+                      await decideGeoContentReviewApi({
+                        reviewId,
+                        action: 'approve',
+                        comment: opinion.trim() || undefined,
+                      });
+                      message.success('已通过');
+                      onClose();
+                    } catch (e) {
+                      message.error(e instanceof Error ? e.message : '审核失败');
+                    } finally {
+                      setActing(false);
+                    }
+                  })();
+                }}
+              >
+                通过
+              </Button>
+              <Button
+                loading={acting}
+                onClick={() => {
+                  void (async () => {
+                    if (!opinion.trim()) {
+                      message.warning('退回修改时请填写意见');
+                      return;
+                    }
+                    setActing(true);
+                    try {
+                      await decideGeoContentReviewApi({
+                        reviewId,
+                        action: 'reject',
+                        comment: opinion.trim(),
+                      });
+                      message.success('已退回');
+                      onClose();
+                    } catch (e) {
+                      message.error(e instanceof Error ? e.message : '退回失败');
+                    } finally {
+                      setActing(false);
+                    }
+                  })();
+                }}
+              >
+                退回修改
+              </Button>
+            </>
+          ) : null}
+          <Button onClick={() => void handleClose()}>关闭</Button>
+        </Space>
+      }
+    >
+      {loading || !bundle ? (
+        <div className='flex flex-1 items-center justify-center py-24'>
+          <Spin tip='加载文章…' />
+        </div>
+      ) : (
+        <div className='flex min-h-0 flex-1'>
+          <aside className='flex w-64 shrink-0 flex-col border-r border-neutral-100'>
+            <div className='border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500'>
+              同一问题在各内容平台默认发同一篇稿，需要时可以改成独立稿。每篇文章单独审核。
+            </div>
+            <button
+              type='button'
+              className={`border-b border-neutral-100 px-3 py-2 text-left ${active === 'shared' ? 'bg-blue-50' : 'bg-white'}`}
+              onClick={() => void selectTarget('shared')}
+            >
+              <div className='text-sm font-medium'>统一稿</div>
+              <div className='text-xs text-neutral-400'>各平台默认正文</div>
+            </button>
+            <div className='min-h-0 flex-1 overflow-auto'>
+              {bundle.articles.length === 0 ? (
+                <p className='px-3 py-4 text-xs text-neutral-400'>
+                  {mode === 'write'
+                    ? '还没有内容平台。先在下方添加要发布的平台。'
+                    : '还没有平台文章，撰写人添加发布平台后才能审核。'}
+                </p>
+              ) : (
+                bundle.articles.map((row) => {
+                  const meta = statusMeta(row.contentStatus);
+                  return (
+                    <button
+                      key={row.itemId}
+                      type='button'
+                      className={`block w-full border-b border-neutral-100 px-3 py-2 text-left ${
+                        active === row.itemId ? 'bg-blue-50' : 'bg-white'
+                      }`}
+                      onClick={() => void selectTarget(row.itemId)}
+                    >
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='truncate text-sm'>{row.platformName}</span>
+                        <Tag
+                          color={meta.color}
+                          className='mr-0'
+                        >
+                          {meta.text}
+                        </Tag>
+                      </div>
+                      <div className='text-xs text-neutral-400'>
+                        {row.contentMode === 'custom' ? '独立稿' : '沿用统一稿'}
+                        {row.contentForm ? ` · ${row.contentForm}` : ''}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            {mode === 'write' ? (
+              <div className='border-t border-neutral-100 p-2'>
+                <Select
+                  key={bundle.articles.length}
+                  className='w-full'
+                  placeholder='添加发布平台'
+                  options={platformOptions}
+                  showSearch
+                  optionFilterProp='label'
+                  onChange={(platformName: string) => {
+                    if (!placementId || !platformName) return;
+                    void (async () => {
+                      try {
+                        const created = await addGeoContentPlatformArticleApi({ placementId, platformName });
+                        setBundle((prev) => (prev ? { ...prev, articles: [...prev.articles, created] } : prev));
+                        message.success(`已添加 ${platformName}`);
+                        setActive(created.itemId);
+                        applyArticle(created, bundle);
+                      } catch (e) {
+                        message.error(e instanceof Error ? e.message : '添加平台失败');
+                      }
+                    })();
+                  }}
+                />
+              </div>
+            ) : null}
+          </aside>
+          <section className='flex min-w-0 flex-1 flex-col'>
+            <div className='flex flex-wrap items-center gap-2 border-b border-neutral-100 px-4 py-2'>
+              {headerStatus ? <Tag color={headerStatus.color}>{headerStatus.text}</Tag> : <Tag>统一稿</Tag>}
+              {article ? (
+                <Tag>{article.contentMode === 'custom' ? '独立稿' : '沿用统一稿'}</Tag>
+              ) : (
+                <span className='text-xs text-neutral-400'>改这里会同步到所有「沿用统一稿」的平台</span>
+              )}
+              {mode === 'write' && article?.editable ? (
+                article.contentMode === 'custom' ? (
+                  <Button
+                    size='small'
+                    loading={acting}
+                    onClick={() => void switchMode('shared')}
+                  >
+                    改回统一稿
+                  </Button>
+                ) : (
+                  <Button
+                    size='small'
+                    loading={acting}
+                    onClick={() => void switchMode('custom')}
+                  >
+                    改为独立稿
+                  </Button>
+                )
+              ) : null}
+              {mode === 'write' ? (
+                <span className='text-xs text-neutral-400'>保存后可在「我的撰写记录」指定多人审核</span>
+              ) : null}
+            </div>
+            <div className='border-b border-neutral-100 px-4 py-2'>
+              <Input
+                placeholder='文章标题'
+                autoComplete='off'
+                value={contentTitle}
+                disabled={readOnly && !sharedEditable}
+                onChange={(e) => {
+                  setContentTitle(e.target.value);
+                  titleRef.current = e.target.value;
+                  scheduleSave();
+                }}
+              />
+            </div>
+            <div className='relative min-h-0 flex-1'>
+              {!editorReady && (
+                <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70'>
+                  <Spin tip='加载编辑器…' />
+                </div>
+              )}
+              <LakexEditorHost
+                key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}`}
+                value={body}
+                readOnly={readOnly && !sharedEditable}
+                onChange={(lake) => {
+                  setBody(lake);
+                  bodyRef.current = lake;
+                  scheduleSave();
+                }}
+                onReady={() => setEditorReady(true)}
+                onError={(err) => message.error(err.message)}
+                uploadImage={async (file) => {
+                  const res = await uploadGeoScreenshotApi(file);
+                  return res.url;
+                }}
+              />
+            </div>
+            {mode === 'review' && reviewId != null ? (
+              <div className='border-t border-neutral-100 px-4 py-2'>
+                <div className='mb-1 text-xs font-medium text-neutral-500'>审核意见（退回时必填）</div>
+                <Input.TextArea
+                  rows={2}
+                  placeholder='填写审核意见'
+                  value={opinion}
+                  onChange={(e) => setOpinion(e.target.value)}
+                />
+              </div>
+            ) : article ? (
+              <div className='max-h-48 overflow-auto border-t border-neutral-100 px-4 py-2'>
+                <div className='mb-1 text-xs font-medium text-neutral-500'>内部意见</div>
+                {(article.opinions ?? []).length === 0 ? (
+                  <p className='mb-2 text-xs text-neutral-400'>还没有意见</p>
+                ) : (
+                  <ul className='mb-2 space-y-1'>
+                    {(article.opinions ?? []).map((note) => (
+                      <li
+                        key={note.id}
+                        className='text-xs text-neutral-700'
+                      >
+                        <span className='text-neutral-400'>
+                          {note.authorName || '内部'} {note.createTime || ''}
+                        </span>
+                        <span className='ml-2'>{note.opinion}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Space.Compact className='w-full'>
+                  <Input
+                    placeholder='填写内部意见'
+                    value={opinion}
+                    onChange={(e) => setOpinion(e.target.value)}
+                  />
+                  <Button
+                    loading={acting}
+                    onClick={() => {
+                      const text = opinion.trim();
+                      if (!text) {
+                        message.warning('请填写意见');
+                        return;
+                      }
+                      void (async () => {
+                        setActing(true);
+                        try {
+                          const next = await addGeoContentArticleOpinionApi({ itemId: article.itemId, opinion: text });
+                          replaceArticle(next);
+                          setOpinion('');
+                          message.success('已记录意见');
+                        } catch (e) {
+                          message.error(e instanceof Error ? e.message : '保存意见失败');
+                        } finally {
+                          setActing(false);
+                        }
+                      })();
+                    }}
+                  >
+                    提交意见
+                  </Button>
+                </Space.Compact>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      )}
+    </Drawer>
+  );
+}

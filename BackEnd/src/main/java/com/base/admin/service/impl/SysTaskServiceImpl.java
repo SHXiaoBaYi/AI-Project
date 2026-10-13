@@ -352,6 +352,9 @@ public class SysTaskServiceImpl implements SysTaskService {
         if ("文章发布".equals(task.getTaskType())) {
             throw new BusinessException("文章发布任务请到「我的投放」填写发布记录，系统会自动完成");
         }
+        if ("文章撰写".equals(task.getTaskType())) {
+            throw new BusinessException("文章撰写请在「我的任务」打开在线撰写，并在「我的撰写记录」发起审核；审核通过后系统自动完成");
+        }
         if ("已完成".equals(task.getStatus()) || "已取消".equals(task.getStatus())) {
             throw new BusinessException("任务已结束，无法再次完成");
         }
@@ -400,6 +403,55 @@ public class SysTaskServiceImpl implements SysTaskService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void completeGeoWriteTasksByReview(Long placementId, Long writerUserId, String writerName) {
+        if (placementId == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, placementId)
+                .eq(SysTask::getTaskType, "文章撰写")
+                .ne(SysTask::getStatus, "已完成")
+                .ne(SysTask::getStatus, "已取消"));
+        if (tasks.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        String by = StringUtils.hasText(writerName) ? writerName.trim() : SecurityUtils.getCurrentUsername();
+        for (SysTask task : tasks) {
+            String oldStatus = task.getStatus();
+            String note = "审核通过，系统自动完成（完成人：" + by + "）";
+            if (StringUtils.hasText(task.getRemark())) {
+                task.setRemark(task.getRemark().trim() + "；" + note);
+            } else {
+                task.setRemark(note);
+            }
+            task.setStatus("已完成");
+            task.setProgress(100);
+            task.setActualEndTime(now);
+            if (writerUserId != null) {
+                task.setOwnerUserId(writerUserId);
+                if (StringUtils.hasText(writerName)) {
+                    task.setOwnerName(writerName.trim());
+                }
+            }
+            applyStatusSideEffects(task, oldStatus);
+            taskMapper.updateById(task);
+            if (writerUserId != null) {
+                assigneeMapper.update(null, new LambdaUpdateWrapper<SysTaskAssignee>()
+                        .eq(SysTaskAssignee::getTaskId, task.getId())
+                        .eq(SysTaskAssignee::getUserId, writerUserId)
+                        .set(SysTaskAssignee::getDone, 1));
+            }
+            HrHirePipelineService pipeline = hirePipeline.getIfAvailable();
+            if (pipeline != null) {
+                pipeline.afterTaskCompleted(task);
+            }
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public String batchComplete(SysTaskBatchCompleteDTO dto) {
         if (dto.getTaskIds() == null || dto.getTaskIds().isEmpty()) {
             throw new BusinessException("请选择至少一条任务");
@@ -427,6 +479,7 @@ public class SysTaskServiceImpl implements SysTaskService {
             }
             SysTaskType typeCfg = taskTypeService.getByTypeName(task.getTaskType());
             if ("文章发布".equals(task.getTaskType())
+                    || "文章撰写".equals(task.getTaskType())
                     || (typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1))) {
                 skip++;
                 continue;

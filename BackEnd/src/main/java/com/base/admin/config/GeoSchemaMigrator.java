@@ -58,6 +58,11 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureContentPlacementProgress(connection);
             ensureContentPlacementViewMenus(connection);
             ensureContentPlacementItemContentForm(connection);
+            ensureContentDraftColumns(connection);
+            ensureContentArticleReview(connection);
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v22_geo_content_review.sql"));
+            ensureContentReviewSnapshot(connection);
+            backfillQueueArticleItems(connection);
             ensureArticleBoardMenu(connection);
             ensureDailyUniqueKeyWithTermType(connection);
             ensureGeoMenuRestructure(connection);
@@ -574,6 +579,99 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         }
     }
 
+    /** 在线撰写：稿件状态 + Lake 正文（一期 text/lake） */
+    private void ensureContentDraftColumns(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_content_placement", "content_status")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN content_status VARCHAR(32) NOT NULL DEFAULT 'drafting'
+                          COMMENT '稿件状态 drafting/pending_review/revising/approved/queue'
+                          AFTER placement_progress
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 content_status");
+        }
+        if (!columnExists(connection, "geo_content_placement", "content_title")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN content_title VARCHAR(500) NOT NULL DEFAULT ''
+                          COMMENT '在线正文标题'
+                          AFTER content_status
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 content_title");
+        }
+        if (!columnExists(connection, "geo_content_placement", "content_format")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN content_format VARCHAR(32) NOT NULL DEFAULT 'text/lake'
+                          COMMENT '正文格式（一期锁定 text/lake）'
+                          AFTER content_title
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 content_format");
+        }
+        if (!columnExists(connection, "geo_content_placement", "content_body")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN content_body LONGTEXT NULL
+                          COMMENT 'Lake 正文'
+                          AFTER content_format
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 content_body");
+        }
+        if (!columnExists(connection, "geo_content_placement", "content_version")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN content_version BIGINT NOT NULL DEFAULT 0
+                          COMMENT '正文乐观锁版本'
+                          AFTER content_body
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 content_version");
+        }
+        if (!columnExists(connection, "geo_content_placement", "content_updated_by")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN content_updated_by VARCHAR(64) NOT NULL DEFAULT ''
+                          COMMENT '正文最近保存人'
+                          AFTER content_version
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 content_updated_by");
+        }
+        if (!columnExists(connection, "geo_content_placement", "content_updated_at")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD COLUMN content_updated_at DATETIME NULL
+                          COMMENT '正文最近保存时间'
+                          AFTER content_updated_by
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 content_updated_at");
+        }
+        if (!indexExists(connection, "geo_content_placement", "idx_content_status")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_placement
+                          ADD INDEX idx_content_status (content_status)
+                        """);
+            }
+            log.info("已为 geo_content_placement 增加 idx_content_status");
+        }
+    }
+
     private void ensureContentPlacementProgress(Connection connection) throws Exception {
         if (!tableExists(connection, "geo_content_placement")) {
             return;
@@ -984,6 +1082,152 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
         }
         log.info("已将 geo_content_placement_item.publish_time 调整为 DATETIME");
+    }
+
+    /** 审核轮次保存提审时正文快照，供历史对照 */
+    /**
+     * 历史「待投放」稿件若尚无文章列表明细，补一条便于填写发布平台/链接/时间。
+     */
+    private void backfillQueueArticleItems(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement")
+                || !tableExists(connection, "geo_content_placement_item")
+                || !columnExists(connection, "geo_content_placement", "content_status")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            int n = statement.executeUpdate("""
+                    INSERT INTO geo_content_placement_item (
+                      placement_id, title, platform_name, content_form, publish_status,
+                      publish_url, sort_order, remark, content_mode, content_status,
+                      content_format, content_version, is_active, create_time, update_time
+                    )
+                    SELECT
+                      p.id,
+                      CASE
+                        WHEN p.content_title IS NOT NULL AND TRIM(p.content_title) <> '' THEN TRIM(p.content_title)
+                        WHEN p.target_question IS NOT NULL AND TRIM(p.target_question) <> '' THEN TRIM(p.target_question)
+                        ELSE '待投放文章'
+                      END,
+                      '',
+                      '图文',
+                      '待投放',
+                      '',
+                      0,
+                      '审核通过自动生成（历史回填），请补充发布平台、投放链接与发布时间',
+                      'shared',
+                      'approved',
+                      'text/lake',
+                      0,
+                      1,
+                      NOW(),
+                      NOW()
+                    FROM geo_content_placement p
+                    WHERE p.is_active = 1
+                      AND p.content_status = 'queue'
+                      AND NOT EXISTS (
+                        SELECT 1 FROM geo_content_placement_item i
+                        WHERE i.placement_id = p.id AND i.is_active = 1
+                      )
+                    """);
+            if (n > 0) {
+                log.info("已回填 {} 条待投放文章列表明细", n);
+            }
+        }
+    }
+
+    private void ensureContentReviewSnapshot(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_review")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_content_review", "content_title")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_review
+                          ADD COLUMN content_title VARCHAR(500) NOT NULL DEFAULT ''
+                          COMMENT '提审时正文标题'
+                          AFTER content_version
+                        """);
+            }
+            log.info("已为 geo_content_review 增加 content_title");
+        }
+        if (!columnExists(connection, "geo_content_review", "content_format")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_review
+                          ADD COLUMN content_format VARCHAR(32) NOT NULL DEFAULT 'text/lake'
+                          COMMENT '提审时正文格式'
+                          AFTER content_title
+                        """);
+            }
+            log.info("已为 geo_content_review 增加 content_format");
+        }
+        if (!columnExists(connection, "geo_content_review", "content_body")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_review
+                          ADD COLUMN content_body LONGTEXT NULL
+                          COMMENT '提审时 Lake 正文快照'
+                          AFTER content_format
+                        """);
+            }
+            log.info("已为 geo_content_review 增加 content_body");
+        }
+    }
+
+    /**
+     * 同一问题下各内容平台文章：默认共用统一稿，也可独立成稿；每篇文章单独内部审核并记录意见。
+     */
+    private void ensureContentArticleReview(Connection connection) throws Exception {
+        if (tableExists(connection, "geo_content_placement_item")) {
+            addItemColumn(connection, "content_mode",
+                    "ALTER TABLE geo_content_placement_item ADD COLUMN content_mode VARCHAR(16) NOT NULL DEFAULT 'shared' COMMENT 'shared统一稿/custom独立稿'");
+            addItemColumn(connection, "content_title",
+                    "ALTER TABLE geo_content_placement_item ADD COLUMN content_title VARCHAR(500) NOT NULL DEFAULT '' COMMENT '独立稿标题'");
+            addItemColumn(connection, "content_body",
+                    "ALTER TABLE geo_content_placement_item ADD COLUMN content_body LONGTEXT NULL COMMENT '独立稿Lake正文'");
+            addItemColumn(connection, "content_format",
+                    "ALTER TABLE geo_content_placement_item ADD COLUMN content_format VARCHAR(32) NOT NULL DEFAULT 'text/lake' COMMENT '独立稿格式'");
+            addItemColumn(connection, "content_status",
+                    "ALTER TABLE geo_content_placement_item ADD COLUMN content_status VARCHAR(32) NOT NULL DEFAULT 'drafting' COMMENT '平台文章审核状态'");
+            addItemColumn(connection, "content_version",
+                    "ALTER TABLE geo_content_placement_item ADD COLUMN content_version BIGINT NOT NULL DEFAULT 0 COMMENT '独立稿版本'");
+            addItemColumn(connection, "content_updated_by",
+                    "ALTER TABLE geo_content_placement_item ADD COLUMN content_updated_by VARCHAR(64) NULL COMMENT '正文最近保存人'");
+            addItemColumn(connection, "content_updated_at",
+                    "ALTER TABLE geo_content_placement_item ADD COLUMN content_updated_at DATETIME NULL COMMENT '正文最近保存时间'");
+        }
+        if (tableExists(connection, "geo_content_review_note")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE geo_content_review_note (
+                      id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                      placement_id BIGINT NOT NULL,
+                      item_id BIGINT NOT NULL,
+                      opinion VARCHAR(2000) NOT NULL,
+                      author_name VARCHAR(64) NOT NULL DEFAULT '',
+                      create_by VARCHAR(64) NULL,
+                      create_time DATETIME NULL,
+                      update_by VARCHAR(64) NULL,
+                      update_time DATETIME NULL,
+                      is_active TINYINT NOT NULL DEFAULT 1,
+                      KEY idx_review_item (item_id),
+                      KEY idx_review_placement (placement_id)
+                    ) COMMENT '内容投放平台文章内部审核意见'
+                    """);
+            log.info("已创建 geo_content_review_note");
+        }
+    }
+
+    private void addItemColumn(Connection connection, String column, String sql) throws Exception {
+        if (columnExists(connection, "geo_content_placement_item", column)) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+            log.info("已为 geo_content_placement_item 增加 {}", column);
+        }
     }
 
     private boolean tableExists(Connection connection, String table) throws Exception {

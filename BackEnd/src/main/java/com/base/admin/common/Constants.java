@@ -69,6 +69,25 @@ public class Constants {
     /** 内容投放待分配占位 */
     public static final String CONTENT_UNASSIGNED = "待分配";
 
+    /** 稿件状态：草稿 */
+    public static final String CONTENT_STATUS_DRAFTING = "drafting";
+    /** 稿件状态：待审核 */
+    public static final String CONTENT_STATUS_PENDING_REVIEW = "pending_review";
+    /** 稿件状态：修改中 */
+    public static final String CONTENT_STATUS_REVISING = "revising";
+    /** 稿件状态：已通过 */
+    public static final String CONTENT_STATUS_APPROVED = "approved";
+    /** 稿件状态：待投放（审核通过，进入文章列表维护投放） */
+    public static final String CONTENT_STATUS_QUEUE = "queue";
+    /** 稿件状态：已发布（文章列表已有投放成功记录） */
+    public static final String CONTENT_STATUS_PUBLISHED = "published";
+    /** 在线正文格式（一期锁定） */
+    public static final String CONTENT_FORMAT_LAKE = "text/lake";
+    /** 平台文章正文来源：沿用问题统一稿 */
+    public static final String CONTENT_MODE_SHARED = "shared";
+    /** 平台文章正文来源：该平台独立稿 */
+    public static final String CONTENT_MODE_CUSTOM = "custom";
+
     /** 任务关联业务：GEO内容投放 */
     public static final String TASK_BIZ_GEO_CONTENT_PLACEMENT = "geo_content_placement";
     /** 任务类型：待分配发布人 */

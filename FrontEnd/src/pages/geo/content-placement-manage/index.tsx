@@ -318,6 +318,25 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       },
     },
     {
+      title: '审核',
+      dataIndex: 'contentStatus',
+      width: 100,
+      search: false,
+      hideInForm: true,
+      render: (_, r) => {
+        const meta: Record<string, { text: string; color: string }> = {
+          drafting: { text: '草稿', color: 'default' },
+          pending_review: { text: '待审核', color: 'processing' },
+          revising: { text: '修改中', color: 'warning' },
+          approved: { text: '已通过', color: 'success' },
+          queue: { text: '待投放', color: 'cyan' },
+          published: { text: '已发布', color: 'green' },
+        };
+        const item = meta[r.contentStatus || 'drafting'] || meta.drafting;
+        return <Tag color={item.color}>{item.text}</Tag>;
+      },
+    },
+    {
       title: '投放进度',
       dataIndex: 'aggregateStatus',
       width: 180,
@@ -384,7 +403,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 280,
+      width: 320,
       hideInForm: true,
       render: (_, record) => (
         <ActionButtons

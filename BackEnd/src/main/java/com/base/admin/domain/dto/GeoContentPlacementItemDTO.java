@@ -34,11 +34,10 @@ public class GeoContentPlacementItemDTO {
     @Schema(description = "投放状态（投放成功/审核未通过/未投放）", requiredMode = Schema.RequiredMode.REQUIRED, example = "投放成功")
     private String publishStatus;
 
-    @Schema(description = "投放链接")
+    @Schema(description = "投放链接（待投放时可先不填）")
     private String publishUrl;
 
-    @NotNull(message = "发布时间不能为空")
-    @Schema(description = "发布时间", requiredMode = Schema.RequiredMode.REQUIRED, example = "2026-09-03 14:30:00")
+    @Schema(description = "发布时间（投放成功时必填）", example = "2026-09-03 14:30:00")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime publishTime;
 

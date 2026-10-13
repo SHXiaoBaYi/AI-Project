@@ -50,6 +50,8 @@ const ArticlePage = memo(function ArticlePage() {
   const filterPlacementId = Number(searchParams.get('placementId') || '') || undefined;
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [form] = Form.useForm();
+  const formPublishStatus = Form.useWatch('publishStatus', form) as string | undefined;
+  const requirePublishDetail = formPublishStatus === '投放成功';
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<GeoContentPlacementArticle | null>(null);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
@@ -446,14 +448,15 @@ const ArticlePage = memo(function ArticlePage() {
             message.warning('请选择目标问题');
             return false;
           }
+          const publishTimeRaw = values.publishTime as string | dayjs.Dayjs | undefined;
           const payload = {
             placementId,
             title: values.title as string,
             platformName: values.platformName as string,
             contentForm: (values.contentForm as string) || '图文',
             publishStatus: values.publishStatus as string,
-            publishUrl: values.publishUrl as string | undefined,
-            publishTime: dayjs(values.publishTime as string | dayjs.Dayjs).format('YYYY-MM-DD HH:mm:ss'),
+            publishUrl: (values.publishUrl as string | undefined) || undefined,
+            publishTime: publishTimeRaw ? dayjs(publishTimeRaw).format('YYYY-MM-DD HH:mm:ss') : undefined,
             remark: values.remark as string | undefined,
           };
           if (editing) {
@@ -536,7 +539,7 @@ const ArticlePage = memo(function ArticlePage() {
           <Form.Item
             name='publishTime'
             label='发布时间'
-            rules={[{ required: true, message: '请选择发布时间' }]}
+            rules={[{ required: requirePublishDetail, message: '请选择发布时间' }]}
           >
             <DatePicker
               className='w-full'
@@ -549,12 +552,16 @@ const ArticlePage = memo(function ArticlePage() {
             label='投放链接'
             className='col-span-2'
             rules={[
-              { required: true, message: '请填写投放链接' },
+              { required: requirePublishDetail, message: '请填写投放链接' },
               {
-                validator: (_, value) =>
-                  canOpenExternalInApp(value)
+                validator: (_, value) => {
+                  if (!value) {
+                    return requirePublishDetail ? Promise.reject(new Error('请填写投放链接')) : Promise.resolve();
+                  }
+                  return canOpenExternalInApp(value)
                     ? Promise.resolve()
-                    : Promise.reject(new Error('投放链接必须是 http 或 https 链接')),
+                    : Promise.reject(new Error('投放链接必须是 http 或 https 链接'));
+                },
               },
             ]}
           >

@@ -496,7 +496,11 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         }
         var snap = dataScopeFilter.snapshot();
         if (!snap.globalAll() && snap.geoEnabled() && !snap.geoPlatformNames().isEmpty()) {
-            iw.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames());
+            iw.and(w -> w.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames())
+                    .or()
+                    .eq(GeoContentPlacementItem::getPlatformName, "")
+                    .or()
+                    .isNull(GeoContentPlacementItem::getPlatformName));
         }
         List<ItemRow> items = new ArrayList<>();
         for (GeoContentPlacementItem item : itemMapper.selectList(iw)) {

@@ -13,6 +13,15 @@ import type { GeoContentPlacementListItem, GeoTopic } from '@/types/geo';
 import { GEO_CONTENT_AGG_STATUS } from '@/constants/geo';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
 
+const CONTENT_STATUS_TAG: Record<string, { text: string; color: string }> = {
+  drafting: { text: '草稿', color: 'default' },
+  pending_review: { text: '待审核', color: 'processing' },
+  revising: { text: '修改中', color: 'warning' },
+  approved: { text: '已通过', color: 'success' },
+  queue: { text: '待投放', color: 'cyan' },
+  published: { text: '已发布', color: 'green' },
+};
+
 /** 一线视角：维护本人负责的话题/目标问题在各平台的投放详情与引用 */
 const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
   const actionRef = useRef<ActionType>(null);
@@ -58,7 +67,7 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
       title: '目标问题',
       dataIndex: 'targetQuestion',
       ellipsis: true,
-      width: 280,
+      width: 240,
       hideInForm: true,
     },
     {
@@ -76,6 +85,17 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
       search: false,
       hideInForm: true,
       render: (v) => v || '待分配',
+    },
+    {
+      title: '稿件状态',
+      dataIndex: 'contentStatus',
+      width: 100,
+      search: false,
+      hideInForm: true,
+      render: (_, r) => {
+        const meta = CONTENT_STATUS_TAG[r.contentStatus || 'drafting'] || CONTENT_STATUS_TAG.drafting;
+        return <Tag color={meta.color}>{meta.text}</Tag>;
+      },
     },
     {
       title: '投放进度',
@@ -136,7 +156,7 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 160,
+      width: 220,
       hideInForm: true,
       render: (_, record) => (
         <ActionButtons
@@ -160,7 +180,6 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='我的投放'
-        search={{ labelWidth: 'auto' }}
         toolBarRender={() => [
           <span
             key='hint'

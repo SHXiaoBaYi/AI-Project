@@ -4,6 +4,11 @@ import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.GeoContentDraftSaveDTO;
+import com.base.admin.domain.dto.GeoContentItemDraftSaveDTO;
+import com.base.admin.domain.dto.GeoContentOpinionSaveDTO;
+import com.base.admin.domain.dto.GeoContentPlatformArticleDTO;
+import com.base.admin.domain.dto.GeoContentReviewActionDTO;
 import com.base.admin.domain.dto.GeoContentPlacementArticleQueryDTO;
 import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
@@ -14,6 +19,9 @@ import com.base.admin.domain.dto.GeoGenerateSimilarDTO;
 import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
 import com.base.admin.domain.vo.GeoSimilarQuestionPreviewVO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
+import com.base.admin.domain.vo.GeoContentArticleBundleVO;
+import com.base.admin.domain.vo.GeoContentArticleVO;
+import com.base.admin.domain.vo.GeoContentDraftVO;
 import com.base.admin.domain.vo.GeoContentPlacementArticleListVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
@@ -111,6 +119,68 @@ public class GeoContentPlacementController {
     @RequiresPermission({"geo:content:list", "geo:content:work"})
     public Result<List<SysTaskFileVO>> proofFiles(@PathVariable Long id) {
         return Result.ok(contentPlacementService.listProofFiles(id));
+    }
+
+    @Operation(summary = "读取在线正文（Lakex text/lake）")
+    @GetMapping("/{id:\\d+}/content")
+    @RequiresPermission({"geo:content:list", "geo:content:work", "geo:content:edit", "geo:write:mine", "geo:write:review"})
+    public Result<GeoContentDraftVO> getContent(@PathVariable Long id) {
+        return Result.ok(contentPlacementService.getDraft(id));
+    }
+
+    @Operation(summary = "保存在线正文（自动保存/手动保存）")
+    @PutMapping("/content")
+    @RequiresPermission({"geo:content:work", "geo:content:edit", "geo:write:mine"})
+    @Log(title = "GEO内容投放正文", businessType = 2)
+    public Result<GeoContentDraftVO> saveContent(@Valid @RequestBody GeoContentDraftSaveDTO dto) {
+        return Result.ok(contentPlacementService.saveDraft(dto));
+    }
+
+    @Operation(summary = "问题统一稿与各平台文章（含内部审核意见）")
+    @GetMapping("/{id:\\d+}/articles")
+    @RequiresPermission({"geo:content:list", "geo:content:work", "geo:content:edit", "geo:write:mine", "geo:write:review"})
+    public Result<GeoContentArticleBundleVO> articleBundle(@PathVariable Long id) {
+        return Result.ok(contentPlacementService.getArticleBundle(id));
+    }
+
+    @Operation(summary = "为问题增加一个内容平台文章，默认沿用统一稿")
+    @PostMapping("/articles/platform")
+    @RequiresPermission("geo:content:work")
+    @Log(title = "GEO内容投放平台文章", businessType = 1)
+    public Result<GeoContentArticleVO> addPlatformArticle(@Valid @RequestBody GeoContentPlatformArticleDTO dto) {
+        return Result.ok(contentPlacementService.addPlatformArticle(dto));
+    }
+
+    @Operation(summary = "保存平台文章：沿用统一稿或独立稿")
+    @PutMapping("/articles/item")
+    @RequiresPermission({"geo:content:work", "geo:content:edit"})
+    @Log(title = "GEO内容投放平台文章", businessType = 2)
+    public Result<GeoContentArticleVO> saveItemDraft(@Valid @RequestBody GeoContentItemDraftSaveDTO dto) {
+        return Result.ok(contentPlacementService.saveItemDraft(dto));
+    }
+
+    @Operation(summary = "提交平台文章内部审核")
+    @PostMapping("/articles/{itemId:\\d+}/submit")
+    @RequiresPermission("geo:content:work")
+    @Log(title = "GEO内容投放提交审核", businessType = 2)
+    public Result<GeoContentArticleVO> submitArticleReview(@PathVariable Long itemId) {
+        return Result.ok(contentPlacementService.submitArticleReview(itemId));
+    }
+
+    @Operation(summary = "内部审核通过或退回")
+    @PostMapping("/articles/review")
+    @RequiresPermission("geo:content:edit")
+    @Log(title = "GEO内容投放内部审核", businessType = 2)
+    public Result<GeoContentArticleVO> reviewArticle(@Valid @RequestBody GeoContentReviewActionDTO dto) {
+        return Result.ok(contentPlacementService.reviewArticle(dto));
+    }
+
+    @Operation(summary = "追加内部审核意见")
+    @PostMapping("/articles/opinion")
+    @RequiresPermission({"geo:content:work", "geo:content:edit"})
+    @Log(title = "GEO内容投放审核意见", businessType = 1)
+    public Result<GeoContentArticleVO> addArticleOpinion(@Valid @RequestBody GeoContentOpinionSaveDTO dto) {
+        return Result.ok(contentPlacementService.addArticleOpinion(dto));
     }
 
     @Operation(summary = "新增内容投放")

@@ -27,6 +27,7 @@ import {
 } from '@/api/task';
 import { getGeoOwnerOptionsApi } from '@/api/geo';
 import type { GeoOwnerOption } from '@/types/geo';
+import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
 
@@ -80,6 +81,8 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   const [files, setFiles] = useState<SysTaskFile[]>([]);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
   const [typeOptions, setTypeOptions] = useState<{ label: string; value: string }[]>([]);
+  const [writeOpen, setWriteOpen] = useState(false);
+  const [writePlacementId, setWritePlacementId] = useState<number | null>(null);
   const defaultType = typeOptions[0]?.value || '日常';
 
   useEffect(() => {
@@ -125,7 +128,8 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   };
 
   /** 仅未要求证明附件的任务可批量完成 */
-  const canBatchComplete = (r: SysTask) => !!r.completable && !r.requireProof && r.taskType !== '文章发布';
+  const canBatchComplete = (r: SysTask) =>
+    !!r.completable && !r.requireProof && r.taskType !== '文章发布' && r.taskType !== '文章撰写';
 
   const openBatchComplete = () => {
     if (!selectedRowKeys.length) {
@@ -424,6 +428,15 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
                 onClick: () => {
                   if (record.taskType === '文章发布') {
                     navigate('/geo/content-placement-work');
+                    return;
+                  }
+                  if (record.taskType === '文章撰写') {
+                    if (!record.bizId) {
+                      message.warning('该撰写任务未关联内容投放');
+                      return;
+                    }
+                    setWritePlacementId(record.bizId);
+                    setWriteOpen(true);
                     return;
                   }
                   openComplete(record);
@@ -1024,6 +1037,17 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
           </ul>
         )}
       </Modal>
+
+      <GeoContentWriteDrawer
+        open={writeOpen}
+        placementId={writePlacementId}
+        mode='write'
+        onClose={() => {
+          setWriteOpen(false);
+          setWritePlacementId(null);
+          actionRef.current?.reload();
+        }}
+      />
     </>
   );
 });

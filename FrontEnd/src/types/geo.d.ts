@@ -493,8 +493,126 @@ export interface GeoContentPlacementListItem {
   successCount?: number;
   citeCount?: number;
   proofFileCount?: number;
+  /** drafting / pending_review / revising / approved / queue */
+  contentStatus?: string;
   remark?: string;
   createTime?: string;
+}
+
+export interface GeoContentDraft {
+  placementId: number;
+  targetQuestion?: string;
+  contentTitle?: string;
+  contentStatus: string;
+  contentFormat: string;
+  contentBody?: string;
+  contentVersion: number;
+  editable: boolean;
+  contentUpdatedBy?: string;
+  contentUpdatedAt?: string;
+}
+
+export interface GeoContentOpinion {
+  id: number;
+  itemId: number;
+  opinion: string;
+  authorName?: string;
+  createTime?: string;
+}
+
+export interface GeoContentArticle {
+  itemId: number;
+  placementId: number;
+  platformName?: string;
+  contentForm?: string;
+  /** shared=沿用统一稿 custom=独立稿 */
+  contentMode: 'shared' | 'custom' | string;
+  contentStatus: string;
+  contentTitle?: string;
+  contentBody?: string;
+  contentVersion: number;
+  editable: boolean;
+  publishStatus?: string;
+  opinions?: GeoContentOpinion[];
+}
+
+export interface GeoContentArticleBundle {
+  placementId: number;
+  topicName?: string;
+  targetQuestion?: string;
+  shared: GeoContentDraft;
+  articles: GeoContentArticle[];
+}
+
+export interface GeoContentWritingRow {
+  placementId: number;
+  topicName?: string;
+  targetQuestion?: string;
+  contentTitle?: string;
+  contentStatus?: string;
+  ownerName?: string;
+  contentVersion?: number;
+  currentReviewId?: number | null;
+  currentRoundNo?: number | null;
+  latestReviewId?: number | null;
+  latestReviewStatus?: string | null;
+  latestRoundNo?: number | null;
+  reviewerSummary?: string;
+  rejectSummary?: string;
+  reviewers?: GeoContentReviewerItem[];
+  contentUpdatedAt?: string;
+  createTime?: string;
+}
+
+export interface GeoContentReviewerItem {
+  userId: number;
+  userName?: string;
+  result?: string;
+  comment?: string;
+  actedAt?: string;
+}
+
+export interface GeoContentReviewRow {
+  reviewId: number;
+  placementId: number;
+  roundNo?: number;
+  status?: string;
+  topicName?: string;
+  targetQuestion?: string;
+  contentTitle?: string;
+  submitterName?: string;
+  submitRemark?: string;
+  myResult?: string;
+  reviewerSummary?: string;
+  reviewers?: GeoContentReviewerItem[];
+  createTime?: string;
+}
+
+export interface GeoContentReviewRound {
+  reviewId?: number | null;
+  /** draft=当前稿 review=某轮提审快照 */
+  entryType?: 'draft' | 'review' | string;
+  roundNo?: number | null;
+  status?: string | null;
+  submitterName?: string;
+  submitRemark?: string;
+  contentVersion?: number;
+  contentTitle?: string;
+  contentFormat?: string;
+  contentBody?: string;
+  hasSnapshot?: boolean;
+  reviewers?: GeoContentReviewerItem[];
+  reviewerSummary?: string;
+  createTime?: string;
+}
+
+export interface GeoContentReviewCompare {
+  placementId: number;
+  topicName?: string;
+  targetQuestion?: string;
+  currentReviewId?: number | null;
+  currentDraft?: GeoContentReviewRound | null;
+  rounds: GeoContentReviewRound[];
 }
 
 export interface GeoContentPlacementArticle {

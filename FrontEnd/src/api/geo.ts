@@ -23,6 +23,9 @@ import type {
   GeoPersistResult,
   GeoYearTarget,
   GeoYearlyBoard,
+  GeoContentDraft,
+  GeoContentArticle,
+  GeoContentArticleBundle,
   GeoContentPlacementCite,
   GeoContentPlacementCiteDTO,
   GeoContentPlacementDetail,
@@ -32,6 +35,9 @@ import type {
   GeoContentPlacementListItem,
   GeoContentPlacementArticle,
   GeoContentPlacementProofFile,
+  GeoContentReviewCompare,
+  GeoContentReviewRow,
+  GeoContentWritingRow,
   GeoTargetQuestionOption,
 } from '@/types/geo';
 
@@ -353,6 +359,93 @@ export function getGeoContentPlacementCitesApi(id: number, itemId?: number) {
 
 export function getGeoContentPlacementProofFilesApi(id: number) {
   return request.get<unknown, GeoContentPlacementProofFile[]>(`/geo/content-placement/${id}/proof-files`);
+}
+
+export function getGeoContentDraftApi(id: number) {
+  return request.get<unknown, GeoContentDraft>(`/geo/content-placement/${id}/content`);
+}
+
+export function saveGeoContentDraftApi(data: {
+  placementId: number;
+  contentTitle?: string;
+  contentBody?: string;
+  contentVersion?: number;
+}) {
+  return request.put<unknown, GeoContentDraft>('/geo/content-placement/content', data);
+}
+
+export function getGeoContentArticleBundleApi(placementId: number) {
+  return request.get<unknown, GeoContentArticleBundle>(`/geo/content-placement/${placementId}/articles`);
+}
+
+export function addGeoContentPlatformArticleApi(data: {
+  placementId: number;
+  platformName: string;
+  contentForm?: string;
+}) {
+  return request.post<unknown, GeoContentArticle>('/geo/content-placement/articles/platform', data);
+}
+
+export function saveGeoContentItemDraftApi(data: {
+  itemId: number;
+  contentMode: string;
+  contentTitle?: string;
+  contentBody?: string;
+  contentVersion?: number;
+}) {
+  return request.put<unknown, GeoContentArticle>('/geo/content-placement/articles/item', data);
+}
+
+export function submitGeoContentArticleReviewApi(itemId: number) {
+  return request.post<unknown, GeoContentArticle>(`/geo/content-placement/articles/${itemId}/submit`);
+}
+
+export function reviewGeoContentArticleApi(data: { itemId: number; action: 'approve' | 'revise'; opinion?: string }) {
+  return request.post<unknown, GeoContentArticle>('/geo/content-placement/articles/review', data);
+}
+
+export function addGeoContentArticleOpinionApi(data: { itemId: number; opinion: string }) {
+  return request.post<unknown, GeoContentArticle>('/geo/content-placement/articles/opinion', data);
+}
+
+export function getMyGeoWritingsApi(params?: {
+  topicId?: number;
+  targetQuestion?: string;
+  contentTitle?: string;
+  contentStatus?: string;
+}) {
+  return request.get<unknown, GeoContentWritingRow[]>('/geo/content-write/mine', { params });
+}
+
+export function getPendingGeoReviewsApi() {
+  return request.get<unknown, GeoContentReviewRow[]>('/geo/content-write/pending-review');
+}
+
+export function getGeoReviewRecordsApi(params?: {
+  status?: string;
+  topicId?: number;
+  targetQuestion?: string;
+  contentTitle?: string;
+  submitterUserId?: number;
+  reviewerUserId?: number;
+}) {
+  return request.get<unknown, GeoContentReviewRow[]>('/geo/content-write/review-records', { params });
+}
+
+export function submitGeoContentMultiReviewApi(data: {
+  placementId: number;
+  reviewerUserIds: number[];
+  remark?: string;
+}) {
+  return request.post<unknown, number>('/geo/content-write/submit-review', data);
+}
+
+export function decideGeoContentReviewApi(data: { reviewId: number; action: 'approve' | 'reject'; comment?: string }) {
+  return request.post('/geo/content-write/decide', data);
+}
+
+export function getGeoContentReviewCompareApi(placementId: number) {
+  return request.get<unknown, GeoContentReviewCompare>(`/geo/content-write/placement/${placementId}/review-compare`);
 }
 
 export function deleteGeoContentPlacementApi(id: number) {

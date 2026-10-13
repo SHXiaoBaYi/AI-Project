@@ -67,6 +67,9 @@ public class GeoContentPlacementListVO {
     @Schema(description = "附件数量", example = "2")
     private Integer proofFileCount;
 
+    @Schema(description = "稿件状态 drafting/pending_review/revising/approved/queue", example = "drafting")
+    private String contentStatus;
+
     @Schema(description = "备注")
     private String remark;
 

@@ -22,24 +22,29 @@ if [[ ! -f "$DIST/index.html" ]]; then
 fi
 
 REMOTE="${ECS_USER}@${ECS_HOST}"
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+if [[ -n "${ECS_IDENTITY:-}" ]]; then
+  SSH_OPTS+=(-o IdentitiesOnly=yes -i "$ECS_IDENTITY")
+fi
 echo "==> 目标 $REMOTE:$ECS_DIR"
 
-ssh -o BatchMode=yes -o ConnectTimeout=15 "$REMOTE" "mkdir -p '$ECS_DIR/html' '$ECS_DIR/config'"
+ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p '$ECS_DIR/html' '$ECS_DIR/config'"
 
 echo "==> 上传后端 jar"
-scp -o BatchMode=yes "$JAR" "$REMOTE:$ECS_DIR/base-admin-1.0.0.jar.new"
-ssh -o BatchMode=yes "$REMOTE" "mv '$ECS_DIR/base-admin-1.0.0.jar.new' '$ECS_DIR/base-admin-1.0.0.jar'"
+scp "${SSH_OPTS[@]}" "$JAR" "$REMOTE:$ECS_DIR/base-admin-1.0.0.jar.new"
+ssh "${SSH_OPTS[@]}" "$REMOTE" "mv '$ECS_DIR/base-admin-1.0.0.jar.new' '$ECS_DIR/base-admin-1.0.0.jar'"
 
 echo "==> 同步前端静态资源"
-rsync -avz --delete \
+RSYNC_SSH="ssh ${SSH_OPTS[*]}"
+rsync -avz --delete -e "$RSYNC_SSH" \
   --exclude='.DS_Store' \
   "$DIST/" "$REMOTE:$ECS_DIR/html/"
 
 echo "==> 重启后端服务"
-ssh -o BatchMode=yes "$REMOTE" 'systemctl restart xby-admin && sleep 2 && systemctl is-active xby-admin'
+ssh "${SSH_OPTS[@]}" "$REMOTE" 'systemctl restart xby-admin && sleep 2 && systemctl is-active xby-admin'
 
 echo "==> 健康检查"
-ssh -o BatchMode=yes "$REMOTE" "curl -sS -o /dev/null -w 'local_api %{http_code}\n' http://127.0.0.1:8080/api/auth/info || true"
+ssh "${SSH_OPTS[@]}" "$REMOTE" "curl -sS -o /dev/null -w 'local_api %{http_code}\n' http://127.0.0.1:8080/api/auth/info || true"
 curl -sS -o /dev/null -w "public_fe %{http_code}\n" "http://${ECS_HOST}/shxby/" || true
 curl -sS -o /dev/null -w "public_api %{http_code}\n" "http://${ECS_HOST}/shxby/api/auth/info" || true
 

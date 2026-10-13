@@ -37,6 +37,12 @@ public interface SysTaskService {
     /** 执行人去完成；按类型可能要求上传证明，附件关联业务并带入下一子任务 */
     void complete(Long id, SysTaskCompleteDTO dto);
 
+    /**
+     * 文章审核通过后自动完成「文章撰写」任务（无需证明附件）。
+     * completerUserId 记为撰写人。
+     */
+    void completeGeoWriteTasksByReview(Long placementId, Long writerUserId, String writerName);
+
     /** 批量完成；要求证明附件的类型会跳过 */
     String batchComplete(SysTaskBatchCompleteDTO dto);
 

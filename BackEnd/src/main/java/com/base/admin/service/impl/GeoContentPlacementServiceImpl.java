@@ -6,6 +6,11 @@ import com.base.admin.common.Constants;
 import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.GeoContentArticleBoardQueryDTO;
 import com.base.admin.domain.dto.GeoContentArticleDetailQueryDTO;
+import com.base.admin.domain.dto.GeoContentDraftSaveDTO;
+import com.base.admin.domain.dto.GeoContentItemDraftSaveDTO;
+import com.base.admin.domain.dto.GeoContentOpinionSaveDTO;
+import com.base.admin.domain.dto.GeoContentPlatformArticleDTO;
+import com.base.admin.domain.dto.GeoContentReviewActionDTO;
 import com.base.admin.domain.dto.GeoContentPlacementArticleQueryDTO;
 import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
@@ -18,6 +23,7 @@ import com.base.admin.domain.entity.GeoContentPeriodStat;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoContentPlacementCite;
 import com.base.admin.domain.entity.GeoContentPlacementItem;
+import com.base.admin.domain.entity.GeoContentReviewNote;
 import com.base.admin.domain.entity.GeoTopic;
 import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysTaskFile;
@@ -27,6 +33,10 @@ import com.base.admin.domain.vo.GeoChartPointVO;
 import com.base.admin.domain.vo.GeoContentArticleBoardVO;
 import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.domain.vo.GeoContentCiteAggRowVO;
+import com.base.admin.domain.vo.GeoContentArticleBundleVO;
+import com.base.admin.domain.vo.GeoContentArticleVO;
+import com.base.admin.domain.vo.GeoContentDraftVO;
+import com.base.admin.domain.vo.GeoContentOpinionVO;
 import com.base.admin.domain.vo.GeoContentPlacementArticleListVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
 import com.base.admin.domain.vo.GeoContentPlacementDetailVO;
@@ -48,6 +58,7 @@ import com.base.admin.mapper.GeoContentPeriodStatMapper;
 import com.base.admin.mapper.GeoContentPlacementCiteMapper;
 import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
+import com.base.admin.mapper.GeoContentReviewNoteMapper;
 import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
@@ -61,6 +72,7 @@ import com.base.admin.service.SysAiProviderService;
 import com.base.admin.util.ExcelCellUtils;
 import com.base.admin.util.GeoExcelTemplateWriter;
 import com.base.admin.util.GeoImportProgress;
+import com.base.admin.util.SecurityUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -109,6 +121,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentPlacementItemMapper itemMapper;
     private final GeoContentPlacementCiteMapper citeMapper;
+    private final GeoContentReviewNoteMapper reviewNoteMapper;
     private final GeoContentPeriodStatMapper contentPeriodStatMapper;
     private final SysUserMapper userMapper;
     private final GeoTopicService topicService;
@@ -223,7 +236,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter);
         var snap = dataScopeFilter.snapshot();
         if (!snap.globalAll() && snap.geoEnabled() && !snap.geoPlatformNames().isEmpty()) {
-            iw.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames());
+            // 审核通过自动生成的待投放明细平台可能为空，仍需在文章列表可见以便补填
+            iw.and(w -> w.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames())
+                    .or()
+                    .eq(GeoContentPlacementItem::getPlatformName, "")
+                    .or()
+                    .isNull(GeoContentPlacementItem::getPlatformName));
         }
         if (query.getPublishTimeStart() != null) {
             iw.ge(GeoContentPlacementItem::getPublishTime, query.getPublishTimeStart().atStartOfDay());
@@ -346,6 +364,421 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         detail.setPublishProgress(publishProgress(items.size(),
                 (int) items.stream().filter(i -> Constants.CONTENT_PUBLISH_SUCCESS.equals(i.getPublishStatus())).count()));
         return detail;
+    }
+
+    @Override
+    public GeoContentDraftVO getDraft(Long placementId) {
+        GeoContentPlacement placement = requirePlacement(placementId);
+        return toDraftVo(placement);
+    }
+
+    @Override
+    @Transactional
+    public GeoContentDraftVO saveDraft(GeoContentDraftSaveDTO dto) {
+        if (dto == null || dto.getPlacementId() == null) {
+            throw new BusinessException("内容投放ID不能为空");
+        }
+        GeoContentPlacement placement = requirePlacement(dto.getPlacementId());
+        String lockStatus = placement.getContentStatus();
+        if (Constants.CONTENT_STATUS_QUEUE.equals(lockStatus)
+                || Constants.CONTENT_STATUS_PUBLISHED.equals(lockStatus)
+                || Constants.CONTENT_STATUS_PENDING_REVIEW.equals(lockStatus)) {
+            throw new BusinessException(Constants.CONTENT_STATUS_PENDING_REVIEW.equals(lockStatus)
+                    ? "审核中不可修改正文"
+                    : "待投放/已发布文章请到「文章列表」维护投放，不可再改稿");
+        }
+        long currentVersion = placement.getContentVersion() == null ? 0L : placement.getContentVersion();
+        Long clientVersion = dto.getContentVersion();
+        if (clientVersion != null && clientVersion != currentVersion) {
+            throw new BusinessException("正文已在别处保存，请刷新后重试（版本冲突）");
+        }
+        String nextTitle = dto.getContentTitle() == null ? "" : dto.getContentTitle().trim();
+        String nextBody = dto.getContentBody() == null ? "" : dto.getContentBody();
+        String prevTitle = placement.getContentTitle() == null ? "" : placement.getContentTitle();
+        String prevBody = placement.getContentBody() == null ? "" : placement.getContentBody();
+        boolean changed = !nextTitle.equals(prevTitle) || !nextBody.equals(prevBody);
+        placement.setContentTitle(nextTitle);
+        placement.setContentBody(nextBody);
+        placement.setContentFormat(Constants.CONTENT_FORMAT_LAKE);
+        if (!StringUtils.hasText(placement.getContentStatus())) {
+            placement.setContentStatus(Constants.CONTENT_STATUS_DRAFTING);
+        }
+        placement.setContentVersion(currentVersion + 1);
+        placement.setContentUpdatedBy(SecurityUtils.getCurrentUsername());
+        placement.setContentUpdatedAt(LocalDateTime.now());
+        placementMapper.updateById(placement);
+        if (changed) {
+            markSharedArticlesNeedRevision(placement.getId());
+        }
+        refreshPlacementContentRollup(placement.getId());
+        return toDraftVo(requirePlacement(placement.getId()));
+    }
+
+    @Override
+    public GeoContentArticleBundleVO getArticleBundle(Long placementId) {
+        GeoContentPlacement placement = requirePlacement(placementId);
+        List<GeoContentPlacementItem> items = listPlacementItems(placementId);
+        Map<Long, List<GeoContentOpinionVO>> opinions = loadOpinions(placementId);
+        GeoContentArticleBundleVO bundle = new GeoContentArticleBundleVO();
+        bundle.setPlacementId(placement.getId());
+        bundle.setTopicName(placement.getTopicName());
+        bundle.setTargetQuestion(placement.getTargetQuestion());
+        bundle.setShared(toDraftVo(placement));
+        bundle.setArticles(items.stream().map(item -> toArticleVo(placement, item, opinions)).toList());
+        return bundle;
+    }
+
+    @Override
+    @Transactional
+    public GeoContentArticleVO addPlatformArticle(GeoContentPlatformArticleDTO dto) {
+        if (dto == null || dto.getPlacementId() == null) {
+            throw new BusinessException("内容投放ID不能为空");
+        }
+        GeoContentPlacement placement = requirePlacement(dto.getPlacementId());
+        String platformName = nz(dto.getPlatformName());
+        if (!StringUtils.hasText(platformName)) {
+            throw new BusinessException("请选择内容发布平台");
+        }
+        Long exists = itemMapper.selectCount(new LambdaQueryWrapper<GeoContentPlacementItem>()
+                .eq(GeoContentPlacementItem::getPlacementId, placement.getId())
+                .eq(GeoContentPlacementItem::getPlatformName, platformName));
+        if (exists != null && exists > 0) {
+            throw new BusinessException("该问题已有「" + platformName + "」上的文章");
+        }
+        GeoContentPlacementItem item = new GeoContentPlacementItem();
+        item.setPlacementId(placement.getId());
+        item.setPlatformName(platformName);
+        item.setContentForm(normalizeContentForm(dto.getContentForm(), platformName));
+        String title = StringUtils.hasText(placement.getContentTitle())
+                ? placement.getContentTitle().trim()
+                : nz(placement.getTargetQuestion());
+        item.setTitle(StringUtils.hasText(title) ? title : platformName);
+        item.setPublishStatus(Constants.CONTENT_PUBLISH_NONE);
+        item.setContentMode(Constants.CONTENT_MODE_SHARED);
+        item.setContentStatus(Constants.CONTENT_STATUS_DRAFTING);
+        item.setContentFormat(Constants.CONTENT_FORMAT_LAKE);
+        item.setContentVersion(0L);
+        item.setSortOrder(nextItemSort(placement.getId()));
+        itemMapper.insert(item);
+        refreshPlacementContentRollup(placement.getId());
+        syncPlacementDerived(placement.getId());
+        return toArticleVo(requirePlacement(placement.getId()), requireItem(item.getId()), loadOpinions(placement.getId()));
+    }
+
+    @Override
+    @Transactional
+    public GeoContentArticleVO saveItemDraft(GeoContentItemDraftSaveDTO dto) {
+        if (dto == null || dto.getItemId() == null) {
+            throw new BusinessException("平台文章ID不能为空");
+        }
+        GeoContentPlacementItem item = requireItem(dto.getItemId());
+        GeoContentPlacement placement = requirePlacement(item.getPlacementId());
+        String mode = normalizeContentMode(dto.getContentMode());
+        String status = articleStatus(item);
+        if (!articleEditable(status)) {
+            throw new BusinessException("当前审核状态不可修改这篇稿");
+        }
+        long currentVersion = item.getContentVersion() == null ? 0L : item.getContentVersion();
+        if (dto.getContentVersion() != null && dto.getContentVersion() != currentVersion
+                && Constants.CONTENT_MODE_CUSTOM.equals(mode)) {
+            throw new BusinessException("正文已在别处保存，请刷新后重试（版本冲突）");
+        }
+        item.setContentMode(mode);
+        if (Constants.CONTENT_MODE_CUSTOM.equals(mode)) {
+            String title = dto.getContentTitle() == null ? "" : dto.getContentTitle().trim();
+            String body = dto.getContentBody() == null ? "" : dto.getContentBody();
+            if (!StringUtils.hasText(body)) {
+                body = placement.getContentBody() == null ? "" : placement.getContentBody();
+                if (!StringUtils.hasText(title)) {
+                    title = placement.getContentTitle() == null ? "" : placement.getContentTitle();
+                }
+            }
+            item.setContentTitle(title);
+            item.setContentBody(body);
+            item.setContentFormat(Constants.CONTENT_FORMAT_LAKE);
+            item.setContentVersion(currentVersion + 1);
+            item.setContentUpdatedBy(SecurityUtils.getCurrentUsername());
+            item.setContentUpdatedAt(LocalDateTime.now());
+            if (StringUtils.hasText(title)) {
+                item.setTitle(title);
+            }
+        }
+        itemMapper.updateById(item);
+        refreshPlacementContentRollup(placement.getId());
+        return toArticleVo(requirePlacement(placement.getId()), requireItem(item.getId()), loadOpinions(placement.getId()));
+    }
+
+    @Override
+    @Transactional
+    public GeoContentArticleVO submitArticleReview(Long itemId) {
+        GeoContentPlacementItem item = requireItem(itemId);
+        GeoContentPlacement placement = requirePlacement(item.getPlacementId());
+        String status = articleStatus(item);
+        if (!Constants.CONTENT_STATUS_DRAFTING.equals(status) && !Constants.CONTENT_STATUS_REVISING.equals(status)) {
+            throw new BusinessException("只有草稿或修改中的文章可以提交审核");
+        }
+        if (lakeBlank(effectiveBody(placement, item))) {
+            throw new BusinessException("请先写好正文再提交审核");
+        }
+        item.setContentStatus(Constants.CONTENT_STATUS_PENDING_REVIEW);
+        itemMapper.updateById(item);
+        refreshPlacementContentRollup(placement.getId());
+        return toArticleVo(placement, requireItem(item.getId()), loadOpinions(placement.getId()));
+    }
+
+    @Override
+    @Transactional
+    public GeoContentArticleVO reviewArticle(GeoContentReviewActionDTO dto) {
+        if (dto == null || dto.getItemId() == null) {
+            throw new BusinessException("平台文章ID不能为空");
+        }
+        GeoContentPlacementItem item = requireItem(dto.getItemId());
+        GeoContentPlacement placement = requirePlacement(item.getPlacementId());
+        if (!Constants.CONTENT_STATUS_PENDING_REVIEW.equals(articleStatus(item))) {
+            throw new BusinessException("只有待审核的文章可以通过或退回");
+        }
+        String action = dto.getAction() == null ? "" : dto.getAction().trim();
+        String opinion = dto.getOpinion() == null ? "" : dto.getOpinion().trim();
+        if ("approve".equals(action)) {
+            item.setContentStatus(Constants.CONTENT_STATUS_APPROVED);
+            if (StringUtils.hasText(opinion)) {
+                insertOpinion(placement.getId(), item.getId(), opinion);
+            }
+        } else if ("revise".equals(action)) {
+            if (!StringUtils.hasText(opinion)) {
+                throw new BusinessException("退回修改时请填写意见");
+            }
+            item.setContentStatus(Constants.CONTENT_STATUS_REVISING);
+            insertOpinion(placement.getId(), item.getId(), opinion);
+        } else {
+            throw new BusinessException("审核动作只能是通过或退回");
+        }
+        itemMapper.updateById(item);
+        refreshPlacementContentRollup(placement.getId());
+        return toArticleVo(requirePlacement(placement.getId()), requireItem(item.getId()), loadOpinions(placement.getId()));
+    }
+
+    @Override
+    @Transactional
+    public GeoContentArticleVO addArticleOpinion(GeoContentOpinionSaveDTO dto) {
+        if (dto == null || dto.getItemId() == null) {
+            throw new BusinessException("平台文章ID不能为空");
+        }
+        String opinion = dto.getOpinion() == null ? "" : dto.getOpinion().trim();
+        if (!StringUtils.hasText(opinion)) {
+            throw new BusinessException("请填写意见");
+        }
+        if (opinion.length() > 2000) {
+            throw new BusinessException("意见不能超过 2000 字");
+        }
+        GeoContentPlacementItem item = requireItem(dto.getItemId());
+        insertOpinion(item.getPlacementId(), item.getId(), opinion);
+        GeoContentPlacement placement = requirePlacement(item.getPlacementId());
+        return toArticleVo(placement, item, loadOpinions(placement.getId()));
+    }
+
+    private GeoContentDraftVO toDraftVo(GeoContentPlacement placement) {
+        String status = StringUtils.hasText(placement.getContentStatus())
+                ? placement.getContentStatus()
+                : Constants.CONTENT_STATUS_DRAFTING;
+        GeoContentDraftVO vo = new GeoContentDraftVO();
+        vo.setPlacementId(placement.getId());
+        vo.setTargetQuestion(placement.getTargetQuestion());
+        vo.setContentTitle(placement.getContentTitle());
+        vo.setContentStatus(status);
+        vo.setContentFormat(StringUtils.hasText(placement.getContentFormat())
+                ? placement.getContentFormat()
+                : Constants.CONTENT_FORMAT_LAKE);
+        vo.setContentBody(placement.getContentBody() == null ? "" : placement.getContentBody());
+        vo.setContentVersion(placement.getContentVersion() == null ? 0L : placement.getContentVersion());
+        boolean editable = !Constants.CONTENT_STATUS_QUEUE.equals(status)
+                && !Constants.CONTENT_STATUS_PUBLISHED.equals(status)
+                && !Constants.CONTENT_STATUS_PENDING_REVIEW.equals(status);
+        vo.setEditable(editable);
+        vo.setContentUpdatedBy(placement.getContentUpdatedBy());
+        vo.setContentUpdatedAt(placement.getContentUpdatedAt());
+        return vo;
+    }
+
+    private List<GeoContentPlacementItem> listPlacementItems(Long placementId) {
+        return itemMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementItem>()
+                .eq(GeoContentPlacementItem::getPlacementId, placementId)
+                .orderByAsc(GeoContentPlacementItem::getSortOrder)
+                .orderByAsc(GeoContentPlacementItem::getId));
+    }
+
+    private GeoContentArticleVO toArticleVo(
+            GeoContentPlacement placement,
+            GeoContentPlacementItem item,
+            Map<Long, List<GeoContentOpinionVO>> opinions) {
+        String mode = normalizeContentMode(item.getContentMode());
+        boolean custom = Constants.CONTENT_MODE_CUSTOM.equals(mode);
+        String status = articleStatus(item);
+        GeoContentArticleVO vo = new GeoContentArticleVO();
+        vo.setItemId(item.getId());
+        vo.setPlacementId(item.getPlacementId());
+        vo.setPlatformName(item.getPlatformName());
+        vo.setContentForm(normalizeContentForm(item.getContentForm(), item.getPlatformName()));
+        vo.setContentMode(mode);
+        vo.setContentStatus(status);
+        vo.setContentTitle(custom
+                ? (item.getContentTitle() == null ? "" : item.getContentTitle())
+                : (placement.getContentTitle() == null ? "" : placement.getContentTitle()));
+        vo.setContentBody(effectiveBody(placement, item));
+        vo.setContentVersion(item.getContentVersion() == null ? 0L : item.getContentVersion());
+        vo.setEditable(articleEditable(status));
+        vo.setPublishStatus(item.getPublishStatus());
+        vo.setOpinions(opinions.getOrDefault(item.getId(), List.of()));
+        return vo;
+    }
+
+    private Map<Long, List<GeoContentOpinionVO>> loadOpinions(Long placementId) {
+        List<GeoContentReviewNote> notes = reviewNoteMapper.selectList(new LambdaQueryWrapper<GeoContentReviewNote>()
+                .eq(GeoContentReviewNote::getPlacementId, placementId)
+                .orderByAsc(GeoContentReviewNote::getId));
+        Map<Long, List<GeoContentOpinionVO>> grouped = new HashMap<>();
+        for (GeoContentReviewNote note : notes) {
+            GeoContentOpinionVO vo = new GeoContentOpinionVO();
+            vo.setId(note.getId());
+            vo.setItemId(note.getItemId());
+            vo.setOpinion(note.getOpinion());
+            vo.setAuthorName(note.getAuthorName());
+            vo.setCreateTime(note.getCreateTime());
+            grouped.computeIfAbsent(note.getItemId(), key -> new ArrayList<>()).add(vo);
+        }
+        return grouped;
+    }
+
+    private void insertOpinion(Long placementId, Long itemId, String opinion) {
+        String text = opinion == null ? "" : opinion.trim();
+        if (!StringUtils.hasText(text)) {
+            return;
+        }
+        if (text.length() > 2000) {
+            throw new BusinessException("意见不能超过 2000 字");
+        }
+        GeoContentReviewNote note = new GeoContentReviewNote();
+        note.setPlacementId(placementId);
+        note.setItemId(itemId);
+        note.setOpinion(text);
+        note.setAuthorName(currentDisplayName());
+        reviewNoteMapper.insert(note);
+    }
+
+    private void markSharedArticlesNeedRevision(Long placementId) {
+        for (GeoContentPlacementItem item : listPlacementItems(placementId)) {
+            if (!Constants.CONTENT_MODE_SHARED.equals(normalizeContentMode(item.getContentMode()))) {
+                continue;
+            }
+            String status = articleStatus(item);
+            if (Constants.CONTENT_STATUS_PENDING_REVIEW.equals(status)
+                    || Constants.CONTENT_STATUS_APPROVED.equals(status)
+                    || Constants.CONTENT_STATUS_QUEUE.equals(status)) {
+                item.setContentStatus(Constants.CONTENT_STATUS_REVISING);
+                itemMapper.updateById(item);
+            }
+        }
+    }
+
+    private void refreshPlacementContentRollup(Long placementId) {
+        GeoContentPlacement current = placementMapper.selectById(placementId);
+        if (current == null) {
+            return;
+        }
+        String cur = current.getContentStatus();
+        // 撰写多人审核链路：待审/待投放/已发布 由审核与投放回写，不被平台文章内部状态覆盖
+        if (Constants.CONTENT_STATUS_PENDING_REVIEW.equals(cur)
+                || Constants.CONTENT_STATUS_QUEUE.equals(cur)
+                || Constants.CONTENT_STATUS_PUBLISHED.equals(cur)) {
+            syncPublishedFromItems(current);
+            return;
+        }
+        List<GeoContentPlacementItem> items = listPlacementItems(placementId);
+        String rollup = Constants.CONTENT_STATUS_DRAFTING;
+        if (!items.isEmpty()) {
+            List<String> statuses = items.stream().map(GeoContentPlacementServiceImpl::articleStatus).toList();
+            if (statuses.stream().anyMatch(Constants.CONTENT_STATUS_PENDING_REVIEW::equals)) {
+                rollup = Constants.CONTENT_STATUS_PENDING_REVIEW;
+            } else if (statuses.stream().anyMatch(Constants.CONTENT_STATUS_REVISING::equals)) {
+                rollup = Constants.CONTENT_STATUS_REVISING;
+            } else if (statuses.stream().anyMatch(Constants.CONTENT_STATUS_DRAFTING::equals)) {
+                rollup = Constants.CONTENT_STATUS_DRAFTING;
+            } else if (statuses.stream().allMatch(Constants.CONTENT_STATUS_APPROVED::equals)) {
+                rollup = Constants.CONTENT_STATUS_APPROVED;
+            }
+        }
+        GeoContentPlacement patch = new GeoContentPlacement();
+        patch.setId(placementId);
+        patch.setContentStatus(rollup);
+        placementMapper.updateById(patch);
+    }
+
+    /** 文章列表出现投放成功记录后，主表稿件状态改为已发布 */
+    private void syncPublishedFromItems(GeoContentPlacement placement) {
+        if (placement == null || placement.getId() == null) {
+            return;
+        }
+        List<GeoContentPlacementItem> items = listPlacementItems(placement.getId());
+        boolean hasSuccess = items.stream().anyMatch(i -> Constants.CONTENT_PUBLISH_SUCCESS.equals(i.getPublishStatus()));
+        String cur = placement.getContentStatus();
+        if (hasSuccess) {
+            if (!Constants.CONTENT_STATUS_PUBLISHED.equals(cur)) {
+                GeoContentPlacement patch = new GeoContentPlacement();
+                patch.setId(placement.getId());
+                patch.setContentStatus(Constants.CONTENT_STATUS_PUBLISHED);
+                placementMapper.updateById(patch);
+            }
+            return;
+        }
+        // 曾标记已发布但投放成功记录没了：回到待投放
+        if (Constants.CONTENT_STATUS_PUBLISHED.equals(cur)) {
+            GeoContentPlacement patch = new GeoContentPlacement();
+            patch.setId(placement.getId());
+            patch.setContentStatus(Constants.CONTENT_STATUS_QUEUE);
+            placementMapper.updateById(patch);
+        }
+    }
+
+    private String currentDisplayName() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            return SecurityUtils.getCurrentUsername();
+        }
+        SysUser user = userMapper.selectById(userId);
+        return userDisplayName(user);
+    }
+
+    private static String articleStatus(GeoContentPlacementItem item) {
+        return StringUtils.hasText(item.getContentStatus())
+                ? item.getContentStatus()
+                : Constants.CONTENT_STATUS_DRAFTING;
+    }
+
+    private static boolean articleEditable(String status) {
+        return Constants.CONTENT_STATUS_DRAFTING.equals(status)
+                || Constants.CONTENT_STATUS_REVISING.equals(status)
+                || !StringUtils.hasText(status);
+    }
+
+    private static String normalizeContentMode(String mode) {
+        return Constants.CONTENT_MODE_CUSTOM.equals(mode)
+                ? Constants.CONTENT_MODE_CUSTOM
+                : Constants.CONTENT_MODE_SHARED;
+    }
+
+    private static String effectiveBody(GeoContentPlacement placement, GeoContentPlacementItem item) {
+        if (Constants.CONTENT_MODE_CUSTOM.equals(normalizeContentMode(item.getContentMode()))) {
+            return item.getContentBody() == null ? "" : item.getContentBody();
+        }
+        return placement.getContentBody() == null ? "" : placement.getContentBody();
+    }
+
+    private static boolean lakeBlank(String lake) {
+        if (!StringUtils.hasText(lake)) {
+            return true;
+        }
+        String text = lake.replaceAll("<[^>]+>", " ").replace("&nbsp;", " ").trim();
+        return !StringUtils.hasText(text);
     }
 
     @Override
@@ -513,6 +946,10 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         placement.setSource(Constants.CONTENT_SOURCE_MANUAL);
         placement.setSourcePlacementId(null);
         placement.setPlacementProgress(Constants.CONTENT_AGG_NONE);
+        placement.setContentStatus(Constants.CONTENT_STATUS_DRAFTING);
+        placement.setContentFormat(Constants.CONTENT_FORMAT_LAKE);
+        placement.setContentBody("");
+        placement.setContentVersion(0L);
         placementMapper.insert(placement);
         placementTaskSyncService.ensureTasksForPlacement(placement);
         return placement.getId();
@@ -809,6 +1246,47 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         syncPlacementDerived(dto.getPlacementId());
         placementTaskSyncService.completeArticlePublishTasks(dto.getPlacementId());
         return item.getId();
+    }
+
+    @Override
+    @Transactional
+    public void ensureQueueArticleItems(Long placementId) {
+        GeoContentPlacement placement = requirePlacement(placementId);
+        List<GeoContentPlacementItem> items = listPlacementItems(placementId);
+        if (items.isEmpty()) {
+            GeoContentPlacementItem item = new GeoContentPlacementItem();
+            item.setPlacementId(placementId);
+            String title = StringUtils.hasText(placement.getContentTitle())
+                    ? placement.getContentTitle().trim()
+                    : nz(placement.getTargetQuestion());
+            item.setTitle(StringUtils.hasText(title) ? title : "待投放文章");
+            item.setPlatformName("");
+            item.setContentForm(Constants.CONTENT_FORM_ARTICLE);
+            item.setPublishStatus(Constants.CONTENT_PUBLISH_PENDING);
+            item.setPublishUrl("");
+            item.setPublishTime(null);
+            item.setContentMode(Constants.CONTENT_MODE_SHARED);
+            item.setContentStatus(Constants.CONTENT_STATUS_APPROVED);
+            item.setContentFormat(Constants.CONTENT_FORMAT_LAKE);
+            item.setContentVersion(0L);
+            item.setSortOrder(0);
+            item.setRemark("审核通过自动生成，请补充发布平台、投放链接与发布时间");
+            itemMapper.insert(item);
+            syncPlacementDerived(placementId);
+            return;
+        }
+        boolean changed = false;
+        for (GeoContentPlacementItem item : items) {
+            String status = nz(item.getPublishStatus());
+            if (!StringUtils.hasText(status) || Constants.CONTENT_PUBLISH_NONE.equals(status)) {
+                item.setPublishStatus(Constants.CONTENT_PUBLISH_PENDING);
+                itemMapper.updateById(item);
+                changed = true;
+            }
+        }
+        if (changed) {
+            syncPlacementDerived(placementId);
+        }
     }
 
     @Override
@@ -1295,9 +1773,17 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         item.setTitle(nz(dto.getTitle()));
         item.setPlatformName(nz(dto.getPlatformName()));
         item.setContentForm(normalizeContentForm(dto.getContentForm(), dto.getPlatformName()));
-        item.setPublishStatus(normalizePublishStatus(dto.getPublishStatus()));
-        assertPublishUrl(dto.getPublishUrl());
+        String publishStatus = normalizePublishStatus(dto.getPublishStatus());
+        item.setPublishStatus(publishStatus);
+        // 待投放/未投放允许先补平台，链接与时间可稍后填写；投放成功时必须有合法链接
+        if (Constants.CONTENT_PUBLISH_SUCCESS.equals(publishStatus)
+                || StringUtils.hasText(dto.getPublishUrl())) {
+            assertPublishUrl(dto.getPublishUrl());
+        }
         item.setPublishUrl(nz(dto.getPublishUrl()));
+        if (Constants.CONTENT_PUBLISH_SUCCESS.equals(publishStatus) && dto.getPublishTime() == null) {
+            throw new BusinessException("投放成功时请填写发布时间");
+        }
         item.setPublishTime(dto.getPublishTime());
         item.setSortOrder(dto.getSortOrder());
         item.setRemark(dto.getRemark());
@@ -1366,6 +1852,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         placement.setTitle(title);
         placement.setPlacementProgress(progress);
         placementMapper.updateById(placement);
+        syncPublishedFromItems(requirePlacement(placementId));
     }
 
     private int nextItemSort(Long placementId) {
@@ -1461,6 +1948,9 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setSuccessCount(success);
         vo.setCiteCount(citeCount);
         vo.setProofFileCount(0);
+        vo.setContentStatus(StringUtils.hasText(entity.getContentStatus())
+                ? entity.getContentStatus()
+                : Constants.CONTENT_STATUS_DRAFTING);
         String progress = StringUtils.hasText(entity.getPlacementProgress())
                 ? entity.getPlacementProgress()
                 : aggregateStatus(items.stream().map(GeoContentPlacementItem::getPublishStatus).toList());
