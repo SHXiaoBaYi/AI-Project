@@ -10,6 +10,7 @@ import com.base.admin.domain.dto.GeoContentWritingQueryDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoContentReview;
 import com.base.admin.domain.entity.GeoContentReviewer;
+import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysUser;
 import com.base.admin.domain.vo.GeoContentReviewCompareVO;
 import com.base.admin.domain.vo.GeoContentReviewRoundVO;
@@ -19,6 +20,7 @@ import com.base.admin.domain.vo.GeoContentWritingRowVO;
 import com.base.admin.mapper.GeoContentPlacementMapper;
 import com.base.admin.mapper.GeoContentReviewMapper;
 import com.base.admin.mapper.GeoContentReviewerMapper;
+import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoContentWriteService;
@@ -48,16 +50,40 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
     private final GeoContentReviewMapper reviewMapper;
     private final GeoContentReviewerMapper reviewerMapper;
     private final SysUserMapper userMapper;
+    private final SysTaskMapper taskMapper;
     private final SysTaskService taskService;
     private final GeoContentPlacementService placementService;
 
     @Override
     public List<GeoContentWritingRowVO> listMyWritings(GeoContentWritingQueryDTO query) {
         Long uid = requireUserId();
+        Set<Long> writeTaskPlacementIds = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                        .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                        .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_WRITE)
+                        .eq(SysTask::getOwnerUserId, uid)
+                        .ne(SysTask::getStatus, "已取消")
+                        .isNotNull(SysTask::getBizId)
+                        .and(t -> t.ge(SysTask::getCreateTime, Constants.GEO_ONLINE_WRITE_LAUNCH_AT)
+                                .or()
+                                .ge(SysTask::getProgress, Constants.TASK_PROGRESS_WRITE_DRAFTED))
+                        .select(SysTask::getBizId))
+                .stream()
+                .map(SysTask::getBizId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         LambdaQueryWrapper<GeoContentPlacement> qw = new LambdaQueryWrapper<GeoContentPlacement>()
-                .eq(GeoContentPlacement::getOwnerUserId, uid)
-                // 仅在线撰写上线后新建的投放，不含历史上已指定撰写人的旧数据
-                .ge(GeoContentPlacement::getCreateTime, Constants.GEO_ONLINE_WRITE_LAUNCH_AT);
+                // 撰写人=当前用户，或上线后/已动笔的撰写任务挂在该投放上
+                .and(w -> {
+                    w.eq(GeoContentPlacement::getOwnerUserId, uid)
+                            .and(inner -> inner.ge(GeoContentPlacement::getCreateTime, Constants.GEO_ONLINE_WRITE_LAUNCH_AT)
+                                    .or()
+                                    .ge(GeoContentPlacement::getContentUpdatedAt, Constants.GEO_ONLINE_WRITE_LAUNCH_AT)
+                                    .or(!writeTaskPlacementIds.isEmpty(),
+                                            inner2 -> inner2.in(GeoContentPlacement::getId, writeTaskPlacementIds)));
+                    if (!writeTaskPlacementIds.isEmpty()) {
+                        w.or().in(GeoContentPlacement::getId, writeTaskPlacementIds);
+                    }
+                });
         if (query != null) {
             if (query.getTopicId() != null) {
                 qw.eq(GeoContentPlacement::getTopicId, query.getTopicId());

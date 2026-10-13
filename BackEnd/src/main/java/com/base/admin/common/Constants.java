@@ -106,7 +106,8 @@ public class Constants {
     public static final int TASK_PROGRESS_WRITE_DRAFTED = 50;
     /**
      * 在线撰写功能上线时间（含当日）。
-     * 「我的撰写记录」仅展示此时间之后新建的投放，避免历史指定撰写人数据涌入。
+     * 「我的撰写记录」排除上线前仅因指定撰写人而存在的历史投放；
+     * 上线后新建投放、上线后派发的撰写任务、以及上线后实际保存过正文的投放仍会展示。
      */
     public static final java.time.LocalDateTime GEO_ONLINE_WRITE_LAUNCH_AT =
             java.time.LocalDateTime.of(2026, 10, 13, 0, 0, 0);
