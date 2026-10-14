@@ -243,9 +243,9 @@ export function ResumeDrawer({
         open={open}
         onClose={onClose}
         size='large'
-        className='[&_.ant-drawer-content-wrapper]:!w-[50vw]'
+        className='[&_.ant-drawer-content-wrapper]:!w-[90vw]'
         styles={{
-          wrapper: { width: '50vw' },
+          wrapper: { width: '90vw', maxWidth: '90vw' },
           body: { display: 'flex', flexDirection: 'column', overflow: 'hidden' },
         }}
         extra={
