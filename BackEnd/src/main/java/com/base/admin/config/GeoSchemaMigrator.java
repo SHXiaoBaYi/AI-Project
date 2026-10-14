@@ -73,6 +73,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureItemPublishTimeDateTime(connection);
             ensureGeoStaffRoles(connection);
             retireLegacyGeoRoles(connection);
+            ensureContentReviewRule(connection);
             if (cleanupEmptyDaily) {
                 cleanupEmptyUninspectedDailyBeforeToday(connection);
             }
@@ -1218,6 +1219,74 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
             log.info("已创建 geo_content_review_note");
         }
+    }
+
+    /** 按撰写人配置审核策略（目前：是否跳过一审）；菜单挂在基础配置下 */
+    private void ensureContentReviewRule(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_review_rule")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_content_review_rule (
+                          id             BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          writer_user_id BIGINT        NOT NULL                COMMENT '撰写人用户ID',
+                          writer_name    VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '撰写人展示名',
+                          skip_stage1    TINYINT       NOT NULL DEFAULT 1      COMMENT '是否跳过一审 1=是 0=否',
+                          remark         VARCHAR(500)  NOT NULL DEFAULT ''     COMMENT '备注',
+                          create_by      VARCHAR(64)   DEFAULT ''              COMMENT '创建者',
+                          create_time    DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                          update_by      VARCHAR(64)   DEFAULT ''              COMMENT '更新者',
+                          update_time    DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                          is_active      TINYINT       NOT NULL DEFAULT 1      COMMENT '是否有效',
+                          PRIMARY KEY (id),
+                          KEY idx_review_rule_writer (writer_user_id, is_active)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO文章审核规则'
+                        """);
+            }
+            log.info("已创建 geo_content_review_rule");
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (178, '文章审核规则', 130, 4, 'geo/review-rule', '', 'C', 'geo:reviewRule:list', 'AuditOutlined', 0, 0,
+                     '按撰写人配置是否跳过一审', 1),
+                    (179, '审核规则新增', 178, 1, '', '', 'F', 'geo:reviewRule:add', '#', 0, 0, '', 1),
+                    (180, '审核规则修改', 178, 2, '', '', 'F', 'geo:reviewRule:edit', '#', 0, 0, '', 1),
+                    (181, '审核规则删除', 178, 3, '', '', 'F', 'geo:reviewRule:delete', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      parent_id = VALUES(parent_id),
+                      sort_order = VALUES(sort_order),
+                      path = VALUES(path),
+                      component = VALUES(component),
+                      menu_type = VALUES(menu_type),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      is_active = 1,
+                      visible = VALUES(visible)
+                    """);
+            statement.execute("""
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (178, 179, 180, 181)
+                    """);
+            statement.execute("""
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT rm.role_id, m.menu_id, 1
+                    FROM sys_role_menu rm
+                    CROSS JOIN sys_menu m
+                    WHERE rm.menu_id = 101 AND rm.is_active = 1
+                      AND m.menu_id IN (178, 179, 180, 181)
+                    """);
+            Long mgmtId = roleIdByKey(connection, "geo_mgmt_review");
+            if (mgmtId != null) {
+                statement.execute("""
+                        INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                        SELECT %d, menu_id, 1 FROM sys_menu WHERE menu_id IN (178, 179, 180, 181)
+                        """.formatted(mgmtId));
+            }
+        }
+        log.info("已同步文章审核规则菜单 menu_id=178 path=geo/review-rule");
     }
 
     private void addItemColumn(Connection connection, String column, String sql) throws Exception {

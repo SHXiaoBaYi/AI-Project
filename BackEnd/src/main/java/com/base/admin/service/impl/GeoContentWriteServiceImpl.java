@@ -23,6 +23,7 @@ import com.base.admin.mapper.GeoContentReviewerMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.GeoContentPlacementService;
+import com.base.admin.service.GeoContentReviewRuleService;
 import com.base.admin.service.GeoContentWriteService;
 import com.base.admin.service.SysTaskService;
 import com.base.admin.util.SecurityUtils;
@@ -53,6 +54,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
     private final SysTaskMapper taskMapper;
     private final SysTaskService taskService;
     private final GeoContentPlacementService placementService;
+    private final GeoContentReviewRuleService reviewRuleService;
 
     @Override
     public List<GeoContentWritingRowVO> listMyWritings(GeoContentWritingQueryDTO query) {
@@ -113,6 +115,8 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         Map<Long, GeoContentReview> latestByPlacement = latestReviewByPlacement(placementIds);
         Map<Long, List<GeoContentReviewer>> reviewersByReview = loadReviewersByReviewIds(
                 allReviews.stream().map(GeoContentReview::getId).toList());
+        Set<Long> skipStage1Writers = reviewRuleService.writerIdsSkippingStage1(
+                rows.stream().map(GeoContentPlacement::getOwnerUserId).filter(Objects::nonNull).collect(Collectors.toSet()));
         List<GeoContentWritingRowVO> result = new ArrayList<>();
         for (GeoContentPlacement p : rows) {
             GeoContentWritingRowVO vo = new GeoContentWritingRowVO();
@@ -128,7 +132,9 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             vo.setContentUpdatedAt(p.getContentUpdatedAt());
             vo.setCreateTime(p.getCreateTime());
             List<GeoContentReview> history = reviewsByPlacement.getOrDefault(p.getId(), List.of());
-            int nextStage = nextReviewStage(history);
+            boolean skipStage1 = skipStage1Writers.contains(p.getOwnerUserId());
+            vo.setSkipStage1(skipStage1 ? 1 : 0);
+            int nextStage = nextReviewStage(history, skipStage1);
             if (Constants.CONTENT_STATUS_QUEUE.equals(vo.getContentStatus())
                     || Constants.CONTENT_STATUS_PUBLISHED.equals(vo.getContentStatus())
                     || Constants.CONTENT_STATUS_PENDING_REVIEW.equals(vo.getContentStatus())) {
@@ -358,7 +364,8 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         List<GeoContentReview> history = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
                 .eq(GeoContentReview::getPlacementId, placement.getId())
                 .orderByAsc(GeoContentReview::getId));
-        int stageNo = nextReviewStage(history);
+        boolean skipStage1 = reviewRuleService.skipStage1(placement.getOwnerUserId());
+        int stageNo = nextReviewStage(history, skipStage1);
         if (stageNo == 0) {
             throw new BusinessException("当前不能发起审核");
         }
@@ -428,6 +435,10 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
 
         placement.setContentStatus(Constants.CONTENT_STATUS_PENDING_REVIEW);
         placementMapper.updateById(placement);
+        if (stageNo == Constants.CONTENT_REVIEW_STAGE2 && skipStage1
+                && lastOfStage(history, Constants.CONTENT_REVIEW_STAGE1) == null) {
+            taskService.markGeoWriteStage1Passed(placement.getId());
+        }
 
         String bizTitle = StringUtils.hasText(placement.getContentTitle())
                 ? placement.getContentTitle().trim()
@@ -846,17 +857,17 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
     /**
      * @return 1/2 可发起；0 当前不能发起；-2 两阶段均已通过
      */
-    private static int nextReviewStage(List<GeoContentReview> history) {
+    private static int nextReviewStage(List<GeoContentReview> history, boolean skipStage1) {
         List<GeoContentReview> rows = history == null ? List.of() : history;
         if (rows.stream().anyMatch(r -> "pending".equals(r.getStatus()))) {
             return 0;
         }
         GeoContentReview last1 = lastOfStage(rows, Constants.CONTENT_REVIEW_STAGE1);
         GeoContentReview last2 = lastOfStage(rows, Constants.CONTENT_REVIEW_STAGE2);
-        if (last1 == null || "rejected".equals(last1.getStatus())) {
-            return Constants.CONTENT_REVIEW_STAGE1;
+        if (last1 == null) {
+            return skipStage1 ? Constants.CONTENT_REVIEW_STAGE2 : Constants.CONTENT_REVIEW_STAGE1;
         }
-        if (!"approved".equals(last1.getStatus())) {
+        if ("rejected".equals(last1.getStatus()) || !"approved".equals(last1.getStatus())) {
             return Constants.CONTENT_REVIEW_STAGE1;
         }
         if (last2 == null || "rejected".equals(last2.getStatus())) {

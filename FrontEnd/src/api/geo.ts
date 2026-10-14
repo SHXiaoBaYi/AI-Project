@@ -37,6 +37,7 @@ import type {
   GeoContentPlacementProofFile,
   GeoContentReviewCompare,
   GeoContentReviewRow,
+  GeoContentReviewRule,
   GeoContentWritingRow,
   GeoTargetQuestionOption,
 } from '@/types/geo';
@@ -63,6 +64,26 @@ export function deleteGeoTopicApi(id: number) {
 
 export function deleteGeoTopicBatchApi(ids: number[]) {
   return request.delete('/geo/topic/batch', { data: ids });
+}
+
+export function getGeoReviewRuleListApi(data: PageQuery & { writerUserId?: number; skipStage1?: number }) {
+  return request.post<unknown, PageResult<GeoContentReviewRule>>('/geo/review-rule/list', data);
+}
+
+export function createGeoReviewRuleApi(data: Partial<GeoContentReviewRule>) {
+  return request.post('/geo/review-rule', data);
+}
+
+export function updateGeoReviewRuleApi(data: Partial<GeoContentReviewRule>) {
+  return request.put('/geo/review-rule', data);
+}
+
+export function deleteGeoReviewRuleApi(id: number) {
+  return request.delete(`/geo/review-rule/${id}`);
+}
+
+export function deleteGeoReviewRuleBatchApi(ids: number[]) {
+  return request.delete('/geo/review-rule/batch', { data: ids });
 }
 
 export function getGeoPlatformListApi(data: PageQuery & { platformName?: string; platformType?: string }) {

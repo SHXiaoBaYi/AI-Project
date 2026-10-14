@@ -5,6 +5,15 @@ export interface GeoTopic {
   remark?: string;
 }
 
+export interface GeoContentReviewRule {
+  id: number;
+  writerUserId: number;
+  writerName?: string;
+  skipStage1: number;
+  remark?: string;
+  createTime?: string;
+}
+
 export interface GeoPlatform {
   id: number;
   platformName: string;
@@ -558,6 +567,7 @@ export interface GeoContentWritingRow {
   currentRoundNo?: number | null;
   currentStageNo?: number | null;
   nextStageNo?: number | null;
+  skipStage1?: number | null;
   lockedReviewerUserId?: number | null;
   lockedReviewerName?: string;
   stage1ReviewerUserId?: number | null;

@@ -367,8 +367,9 @@ const MyWritingsPage = memo(function MyWritingsPage() {
         </p>
         {submitting?.nextStageNo === 2 ? (
           <p className='mb-3 text-xs text-neutral-500'>
-            一审已通过{submitting.stage1ReviewerName ? `（${submitting.stage1ReviewerName}）` : ''}
-            ，请指定另一位二审人。
+            {Number(submitting.skipStage1) === 1 && !submitting.stage1ReviewerName
+              ? '按审核规则跳过一审，请直接指定二审人。发起后撰写进度记为 80%，二审通过后完成。'
+              : `一审已通过${submitting.stage1ReviewerName ? `（${submitting.stage1ReviewerName}）` : ''}，请指定另一位二审人。`}
           </p>
         ) : (
           <p className='mb-3 text-xs text-neutral-500'>

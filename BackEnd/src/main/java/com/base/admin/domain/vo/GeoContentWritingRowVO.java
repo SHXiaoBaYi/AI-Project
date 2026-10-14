@@ -44,6 +44,9 @@ public class GeoContentWritingRowVO {
     @Schema(description = "下一步可发起的阶段 1/2；空表示不能发起", example = "1", nullable = true)
     private Integer nextStageNo;
 
+    @Schema(description = "该撰写人是否按规则跳过一审 1=是 0=否", example = "0")
+    private Integer skipStage1;
+
     @Schema(description = "退回重提时锁定的审核人用户ID", example = "3", nullable = true)
     private Long lockedReviewerUserId;
 

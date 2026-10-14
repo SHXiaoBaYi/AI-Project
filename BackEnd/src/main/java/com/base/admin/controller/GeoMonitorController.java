@@ -223,7 +223,7 @@ public class GeoMonitorController {
 
     @Operation(summary = "负责人下拉（系统用户，展示昵称或用户名）")
     @GetMapping("/daily/owners")
-    @RequiresPermission({"geo:daily:list", "board:view", "geo:expose:list", "geo:article:list"})
+    @RequiresPermission({"geo:daily:list", "board:view", "geo:expose:list", "geo:article:list", "geo:reviewRule:list", "geo:write:mine"})
     public Result<List<GeoOwnerOptionVO>> owners() {
         return Result.ok(monitorService.listOwnerOptions());
     }
