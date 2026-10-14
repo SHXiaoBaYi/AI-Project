@@ -255,10 +255,14 @@ export function getTrainAssistantMetaApi(category = 'cashier') {
 }
 
 export function askTrainAssistantApi(data: { question: string; searchOld?: boolean; category?: string }) {
-  return request.post<unknown, TrainAssistantAskResult>('/train/assistant/ask', {
-    category: 'cashier',
-    ...data,
-  });
+  return request.post<unknown, TrainAssistantAskResult>(
+    '/train/assistant/ask',
+    {
+      category: 'cashier',
+      ...data,
+    },
+    { timeout: 120000 },
+  );
 }
 
 export function feedbackTrainAssistantApi(data: {
@@ -276,6 +280,37 @@ export function feedbackTrainAssistantApi(data: {
   return request.post<unknown, number>('/train/assistant/feedback', {
     category: 'cashier',
     ...data,
+  });
+}
+
+export type TrainQaMiss = {
+  id: number;
+  category?: string;
+  question?: string;
+  intentTokens?: string;
+  userId?: number;
+  username?: string;
+  nickname?: string;
+  status?: string;
+  versionId?: number;
+  createTime?: string;
+};
+
+export type TrainQaMissPage = {
+  rows: TrainQaMiss[];
+  total: number;
+};
+
+export function listTrainQaMissApi(params: {
+  pageNum?: number;
+  pageSize?: number;
+  category?: string;
+  keyword?: string;
+  createTimeStart?: string;
+  createTimeEnd?: string;
+}) {
+  return request.get<unknown, TrainQaMissPage>('/train/qa/miss/list', {
+    params: { category: 'cashier', ...params },
   });
 }
 

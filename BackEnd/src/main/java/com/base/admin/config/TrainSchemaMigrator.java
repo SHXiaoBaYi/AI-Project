@@ -94,6 +94,24 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                   KEY idx_train_qa_intent (intent_norm, version_id, status, is_active)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='培训答疑人工校准库'
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS train_qa_miss (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  category VARCHAR(64) NOT NULL DEFAULT 'cashier',
+                  question VARCHAR(512) NOT NULL COMMENT '用户原问',
+                  intent_tokens VARCHAR(512) NULL COMMENT '分词意图',
+                  user_id BIGINT NULL COMMENT '提问人用户ID',
+                  username VARCHAR(64) NULL COMMENT '登录账号',
+                  nickname VARCHAR(64) NULL COMMENT '提问人姓名',
+                  status VARCHAR(16) NOT NULL DEFAULT 'NOT_FOUND' COMMENT 'NEED_OLD/NOT_FOUND',
+                  doc_id BIGINT NULL,
+                  version_id BIGINT NULL,
+                  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  is_active TINYINT NOT NULL DEFAULT 1,
+                  KEY idx_train_qa_miss_time (create_time),
+                  KEY idx_train_qa_miss_user (user_id, create_time)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='培训答疑未命中提问'
+                """);
     }
 
     private void seedMenus() {
@@ -106,14 +124,15 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         menu(306, "答疑校准", 300, 2, "train/qa", "train/qa/index", "C", "train:qa:list", "CheckCircleOutlined", "人工校准准/不准答案");
         menu(307, "校准编辑", 306, 1, "", "", "F", "train:qa:edit", "#", "");
         menu(308, "重新识别", 306, 2, "", "", "F", "train:qa:recognize", "#", "");
+        menu(309, "未命中提问", 300, 3, "train/miss", "train/miss/index", "C", "train:qa:list", "QuestionCircleOutlined", "没有找到答案的用户提问");
 
         Long admin = roleId("admin");
         if (admin != null) {
-            grant(admin, 300, 301, 302, 303, 304, 305, 306, 307, 308);
+            grant(admin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309);
         }
         Long hrAdmin = roleId("hr_admin");
         if (hrAdmin != null) {
-            grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308);
+            grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309);
         }
     }
 

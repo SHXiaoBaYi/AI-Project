@@ -11,6 +11,7 @@ import com.base.admin.domain.vo.TrainDocVersionVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
 import com.base.admin.util.TrainQaAnswerSanitizer;
+import com.base.admin.util.TrainQaIntentMatcher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +51,8 @@ import javax.xml.transform.stream.StreamResult;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.StringWriter;
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -81,6 +84,7 @@ public class TrainDocService {
     private final DingTalkAppService dingTalkAppService;
     private final DingTalkProperties dingTalkProperties;
     private final TrainQaCalibrateService trainQaCalibrateService;
+    private final TrainQaMissService trainQaMissService;
 
     @Value("${xby.upload-public-base:}")
     private String uploadPublicBase;
@@ -91,7 +95,8 @@ public class TrainDocService {
                            ObjectMapper objectMapper,
                            DingTalkAppService dingTalkAppService,
                            DingTalkProperties dingTalkProperties,
-                           @Lazy TrainQaCalibrateService trainQaCalibrateService) {
+                           @Lazy TrainQaCalibrateService trainQaCalibrateService,
+                           TrainQaMissService trainQaMissService) {
         this.jdbc = jdbc;
         this.fileStorage = fileStorage;
         this.aiChatService = aiChatService;
@@ -99,6 +104,7 @@ public class TrainDocService {
         this.dingTalkAppService = dingTalkAppService;
         this.dingTalkProperties = dingTalkProperties;
         this.trainQaCalibrateService = trainQaCalibrateService;
+        this.trainQaMissService = trainQaMissService;
     }
 
     public List<TrainDocVO> list(String category) {
@@ -555,9 +561,6 @@ public class TrainDocService {
         if (question.isEmpty()) {
             throw new BusinessException("请输入问题");
         }
-        if (!aiChatService.isEnabled()) {
-            throw new BusinessException("AI 未配置，请到「系统管理 → AI模型配置」填写可用模型");
-        }
         String cat = normalizeCategory(dto.getCategory());
         DocBundle latest = loadLatestDoc(cat);
         if (latest == null) {
@@ -565,6 +568,7 @@ public class TrainDocService {
             empty.setStatus("NOT_FOUND");
             empty.setMessage("暂无培训文档，请先在后台上传收银操作培训资料");
             empty.setHasOlderVersions(false);
+            trainQaMissService.record(question, cat, "NOT_FOUND", null, null);
             return empty;
         }
         boolean searchOld = Boolean.TRUE.equals(dto.getSearchOld());
@@ -611,6 +615,7 @@ public class TrainDocService {
                 vo.setStatus("NOT_FOUND");
                 vo.setMessage("没有找到答案");
             }
+            trainQaMissService.record(question, cat, vo.getStatus(), latest.docId, latest.versionId);
             return vo;
         }
 
@@ -621,6 +626,7 @@ public class TrainDocService {
             vo.setMessage("没有找到答案");
             vo.setHasOlderVersions(false);
             vo.setVersionLabel(latest.versionLabel);
+            trainQaMissService.record(question, cat, "NOT_FOUND", latest.docId, latest.versionId);
             return vo;
         }
         List<TrainAssistantAskVO.QaItem> all = new ArrayList<>();
@@ -632,6 +638,7 @@ public class TrainDocService {
         if (all.isEmpty()) {
             vo.setStatus("NOT_FOUND");
             vo.setMessage("没有找到答案");
+            trainQaMissService.record(question, cat, "NOT_FOUND", latest.docId, latest.versionId);
         } else {
             vo.setStatus("HIT");
             vo.setMessage("已在旧版培训文档中找到相关问答");
@@ -688,20 +695,8 @@ public class TrainDocService {
         } else {
             return null;
         }
-        if (candidates.size() == 1) {
-            return candidates.get(0);
-        }
-        // 头部明显领先：不必再调模型
-        if (candidates.get(0).score >= candidates.get(1).score + 40
-                && candidates.get(0).score >= MIN_SECTION_SCORE + 20) {
-            return candidates.get(0);
-        }
-        TitleCandidate aiPick = pickTitleWithAi(question, candidates);
-        if (aiPick != null) {
-            return aiPick;
-        }
-        // 模型无把握：仅当第一名已够强才采用，避免歧义时硬答
-        return candidates.get(0).score >= MIN_SECTION_SCORE + 30 ? candidates.get(0) : null;
+        candidates.sort(Comparator.comparingInt((TitleCandidate c) -> c.score).reversed());
+        return candidates.get(0);
     }
 
     private TitleCandidate pickTitleWithAi(String question, List<TitleCandidate> candidates) {
@@ -802,14 +797,14 @@ public class TrainDocService {
             if (!titleMatchesTopic(userQuestion, title)) {
                 continue;
             }
-            int score = scoreUserAgainstTitle(userNorm, titleNorm);
-            if (score >= MIN_SECTION_SCORE) {
+            int score = scoreUserAgainstTitle(userQuestion, title);
+            if (score >= MIN_SECTION_SCORE || TrainQaIntentMatcher.titleMatches(userQuestion, title)) {
                 list.add(new TitleCandidate(from, to, title, score));
             }
         }
         // HTML 兜底常把「一、系统概述与登录」拆成无标记短行，SECTION_START 认不出 → 行级兜底
-        if (list.isEmpty() && userNorm.length() <= 8) {
-            list.addAll(recallLineTitleCandidates(userNorm, plain, starts));
+        if (list.isEmpty()) {
+            list.addAll(recallLineTitleCandidates(userQuestion, plain, starts));
         }
         list.sort(Comparator.comparingInt((TitleCandidate c) -> c.score).reversed());
         if (list.size() > 12) {
@@ -822,7 +817,8 @@ public class TrainDocService {
      * 短问行级召回：标题行本身含用户词（如单独一行「系统概述与登录」），
      * 段落范围取到下一硬切点或一定长度内。
      */
-    private List<TitleCandidate> recallLineTitleCandidates(String userNorm, String plain, List<Integer> hardStarts) {
+    private List<TitleCandidate> recallLineTitleCandidates(String userQuestion, String plain, List<Integer> hardStarts) {
+        String userNorm = compact(userQuestion);
         List<TitleCandidate> list = new ArrayList<>();
         Matcher line = Pattern.compile("(?m)^[\\t　 ]*([^\\n\\r]{2,40})$").matcher(plain);
         while (line.find()) {
@@ -831,15 +827,15 @@ public class TrainDocService {
                 continue;
             }
             String titleNorm = compact(title);
-            if (titleNorm.length() < 2 || !titleNorm.contains(userNorm)) {
+            if (titleNorm.length() < 2 || !TrainQaIntentMatcher.titleMatches(userNorm, title)) {
                 continue;
             }
             // 跳过答句/过长说明
             if (title.contains("答：") || title.contains("答:") || titleNorm.length() > 36) {
                 continue;
             }
-            int score = scoreUserAgainstTitle(userNorm, titleNorm);
-            if (score < MIN_SECTION_SCORE) {
+            int score = scoreUserAgainstTitle(userQuestion, title);
+            if (score < MIN_SECTION_SCORE && !TrainQaIntentMatcher.titleMatches(userQuestion, title)) {
                 continue;
             }
             int from = line.start(1);
@@ -876,45 +872,22 @@ public class TrainDocService {
         return list;
     }
 
-    /** 只用用户原话给标题打分（禁止用「模型返回的标题」自我加分）。 */
-    private static int scoreUserAgainstTitle(String userNorm, String titleNorm) {
-        int score = scoreTitleIntent(userNorm, userNorm, userNorm, titleNorm);
-        String titleCore = titleCoreOf(titleNorm);
-        // 短问字面包含：登录 ⊂ 如何登录收银 → 强命中
-        if (userNorm.length() >= 2 && userNorm.length() <= 8
-                && (titleNorm.contains(userNorm) || titleCore.contains(userNorm))) {
-            score = Math.max(score, 120);
-            // 「系统概述与登录」优于正文操作里的「一键登录」
-            if (titleCore.contains("系统") && titleCore.contains(userNorm)) {
-                score += 40;
-            }
-            if (titleNorm.contains("一键" + userNorm) && !titleCore.contains("系统")) {
-                score -= 50;
-            }
-        }
-        return score;
+    /** 只用用户原话给标题打分：命中次数多的问答题干优先，罗列词条靠后。 */
+    private static int scoreUserAgainstTitle(String userQuestion, String title) {
+        return TrainQaIntentMatcher.score(userQuestion, title);
     }
 
     private static boolean passesUserAlignment(String userQuestion, String title) {
         return titleMatchesTopic(userQuestion, title);
     }
 
-    /** 去掉「如何/怎么/进行」后的核心词必须出现在标题里，避免折扣打到退货。 */
+    /** 分词意图：核心词/同义族出现在标题即可，不要求「如何折扣」整句连续贴在标题上。 */
     private static boolean titleMatchesTopic(String userQuestion, String title) {
-        String key = topicKey(userQuestion);
-        String t = compact(titleCoreOf(compact(cleanTopicTitle(title))));
-        if (key.length() < 2) {
-            String userNorm = compact(userQuestion);
-            return userNorm.length() >= 2 && (t.contains(userNorm) || compact(title).contains(userNorm));
-        }
-        return t.contains(key) || (t.length() >= 2 && key.contains(t));
+        return TrainQaIntentMatcher.titleMatches(userQuestion, cleanTopicTitle(title));
     }
 
     private static String topicKey(String q) {
-        String s = compact(q);
-        s = s.replaceFirst("^(?:问答\\d+|问题\\d+|问)", "");
-        s = s.replaceAll("如何|怎么|怎样|怎么样|请问|能否|可以吗|一下|进行|操作", "");
-        return s;
+        return TrainQaIntentMatcher.leftover(q);
     }
 
     private static String titleCoreOf(String titleNorm) {
@@ -1133,8 +1106,11 @@ public class TrainDocService {
                 return cached;
             }
             Path path = fileStorage.resolveUploadPath(doc.filePath);
+            byte[] bytes = null;
             if (path != null && Files.isRegularFile(path)) {
-                byte[] bytes = Files.readAllBytes(path);
+                bytes = Files.readAllBytes(path);
+            }
+            if (bytes != null && bytes.length > 0) {
                 String lower = doc.fileName == null ? "" : doc.fileName.toLowerCase(Locale.ROOT);
                 IndexedDoc indexed;
                 if (lower.endsWith(".docx") || (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K')) {
@@ -1344,6 +1320,32 @@ public class TrainDocService {
     }
 
     /** 题干行后面紧跟 [图N]、答之前：旧索引把上一问截图锚在了本题标题上，需要重抽。 */
+    /** 「见下图/进入下图」之后到下一问之前没有 [图N]，说明段末截图没抽出来。 */
+    private static boolean indexMissingFigureAfterXiatu(String text) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        Matcher m = Pattern.compile("下图").matcher(text);
+        while (m.find()) {
+            int from = m.end();
+            int to = text.length();
+            for (int s : listQaStarts(text)) {
+                if (s > from) {
+                    to = s;
+                    break;
+                }
+            }
+            if (to - from > 1200) {
+                continue;
+            }
+            String between = text.substring(from, to);
+            if (!between.contains("[图")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean headingOwnsNextImage(String text) {
         if (!StringUtils.hasText(text)) {
             return false;
@@ -1361,10 +1363,121 @@ public class TrainDocService {
         return QA_LINE.matcher(line.strip()).lookingAt();
     }
 
-    private void appendDocxImage(ZipFile zip, Map<String, String> relTarget, Set<String> usedTargets,
+    /** 按配对的 &lt;w:p&gt; 切段，避免嵌套段落把后面的 drawing 截丢。 */
+    private static List<String> splitDocxParagraphs(String xml) {
+        List<String> list = new ArrayList<>();
+        if (!StringUtils.hasText(xml)) {
+            return list;
+        }
+        int i = 0;
+        while (i < xml.length()) {
+            int start = indexOfWpOpen(xml, i);
+            if (start < 0) {
+                break;
+            }
+            int end = matchingWpClose(xml, start);
+            if (end < 0 || end <= start) {
+                break;
+            }
+            list.add(xml.substring(start, end));
+            i = end;
+        }
+        return list;
+    }
+
+    private static int indexOfWpOpen(String xml, int from) {
+        int i = from;
+        while (i < xml.length()) {
+            int at = xml.indexOf("<w:p", i);
+            if (at < 0) {
+                return -1;
+            }
+            int after = at + 4;
+            if (after >= xml.length()) {
+                return -1;
+            }
+            char c = xml.charAt(after);
+            if (c == '>' || c == '/' || Character.isWhitespace(c)) {
+                return at;
+            }
+            i = after;
+        }
+        return -1;
+    }
+
+    private static int matchingWpClose(String xml, int start) {
+        int gt = xml.indexOf('>', start);
+        if (gt < 0) {
+            return -1;
+        }
+        if (gt > start && xml.charAt(gt - 1) == '/') {
+            return gt + 1;
+        }
+        int i = gt + 1;
+        int depth = 1;
+        while (i < xml.length() && depth > 0) {
+            int open = indexOfWpOpen(xml, i);
+            int close = xml.indexOf("</w:p>", i);
+            if (close < 0) {
+                return -1;
+            }
+            if (open >= 0 && open < close) {
+                int ogt = xml.indexOf('>', open);
+                if (ogt < 0) {
+                    return -1;
+                }
+                if (xml.charAt(ogt - 1) == '/') {
+                    i = ogt + 1;
+                    continue;
+                }
+                depth++;
+                i = ogt + 1;
+            } else {
+                depth--;
+                i = close + 6;
+            }
+        }
+        return depth == 0 ? i : -1;
+    }
+
+    private byte[] readPublicDocBytes(String url) {
+        if (!StringUtils.hasText(url) || !url.startsWith("http")) {
+            return null;
+        }
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+            conn.setInstanceFollowRedirects(true);
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(30000);
+            conn.setRequestMethod("GET");
+            int code = conn.getResponseCode();
+            if (code >= 400) {
+                log.warn("公网培训原文件下载失败 code={} url={}", code, url);
+                return null;
+            }
+            try (InputStream in = conn.getInputStream()) {
+                return in.readAllBytes();
+            }
+        } catch (Exception e) {
+            log.warn("公网培训原文件下载失败 url={}: {}", url, e.getMessage());
+            return null;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    private void appendDocxImage(ZipFile zip, Map<String, String> relTarget, Map<String, Integer> targetToFig,
                                  IndexedDoc indexed, long versionId, String rId, StringBuilder marks) {
         String target = relTarget.get(rId);
-        if (!StringUtils.hasText(target) || usedTargets.contains(target)) {
+        if (!StringUtils.hasText(target)) {
+            return;
+        }
+        Integer reused = targetToFig.get(target);
+        if (reused != null) {
+            marks.append(" [图").append(reused).append("] ");
             return;
         }
         try {
@@ -1390,8 +1503,8 @@ public class TrainDocService {
             if (!StringUtils.hasText(url)) {
                 return;
             }
-            usedTargets.add(target);
             indexed.images.add(url);
+            targetToFig.put(target, indexed.images.size());
             marks.append(" [图").append(indexed.images.size()).append("] ");
         } catch (Exception e) {
             log.warn("抽取 Word 配图失败 rId={}: {}", rId, e.getMessage());
@@ -1416,16 +1529,12 @@ public class TrainDocService {
                     return indexed;
                 }
                 Map<String, String> relTarget = parseDocxRels(relsXml);
-                Pattern paraPat = Pattern.compile("(?is)<w:p[\\s>].*?</w:p>");
                 Pattern textPat = Pattern.compile("(?is)<w:t[^>]*>(.*?)</w:t>");
                 Pattern blipPat = Pattern.compile(
-                        "(?is)<a:blip[^>]+(?:r:embed|r:link)=\"(rId[^\"]+)\"[^>]*/?>");
-                Matcher paraMatcher = paraPat.matcher(documentXml);
+                        "(?is)<(?:a:blip|asvg:svgBlip|v:imagedata)\\b[^>]*?(?:r:embed|r:link|r:id)\\s*=\\s*\"(rId[^\"]+)\"");
                 StringBuilder ai = new StringBuilder();
-                Set<String> usedTargets = new LinkedHashSet<>();
-                Pattern vmlPat = Pattern.compile("(?is)<v:imagedata[^>]+r:id=\"(rId[^\"]+)\"");
-                while (paraMatcher.find()) {
-                    String paraXml = paraMatcher.group();
+                Map<String, Integer> targetToFig = new HashMap<>();
+                for (String paraXml : splitDocxParagraphs(documentXml)) {
                     StringBuilder line = new StringBuilder();
                     Matcher tm = textPat.matcher(paraXml);
                     while (tm.find()) {
@@ -1434,11 +1543,7 @@ public class TrainDocService {
                     StringBuilder marks = new StringBuilder();
                     Matcher bm = blipPat.matcher(paraXml);
                     while (bm.find()) {
-                        appendDocxImage(zip, relTarget, usedTargets, indexed, versionId, bm.group(1), marks);
-                    }
-                    Matcher vm = vmlPat.matcher(paraXml);
-                    while (vm.find()) {
-                        appendDocxImage(zip, relTarget, usedTargets, indexed, versionId, vm.group(1), marks);
+                        appendDocxImage(zip, relTarget, targetToFig, indexed, versionId, bm.group(1), marks);
                     }
                     String lineStr = line.toString();
                     boolean qaTitle = isQaTitleLine(lineStr);
