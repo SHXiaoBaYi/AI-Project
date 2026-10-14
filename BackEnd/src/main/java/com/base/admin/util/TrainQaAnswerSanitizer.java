@@ -2,17 +2,22 @@ package com.base.admin.util;
 
 import org.springframework.util.StringUtils;
 
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 仅拦截「几乎没有中文的程序源码」。培训文档里的操作说明、带图 HTML、Word 残留标签一律放行。
+ * 答疑正文清洗：去掉 Word/OOXML 标签；拦截真正的程序源码，禁止下发前台。
  */
 public final class TrainQaAnswerSanitizer {
 
     private static final Pattern JSON_PAYLOAD = Pattern.compile(
             "(?s)^\\s*\\{\\s*\"(?:answer|question|index|code|items)\"\\s*:");
 
-    /** 强特征：正常收银手册几乎不会同时出现这些。 */
+    private static final Pattern WT_TEXT = Pattern.compile("(?is)<w:t[^>]*>(.*?)</w:t>");
+
+    private static final Pattern OFFICE_TAG = Pattern.compile(
+            "(?is)</?(?:w|a|r|wp|wps|v|o|m|pic|c)\\b[^>]*>");
+
     private static final Pattern[] SOURCE_SIGNATURES = {
             Pattern.compile("(?i)\\bpackage\\s+[\\w.]+\\s*;"),
             Pattern.compile("(?i)\\bimport\\s+(static\\s+)?[\\w.*]+\\s*;"),
@@ -30,26 +35,54 @@ public final class TrainQaAnswerSanitizer {
     private TrainQaAnswerSanitizer() {
     }
 
+    /** 去掉 Word 文档泄漏的 w:pPr / w:rFonts 等标签，保留中文与 [图N]。 */
+    public static String stripOfficeMarkup(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return raw == null ? "" : raw;
+        }
+        if (!raw.contains("<w:") && !raw.contains("<a:") && !raw.contains("<wp:")) {
+            return raw;
+        }
+        String s = raw;
+        Matcher m = WT_TEXT.matcher(s);
+        StringBuffer wt = new StringBuffer();
+        boolean anyT = false;
+        while (m.find()) {
+            anyT = true;
+            m.appendReplacement(wt, Matcher.quoteReplacement(m.group(1)));
+        }
+        if (anyT) {
+            m.appendTail(wt);
+            s = wt.toString();
+        }
+        s = OFFICE_TAG.matcher(s).replaceAll("");
+        s = s.replace("&nbsp;", " ")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"");
+        if (s.contains("<w:")) {
+            s = OFFICE_TAG.matcher(s).replaceAll("");
+        }
+        return s.replaceAll("[ \\t\\x0B\\f\\r]+", " ")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
+    }
+
     public static boolean looksLikeSourceCode(String answer, String answerHtml) {
-        String text = plainText(answer, answerHtml);
+        String text = plainText(stripOfficeMarkup(answer), stripOfficeMarkup(answerHtml));
         if (text.length() < 24) {
             return false;
         }
-        int han = countHan(text);
-        // 主体是中文操作说明：即使夹了少量英文/符号也放行
-        if (han >= 15) {
-            return false;
-        }
-        if (JSON_PAYLOAD.matcher(text).find() && han < 8) {
+        if (JSON_PAYLOAD.matcher(text).find() && countHan(text) < 8) {
             return true;
         }
-        int hits = 0;
         for (Pattern p : SOURCE_SIGNATURES) {
             if (p.matcher(text).find()) {
-                hits++;
+                return true;
             }
         }
-        return hits >= 1;
+        return false;
     }
 
     private static String plainText(String answer, String answerHtml) {

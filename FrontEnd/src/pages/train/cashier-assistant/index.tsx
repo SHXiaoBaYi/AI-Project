@@ -51,16 +51,31 @@ function extractImgAlt(tag: string) {
 const SOURCE_HINT =
   /\b(package\s+[\w.]+;|import\s+[\w.*]+;|public\s+(class|interface|enum)|public\s+static\s+void\s+main\s*\(|System\.out\.print|console\.(log|error)\s*\(|<\?php|#include\s*[<"]|export\s+default|module\.exports)/i;
 
+function stripOfficeMarkup(s?: string) {
+  if (!s) return '';
+  if (!/<w:|<\/w:/.test(s)) return s;
+  return s
+    .replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi, '$1')
+    .replace(/<\/?w:[^>]*>/gi, '')
+    .replace(/<\/?(?:a|r|wp|wps|v|o|m):[^>]*>/gi, '');
+}
+
 function looksLikeSourceCode(answer?: string) {
-  const text = (answer || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const text = stripOfficeMarkup(answer || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (text.length < 24) return false;
-  const han = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-  if (han >= 15) return false;
   return SOURCE_HINT.test(text);
 }
 
 function safeQaItems(items?: TrainQaItem[]) {
-  return (items || []).filter((it) => !looksLikeSourceCode(it.answer));
+  return (items || []).map((it) => ({
+    ...it,
+    question: stripOfficeMarkup(it.question),
+    answer: stripOfficeMarkup(it.answer),
+    answerHtml: stripOfficeMarkup(it.answerHtml),
+  })).filter((it) => !looksLikeSourceCode(it.answer) && !looksLikeSourceCode(it.answerHtml));
 }
 
 /** 图文 HTML：配图可点击预览、放大缩小；纯文本段落仍按 HTML 渲染 */

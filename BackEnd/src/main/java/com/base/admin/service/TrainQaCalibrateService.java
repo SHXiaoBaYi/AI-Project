@@ -83,9 +83,10 @@ public class TrainQaCalibrateService {
         item.setCalibrateId(id);
         item.setFromCalibrate(true);
         String topic = str(best.get("topic_title"));
-        item.setQuestion(StringUtils.hasText(topic) ? topic : str(best.get("user_question")));
-        item.setAnswer(str(best.get("answer_text")));
-        item.setAnswerHtml(str(best.get("answer_html")));
+        item.setQuestion(TrainQaAnswerSanitizer.stripOfficeMarkup(
+                StringUtils.hasText(topic) ? topic : str(best.get("user_question"))));
+        item.setAnswer(TrainQaAnswerSanitizer.stripOfficeMarkup(str(best.get("answer_text"))));
+        item.setAnswerHtml(TrainQaAnswerSanitizer.stripOfficeMarkup(str(best.get("answer_html"))));
         item.setImages(parseImages(str(best.get("images_json"))));
         item.setVersionLabel(versionLabel);
         return item;
