@@ -93,6 +93,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 """);
         addColumnIfMissing("hr_offer", "salary_amount",
                 "ALTER TABLE hr_offer ADD COLUMN salary_amount DECIMAL(12,2) NULL COMMENT '最终offer金额' AFTER application_id");
+        addColumnIfMissing("hr_application", "screen_reject_reason",
+                "ALTER TABLE hr_application ADD COLUMN screen_reject_reason VARCHAR(255) NULL COMMENT '初筛不合适原因' AFTER screen_result");
         jdbc.update("""
                 INSERT IGNORE INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
                 ('SCREEN_FAIL', '初筛不合适', 21, 0, 1, 1, 1),

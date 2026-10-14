@@ -725,6 +725,7 @@ public class HrMasterService {
         vo.setReferrerName(stringOf(row.get("submitter_name")));
         vo.setCurrentStage(stringOf(row.get("current_stage")));
         vo.setStageName(stringOf(row.get("stage_name")));
+        vo.setResumeName(stringOf(row.get("file_name")));
         return vo;
     }
 

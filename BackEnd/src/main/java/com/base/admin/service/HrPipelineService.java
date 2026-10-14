@@ -187,15 +187,25 @@ public class HrPipelineService {
     public void screen(HrPipelineScreenDTO dto) {
         String result = normalizePassFail(dto.getResult(), "初筛结果");
         ensureApplication(dto.getApplicationId());
+        if ("FAIL".equals(result) && !StringUtils.hasText(dto.getRejectReason())) {
+            throw new BusinessException("不合适时请选择原因");
+        }
         String stage = "PASS".equals(result) ? "SCREEN_PASS" : "SCREEN_FAIL";
+        String reason = "FAIL".equals(result) ? emptyToNull(dto.getRejectReason()) : null;
         jdbc.update("""
                 UPDATE hr_application
-                SET screen_result = ?, resume_status = ?, current_stage = ?
+                SET screen_result = ?, resume_status = ?, current_stage = ?, screen_reject_reason = ?
                 WHERE id = ? AND is_active = 1
-                """, result, result, stage, dto.getApplicationId());
-        touchStage(dto.getApplicationId(), stage, "SCREEN",
-                "PASS".equals(result) ? "初筛合适" : "初筛不合适"
-                        + (StringUtils.hasText(dto.getRemark()) ? "：" + dto.getRemark().trim() : ""));
+                """, result, result, stage, reason, dto.getApplicationId());
+        String failBit = StringUtils.hasText(dto.getRejectReason()) ? dto.getRejectReason().trim() : "";
+        String remarkBit = StringUtils.hasText(dto.getRemark()) ? dto.getRemark().trim() : "";
+        String summary;
+        if ("PASS".equals(result)) {
+            summary = "初筛合适" + (remarkBit.isEmpty() ? "" : "：" + remarkBit);
+        } else {
+            summary = "初筛不合适：" + failBit + (remarkBit.isEmpty() ? "" : "；" + remarkBit);
+        }
+        touchStage(dto.getApplicationId(), stage, "SCREEN", summary);
     }
 
     @Transactional

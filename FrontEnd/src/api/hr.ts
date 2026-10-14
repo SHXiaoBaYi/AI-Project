@@ -373,6 +373,7 @@ export type HrJobCandidate = {
   referrerName?: string;
   currentStage?: string;
   stageName?: string;
+  resumeName?: string;
 };
 
 export type HrJobFunnelStatus = 'PENDING' | 'INTERVIEWING' | 'ONBOARDED';
@@ -583,7 +584,12 @@ export function getHrPipelineDetailApi(applicationId: number) {
   return request.get<unknown, HrPipelineDetail>(`/hr/pipeline/detail/${applicationId}`);
 }
 
-export function saveHrPipelineScreenApi(data: { applicationId: number; result: 'PASS' | 'FAIL'; remark?: string }) {
+export function saveHrPipelineScreenApi(data: {
+  applicationId: number;
+  result: 'PASS' | 'FAIL';
+  rejectReason?: string;
+  remark?: string;
+}) {
   return request.post<unknown, void>('/hr/pipeline/screen', data);
 }
 

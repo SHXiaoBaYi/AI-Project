@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { App, Card, Drawer, Empty, Input, Pagination, Select, Space, Spin, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ClockCircleOutlined, UserOutlined } from '@ant-design/icons';
+import { ResumeDrawer } from '@/components/hr/ResumeDrawer';
 import {
   getHrDepartmentsApi,
   getHrDictOptionsApi,
@@ -238,6 +239,7 @@ export default function HrJobBoardPage() {
   const [drawerPage, setDrawerPage] = useState(1);
   const [drawerTotal, setDrawerTotal] = useState(0);
   const [candidates, setCandidates] = useState<HrJobCandidate[]>([]);
+  const [resumeRow, setResumeRow] = useState<HrJobCandidate | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -437,6 +439,7 @@ export default function HrJobBoardPage() {
           setDrawerJob(null);
           setDrawerFunnel(undefined);
           setCandidates([]);
+          setResumeRow(null);
         }}
         width={1100}
         destroyOnHidden
@@ -448,6 +451,10 @@ export default function HrJobBoardPage() {
           dataSource={candidates}
           columns={candidateColumns}
           scroll={{ x: 1100 }}
+          onRow={(record) => ({
+            className: 'cursor-pointer',
+            onClick: () => setResumeRow(record),
+          })}
           pagination={{
             current: drawerPage,
             pageSize: 10,
@@ -457,6 +464,18 @@ export default function HrJobBoardPage() {
           }}
         />
       </Drawer>
+      {resumeRow ? (
+        <ResumeDrawer
+          applicationId={resumeRow.applicationId}
+          fileName={resumeRow.resumeName}
+          open
+          onClose={() => setResumeRow(null)}
+          onActionSuccess={() => {
+            if (drawerJob) void loadCandidates(drawerJob, drawerPage, drawerFunnel);
+            void load();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

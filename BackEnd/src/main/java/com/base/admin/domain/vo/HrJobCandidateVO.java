@@ -54,4 +54,7 @@ public class HrJobCandidateVO {
 
     @Schema(description = "当前阶段名")
     private String stageName;
+
+    @Schema(description = "简历文件名")
+    private String resumeName;
 }
