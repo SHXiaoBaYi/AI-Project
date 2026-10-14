@@ -48,8 +48,27 @@ function extractImgAlt(tag: string) {
   return m?.[1] ?? '配图';
 }
 
+const CODE_HINT =
+  /\b(package\s+[\w.]+;|import\s+[\w.*]+;|public\s+(class|interface|enum)|function\s+\w+\s*\(|console\.(log|error)\s*\(|System\.out\.print|<\?php|<script\b|<!DOCTYPE\s+html|<html\b|export\s+default|```[a-zA-Z])/i;
+
+function looksLikeSourceCode(answer?: string, answerHtml?: string) {
+  const raw = `${answer || ''}\n${answerHtml || ''}`.trim();
+  if (raw.length < 12) return false;
+  if (CODE_HINT.test(raw)) return true;
+  const symbols = (raw.match(/[{};()[\]]/g) || []).length;
+  const han = (raw.match(/[\u4e00-\u9fff]/g) || []).length;
+  return raw.length >= 80 && symbols >= 12 && han * 8 < raw.length;
+}
+
+function safeQaItems(items?: TrainQaItem[]) {
+  return (items || []).filter((it) => !looksLikeSourceCode(it.answer, it.answerHtml));
+}
+
 /** 图文 HTML：配图可点击预览、放大缩小；纯文本段落仍按 HTML 渲染 */
 function TrainQaRichHtml({ html }: { html: string }) {
+  if (looksLikeSourceCode('', html)) {
+    return <div className='text-neutral-500'>答案不可展示</div>;
+  }
   const parts = html.split(/(<img\b[^>]*>)/gi);
   const hasImg = parts.some((p) => /^<img\b/i.test(p));
   if (!hasImg) {
@@ -496,26 +515,27 @@ export default function CashierAssistantPage() {
     }
     try {
       const res = await askTrainAssistantApi({ question: q, searchOld, category: 'cashier' });
-      if (res.status === 'HIT') {
+      const items = safeQaItems(res.items);
+      if (res.status === 'HIT' && items.length) {
         push({
           role: 'assistant',
           text: res.message || '已找到相关问答',
-          items: res.items || [],
+          items,
           userQuestion: q,
           docId: res.docId,
           versionId: res.versionId,
         });
-      } else if (res.status === 'NEED_OLD') {
+      } else if (res.status === 'NEED_OLD' || (res.status === 'HIT' && !items.length && res.hasOlderVersions)) {
         push({
           role: 'assistant',
-          text: res.message || '暂时没有找到答案，是否检索旧版？',
+          text: '暂时没有找到答案，是否检索旧版？',
           needOld: true,
           userQuestion: q,
           docId: res.docId,
           versionId: res.versionId,
         });
       } else {
-        push({ role: 'assistant', text: res.message || '没有找到答案' });
+        push({ role: 'assistant', text: res.status === 'HIT' ? '没有找到答案' : res.message || '没有找到答案' });
       }
     } catch (err) {
       message.error(err instanceof Error ? err.message : '提问失败');

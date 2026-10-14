@@ -375,7 +375,14 @@ export type HrJobCandidate = {
   stageName?: string;
 };
 
-export function getHrJobCandidatesApi(data: { requisitionId: number; pageNum?: number; pageSize?: number }) {
+export type HrJobFunnelStatus = 'PENDING' | 'INTERVIEWING' | 'ONBOARDED';
+
+export function getHrJobCandidatesApi(data: {
+  requisitionId: number;
+  funnelStatus?: HrJobFunnelStatus;
+  pageNum?: number;
+  pageSize?: number;
+}) {
   return request.post<unknown, { total: number; rows: HrJobCandidate[] }>('/hr/requisition/candidates', data);
 }
 

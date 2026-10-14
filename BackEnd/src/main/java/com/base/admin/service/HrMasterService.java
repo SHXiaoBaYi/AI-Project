@@ -50,6 +50,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class HrMasterService {
 
+    private static final Set<String> JOB_FUNNEL_INTERVIEWING = Set.of(
+            "INVITED", "SHOW_UP", "PHONE_PASS",
+            "FIRST_PENDING", "FIRST_ROUND", "R1_DISPUTE",
+            "SECOND_ROUND", "R2_PENDING", "R2_DISPUTE",
+            "R3_PASS", "R3_PENDING", "R3_DISPUTE",
+            "R4_PASS", "R4_PENDING", "R4_DISPUTE",
+            "R5_PASS", "R5_PENDING", "R5_DISPUTE");
+
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final HrDataScope dataScope;
@@ -670,6 +678,23 @@ public class HrMasterService {
                 """, candidateId);
     }
 
+    private static boolean matchJobFunnel(Map<String, Object> row, String funnelStatus) {
+        String bucket = funnelStatus == null ? "" : funnelStatus.trim().toUpperCase(Locale.ROOT);
+        if (bucket.isEmpty()) {
+            return true;
+        }
+        String stage = stringOf(row.get("current_stage"));
+        if (stage == null || stage.isBlank()) {
+            stage = "ENTERED";
+        }
+        return switch (bucket) {
+            case "PENDING" -> "ENTERED".equalsIgnoreCase(stage);
+            case "INTERVIEWING" -> JOB_FUNNEL_INTERVIEWING.contains(stage.toUpperCase(Locale.ROOT));
+            case "ONBOARDED" -> "ONBOARDED".equalsIgnoreCase(stage);
+            default -> true;
+        };
+    }
+
     private static void attachCandidateDisplay(Map<String, Object> row) {
         row.put("basic_info", buildBasicInfo(row));
         row.put("remaining_hours", remainingHours(row.get("create_time"), row.get("submitted_at")));
@@ -823,7 +848,9 @@ public class HrMasterService {
         int pageSize = q.getPageSize() == null || q.getPageSize() < 1 ? 10 : Math.min(q.getPageSize(), 100);
         HrBoardQueryDTO filter = new HrBoardQueryDTO();
         filter.setRequisitionId(q.getRequisitionId());
-        List<Map<String, Object>> all = applications(filter);
+        List<Map<String, Object>> all = applications(filter).stream()
+                .filter(row -> matchJobFunnel(row, q.getFunnelStatus()))
+                .toList();
         int from = Math.min((pageNum - 1) * pageSize, all.size());
         int to = Math.min(from + pageSize, all.size());
         List<HrJobCandidateVO> page = new ArrayList<>();

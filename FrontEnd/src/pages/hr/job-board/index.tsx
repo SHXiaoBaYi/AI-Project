@@ -12,7 +12,14 @@ import {
   type HrJobCardQuery,
   type HrJobCardStatus,
   type HrJobCandidate,
+  type HrJobFunnelStatus,
 } from '@/api/hr';
+
+const FUNNEL_LABEL: Record<HrJobFunnelStatus, string> = {
+  PENDING: '未处理',
+  INTERVIEWING: '约面中',
+  ONBOARDED: '已入职',
+};
 
 const CARD_STATUS: { label: string; value: HrJobCardStatus }[] = [
   { label: '待招', value: 'PENDING' },
@@ -55,16 +62,23 @@ function remainingLabel(hours?: number | null) {
   );
 }
 
-function Metric({ value, label }: { value?: number; label: string }) {
+function Metric({ value, label, onClick }: { value?: number; label: string; onClick: () => void }) {
   return (
-    <div className='flex min-w-[88px] flex-1 flex-col items-center justify-center px-3 py-1 text-center'>
+    <button
+      type='button'
+      className='flex min-w-[88px] flex-1 flex-col items-center justify-center px-3 py-1 text-center hover:bg-neutral-50'
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
       <span className='text-xl leading-none font-semibold text-neutral-800'>{value ?? 0}</span>
       <span className='mt-1 text-xs text-neutral-500'>{label}</span>
-    </div>
+    </button>
   );
 }
 
-function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard) => void }) {
+function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, funnel?: HrJobFunnelStatus) => void }) {
   const tags: string[] = [];
   if (job.jobPriorityLabel) tags.push(job.jobPriorityLabel);
   if (job.priorityLabel) tags.push(`【${job.priorityLabel}】`);
@@ -120,14 +134,17 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard) 
           <Metric
             value={job.pendingCount}
             label='未处理'
+            onClick={() => onOpen(job, 'PENDING')}
           />
           <Metric
             value={job.interviewingCount}
             label='约面中'
+            onClick={() => onOpen(job, 'INTERVIEWING')}
           />
           <Metric
             value={job.onboardedCount}
             label='已入职'
+            onClick={() => onOpen(job, 'ONBOARDED')}
           />
         </div>
       </div>
@@ -216,6 +233,7 @@ export default function HrJobBoardPage() {
   const [addresses, setAddresses] = useState<{ value: number; label: string }[]>([]);
   const [filters, setFilters] = useState<HrJobCardQuery>({});
   const [drawerJob, setDrawerJob] = useState<HrJobCard | null>(null);
+  const [drawerFunnel, setDrawerFunnel] = useState<HrJobFunnelStatus | undefined>();
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [drawerPage, setDrawerPage] = useState(1);
   const [drawerTotal, setDrawerTotal] = useState(0);
@@ -235,11 +253,12 @@ export default function HrJobBoardPage() {
   }, [filters, message, pageNum, pageSize]);
 
   const loadCandidates = useCallback(
-    async (job: HrJobCard, page: number) => {
+    async (job: HrJobCard, page: number, funnel?: HrJobFunnelStatus) => {
       setDrawerLoading(true);
       try {
         const res = await getHrJobCandidatesApi({
           requisitionId: job.id,
+          funnelStatus: funnel,
           pageNum: page,
           pageSize: 10,
         });
@@ -294,9 +313,10 @@ export default function HrJobBoardPage() {
     setFilters((prev) => ({ ...prev, ...patch }));
   };
 
-  const openJob = (job: HrJobCard) => {
+  const openJob = (job: HrJobCard, funnel?: HrJobFunnelStatus) => {
     setDrawerJob(job);
-    void loadCandidates(job, 1);
+    setDrawerFunnel(funnel);
+    void loadCandidates(job, 1, funnel);
   };
 
   return (
@@ -411,10 +431,11 @@ export default function HrJobBoardPage() {
       </div>
 
       <Drawer
-        title={drawerJob ? `${drawerJob.jobName} · 候选人` : '候选人'}
+        title={drawerJob ? `${drawerJob.jobName} · ${drawerFunnel ? FUNNEL_LABEL[drawerFunnel] : '候选人'}` : '候选人'}
         open={drawerJob != null}
         onClose={() => {
           setDrawerJob(null);
+          setDrawerFunnel(undefined);
           setCandidates([]);
         }}
         width={1100}
@@ -432,7 +453,7 @@ export default function HrJobBoardPage() {
             pageSize: 10,
             total: drawerTotal,
             showSizeChanger: false,
-            onChange: (page) => drawerJob && void loadCandidates(drawerJob, page),
+            onChange: (page) => drawerJob && void loadCandidates(drawerJob, page, drawerFunnel),
           }}
         />
       </Drawer>

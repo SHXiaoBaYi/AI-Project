@@ -12,6 +12,9 @@ public class HrJobCandidateQueryDTO {
     @Schema(description = "招聘需求ID", requiredMode = Schema.RequiredMode.REQUIRED, example = "10")
     private Long requisitionId;
 
+    @Schema(description = "漏斗状态：PENDING未处理 / INTERVIEWING约面中 / ONBOARDED已入职，空则全部")
+    private String funnelStatus;
+
     @Schema(description = "页码", example = "1")
     private Integer pageNum;
 

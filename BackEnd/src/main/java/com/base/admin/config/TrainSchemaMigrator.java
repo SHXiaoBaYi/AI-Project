@@ -1,5 +1,6 @@
 package com.base.admin.config;
 
+import com.base.admin.util.TrainQaAnswerSanitizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -10,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 收银操作培训：文档 + 版本表、管理菜单。
@@ -26,6 +28,7 @@ public class TrainSchemaMigrator implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         ensureTables();
         seedMenus();
+        quarantineCodeAnswers();
         log.info("收银培训表结构与菜单已同步");
     }
 
@@ -110,6 +113,38 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         Long hrAdmin = roleId("hr_admin");
         if (hrAdmin != null) {
             grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308);
+        }
+    }
+
+    /** 已入库的代码类答案禁止继续作为「准」命中前台。 */
+    private void quarantineCodeAnswers() {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT id, LEFT(IFNULL(answer_text, ''), 8000) answer_text,
+                       LEFT(IFNULL(answer_html, ''), 8000) answer_html
+                FROM train_qa_calibrate
+                WHERE is_active = 1 AND status IN ('APPROVED', 'PENDING')
+                """);
+        int n = 0;
+        for (Map<String, Object> row : rows) {
+            String text = row.get("answer_text") == null ? "" : String.valueOf(row.get("answer_text"));
+            String html = row.get("answer_html") == null ? "" : String.valueOf(row.get("answer_html"));
+            if (!TrainQaAnswerSanitizer.looksLikeSourceCode(text, html)) {
+                continue;
+            }
+            Number id = (Number) row.get("id");
+            if (id == null) {
+                continue;
+            }
+            jdbc.update("""
+                    UPDATE train_qa_calibrate
+                    SET status = 'REJECTED',
+                        remark = LEFT(CONCAT(IFNULL(CONCAT(remark, '；'), ''), '系统拦截：答案疑似程序代码，已禁止下发前台'), 512)
+                    WHERE id = ? AND is_active = 1 AND status IN ('APPROVED', 'PENDING')
+                    """, id.longValue());
+            n++;
+        }
+        if (n > 0) {
+            log.warn("已拦截疑似代码的答疑校准记录 count={}", n);
         }
     }
 

@@ -10,6 +10,7 @@ import com.base.admin.domain.vo.TrainDocVO;
 import com.base.admin.domain.vo.TrainDocVersionVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
+import com.base.admin.util.TrainQaAnswerSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -663,6 +664,9 @@ public class TrainDocService {
             return List.of();
         }
         TrainAssistantAskVO.QaItem item = materializeFromSection(hit, indexed);
+        if (item == null) {
+            return List.of();
+        }
         enrichImagesFromContexts(item, indexed);
         item.setVersionLabel(doc.versionLabel);
         return List.of(item);
@@ -1495,6 +1499,11 @@ public class TrainDocService {
         item.setAnswer(stripImageMarkers(mixed).trim());
         item.setImages(toImageUrls(refs, indexed));
         item.setAnswerHtml(buildMixedAnswerHtml(mixed, indexed));
+        if (TrainQaAnswerSanitizer.looksLikeSourceCode(item.getAnswer(), item.getAnswerHtml())) {
+            log.warn("答疑抽段疑似源码，丢弃 title={} bodyLen={}",
+                    item.getQuestion(), item.getAnswer() == null ? 0 : item.getAnswer().length());
+            return null;
+        }
         log.info("答疑严格切段 score={} span=[{},{}) title={} imgs={} bodyLen={}",
                 hit.score, hit.from, hit.to, item.getQuestion(), refs.size(),
                 item.getAnswer() == null ? 0 : item.getAnswer().length());
