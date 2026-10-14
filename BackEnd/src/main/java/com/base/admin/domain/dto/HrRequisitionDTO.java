@@ -35,8 +35,7 @@ public class HrRequisitionDTO {
     @Schema(description = "技能要求")
     private String skillReq;
 
-    @NotBlank
-    @Schema(description = "工作地 SH/XJ")
+    @Schema(description = "工作地 SH/XJ，由工作地址回写，可空")
     private String locationCode;
 
     @Schema(description = "部门")
@@ -50,6 +49,12 @@ public class HrRequisitionDTO {
 
     @Schema(description = "优先级 1紧急 2优先 3常规")
     private Integer priority;
+
+    @Schema(description = "岗位优先级编码 P0/P1，独立于紧急/优先/常规", example = "P0")
+    private String jobPriorityCode;
+
+    @Schema(description = "工作地址字典ID", example = "1", nullable = true)
+    private Long workAddressId;
 
     @Schema(description = "岗位重要性 1高 2中 3低")
     private Integer importanceLevel;

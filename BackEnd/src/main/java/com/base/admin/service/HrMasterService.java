@@ -57,6 +57,7 @@ public class HrMasterService {
         StringBuilder sql = new StringBuilder("""
                 SELECT r.id, r.job_name, r.job_desc, r.salary_range, r.education_req, r.experience_req, r.skill_req,
                        r.status, r.location_code, r.headcount, r.target_text, r.priority,
+                       r.job_priority_code, r.work_address_id,
                        r.importance_level, r.urgency_level, r.difficulty_level,
                        r.received_date, r.onboard_date, r.dept_id, d.name dept_name,
                        (SELECT GROUP_CONCAT(COALESCE(u.nickname, o.alias) ORDER BY o.sort_no SEPARATOR '、')
@@ -105,6 +106,10 @@ public class HrMasterService {
         if (q.getLocationCode() != null && !q.getLocationCode().isBlank()) {
             sql.append(" AND r.location_code = ? ");
             args.add(q.getLocationCode());
+        }
+        if (q.getWorkAddressId() != null) {
+            sql.append(" AND r.work_address_id = ? ");
+            args.add(q.getWorkAddressId());
         }
         if (q.getDeptId() != null) {
             sql.append(" AND r.dept_id IN (SELECT id FROM hr_department WHERE is_active = 1 AND (id = ? OR CONCAT(',', ancestors, ',') LIKE CONCAT('%,', ?, ',%'))) ");
@@ -329,19 +334,24 @@ public class HrMasterService {
         if (dto.getPriority() != null && (dto.getPriority() < 1 || dto.getPriority() > 3)) {
             throw new BusinessException("优先级只能是紧急、优先或常规");
         }
+        String jobPriorityCode = resolveJobPriorityCode(dto.getJobPriorityCode());
+        Long workAddressId = resolveWorkAddressId(dto.getWorkAddressId(), dto.getLocationCode());
         Long requisitionId = dto.getId();
+        String locationCode = resolveLocationCode(requisitionId, workAddressId, dto.getLocationCode());
         if (requisitionId == null) {
             // urgency_level 与 priority 同源：紧急=1，其余按常规=2 冗余同步，展示以 priority 为准
             Integer urgency = dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2;
             jdbc.update("""
                     INSERT INTO hr_requisition (job_name, job_desc, salary_range, education_req, experience_req, skill_req,
                                                status, location_code, dept_id, headcount, target_text, priority,
+                                               job_priority_code, work_address_id,
                                                importance_level, urgency_level, difficulty_level,
                                                received_date, onboard_date, create_by, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
                     emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
-                    dto.getLocationCode(), dto.getDeptId(), headcount, target, dto.getPriority(),
+                    locationCode, dto.getDeptId(), headcount, target, dto.getPriority(),
+                    jobPriorityCode, workAddressId,
                     dto.getImportanceLevel(), urgency, dto.getDifficultyLevel(),
                     dto.getReceivedDate(), dto.getOnboardDate(), SecurityUtils.getCurrentUsername());
             requisitionId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
@@ -351,12 +361,14 @@ public class HrMasterService {
                     UPDATE hr_requisition
                     SET job_name = ?, job_desc = ?, salary_range = ?, education_req = ?, experience_req = ?, skill_req = ?,
                         location_code = ?, dept_id = ?, headcount = ?, target_text = ?,
-                        priority = ?, importance_level = ?, urgency_level = ?, difficulty_level = ?,
+                        priority = ?, job_priority_code = ?, work_address_id = ?,
+                        importance_level = ?, urgency_level = ?, difficulty_level = ?,
                         received_date = ?, onboard_date = ?
                     WHERE id = ? AND is_active = 1
                     """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
                     emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
-                    dto.getLocationCode(), dto.getDeptId(), headcount, target, dto.getPriority(),
+                    locationCode, dto.getDeptId(), headcount, target, dto.getPriority(),
+                    jobPriorityCode, workAddressId,
                     dto.getImportanceLevel(), urgency, dto.getDifficultyLevel(),
                     dto.getReceivedDate(), dto.getOnboardDate(), requisitionId);
             if (updated == 0) {
@@ -470,6 +482,85 @@ public class HrMasterService {
                 }
             }
         }
+    }
+
+    private String resolveJobPriorityCode(String raw) {
+        String code = raw == null ? "" : raw.trim();
+        if (code.isEmpty()) {
+            return null;
+        }
+        Integer ok = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_base_dict
+                WHERE dict_type = ? AND code = ? AND is_active = 1
+                """, Integer.class, Constants.HR_DICT_JOB_PRIORITY, code);
+        if (ok == null || ok == 0) {
+            throw new BusinessException("岗位优先级不在基础配置中，请先在「岗位优先级」里维护");
+        }
+        return code;
+    }
+
+    private Long resolveWorkAddressId(Long id, String locationCode) {
+        if (id != null) {
+            Integer ok = jdbc.queryForObject("""
+                    SELECT COUNT(1) FROM hr_base_dict
+                    WHERE id = ? AND dict_type = ? AND is_active = 1
+                    """, Integer.class, id, Constants.HR_DICT_WORK_ADDRESS);
+            if (ok == null || ok == 0) {
+                throw new BusinessException("工作地址不在基础配置中，请先在「工作地址」里维护");
+            }
+            return id;
+        }
+        Long mapped = findWorkAddressIdByLocation(locationCode);
+        if (mapped == null) {
+            throw new BusinessException("请选择工作地址");
+        }
+        return mapped;
+    }
+
+    private Long findWorkAddressIdByLocation(String locationCode) {
+        boolean xinjiang = "XJ".equalsIgnoreCase(locationCode == null ? "" : locationCode.trim());
+        boolean shanghai = "SH".equalsIgnoreCase(locationCode == null ? "" : locationCode.trim());
+        if (!xinjiang && !shanghai) {
+            return null;
+        }
+        String exact = xinjiang ? "新疆" : "上海";
+        String like = "%" + exact + "%";
+        List<Long> ids = jdbc.query("""
+                SELECT id FROM hr_base_dict
+                WHERE dict_type = ? AND is_active = 1 AND (name = ? OR name LIKE ?)
+                ORDER BY CASE WHEN name = ? THEN 0 ELSE 1 END, id
+                LIMIT 1
+                """, (rs, i) -> rs.getLong(1), Constants.HR_DICT_WORK_ADDRESS, exact, like, exact);
+        return ids.isEmpty() ? null : ids.get(0);
+    }
+
+    private String resolveLocationCode(Long requisitionId, Long workAddressId, String fallback) {
+        if (workAddressId != null) {
+            String name = jdbc.query("""
+                    SELECT name FROM hr_base_dict
+                    WHERE id = ? AND dict_type = ? AND is_active = 1
+                    """, rs -> rs.next() ? rs.getString(1) : null, workAddressId, Constants.HR_DICT_WORK_ADDRESS);
+            if (name != null) {
+                if (name.contains("新疆")) {
+                    return "XJ";
+                }
+                if (name.contains("上海")) {
+                    return "SH";
+                }
+            }
+        }
+        String loc = fallback == null ? "" : fallback.trim().toUpperCase(Locale.ROOT);
+        if ("XJ".equals(loc) || "SH".equals(loc)) {
+            return loc;
+        }
+        if (requisitionId != null) {
+            String existing = jdbc.query("SELECT location_code FROM hr_requisition WHERE id = ?",
+                    rs -> rs.next() ? rs.getString(1) : null, requisitionId);
+            if ("XJ".equals(existing) || "SH".equals(existing)) {
+                return existing;
+            }
+        }
+        return "SH";
     }
 
     private static String emptyToNull(String text) {

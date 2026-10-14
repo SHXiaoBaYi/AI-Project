@@ -11,6 +11,7 @@ import {
   deleteHrRequisitionApi,
   deleteHrRequisitionBatchApi,
   getHrDepartmentsApi,
+  getHrDictOptionsApi,
   getHrRequisitionsApi,
   getHrTargetOptionsApi,
   getHrUsersApi,
@@ -41,11 +42,6 @@ const DIFFICULTY = [
   { label: '高', value: 1 },
   { label: '中', value: 2 },
   { label: '低', value: 3 },
-];
-
-const LOCATIONS = [
-  { label: '上海', value: 'SH' },
-  { label: '新疆', value: 'XJ' },
 ];
 
 const ROUND_COUNT = [
@@ -80,6 +76,8 @@ interface Req {
   headcount: number;
   targetText?: string;
   priority?: number;
+  jobPriorityCode?: string;
+  workAddressId?: number;
   importanceLevel?: number;
   difficultyLevel?: number;
   receivedDate?: string;
@@ -155,6 +153,8 @@ function mapRow(raw: Record<string, unknown>): Req {
     headcount: Number(raw.headcount ?? 1),
     targetText: textOf(raw.target_text)?.trim(),
     priority: raw.priority == null || raw.priority === '' ? undefined : Number(raw.priority),
+    jobPriorityCode: textOf(raw.job_priority_code),
+    workAddressId: raw.work_address_id == null || raw.work_address_id === '' ? undefined : Number(raw.work_address_id),
     importanceLevel:
       raw.importance_level == null || raw.importance_level === '' ? undefined : Number(raw.importance_level),
     difficultyLevel:
@@ -194,6 +194,8 @@ const RequisitionPage = memo(function RequisitionPage() {
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [interviewers, setInterviewers] = useState<{ value: number; label: string }[]>([]);
   const [targets, setTargets] = useState<{ value: string; label: string }[]>([]);
+  const [jobPriorities, setJobPriorities] = useState<{ value: string; label: string }[]>([]);
+  const [workAddresses, setWorkAddresses] = useState<{ value: number; label: string }[]>([]);
   const ccOptions = useMemo(() => {
     const map = new Map<number, string>();
     [...users, ...interviewers].forEach((item) => {
@@ -212,6 +214,22 @@ const RequisitionPage = memo(function RequisitionPage() {
     getHrUsersApi('owner').then((list) => setUsers(toOptions(list as Record<string, unknown>[])));
     getHrUsersApi('interviewer').then((list) => setInterviewers(toOptions(list as Record<string, unknown>[])));
     getHrTargetOptionsApi().then((rows) => setTargets(rows.map((row) => ({ value: row.name, label: row.name }))));
+    getHrDictOptionsApi('JOB_PRIORITY').then((rows) =>
+      setJobPriorities(
+        (rows ?? []).map((row) => ({
+          value: row.code || '',
+          label: [row.code, row.name].filter(Boolean).join(' '),
+        })),
+      ),
+    );
+    getHrDictOptionsApi('WORK_ADDRESS').then((rows) =>
+      setWorkAddresses(
+        (rows ?? []).map((row) => ({
+          value: row.id,
+          label: row.category ? `${row.category} · ${row.name}` : row.name,
+        })),
+      ),
+    );
   }, []);
 
   const columns: ProColumnType<Req>[] = useMemo(
@@ -253,12 +271,13 @@ const RequisitionPage = memo(function RequisitionPage() {
         fieldProps: { mode: 'multiple', options: users, allowClear: true, optionFilterProp: 'label' },
       },
       {
-        title: '地点',
-        dataIndex: 'locationCode',
+        title: '工作地址',
+        dataIndex: 'workAddressId',
         valueType: 'select',
-        fieldProps: { options: LOCATIONS },
-        formItemProps: { rules: [{ required: true, message: '请选择工作地' }] },
-        render: (_, record) => (record.locationCode === 'XJ' ? '新疆' : '上海'),
+        width: 180,
+        fieldProps: { options: workAddresses, allowClear: true, showSearch: true, optionFilterProp: 'label' },
+        formItemProps: { rules: [{ required: true, message: '请选择工作地址' }] },
+        render: (_, record) => workAddresses.find((item) => item.value === record.workAddressId)?.label || '—',
       },
       {
         title: '状态',
@@ -275,6 +294,15 @@ const RequisitionPage = memo(function RequisitionPage() {
         width: 90,
         fieldProps: { options: PRIORITY, allowClear: true },
         render: (_, record) => PRIORITY.find((item) => item.value === record.priority)?.label || '—',
+      },
+      {
+        title: '岗位优先级',
+        dataIndex: 'jobPriorityCode',
+        valueType: 'select',
+        width: 180,
+        search: false,
+        fieldProps: { options: jobPriorities, allowClear: true, showSearch: true, optionFilterProp: 'label' },
+        render: (_, record) => jobPriorities.find((item) => item.value === record.jobPriorityCode)?.label || '—',
       },
       {
         title: '重要性',
@@ -502,7 +530,7 @@ const RequisitionPage = memo(function RequisitionPage() {
         ),
       },
     ],
-    [ccOptions, depts, interviewers, message, targets, users],
+    [ccOptions, depts, interviewers, jobPriorities, message, targets, users, workAddresses],
   );
 
   return (
@@ -517,7 +545,8 @@ const RequisitionPage = memo(function RequisitionPage() {
             jobName: params.jobName,
             deptId: params.deptId,
             ownerUserId: params.ownerUserId,
-            locationCode: params.locationCode,
+            workAddressId:
+              params.workAddressId != null && params.workAddressId !== '' ? Number(params.workAddressId) : undefined,
             status: params.status,
             priority: params.priority,
             targetText: params.targetText,
@@ -591,7 +620,7 @@ const RequisitionPage = memo(function RequisitionPage() {
         onOpenChange={setOpen}
         initialValues={
           editing ?? {
-            locationCode: 'SH',
+            workAddressId: workAddresses.find((item) => item.label.includes('上海'))?.value,
             headcount: 1,
             targetText: '尽快',
             roundCount: 2,
@@ -617,11 +646,12 @@ const RequisitionPage = memo(function RequisitionPage() {
             educationReq: form.educationReq,
             experienceReq: form.experienceReq,
             skillReq: form.skillReq,
-            locationCode: form.locationCode,
+            workAddressId: form.workAddressId,
             deptId: form.deptId,
             headcount: form.headcount,
             targetText: form.targetText,
             priority: form.priority,
+            jobPriorityCode: form.jobPriorityCode,
             importanceLevel: form.importanceLevel,
             difficultyLevel: form.difficultyLevel,
             receivedDate: dateOf(form.receivedDate),

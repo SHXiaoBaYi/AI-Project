@@ -7,6 +7,7 @@ export interface HrBoardQuery {
   endDate?: string;
   deptId?: number;
   locationCode?: string;
+  workAddressId?: number;
   channelCode?: string;
   requisitionId?: number;
   ownerUserId?: number;
@@ -182,6 +183,92 @@ export interface HrJobDetailRow {
 /** 岗位实时明细（日/周进展，不分页） */
 export function getHrJobDetailsApi(data: HrBoardQuery = {}) {
   return request.post<unknown, HrJobDetailRow[]>('/hr/board/job-details', data);
+}
+
+export interface HrPanelQuery {
+  panelStatus?: string;
+  deptId?: number;
+  jobName?: string;
+  ownerUserId?: number;
+  jobPriorityCode?: string;
+  workAddressId?: number;
+  pageNum?: number;
+  pageSize?: number;
+}
+
+export interface HrPanelStats {
+  openJobCount?: number;
+  bgCheckCount?: number;
+  pendingOnboardCount?: number;
+  todayScreenCount?: number;
+  todayPhoneCount?: number;
+  todayInviteCount?: number;
+  todayInterviewCount?: number;
+  todayInterviewPassCount?: number;
+}
+
+export interface HrPanelJobRow {
+  id: number;
+  panelStatus?: string;
+  panelStatusLabel?: string;
+  deptName?: string;
+  jobName?: string;
+  ownerName?: string;
+  jobPriorityCode?: string;
+  jobPriorityLabel?: string;
+  workLocation?: string;
+  receivedDate?: string;
+  deadlineDate?: string;
+  recruitingDays?: number;
+  progressSummary?: string;
+}
+
+export interface HrPanelResult {
+  stats?: HrPanelStats;
+  total?: number;
+  rows?: HrPanelJobRow[];
+}
+
+export type HrPanelMetric =
+  | 'OPEN_JOB'
+  | 'BG_CHECK'
+  | 'PENDING_ONBOARD'
+  | 'TODAY_SCREEN'
+  | 'TODAY_PHONE'
+  | 'TODAY_INVITE'
+  | 'TODAY_INTERVIEW'
+  | 'TODAY_INTERVIEW_PASS';
+
+export interface HrPanelPersonRow {
+  applicationId: number;
+  candidateName?: string;
+  jobName?: string;
+  deptName?: string;
+  ownerName?: string;
+  stageName?: string;
+  occurredAt?: string;
+  resultLabel?: string;
+}
+
+export interface HrPanelDetailQuery extends HrPanelQuery {
+  metric: HrPanelMetric;
+}
+
+export interface HrPanelDetailResult {
+  metric?: string;
+  title?: string;
+  kind?: 'JOB' | 'PERSON' | string;
+  total?: number;
+  jobs?: HrPanelJobRow[];
+  people?: HrPanelPersonRow[];
+}
+
+export function getHrPanelApi(data: HrPanelQuery = {}) {
+  return request.post<unknown, HrPanelResult>('/hr/panel', data);
+}
+
+export function getHrPanelDetailApi(data: HrPanelDetailQuery) {
+  return request.post<unknown, HrPanelDetailResult>('/hr/panel/detail', data);
 }
 
 export function getHrDrillApi(data: HrBoardQuery) {

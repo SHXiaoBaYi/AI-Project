@@ -46,6 +46,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensurePipelineSchema();
         ensureKpiGradeColumns();
         ensureBaseDictTable();
+        ensureRequisitionPanelColumns();
+        backfillWorkAddressFromLocation();
         log.info("招聘表结构、角色、用户和菜单已同步");
     }
 
@@ -189,6 +191,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
             systemParent = menuId("系统管理", "M");
         }
         menu(201, "招聘看板", boardParent == 0 ? 200 : boardParent, 4, "hr/board", "hr/board/index", "C", "hr:board:view", "DashboardOutlined", "漏斗、周期、HC、面试");
+        menu(249, "招聘面板", 200, 0, "hr/panel", "hr/panel/index", "C", "hr:panel:view", "LayoutOutlined", "在招岗位、今日进展与岗位列表");
         menu(202, "招聘需求", 200, 1, "hr/requisition", "hr/requisition/index", "C", "hr:requisition:list", "ProfileOutlined", "HC与面试流程");
         menu(234, "岗位看板", 200, 2, "hr/job-board", "hr/job-board/index", "C", "hr:job-board:list", "AppstoreOutlined", "按部门分组的岗位信息卡片");
         menu(235, "简历流程", 200, 3, "hr/pipeline", "hr/pipeline/index", "C", "hr:pipeline:list", "PartitionOutlined", "单岗位简历全流程跟踪");
@@ -242,12 +245,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247);
-        grant(plain, 200, 201, 209, 234, 235, 237);
-        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249);
+        grant(plain, 200, 201, 209, 234, 235, 237, 249);
+        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235, 249);
     }
 
     private int menuId(String name, String type) {
@@ -340,6 +343,63 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 """);
         addColumnIfMissing("hr_base_dict", "category",
                 "ALTER TABLE hr_base_dict ADD COLUMN category VARCHAR(64) NOT NULL DEFAULT '' COMMENT '地址类别，仅工作地址使用' AFTER code");
+    }
+
+    private void ensureRequisitionPanelColumns() {
+        addColumnIfMissing("hr_requisition", "job_priority_code",
+                "ALTER TABLE hr_requisition ADD COLUMN job_priority_code VARCHAR(32) NULL COMMENT '岗位优先级P0/P1，独立于priority紧急优先常规' AFTER priority");
+        addColumnIfMissing("hr_requisition", "work_address_id",
+                "ALTER TABLE hr_requisition ADD COLUMN work_address_id BIGINT NULL COMMENT '工作地址hr_base_dict.id' AFTER location_code");
+    }
+
+    /** 原地点 SH/XJ 对应到工作地址：优先精确名，其次名称包含上海/新疆；新疆若缺失则补一条城市级地址 */
+    private void backfillWorkAddressFromLocation() {
+        ensureCityWorkAddress("新疆");
+        ensureCityWorkAddress("上海");
+        int n = jdbc.update("""
+                UPDATE hr_requisition r
+                SET r.work_address_id = (
+                    SELECT d.id FROM hr_base_dict d
+                    WHERE d.dict_type = 'WORK_ADDRESS' AND d.is_active = 1
+                      AND (
+                        (r.location_code = 'XJ' AND (d.name = '新疆' OR d.name LIKE '%新疆%'))
+                        OR (IFNULL(r.location_code, 'SH') <> 'XJ' AND (d.name = '上海' OR d.name LIKE '%上海%'))
+                      )
+                    ORDER BY CASE
+                      WHEN r.location_code = 'XJ' AND d.name = '新疆' THEN 0
+                      WHEN IFNULL(r.location_code, 'SH') <> 'XJ' AND d.name = '上海' THEN 0
+                      ELSE 1
+                    END, d.id
+                    LIMIT 1
+                )
+                WHERE r.work_address_id IS NULL
+                """);
+        if (n > 0) {
+            log.info("已将 {} 条招聘需求地点映射到工作地址", n);
+        }
+    }
+
+    private void ensureCityWorkAddress(String name) {
+        Integer active = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_base_dict
+                WHERE dict_type = 'WORK_ADDRESS' AND is_active = 1
+                  AND (name = ? OR name LIKE ?)
+                """, Integer.class, name, "%" + name + "%");
+        if (active != null && active > 0) {
+            return;
+        }
+        int revived = jdbc.update("""
+                UPDATE hr_base_dict
+                SET is_active = 1, category = IF(category = '', '城市', category)
+                WHERE dict_type = 'WORK_ADDRESS' AND name = ?
+                """, name);
+        if (revived > 0) {
+            return;
+        }
+        jdbc.update("""
+                INSERT INTO hr_base_dict (dict_type, code, category, name, sort_no, create_by, is_active)
+                VALUES ('WORK_ADDRESS', '', '城市', ?, 0, 'hr-seed', 1)
+                """, name);
     }
 
     private void ensureFailReasonColumn() {
