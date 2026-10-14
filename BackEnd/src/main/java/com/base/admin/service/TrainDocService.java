@@ -573,6 +573,7 @@ public class TrainDocService {
             TrainAssistantAskVO.QaItem calibrated = trainQaCalibrateService.findApprovedHit(
                     question, latest.docId, latest.versionId, latest.versionLabel);
             if (calibrated != null) {
+                fillMissingImages(calibrated, question, latest);
                 TrainAssistantAskVO vo = new TrainAssistantAskVO();
                 vo.setStatus("HIT");
                 vo.setMessage("已命中人工校准答案");
@@ -668,6 +669,7 @@ public class TrainDocService {
             return List.of();
         }
         enrichImagesFromContexts(item, indexed);
+        appendImagesToAnswerHtml(item);
         item.setVersionLabel(doc.versionLabel);
         return List.of(item);
     }
@@ -901,21 +903,84 @@ public class TrainDocService {
 
     private SectionHit sectionHitFromCandidate(TitleCandidate c, IndexedDoc indexed) {
         String plain = indexed.textForAi == null ? "" : indexed.textForAi;
-        if (!StringUtils.hasText(plain) || c.from < 0 || c.to <= c.from || c.from >= plain.length()) {
+        String marked = StringUtils.hasText(indexed.markedText) ? indexed.markedText : plain;
+        int from = c.from;
+        int to = c.to;
+        int[] remapped = findSectionSpanByTitle(marked, c.title);
+        if (remapped != null) {
+            from = remapped[0];
+            to = remapped[1];
+            plain = marked;
+        }
+        if (!StringUtils.hasText(plain) || from < 0 || to <= from || from >= plain.length()) {
             return null;
         }
-        int to = Math.min(c.to, plain.length());
-        String sec = plain.substring(c.from, to).trim();
+        to = Math.min(to, plain.length());
+        String sec = plain.substring(from, to);
+        sec = includeTrailingImages(sec, plain, to);
+        sec = sec.trim();
         if (!StringUtils.hasText(sec)) {
             return null;
         }
         SectionHit hit = new SectionHit();
-        hit.from = c.from;
+        hit.from = from;
         hit.to = to;
         hit.score = c.score;
         hit.title = StringUtils.hasText(c.title) ? c.title : sectionTitle(sec);
         hit.bodyWithMarkers = trimSectionForDisplay(sec);
         return hit;
+    }
+
+    /** 切段终点若落在配图之前（纯文本索引），把紧随其后、下一问之前的 [图N] 补进来。 */
+    private static String includeTrailingImages(String sec, String plain, int to) {
+        if (!StringUtils.hasText(plain) || to >= plain.length()) {
+            return sec;
+        }
+        String rest = plain.substring(to);
+        Matcher m = Pattern.compile("\\A(?:\\s*\\[图\\d+\\]\\s*)+").matcher(rest);
+        if (m.find()) {
+            return sec + rest.substring(0, m.end());
+        }
+        return sec;
+    }
+
+    private static int[] findSectionSpanByTitle(String plain, String title) {
+        if (!StringUtils.hasText(plain) || !StringUtils.hasText(title)) {
+            return null;
+        }
+        String want = compact(cleanTopicTitle(title));
+        if (want.length() < 2) {
+            return null;
+        }
+        List<Integer> starts = listSectionStarts(plain);
+        int best = -1;
+        int bestScore = -1;
+        for (int i = 0; i < starts.size(); i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+            String got = compact(cleanTopicTitle(sectionTitle(plain.substring(from, to))));
+            if (got.length() < 2) {
+                continue;
+            }
+            int score = 0;
+            if (got.equals(want)) {
+                score = 100;
+            } else if (got.contains(want) || want.contains(got)) {
+                score = 80;
+            } else {
+                score = scoreUserAgainstTitle(want, got);
+            }
+            if (score >= MIN_SECTION_SCORE && score > bestScore) {
+                best = i;
+                bestScore = score;
+            }
+        }
+        if (best < 0) {
+            return null;
+        }
+        int from = starts.get(best);
+        int to = best + 1 < starts.size() ? starts.get(best + 1) : plain.length();
+        return new int[]{from, to};
     }
 
     /**
@@ -956,18 +1021,58 @@ public class TrainDocService {
             return;
         }
         item.setImages(toImageUrls(refs, indexed));
-        if (!StringUtils.hasText(item.getAnswerHtml()) && StringUtils.hasText(item.getAnswer())) {
-            // 无混排 HTML 时仍保留纯文本；有图则前端走 images 列表
+        appendImagesToAnswerHtml(item);
+    }
+
+    private void fillMissingImages(TrainAssistantAskVO.QaItem item, String question, DocBundle doc) {
+        if (item == null || htmlHasImg(item.getAnswerHtml())
+                || (item.getImages() != null && !item.getImages().isEmpty())) {
             return;
         }
-        if (StringUtils.hasText(item.getAnswer()) && !StringUtils.hasText(item.getAnswerHtml())) {
-            StringBuilder html = new StringBuilder();
-            html.append("<p>").append(escapeHtml(item.getAnswer()).replace("\n", "<br/>")).append("</p>");
-            for (String url : item.getImages()) {
-                html.append("<img src=\"").append(escapeHtml(url)).append("\" alt=\"配图\"/>");
-            }
-            item.setAnswerHtml(html.toString());
+        List<TrainAssistantAskVO.QaItem> hits = aiExtractQa(question, doc);
+        if (hits.isEmpty()) {
+            return;
         }
+        TrainAssistantAskVO.QaItem extracted = hits.get(0);
+        if (extracted.getImages() == null || extracted.getImages().isEmpty()) {
+            return;
+        }
+        item.setImages(extracted.getImages());
+        appendImagesToAnswerHtml(item);
+    }
+
+    private static boolean htmlHasImg(String html) {
+        return StringUtils.hasText(html) && html.toLowerCase(Locale.ROOT).contains("<img");
+    }
+
+    private static void appendImagesToAnswerHtml(TrainAssistantAskVO.QaItem item) {
+        if (item == null || item.getImages() == null || item.getImages().isEmpty() || htmlHasImg(item.getAnswerHtml())) {
+            return;
+        }
+        StringBuilder imgs = new StringBuilder();
+        for (String url : item.getImages()) {
+            if (!StringUtils.hasText(url)) {
+                continue;
+            }
+            imgs.append("<img src=\"")
+                    .append(escapeHtml(url))
+                    .append("\" alt=\"培训配图\" style=\"max-width:100%;height:auto;display:block;margin:10px 0;border-radius:6px;\" />");
+        }
+        if (imgs.isEmpty()) {
+            return;
+        }
+        String html = item.getAnswerHtml();
+        if (StringUtils.hasText(html)) {
+            int close = html.lastIndexOf("</div>");
+            item.setAnswerHtml(close >= 0 ? html.substring(0, close) + imgs + html.substring(close) : html + imgs);
+            return;
+        }
+        if (!StringUtils.hasText(item.getAnswer())) {
+            item.setAnswerHtml("<div class=\"train-qa-answer\" style=\"line-height:1.7;\">" + imgs + "</div>");
+            return;
+        }
+        item.setAnswerHtml("<div class=\"train-qa-answer\" style=\"line-height:1.7;\">"
+                + escapeHtml(item.getAnswer()).replace("\n", "<br/>") + imgs + "</div>");
     }
 
     private static final class TitleCandidate {
@@ -1061,8 +1166,64 @@ public class TrainDocService {
         if (textStarts > htmlStarts || (textHasLoginTitle && !htmlHasLoginTitle) || textStarts >= htmlStarts + 2) {
             log.info("答疑切段改用 content_text：htmlStarts={} textStarts={} htmlLoginTitle={} textLoginTitle={}",
                     htmlStarts, textStarts, htmlHasLoginTitle, textHasLoginTitle);
-            indexed.textForAi = contentText;
+            if (!StringUtils.hasText(indexed.markedText) && htmlPlain.contains("[图")) {
+                indexed.markedText = htmlPlain;
+            }
+            indexed.textForAi = mergeMarkersIntoStructured(contentText, htmlPlain);
+            fillImageContexts(indexed);
         }
+    }
+
+    /** 把带位置的 [图N] 插回结构更好的纯文本，避免切段把段末配图丢掉。 */
+    private static String mergeMarkersIntoStructured(String structured, String marked) {
+        if (!StringUtils.hasText(structured)) {
+            return marked;
+        }
+        if (!StringUtils.hasText(marked) || !marked.contains("[图") || structured.contains("[图")) {
+            return structured;
+        }
+        StringBuilder out = new StringBuilder(structured);
+        int searchFrom = 0;
+        Matcher m = Pattern.compile("\\[图(\\d+)\\]").matcher(marked);
+        int last = 0;
+        while (m.find()) {
+            String prefix = stripImageMarkers(marked.substring(last, m.start()));
+            last = m.end();
+            String needle = compact(prefix);
+            if (needle.length() > 20) {
+                needle = needle.substring(needle.length() - 20);
+            }
+            String marker = " [图" + m.group(1) + "] ";
+            int insertAt = needle.length() >= 4 ? indexAfterCompact(out, needle, searchFrom) : -1;
+            if (insertAt < 0) {
+                continue;
+            }
+            out.insert(insertAt, marker);
+            searchFrom = insertAt + marker.length();
+        }
+        return out.toString();
+    }
+
+    private static int indexAfterCompact(StringBuilder haystack, String compactNeedle, int from) {
+        if (haystack == null || from >= haystack.length() || !StringUtils.hasText(compactNeedle)) {
+            return -1;
+        }
+        String h = haystack.substring(from);
+        String hc = compact(h);
+        int at = hc.indexOf(compactNeedle);
+        if (at < 0) {
+            return -1;
+        }
+        int endCompact = at + compactNeedle.length();
+        int orig = 0;
+        int cc = 0;
+        while (orig < h.length() && cc < endCompact) {
+            if (!Character.isWhitespace(h.charAt(orig))) {
+                cc++;
+            }
+            orig++;
+        }
+        return from + orig;
     }
 
     private static boolean sectionTitlesContain(String plain, String needle) {
@@ -1119,6 +1280,7 @@ public class TrainDocService {
                     return null;
                 }
                 indexed.textForAi = text;
+                indexed.markedText = text;
                 fillImageContexts(indexed);
                 return indexed;
             }
@@ -1217,9 +1379,43 @@ public class TrainDocService {
                         indexed.images.add(url);
                         ai.append(" [图").append(indexed.images.size()).append("] ");
                     }
+                    Matcher vm = Pattern.compile("(?is)<v:imagedata[^>]+r:id=\"(rId[^\"]+)\"").matcher(paraXml);
+                    while (vm.find()) {
+                        String rId = vm.group(1);
+                        String target = relTarget.get(rId);
+                        if (!StringUtils.hasText(target) || usedTargets.contains(target)) {
+                            continue;
+                        }
+                        String entryName = target.startsWith("/") ? target.substring(1) : "word/" + target.replaceFirst("^\\.\\./", "");
+                        if (!entryName.startsWith("word/")) {
+                            entryName = "word/" + entryName;
+                        }
+                        entryName = entryName.replace("\\", "/");
+                        byte[] imgBytes = readZipEntryBytes(zip, entryName);
+                        if (imgBytes == null || imgBytes.length == 0) {
+                            String alt = "word/" + target.replaceFirst("^[/\\\\]+", "");
+                            imgBytes = readZipEntryBytes(zip, alt);
+                            entryName = alt;
+                        }
+                        if (imgBytes == null || imgBytes.length == 0) {
+                            continue;
+                        }
+                        String fileHint = entryName.contains("/")
+                                ? entryName.substring(entryName.lastIndexOf('/') + 1)
+                                : entryName;
+                        String url = fileStorage.saveTrainVersionImage(
+                                versionId, indexed.images.size() + 1, imgBytes, fileHint);
+                        if (!StringUtils.hasText(url)) {
+                            continue;
+                        }
+                        usedTargets.add(target);
+                        indexed.images.add(url);
+                        ai.append(" [图").append(indexed.images.size()).append("] ");
+                    }
                 }
                 // 未挂到段落的媒体不再追加到文末，避免「问→下一问」区间被无关图污染
                 indexed.textForAi = !ai.isEmpty() ? ai.toString().trim() : nullToEmpty(fallbackText);
+                indexed.markedText = indexed.textForAi;
                 fillImageContexts(indexed);
                 return indexed;
             }
@@ -1270,6 +1466,7 @@ public class TrainDocService {
                 }
             }
             indexed.textForAi = ai.toString().trim();
+            indexed.markedText = indexed.textForAi;
             fillImageContexts(indexed);
             return indexed;
         }
@@ -1335,8 +1532,8 @@ public class TrainDocService {
                 indexed.contexts.add("");
                 continue;
             }
-            int from = Math.max(0, pos - 160);
-            int to = Math.min(plain.length(), pos + marker.length() + 160);
+            int from = Math.max(0, pos - 400);
+            int to = Math.min(plain.length(), pos + marker.length() + 400);
             indexed.contexts.add(plain.substring(from, to));
         }
     }
@@ -1376,6 +1573,7 @@ public class TrainDocService {
                 .replaceAll("\\n{3,}", "\n\n")
                 .trim();
         indexed.textForAi = StringUtils.hasText(plain) ? plain : nullToEmpty(fallbackText);
+        indexed.markedText = indexed.textForAi;
         fillImageContexts(indexed);
         return indexed;
     }
@@ -2111,6 +2309,8 @@ public class TrainDocService {
 
     private static class IndexedDoc {
         String textForAi = "";
+        /** 带 [图N] 的原文，切段配图用；textForAi 可能被换成结构更好的纯文本。 */
+        String markedText = "";
         List<String> images = new ArrayList<>();
         List<String> contexts = new ArrayList<>();
     }

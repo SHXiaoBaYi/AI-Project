@@ -797,13 +797,13 @@ export default function CashierAssistantPage() {
                               <TrainQaRichHtml html={item.answerHtml} />
                             </div>
                           ) : (
-                            <>
-                              <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap text-neutral-700'>
-                                A. {item.answer}
-                              </div>
-                              {item.images?.length ? <TrainQaImageList urls={item.images} /> : null}
-                            </>
+                            <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap text-neutral-700'>
+                              A. {item.answer}
+                            </div>
                           )}
+                          {!/<img\b/i.test(item.answerHtml || '') && item.images?.length ? (
+                            <TrainQaImageList urls={item.images} />
+                          ) : null}
                           {item.fromCalibrate ? (
                             <div className='mt-1 text-xs text-emerald-600'>来自人工校准库</div>
                           ) : null}
