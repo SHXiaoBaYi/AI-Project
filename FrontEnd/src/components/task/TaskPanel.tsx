@@ -28,6 +28,7 @@ import {
 import { getGeoOwnerOptionsApi, getPendingGeoReviewsApi } from '@/api/geo';
 import type { GeoOwnerOption } from '@/types/geo';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
 
@@ -96,13 +97,15 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
     try {
       const rows = await getPendingGeoReviewsApi();
       const row = (rows ?? []).find((r) => r.reviewId === record.bizId);
-      if (!row) {
+      const fromContent = Number(/placementId=(\d+)/.exec(record.content || '')?.[1] || 0);
+      const placementId = row?.placementId || (fromContent > 0 ? fromContent : null);
+      if (!placementId) {
         message.warning('该审核已处理或不在待审列表，请刷新任务');
         actionRef.current?.reload();
         return;
       }
-      setReviewPlacementId(row.placementId);
-      setReviewId(row.reviewId);
+      setReviewPlacementId(placementId);
+      setReviewId(record.bizId);
       setReviewOpen(true);
     } catch (e) {
       message.error(e instanceof Error ? e.message : '加载待审失败');
@@ -1081,10 +1084,10 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
         }}
       />
 
-      <GeoContentWriteDrawer
+      <GeoContentReviewCompareDrawer
         open={reviewOpen}
         placementId={reviewPlacementId}
-        mode='review'
+        focusReviewId={reviewId}
         reviewId={reviewId}
         onClose={() => {
           setReviewOpen(false);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Checkbox, Drawer, Segmented, Spin, Tag, message } from 'antd';
+import { Button, Checkbox, Drawer, Input, Segmented, Space, Spin, Tag, message } from 'antd';
 import { LakexEditorHost } from '@/components/lakex/LakexEditorHost';
-import { getGeoContentReviewCompareApi } from '@/api/geo';
+import { decideGeoContentReviewApi, getGeoContentReviewCompareApi } from '@/api/geo';
 import type { GeoContentReviewCompare, GeoContentReviewRound } from '@/types/geo';
 import { diffBlocks, lakeToBlocks, titleDiff, type DiffBlock } from '@/utils/articleDiff';
 
@@ -19,10 +19,14 @@ const RESULT_META: Record<string, { text: string; color: string }> = {
 
 type VersionKey = `review:${number}`;
 
+type ViewMode = 'diff' | 'side';
+
 type Props = {
   open: boolean;
   placementId: number | null;
   focusReviewId?: number | null;
+  /** 传入则进入审核：可对照历史快照并在本轮通过/退回 */
+  reviewId?: number | null;
   onClose: () => void;
 };
 
@@ -110,13 +114,94 @@ function DiffBlockCard({ block }: { block: DiffBlock }) {
   );
 }
 
+function ReviewHistoryList({
+  versions,
+  latestRoundNo,
+  focusReviewId,
+}: {
+  versions: GeoContentReviewRound[];
+  latestRoundNo?: number | null;
+  focusReviewId?: number | null;
+}) {
+  if (versions.length === 0) {
+    return <div className='flex flex-1 items-center justify-center text-sm text-neutral-400'>暂无审核记录</div>;
+  }
+  return (
+    <div className='min-h-0 flex-1 overflow-auto px-4 py-3'>
+      <ul className='m-0 list-none space-y-3 p-0'>
+        {versions.map((round) => {
+          const meta = round.status ? STATUS_META[round.status] || { text: round.status, color: 'default' } : null;
+          const focused = focusReviewId != null && round.reviewId === focusReviewId;
+          return (
+            <li
+              key={versionKeyOf(round)}
+              className={`rounded border px-3 py-3 ${focused ? 'border-blue-300 bg-blue-50/60' : 'border-neutral-100 bg-white'}`}
+            >
+              <div className='mb-2 flex flex-wrap items-center gap-2'>
+                <span className='font-medium'>{labelOf(round, latestRoundNo)}</span>
+                {focused ? (
+                  <Tag
+                    color='blue'
+                    className='mr-0'
+                  >
+                    本轮待审
+                  </Tag>
+                ) : null}
+                {meta ? (
+                  <Tag
+                    color={meta.color}
+                    className='mr-0'
+                  >
+                    {meta.text}
+                  </Tag>
+                ) : null}
+                <span className='text-xs text-neutral-400'>{round.createTime || ''}</span>
+              </div>
+              {round.submitRemark ? (
+                <p className='mb-2 text-xs text-neutral-500'>提审说明：{round.submitRemark}</p>
+              ) : null}
+              {(round.reviewers ?? []).length === 0 ? (
+                <p className='mb-0 text-sm text-neutral-400'>暂无审核意见</p>
+              ) : (
+                <ul className='m-0 list-none space-y-2 p-0'>
+                  {(round.reviewers ?? []).map((item) => {
+                    const rm = RESULT_META[item.result || 'pending'] || RESULT_META.pending;
+                    return (
+                      <li
+                        key={`${round.reviewId}-${item.userId}-${item.actedAt || item.result}`}
+                        className='rounded border border-neutral-100 bg-white px-3 py-2 text-sm'
+                      >
+                        <div className='mb-1 flex flex-wrap items-center gap-1'>
+                          <span className='font-medium'>{item.userName || item.userId}</span>
+                          <Tag
+                            color={rm.color}
+                            className='mr-0'
+                          >
+                            {rm.text}
+                          </Tag>
+                          {item.actedAt ? <span className='text-xs text-neutral-400'>{item.actedAt}</span> : null}
+                        </div>
+                        <div className='text-neutral-700'>{item.comment?.trim() || '（无文字意见）'}</div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function SidePreview({
   round,
   side,
   latestRoundNo,
 }: {
   round: GeoContentReviewRound;
-  side: '左' | '右';
+  side?: string;
   latestRoundNo?: number | null;
 }) {
   const meta = round.status ? STATUS_META[round.status] || { text: round.status, color: 'default' } : null;
@@ -124,7 +209,7 @@ function SidePreview({
     <div className='flex h-full min-h-0 flex-col'>
       <div className='shrink-0 border-b border-neutral-100 px-3 py-2'>
         <div className='mb-1 flex flex-wrap items-center gap-2'>
-          <span className='text-xs text-neutral-400'>{side}</span>
+          {side ? <span className='text-xs text-neutral-400'>{side}</span> : null}
           <span className='font-medium'>{labelOf(round, latestRoundNo)}</span>
           {meta ? (
             <Tag
@@ -153,11 +238,21 @@ function SidePreview({
   );
 }
 
-export function GeoContentReviewCompareDrawer({ open, placementId, focusReviewId = null, onClose }: Props) {
+export function GeoContentReviewCompareDrawer({
+  open,
+  placementId,
+  focusReviewId = null,
+  reviewId = null,
+  onClose,
+}: Props) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<GeoContentReviewCompare | null>(null);
   const [checked, setChecked] = useState<VersionKey[]>([]);
-  const [view, setView] = useState<'diff' | 'side' | 'opinions'>('diff');
+  const [view, setView] = useState<ViewMode>('diff');
+  const [opinion, setOpinion] = useState('');
+  const [acting, setActing] = useState(false);
+  const reviewing = reviewId != null;
+  const highlightReviewId = focusReviewId ?? reviewId;
 
   const versions = useMemo(() => {
     if (!data) return [] as GeoContentReviewRound[];
@@ -180,15 +275,18 @@ export function GeoContentReviewCompareDrawer({ open, placementId, focusReviewId
       setData(null);
       setChecked([]);
       setView('diff');
+      setOpinion('');
+      setActing(false);
       return;
     }
     setLoading(true);
+    setOpinion('');
     void getGeoContentReviewCompareApi(placementId)
       .then((res) => {
         setData(res);
         const rounds = res.rounds ?? [];
         const focus =
-          (focusReviewId != null && rounds.find((r) => r.reviewId === focusReviewId)) ||
+          (highlightReviewId != null && rounds.find((r) => r.reviewId === highlightReviewId)) ||
           (res.currentReviewId != null && rounds.find((r) => r.reviewId === res.currentReviewId)) ||
           rounds[rounds.length - 1] ||
           null;
@@ -220,7 +318,7 @@ export function GeoContentReviewCompareDrawer({ open, placementId, focusReviewId
         setData(null);
       })
       .finally(() => setLoading(false));
-  }, [open, placementId, focusReviewId]);
+  }, [open, placementId, highlightReviewId]);
 
   const pair = useMemo(() => {
     if (checked.length !== 2) return null;
@@ -239,6 +337,13 @@ export function GeoContentReviewCompareDrawer({ open, placementId, focusReviewId
     return { title, blocks, changedCount: changed.length };
   }, [pair]);
 
+  const singleRound = useMemo(() => {
+    if (pair) return null;
+    if (checked.length === 1) return byKey.get(checked[0]) ?? null;
+    if (versions.length === 1) return versions[0];
+    return null;
+  }, [pair, checked, byKey, versions]);
+
   const onCheck = (key: VersionKey, next: boolean) => {
     setChecked((prev) => {
       if (next) {
@@ -253,224 +358,271 @@ export function GeoContentReviewCompareDrawer({ open, placementId, focusReviewId
     });
   };
 
+  const decide = async (action: 'approve' | 'reject') => {
+    if (reviewId == null) return;
+    if (action === 'reject' && !opinion.trim()) {
+      message.warning('退回修改时请填写意见');
+      return;
+    }
+    setActing(true);
+    try {
+      await decideGeoContentReviewApi({
+        reviewId,
+        action,
+        comment: opinion.trim() || undefined,
+      });
+      message.success(action === 'approve' ? '已通过' : '已退回');
+      onClose();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '审核失败');
+    } finally {
+      setActing(false);
+    }
+  };
+
   return (
     <Drawer
       open={open}
       width='96vw'
       placement='right'
       destroyOnHidden
+      maskClosable={!reviewing}
       onClose={onClose}
       styles={{
         body: { padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
         header: { paddingBlock: 12 },
       }}
+      extra={
+        reviewing ? (
+          <Space>
+            <Button
+              type='primary'
+              loading={acting}
+              onClick={() => void decide('approve')}
+            >
+              通过
+            </Button>
+            <Button
+              loading={acting}
+              onClick={() => void decide('reject')}
+            >
+              退回修改
+            </Button>
+          </Space>
+        ) : null
+      }
       title={
         <div className='flex min-w-0 flex-wrap items-center gap-3'>
           <div className='flex min-w-0 flex-col'>
-            <span className='font-medium'>文章对照</span>
+            <span className='font-medium'>{reviewing ? '审核文章' : '文章对照'}</span>
             <span className='truncate text-xs font-normal text-neutral-500'>
-              {data?.topicName || '话题'} · {data?.targetQuestion || '目标问题'} · 最新一轮提审稿即当前稿
+              {data?.topicName || '话题'} · {data?.targetQuestion || '目标问题'} ·
+              左侧勾选两轮看差异，右侧为全部审核记录
             </span>
           </div>
           <Segmented
             size='small'
             value={view}
-            onChange={(v) => setView(v as 'diff' | 'side' | 'opinions')}
+            onChange={(v) => setView(v as ViewMode)}
             options={[
               { label: '差异块', value: 'diff' },
               { label: '左右原文', value: 'side' },
-              { label: '审核意见', value: 'opinions' },
             ]}
           />
         </div>
       }
     >
-      {loading || !data ? (
+      {loading ? (
         <div className='flex flex-1 items-center justify-center py-24'>
           <Spin tip='加载文章历史…' />
         </div>
+      ) : !data ? (
+        <div className='flex flex-1 items-center justify-center text-sm text-neutral-400'>对照数据加载失败</div>
       ) : versions.length === 0 ? (
         <div className='flex flex-1 items-center justify-center text-neutral-400'>暂无可对照的提审稿</div>
       ) : (
-        <div className='flex min-h-0 flex-1'>
-          <aside className='flex w-64 shrink-0 flex-col border-r border-neutral-100'>
-            <div className='border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500'>
-              勾选 <b>两轮提审稿</b>。默认：当前轮 vs 上一轮。旧在左、新在右。
-            </div>
-            <div className='min-h-0 flex-1 overflow-auto p-2'>
-              {versions.map((round) => {
-                const key = versionKeyOf(round);
-                const checkedNow = checked.includes(key);
-                const meta = round.status ? STATUS_META[round.status] || { text: '-', color: 'default' } : null;
-                const order = checked.indexOf(key);
-                const isLatest = latestRoundNo != null && round.roundNo === latestRoundNo;
-                return (
-                  <label
-                    key={key}
-                    className={`mb-1 flex cursor-pointer gap-2 rounded border px-2 py-2 ${
-                      checkedNow ? 'border-blue-300 bg-blue-50' : 'border-transparent hover:bg-neutral-50'
-                    }`}
-                  >
-                    <Checkbox
-                      checked={checkedNow}
-                      onChange={(e) => onCheck(key, e.target.checked)}
-                      className='mt-0.5'
-                    />
-                    <div className='min-w-0 flex-1'>
-                      <div className='mb-0.5 flex flex-wrap items-center gap-1'>
-                        <span className='text-sm font-medium'>{labelOf(round, latestRoundNo)}</span>
-                        {order >= 0 ? (
-                          <Tag
-                            color='blue'
-                            className='mr-0'
-                          >
-                            {order === 0 ? '已选1' : '已选2'}
-                          </Tag>
-                        ) : null}
-                        {isLatest ? (
-                          <Tag
-                            color='cyan'
-                            className='mr-0'
-                          >
-                            当前
-                          </Tag>
-                        ) : null}
-                        {meta ? (
-                          <Tag
-                            color={meta.color}
-                            className='mr-0'
-                          >
-                            {meta.text}
-                          </Tag>
-                        ) : null}
-                      </div>
-                      <div className='truncate text-xs text-neutral-500'>
-                        {round.contentTitle || '（无标题）'} · v{round.contentVersion ?? 0}
-                      </div>
-                      {!round.hasSnapshot ? (
-                        <div className='text-xs text-amber-600'>无文章快照（需重新提审后才会保存）</div>
-                      ) : null}
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-          </aside>
-
-          <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
-            {checked.length < 2 ? (
-              <div className='flex flex-1 items-center justify-center text-sm text-neutral-400'>
-                请再勾选 {2 - checked.length} 轮，才能对照文章
+        <>
+          <div className='flex min-h-0 flex-1'>
+            <aside className='flex w-64 shrink-0 flex-col border-r border-neutral-100'>
+              <div className='border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500'>
+                勾选 <b>两轮提审稿</b>看快照差异。默认：当前轮 vs 上一轮。
               </div>
-            ) : !pair ? (
-              <div className='flex flex-1 items-center justify-center text-sm text-neutral-400'>选中的版本无效</div>
-            ) : view === 'diff' ? (
-              <div className='min-h-0 flex-1 overflow-auto px-4 py-3'>
-                <div className='mb-3 flex flex-wrap items-center gap-2 text-sm'>
-                  <Tag color='default'>{labelOf(pair.left, latestRoundNo)}</Tag>
-                  <span className='text-neutral-400'>→</span>
-                  <Tag color='processing'>{labelOf(pair.right, latestRoundNo)}</Tag>
-                  <span className='text-neutral-500'>
-                    {diffResult?.changedCount === 0 ? '正文段落无差异' : `差异块 ${diffResult?.changedCount ?? 0} 处`}
-                  </span>
-                  <span className='text-xs text-neutral-400'>红=删除 / 绿=新增 / 黄=改动</span>
-                </div>
-
-                {diffResult?.title && diffResult.title.type !== 'equal' ? (
-                  <div className='mb-4'>
-                    <div className='mb-1 text-xs font-medium text-neutral-500'>标题</div>
-                    <DiffBlockCard block={diffResult.title} />
-                  </div>
-                ) : (
-                  <div className='mb-4 rounded border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm'>
-                    <span className='text-xs text-neutral-400'>标题相同 · </span>
-                    {pair.right.contentTitle || '（无标题）'}
-                  </div>
-                )}
-
-                <div className='mb-1 text-xs font-medium text-neutral-500'>正文差异块</div>
-                {(diffResult?.blocks ?? []).length === 0 ? (
-                  <div className='text-sm text-neutral-400'>两边都没有可解析正文</div>
-                ) : (
-                  <div className='space-y-2'>
-                    {(diffResult?.blocks ?? []).map((block, idx) =>
-                      block.type === 'equal' ? (
-                        <div
-                          key={idx}
-                          className='rounded border border-dashed border-neutral-100 px-3 py-1.5 text-xs text-neutral-400'
-                        >
-                          相同段落：{block.text.length > 80 ? `${block.text.slice(0, 80)}…` : block.text}
-                        </div>
-                      ) : (
-                        <DiffBlockCard
-                          key={idx}
-                          block={block}
-                        />
-                      ),
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : view === 'side' ? (
-              <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2'>
-                <section className='min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
-                  <SidePreview
-                    round={pair.left}
-                    side='左'
-                    latestRoundNo={latestRoundNo}
-                  />
-                </section>
-                <section className='min-h-0'>
-                  <SidePreview
-                    round={pair.right}
-                    side='右'
-                    latestRoundNo={latestRoundNo}
-                  />
-                </section>
-              </div>
-            ) : (
-              <div className='grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-auto lg:grid-cols-2'>
-                {[pair.left, pair.right].map((round, idx) => (
-                  <div
-                    key={versionKeyOf(round)}
-                    className={`border-b border-neutral-100 p-4 lg:border-b-0 ${idx === 0 ? 'lg:border-r' : ''}`}
-                  >
-                    <div className='mb-2 font-medium'>
-                      {idx === 0 ? '左 · ' : '右 · '}
-                      {labelOf(round, latestRoundNo)}
-                    </div>
-                    {(round.reviewers ?? []).length === 0 ? (
-                      <p className='text-sm text-neutral-400'>暂无意见</p>
-                    ) : (
-                      <ul className='m-0 list-none space-y-2 p-0'>
-                        {(round.reviewers ?? []).map((item) => {
-                          const rm = RESULT_META[item.result || 'pending'] || RESULT_META.pending;
-                          return (
-                            <li
-                              key={`${item.userId}-${item.actedAt || item.result}`}
-                              className='rounded border border-neutral-100 px-3 py-2 text-sm'
+              <div className='min-h-0 flex-1 overflow-auto p-2'>
+                {versions.map((round) => {
+                  const key = versionKeyOf(round);
+                  const checkedNow = checked.includes(key);
+                  const meta = round.status ? STATUS_META[round.status] || { text: '-', color: 'default' } : null;
+                  const order = checked.indexOf(key);
+                  const isLatest = latestRoundNo != null && round.roundNo === latestRoundNo;
+                  const focused = highlightReviewId != null && round.reviewId === highlightReviewId;
+                  return (
+                    <label
+                      key={key}
+                      className={`mb-1 flex cursor-pointer gap-2 rounded border px-2 py-2 ${
+                        checkedNow ? 'border-blue-300 bg-blue-50' : 'border-transparent hover:bg-neutral-50'
+                      }`}
+                    >
+                      <Checkbox
+                        checked={checkedNow}
+                        onChange={(e) => onCheck(key, e.target.checked)}
+                        className='mt-0.5'
+                      />
+                      <div className='min-w-0 flex-1'>
+                        <div className='mb-0.5 flex flex-wrap items-center gap-1'>
+                          <span className='text-sm font-medium'>{labelOf(round, latestRoundNo)}</span>
+                          {order >= 0 ? (
+                            <Tag
+                              color='blue'
+                              className='mr-0'
                             >
-                              <div className='mb-1 flex flex-wrap items-center gap-1'>
-                                <span className='font-medium'>{item.userName || item.userId}</span>
-                                <Tag
-                                  color={rm.color}
-                                  className='mr-0'
-                                >
-                                  {rm.text}
-                                </Tag>
-                              </div>
-                              <div>{item.comment?.trim() || '（无文字意见）'}</div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                ))}
+                              {order === 0 ? '已选1' : '已选2'}
+                            </Tag>
+                          ) : null}
+                          {focused ? (
+                            <Tag
+                              color='blue'
+                              className='mr-0'
+                            >
+                              本轮
+                            </Tag>
+                          ) : null}
+                          {isLatest ? (
+                            <Tag
+                              color='cyan'
+                              className='mr-0'
+                            >
+                              当前
+                            </Tag>
+                          ) : null}
+                          {meta ? (
+                            <Tag
+                              color={meta.color}
+                              className='mr-0'
+                            >
+                              {meta.text}
+                            </Tag>
+                          ) : null}
+                        </div>
+                        <div className='truncate text-xs text-neutral-500'>
+                          {round.contentTitle || '（无标题）'} · v{round.contentVersion ?? 0}
+                        </div>
+                        {!round.hasSnapshot ? (
+                          <div className='text-xs text-amber-600'>无文章快照（需重新提审后才会保存）</div>
+                        ) : null}
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
-            )}
+            </aside>
+
+            <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
+              {pair && view === 'diff' ? (
+                <div className='min-h-0 flex-1 overflow-auto px-4 py-3'>
+                  <div className='mb-3 flex flex-wrap items-center gap-2 text-sm'>
+                    <Tag color='default'>{labelOf(pair.left, latestRoundNo)}</Tag>
+                    <span className='text-neutral-400'>→</span>
+                    <Tag color='processing'>{labelOf(pair.right, latestRoundNo)}</Tag>
+                    <span className='text-neutral-500'>
+                      {diffResult?.changedCount === 0 ? '正文段落无差异' : `差异块 ${diffResult?.changedCount ?? 0} 处`}
+                    </span>
+                    <span className='text-xs text-neutral-400'>红=删除 / 绿=新增 / 黄=改动</span>
+                  </div>
+
+                  {diffResult?.title && diffResult.title.type !== 'equal' ? (
+                    <div className='mb-4'>
+                      <div className='mb-1 text-xs font-medium text-neutral-500'>标题</div>
+                      <DiffBlockCard block={diffResult.title} />
+                    </div>
+                  ) : (
+                    <div className='mb-4 rounded border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm'>
+                      <span className='text-xs text-neutral-400'>标题相同 · </span>
+                      {pair.right.contentTitle || '（无标题）'}
+                    </div>
+                  )}
+
+                  <div className='mb-1 text-xs font-medium text-neutral-500'>正文差异块</div>
+                  {(diffResult?.blocks ?? []).length === 0 ? (
+                    <div className='text-sm text-neutral-400'>两边都没有可解析正文</div>
+                  ) : (
+                    <div className='space-y-2'>
+                      {(diffResult?.blocks ?? []).map((block, idx) =>
+                        block.type === 'equal' ? (
+                          <div
+                            key={idx}
+                            className='rounded border border-dashed border-neutral-100 px-3 py-1.5 text-xs text-neutral-400'
+                          >
+                            相同段落：{block.text.length > 80 ? `${block.text.slice(0, 80)}…` : block.text}
+                          </div>
+                        ) : (
+                          <DiffBlockCard
+                            key={idx}
+                            block={block}
+                          />
+                        ),
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : pair && view === 'side' ? (
+                <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2'>
+                  <section className='min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
+                    <SidePreview
+                      round={pair.left}
+                      side='左'
+                      latestRoundNo={latestRoundNo}
+                    />
+                  </section>
+                  <section className='min-h-0'>
+                    <SidePreview
+                      round={pair.right}
+                      side='右'
+                      latestRoundNo={latestRoundNo}
+                    />
+                  </section>
+                </div>
+              ) : singleRound ? (
+                <div className='flex min-h-0 flex-1 flex-col'>
+                  <div className='shrink-0 border-b border-neutral-100 px-4 py-2 text-xs text-neutral-500'>
+                    {versions.length < 2
+                      ? '首次提审，暂无上一轮稿可对照，以下为本轮正文'
+                      : '请再勾选一轮提审稿，即可对照快照差异'}
+                  </div>
+                  <div className='min-h-0 flex-1'>
+                    <SidePreview
+                      round={singleRound}
+                      latestRoundNo={latestRoundNo}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className='flex flex-1 items-center justify-center text-sm text-neutral-400'>
+                  请勾选两轮提审稿对照文章
+                </div>
+              )}
+            </div>
+
+            <aside className='flex w-80 shrink-0 flex-col border-l border-neutral-100'>
+              <div className='border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500'>历史审核记录</div>
+              <ReviewHistoryList
+                versions={versions}
+                latestRoundNo={latestRoundNo}
+                focusReviewId={highlightReviewId}
+              />
+            </aside>
           </div>
-        </div>
+          {reviewing ? (
+            <div className='shrink-0 border-t border-neutral-100 bg-white px-4 py-3'>
+              <div className='mb-1 text-xs text-neutral-500'>本轮审核意见{opinion.trim() ? '' : '（退回时必填）'}</div>
+              <Input.TextArea
+                value={opinion}
+                onChange={(e) => setOpinion(e.target.value)}
+                placeholder='填写审核意见，退回修改时必填'
+                autoSize={{ minRows: 2, maxRows: 4 }}
+              />
+            </div>
+          ) : null}
+        </>
       )}
     </Drawer>
   );
