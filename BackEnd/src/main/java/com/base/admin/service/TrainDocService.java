@@ -935,7 +935,11 @@ public class TrainDocService {
             return null;
         }
         int to = nextQaAfter(source, from);
-        String sec = source.substring(from, to).trim();
+        String sec = source.substring(from, Math.min(to, source.length()));
+        if (to < source.length()) {
+            sec = sec + stealHeadingImages(source.substring(to));
+        }
+        sec = sec.trim();
         if (!StringUtils.hasText(sec)) {
             return null;
         }
@@ -1011,6 +1015,32 @@ public class TrainDocService {
         }
         int line = source.lastIndexOf('\n', at);
         return line < 0 ? at : line + 1;
+    }
+
+    /**
+     * 下一问题干上常锚着上一问最后一张图。把「下一问题干行 → 答：之前」的 [图N] 收回本问。
+     */
+    private static String stealHeadingImages(String nextSection) {
+        if (!StringUtils.hasText(nextSection)) {
+            return "";
+        }
+        String s = nextSection.stripLeading();
+        Matcher qa = QA_LINE.matcher(s);
+        if (!qa.lookingAt()) {
+            return "";
+        }
+        int nl = indexOfNewline(s);
+        if (nl < 0 || nl + 1 >= s.length()) {
+            return "";
+        }
+        s = s.substring(nl + 1);
+        int ans = indexOfAnswerMark(s);
+        String head = ans >= 0 ? s.substring(0, ans) : s;
+        Matcher m = Pattern.compile("\\A(?:\\s*\\[图\\d+]\\s*)+").matcher(head);
+        if (!m.find()) {
+            return "";
+        }
+        return m.group();
     }
 
     private static int nextQaAfter(String source, int from) {
