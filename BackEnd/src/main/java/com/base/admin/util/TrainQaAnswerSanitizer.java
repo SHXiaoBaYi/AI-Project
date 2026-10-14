@@ -5,96 +5,72 @@ import org.springframework.util.StringUtils;
 import java.util.regex.Pattern;
 
 /**
- * 收银答疑答案卫士：拦截程序代码 / 整页 HTML / JSON 载荷，避免下发给前台收银员。
+ * 仅拦截「几乎没有中文的程序源码」。培训文档里的操作说明、带图 HTML、Word 残留标签一律放行。
  */
 public final class TrainQaAnswerSanitizer {
-
-    private static final Pattern HTML_DOCUMENT = Pattern.compile(
-            "(?i)<!DOCTYPE\\s+html\\b|<html\\b|</html>|<head\\b|<body\\b|<script\\b|<style\\b");
-
-    private static final Pattern MARKDOWN_FENCE = Pattern.compile("```[a-zA-Z0-9_+-]*");
 
     private static final Pattern JSON_PAYLOAD = Pattern.compile(
             "(?s)^\\s*\\{\\s*\"(?:answer|question|index|code|items)\"\\s*:");
 
-    private static final Pattern[] CODE_SIGNATURES = {
+    /** 强特征：正常收银手册几乎不会同时出现这些。 */
+    private static final Pattern[] SOURCE_SIGNATURES = {
             Pattern.compile("(?i)\\bpackage\\s+[\\w.]+\\s*;"),
             Pattern.compile("(?i)\\bimport\\s+(static\\s+)?[\\w.*]+\\s*;"),
             Pattern.compile("(?i)\\bpublic\\s+(class|interface|enum|record)\\b"),
-            Pattern.compile("(?i)\\b(public|private|protected)\\s+(static\\s+)?(final\\s+)?(void|int|String|boolean|long)\\b"),
-            Pattern.compile("(?i)\\bfunction\\s+\\w+\\s*\\("),
-            Pattern.compile("(?i)\\b(export\\s+default|module\\.exports)\\b"),
-            Pattern.compile("(?i)\\b(const|let|var)\\s+\\w+\\s*=\\s*(function|async|\\(|\\[|\\{)"),
-            Pattern.compile("(?i)\\bdef\\s+\\w+\\s*\\("),
-            Pattern.compile("(?i)#include\\s*[<\"]"),
-            Pattern.compile("(?i)<\\?php\\b"),
+            Pattern.compile("(?i)\\bpublic\\s+static\\s+void\\s+main\\s*\\("),
             Pattern.compile("(?i)\\bSystem\\.out\\.print"),
             Pattern.compile("(?i)\\bconsole\\.(log|error|warn)\\s*\\("),
-            Pattern.compile("(?i)\\bdocument\\.(getElementById|querySelector)"),
-            Pattern.compile("(?i)@(Override|RestController|SpringBootApplication|RequestMapping|Data|Slf4j)\\b"),
-            Pattern.compile("(?i)\\bclass\\s+\\w+\\s*\\{"),
-            Pattern.compile("(?i)=>\\s*\\{"),
-            Pattern.compile("(?i)\\bSELECT\\s+[\\w*,.\\s]+\\s+FROM\\s+\\w+"),
-            Pattern.compile("(?i)\\b(?:fn|pub)\\s+(?:fn\\s+)?\\w+\\s*\\("),
+            Pattern.compile("(?i)<\\?php\\b"),
+            Pattern.compile("(?i)#include\\s*[<\"]"),
+            Pattern.compile("(?i)@(Override|RestController|SpringBootApplication|RequestMapping)\\b"),
+            Pattern.compile("(?i)\\b(export\\s+default|module\\.exports)\\b"),
+            Pattern.compile("```(?:java|javascript|typescript|python|go|sql|json|html|css)\\b"),
     };
 
     private TrainQaAnswerSanitizer() {
     }
 
     public static boolean looksLikeSourceCode(String answer, String answerHtml) {
-        if (looksLike(answer)) {
-            return true;
-        }
-        if (!StringUtils.hasText(answerHtml)) {
+        String text = plainText(answer, answerHtml);
+        if (text.length() < 24) {
             return false;
         }
-        String html = answerHtml.trim();
-        boolean ourWrapper = html.contains("train-qa-answer");
-        if (!ourWrapper && HTML_DOCUMENT.matcher(html).find()) {
-            return true;
-        }
-        return looksLike(stripTags(html));
-    }
-
-    private static boolean looksLike(String raw) {
-        if (!StringUtils.hasText(raw)) {
+        int han = countHan(text);
+        // 主体是中文操作说明：即使夹了少量英文/符号也放行
+        if (han >= 15) {
             return false;
         }
-        String text = raw.trim();
-        if (text.length() < 12) {
-            return false;
-        }
-        if (MARKDOWN_FENCE.matcher(text).find() || JSON_PAYLOAD.matcher(text).find()) {
+        if (JSON_PAYLOAD.matcher(text).find() && han < 8) {
             return true;
         }
-        if (HTML_DOCUMENT.matcher(text).find()) {
-            return true;
-        }
-        for (Pattern p : CODE_SIGNATURES) {
+        int hits = 0;
+        for (Pattern p : SOURCE_SIGNATURES) {
             if (p.matcher(text).find()) {
-                return true;
+                hits++;
             }
         }
-        return highSymbolDensity(text);
+        return hits >= 1;
     }
 
-    /** 大段花括号/分号且几乎没有中文：视为源码，而不是收银操作说明。 */
-    private static boolean highSymbolDensity(String text) {
-        if (text.length() < 80) {
-            return false;
+    private static String plainText(String answer, String answerHtml) {
+        StringBuilder sb = new StringBuilder();
+        if (StringUtils.hasText(answer)) {
+            sb.append(stripTags(answer)).append('\n');
         }
-        int symbols = 0;
-        int han = 0;
+        if (StringUtils.hasText(answerHtml)) {
+            sb.append(stripTags(answerHtml));
+        }
+        return sb.toString().replaceAll("\\s+", " ").trim();
+    }
+
+    private static int countHan(String text) {
+        int n = 0;
         for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '{' || c == '}' || c == ';' || c == '(' || c == ')' || c == '[' || c == ']') {
-                symbols++;
-            }
-            if (Character.UnicodeScript.of(c) == Character.UnicodeScript.HAN) {
-                han++;
+            if (Character.UnicodeScript.of(text.charAt(i)) == Character.UnicodeScript.HAN) {
+                n++;
             }
         }
-        return symbols >= 12 && han * 8 < text.length();
+        return n;
     }
 
     private static String stripTags(String html) {
@@ -104,8 +80,6 @@ public final class TrainQaAnswerSanitizer {
                 .replace("&nbsp;", " ")
                 .replace("&lt;", "<")
                 .replace("&gt;", ">")
-                .replace("&amp;", "&")
-                .replaceAll("\\s+", " ")
-                .trim();
+                .replace("&amp;", "&");
     }
 }

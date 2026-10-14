@@ -28,6 +28,7 @@ public class TrainSchemaMigrator implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         ensureTables();
         seedMenus();
+        restoreFalseCodeQuarantine();
         quarantineCodeAnswers();
         log.info("收银培训表结构与菜单已同步");
     }
@@ -113,6 +114,39 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         Long hrAdmin = roleId("hr_admin");
         if (hrAdmin != null) {
             grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308);
+        }
+    }
+
+    /** 上一版卫士过严，把手册正文误标为代码：中文操作说明恢复为「准」。 */
+    private void restoreFalseCodeQuarantine() {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT id, LEFT(IFNULL(answer_text, ''), 8000) answer_text,
+                       LEFT(IFNULL(answer_html, ''), 8000) answer_html, remark
+                FROM train_qa_calibrate
+                WHERE is_active = 1 AND status = 'REJECTED'
+                  AND IFNULL(remark, '') LIKE '%系统拦截：答案疑似程序代码%'
+                """);
+        int n = 0;
+        for (Map<String, Object> row : rows) {
+            String text = row.get("answer_text") == null ? "" : String.valueOf(row.get("answer_text"));
+            String html = row.get("answer_html") == null ? "" : String.valueOf(row.get("answer_html"));
+            if (TrainQaAnswerSanitizer.looksLikeSourceCode(text, html)) {
+                continue;
+            }
+            Number id = (Number) row.get("id");
+            if (id == null) {
+                continue;
+            }
+            jdbc.update("""
+                    UPDATE train_qa_calibrate
+                    SET status = 'APPROVED',
+                        remark = REPLACE(IFNULL(remark, ''), '系统拦截：答案疑似程序代码，已禁止下发前台', '已恢复：手册正文误判已纠正')
+                    WHERE id = ? AND is_active = 1 AND status = 'REJECTED'
+                    """, id.longValue());
+            n++;
+        }
+        if (n > 0) {
+            log.info("已恢复误判为代码的答疑校准记录 count={}", n);
         }
     }
 

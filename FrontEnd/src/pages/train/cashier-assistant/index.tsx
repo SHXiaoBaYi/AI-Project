@@ -48,27 +48,23 @@ function extractImgAlt(tag: string) {
   return m?.[1] ?? '配图';
 }
 
-const CODE_HINT =
-  /\b(package\s+[\w.]+;|import\s+[\w.*]+;|public\s+(class|interface|enum)|function\s+\w+\s*\(|console\.(log|error)\s*\(|System\.out\.print|<\?php|<script\b|<!DOCTYPE\s+html|<html\b|export\s+default|```[a-zA-Z])/i;
+const SOURCE_HINT =
+  /\b(package\s+[\w.]+;|import\s+[\w.*]+;|public\s+(class|interface|enum)|public\s+static\s+void\s+main\s*\(|System\.out\.print|console\.(log|error)\s*\(|<\?php|#include\s*[<"]|export\s+default|module\.exports)/i;
 
-function looksLikeSourceCode(answer?: string, answerHtml?: string) {
-  const raw = `${answer || ''}\n${answerHtml || ''}`.trim();
-  if (raw.length < 12) return false;
-  if (CODE_HINT.test(raw)) return true;
-  const symbols = (raw.match(/[{};()[\]]/g) || []).length;
-  const han = (raw.match(/[\u4e00-\u9fff]/g) || []).length;
-  return raw.length >= 80 && symbols >= 12 && han * 8 < raw.length;
+function looksLikeSourceCode(answer?: string) {
+  const text = (answer || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (text.length < 24) return false;
+  const han = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  if (han >= 15) return false;
+  return SOURCE_HINT.test(text);
 }
 
 function safeQaItems(items?: TrainQaItem[]) {
-  return (items || []).filter((it) => !looksLikeSourceCode(it.answer, it.answerHtml));
+  return (items || []).filter((it) => !looksLikeSourceCode(it.answer));
 }
 
 /** 图文 HTML：配图可点击预览、放大缩小；纯文本段落仍按 HTML 渲染 */
 function TrainQaRichHtml({ html }: { html: string }) {
-  if (looksLikeSourceCode('', html)) {
-    return <div className='text-neutral-500'>答案不可展示</div>;
-  }
   const parts = html.split(/(<img\b[^>]*>)/gi);
   const hasImg = parts.some((p) => /^<img\b/i.test(p));
   if (!hasImg) {
