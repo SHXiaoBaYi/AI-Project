@@ -7,6 +7,7 @@ import com.base.admin.domain.dto.HrDepartmentDTO;
 import com.base.admin.domain.dto.HrApplicationDTO;
 import com.base.admin.domain.dto.HrDingTalkBindDTO;
 import com.base.admin.domain.dto.HrJobCardQueryDTO;
+import com.base.admin.domain.dto.HrJobCandidateQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.common.Constants;
 import com.base.admin.domain.dto.HrBaseDictDTO;
@@ -16,6 +17,7 @@ import com.base.admin.domain.dto.HrSchoolQueryDTO;
 import com.base.admin.domain.vo.HrBaseDictVO;
 import com.base.admin.domain.vo.HrDingTalkIdentityVO;
 import com.base.admin.domain.vo.HrJobCardVO;
+import com.base.admin.domain.vo.HrJobCandidateVO;
 import com.base.admin.domain.vo.HrSchoolVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.security.LoginUser;
@@ -29,7 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Date;
+import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -138,29 +143,80 @@ public class HrMasterService {
     }
 
     /**
-     * 岗位信息卡片：按部门分组。
+     * 岗位看板第一屏：筛选 + 分页卡片。
      * 卡片状态：OPEN 且无候选人→待招；OPEN 且有候选人→进行中；其余→已关闭。
      */
     public HrJobCardVO jobCards(HrJobCardQueryDTO query) {
         HrJobCardQueryDTO q = query == null ? new HrJobCardQueryDTO() : query;
-        StringBuilder sql = new StringBuilder("""
+        int pageNum = q.getPageNum() == null || q.getPageNum() < 1 ? 1 : q.getPageNum();
+        int pageSize = q.getPageSize() == null || q.getPageSize() < 1 ? 10 : Math.min(q.getPageSize(), 100);
+
+        String fromWhere = """
+                FROM hr_requisition r
+                LEFT JOIN hr_department d ON d.id = r.dept_id
+                WHERE r.is_active = 1
+                """;
+        StringBuilder filter = new StringBuilder(fromWhere);
+        List<Object> args = new ArrayList<>();
+        appendJobCardFilters(filter, args, q);
+        dataScope.apply(filter, args, "r", null);
+
+        Long total = jdbc.queryForObject("SELECT COUNT(1) " + filter, Long.class, args.toArray());
+        String listSql = """
                 SELECT r.id, r.job_name, r.job_desc, r.salary_range, r.education_req, r.experience_req, r.skill_req,
-                       r.status, r.location_code, r.headcount, r.target_text, r.priority,
+                       r.status, r.location_code, r.headcount, r.target_text, r.priority, r.job_priority_code,
                        r.received_date, r.onboard_date, r.dept_id, d.name dept_name,
                        (SELECT COUNT(1) FROM hr_application a
                         WHERE a.requisition_id = r.id AND a.is_active = 1) candidate_count,
+                       (SELECT COUNT(1) FROM hr_requisition_owner o
+                        WHERE o.requisition_id = r.id AND o.is_active = 1) owner_count,
                        (SELECT GROUP_CONCAT(COALESCE(u.nickname, o.alias) ORDER BY o.sort_no SEPARATOR '、')
                         FROM hr_requisition_owner o
                         LEFT JOIN sys_user u ON u.user_id = o.user_id
                         WHERE o.requisition_id = r.id AND o.is_active = 1) owner_names,
                        (SELECT GROUP_CONCAT(o.user_id ORDER BY o.sort_no)
                         FROM hr_requisition_owner o
-                        WHERE o.requisition_id = r.id AND o.is_active = 1 AND o.user_id IS NOT NULL) owner_user_ids
-                FROM hr_requisition r
-                LEFT JOIN hr_department d ON d.id = r.dept_id
-                WHERE r.is_active = 1
-                """);
-        List<Object> args = new ArrayList<>();
+                        WHERE o.requisition_id = r.id AND o.is_active = 1 AND o.user_id IS NOT NULL) owner_user_ids,
+                       (SELECT wa.name FROM hr_base_dict wa
+                         WHERE wa.id = r.work_address_id AND wa.dict_type = 'WORK_ADDRESS' AND wa.is_active = 1
+                         LIMIT 1) work_address_name,
+                       (SELECT jp.name FROM hr_base_dict jp
+                         WHERE jp.dict_type = 'JOB_PRIORITY' AND jp.is_active = 1
+                           AND jp.code = r.job_priority_code LIMIT 1) job_priority_name,
+                       (SELECT COUNT(1) FROM hr_application a
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND IFNULL(NULLIF(TRIM(a.current_stage), ''), 'ENTERED') = 'ENTERED') pending_count,
+                       (SELECT COUNT(1) FROM hr_application a
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND a.current_stage IN (
+                            'INVITED','SHOW_UP','PHONE_PASS',
+                            'FIRST_PENDING','FIRST_ROUND','R1_DISPUTE',
+                            'SECOND_ROUND','R2_PENDING','R2_DISPUTE',
+                            'R3_PASS','R3_PENDING','R3_DISPUTE',
+                            'R4_PASS','R4_PENDING','R4_DISPUTE',
+                            'R5_PASS','R5_PENDING','R5_DISPUTE'
+                          )) interviewing_count,
+                       (SELECT COUNT(1) FROM hr_application a
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND a.current_stage = 'ONBOARDED') onboarded_count
+                """ + filter + """
+                 ORDER BY FIELD(r.priority,1,2,3), r.received_date DESC, r.id DESC
+                 LIMIT ? OFFSET ?
+                """;
+        List<Object> listArgs = new ArrayList<>(args);
+        listArgs.add(pageSize);
+        listArgs.add((long) (pageNum - 1) * pageSize);
+        List<Map<String, Object>> rows = jdbc.queryForList(listSql, listArgs.toArray());
+
+        HrJobCardVO vo = new HrJobCardVO();
+        vo.setTotal(total == null ? 0L : total);
+        for (Map<String, Object> row : rows) {
+            vo.getRows().add(toJobCard(row));
+        }
+        return vo;
+    }
+
+    private static void appendJobCardFilters(StringBuilder sql, List<Object> args, HrJobCardQueryDTO q) {
         if (q.getDeptId() != null) {
             sql.append("""
                      AND r.dept_id IN (
@@ -171,9 +227,42 @@ public class HrMasterService {
             args.add(q.getDeptId());
             args.add(String.valueOf(q.getDeptId()));
         }
+        if (q.getJobName() != null && !q.getJobName().isBlank()) {
+            sql.append(" AND r.job_name LIKE ? ");
+            args.add("%" + q.getJobName().trim() + "%");
+        }
+        if (q.getOwnerUserId() != null) {
+            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
+            args.add(q.getOwnerUserId());
+        }
         if (q.getPriority() != null) {
             sql.append(" AND r.priority = ? ");
             args.add(q.getPriority());
+        }
+        if (q.getJobPriorityCode() != null && !q.getJobPriorityCode().isBlank()) {
+            sql.append(" AND r.job_priority_code = ? ");
+            args.add(q.getJobPriorityCode().trim());
+        }
+        if (q.getWorkAddressId() != null) {
+            sql.append("""
+                     AND (
+                       r.work_address_id = ?
+                       OR (
+                         r.work_address_id IS NULL
+                         AND r.location_code = (
+                           SELECT CASE
+                             WHEN name LIKE '%新疆%' THEN 'XJ'
+                             WHEN name LIKE '%上海%' THEN 'SH'
+                             ELSE NULL
+                           END
+                           FROM hr_base_dict
+                           WHERE id = ? AND dict_type = 'WORK_ADDRESS' AND is_active = 1
+                         )
+                       )
+                     )
+                    """);
+            args.add(q.getWorkAddressId());
+            args.add(q.getWorkAddressId());
         }
         String cardStatus = q.getCardStatus() == null ? "" : q.getCardStatus().trim().toUpperCase(Locale.ROOT);
         if ("PENDING".equals(cardStatus)) {
@@ -183,28 +272,6 @@ public class HrMasterService {
         } else if ("CLOSED".equals(cardStatus)) {
             sql.append(" AND r.status IN ('DONE','STOPPED','ARCHIVED','PAUSED') ");
         }
-        dataScope.apply(sql, args, "r", null);
-        sql.append(" ORDER BY COALESCE(d.sort_order, 9999), d.id, FIELD(r.priority,1,2,3), r.received_date DESC, r.id DESC");
-
-        List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), args.toArray());
-        LinkedHashMap<String, HrJobCardVO.DeptGroup> groups = new LinkedHashMap<>();
-        for (Map<String, Object> row : rows) {
-            HrJobCardVO.JobCard card = toJobCard(row);
-            String key = card.getDeptId() == null ? "_none" : String.valueOf(card.getDeptId());
-            HrJobCardVO.DeptGroup group = groups.computeIfAbsent(key, k -> {
-                HrJobCardVO.DeptGroup g = new HrJobCardVO.DeptGroup();
-                g.setDeptId(card.getDeptId());
-                g.setDeptName(card.getDeptName() == null || card.getDeptName().isBlank() ? "未分配部门" : card.getDeptName());
-                return g;
-            });
-            group.getJobs().add(card);
-        }
-        HrJobCardVO vo = new HrJobCardVO();
-        for (HrJobCardVO.DeptGroup g : groups.values()) {
-            g.setJobCount(g.getJobs().size());
-            vo.getGroups().add(g);
-        }
-        return vo;
     }
 
     private static HrJobCardVO.JobCard toJobCard(Map<String, Object> row) {
@@ -248,7 +315,29 @@ public class HrMasterService {
         Object headcount = row.get("headcount");
         card.setHeadcount(headcount == null ? null : ((Number) headcount).intValue());
         card.setLocationCode(stringOf(row.get("location_code")));
+        card.setOwnerCount(intOf(row.get("owner_count")));
+        card.setPendingCount(intOf(row.get("pending_count")));
+        card.setInterviewingCount(intOf(row.get("interviewing_count")));
+        card.setOnboardedCount(intOf(row.get("onboarded_count")));
+        String addr = stringOf(row.get("work_address_name"));
+        if (addr == null || addr.isBlank()) {
+            String loc = card.getLocationCode();
+            addr = "XJ".equals(loc) ? "新疆" : ("SH".equals(loc) ? "上海" : loc);
+        }
+        card.setWorkLocation(addr);
+        String priorityCode = stringOf(row.get("job_priority_code"));
+        card.setJobPriorityCode(priorityCode);
+        String priorityName = stringOf(row.get("job_priority_name"));
+        if (priorityCode != null && !priorityCode.isBlank() && priorityName != null && !priorityName.isBlank()) {
+            card.setJobPriorityLabel(priorityCode + " " + priorityName);
+        } else if (priorityCode != null && !priorityCode.isBlank()) {
+            card.setJobPriorityLabel(priorityCode);
+        }
         return card;
+    }
+
+    private static Integer intOf(Object value) {
+        return value == null ? 0 : ((Number) value).intValue();
     }
 
     private static String resolveCardStatus(String status, int candidateCount) {
@@ -567,11 +656,106 @@ public class HrMasterService {
         return text == null || text.isBlank() ? null : text.trim();
     }
 
+    private void ensureCandidateNo(Long candidateId, String candidateNo) {
+        if (candidateId == null) {
+            return;
+        }
+        if (emptyToNull(candidateNo) != null) {
+            return;
+        }
+        jdbc.update("""
+                UPDATE hr_candidate
+                SET candidate_no = CAST(14000000 + id AS CHAR)
+                WHERE id = ? AND is_active = 1 AND (candidate_no IS NULL OR TRIM(candidate_no) = '')
+                """, candidateId);
+    }
+
+    private static void attachCandidateDisplay(Map<String, Object> row) {
+        row.put("basic_info", buildBasicInfo(row));
+        row.put("remaining_hours", remainingHours(row.get("create_time"), row.get("submitted_at")));
+        String stage = stringOf(row.get("current_stage"));
+        row.put("pending", stage == null || stage.isBlank() || "ENTERED".equalsIgnoreCase(stage));
+    }
+
+    private static HrJobCandidateVO toJobCandidate(Map<String, Object> row) {
+        HrJobCandidateVO vo = new HrJobCandidateVO();
+        Object appId = row.get("id");
+        vo.setApplicationId(appId == null ? null : ((Number) appId).longValue());
+        Object cid = row.get("candidate_id");
+        vo.setCandidateId(cid == null ? null : ((Number) cid).longValue());
+        vo.setDisplayName(stringOf(row.get("display_name")));
+        vo.setPending(Boolean.TRUE.equals(row.get("pending")));
+        vo.setGender(stringOf(row.get("gender")));
+        Object age = row.get("age");
+        vo.setAge(age == null ? null : ((Number) age).intValue());
+        vo.setEducation(stringOf(row.get("education")));
+        vo.setBasicInfo(stringOf(row.get("basic_info")));
+        vo.setCandidateNo(stringOf(row.get("candidate_no")));
+        vo.setCurrentTitle(stringOf(row.get("current_title")));
+        vo.setCurrentCompany(stringOf(row.get("current_company")));
+        LocalDate recommended = dateOf(row.get("submitted_at"));
+        vo.setRecommendedAt(recommended == null ? null : recommended.toString());
+        Object hours = row.get("remaining_hours");
+        vo.setRemainingHours(hours == null ? null : ((Number) hours).doubleValue());
+        vo.setReferrerName(stringOf(row.get("submitter_name")));
+        vo.setCurrentStage(stringOf(row.get("current_stage")));
+        vo.setStageName(stringOf(row.get("stage_name")));
+        return vo;
+    }
+
+    private static String buildBasicInfo(Map<String, Object> row) {
+        List<String> parts = new ArrayList<>();
+        String gender = stringOf(row.get("gender"));
+        if (gender != null && !gender.isBlank()) {
+            parts.add(gender.trim());
+        }
+        Object age = row.get("age");
+        if (age instanceof Number n) {
+            parts.add(String.valueOf(n.intValue()));
+        }
+        String education = stringOf(row.get("education"));
+        if (education != null && !education.isBlank()) {
+            parts.add(education.trim());
+        }
+        return String.join(" | ", parts);
+    }
+
+    private static Double remainingHours(Object createTime, Object submittedAt) {
+        LocalDateTime start = dateTimeOf(createTime);
+        if (start == null) {
+            LocalDate day = dateOf(submittedAt);
+            if (day == null) {
+                return null;
+            }
+            start = day.atStartOfDay();
+        }
+        Duration left = Duration.between(LocalDateTime.now(), start.plusHours(48));
+        return Math.round((left.toMillis() / 3600000.0) * 100.0) / 100.0;
+    }
+
+    private static LocalDateTime dateTimeOf(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof LocalDateTime t) {
+            return t;
+        }
+        if (value instanceof Timestamp t) {
+            return t.toLocalDateTime();
+        }
+        if (value instanceof java.util.Date d) {
+            return new Timestamp(d.getTime()).toLocalDateTime();
+        }
+        return null;
+    }
+
     public List<Map<String, Object>> applications(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
         StringBuilder sql = new StringBuilder("""
-                SELECT a.id, c.id candidate_id, c.display_name, c.phone, c.email, a.requisition_id, r.job_name, a.channel_code, ch.channel_name,
-                       a.resume_status, a.current_stage, s.stage_name, a.submitter_user_id, a.submitter_name, a.submitted_at, f.file_name,
+                SELECT a.id, c.id candidate_id, c.display_name, c.phone, c.email, c.gender, c.age, c.education, c.candidate_no,
+                       c.current_title, c.current_company, a.requisition_id, r.job_name, a.channel_code, ch.channel_name,
+                       a.resume_status, a.current_stage, s.stage_name, a.submitter_user_id, a.submitter_name, a.submitted_at, a.create_time,
+                       f.file_name,
                        (SELECT ai.score FROM hr_application_ai ai WHERE ai.application_id = a.id AND ai.is_active = 1 ORDER BY ai.id DESC LIMIT 1) ai_score,
                        (SELECT COUNT(1) FROM hr_application_ai ai WHERE ai.application_id = a.id AND ai.is_active = 1) ai_count,
                        (SELECT COUNT(1) FROM hr_candidate_portfolio p WHERE p.candidate_id = c.id AND p.is_active = 1) portfolio_count,
@@ -623,7 +807,30 @@ public class HrMasterService {
         }
         dataScope.apply(sql, args, "r", "a");
         sql.append(" ORDER BY a.submitted_at DESC, a.id DESC");
-        return jdbc.queryForList(sql.toString(), args.toArray());
+        List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), args.toArray());
+        for (Map<String, Object> row : rows) {
+            attachCandidateDisplay(row);
+        }
+        return rows;
+    }
+
+    public PageResult<HrJobCandidateVO> jobCandidates(HrJobCandidateQueryDTO query) {
+        HrJobCandidateQueryDTO q = query == null ? new HrJobCandidateQueryDTO() : query;
+        if (q.getRequisitionId() == null) {
+            throw new BusinessException("请选择岗位");
+        }
+        int pageNum = q.getPageNum() == null || q.getPageNum() < 1 ? 1 : q.getPageNum();
+        int pageSize = q.getPageSize() == null || q.getPageSize() < 1 ? 10 : Math.min(q.getPageSize(), 100);
+        HrBoardQueryDTO filter = new HrBoardQueryDTO();
+        filter.setRequisitionId(q.getRequisitionId());
+        List<Map<String, Object>> all = applications(filter);
+        int from = Math.min((pageNum - 1) * pageSize, all.size());
+        int to = Math.min(from + pageSize, all.size());
+        List<HrJobCandidateVO> page = new ArrayList<>();
+        for (Map<String, Object> row : all.subList(from, to)) {
+            page.add(toJobCandidate(row));
+        }
+        return new PageResult<>((long) all.size(), page);
     }
 
     @Transactional
@@ -644,10 +851,15 @@ public class HrMasterService {
         Submitter submitter = resolveSubmitter(dto.getSubmitterUserId(), dto.getSubmitterName());
         if (dto.getId() == null) {
             jdbc.update("""
-                    INSERT INTO hr_candidate (display_name, phone, email, create_by, is_active)
-                    VALUES (?, ?, ?, ?, 1)
-                    """, dto.getDisplayName().trim(), emptyToNull(dto.getPhone()), emptyToNull(dto.getEmail()), user);
+                    INSERT INTO hr_candidate (display_name, phone, email, gender, age, education, candidate_no,
+                                              current_title, current_company, create_by, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """, dto.getDisplayName().trim(), emptyToNull(dto.getPhone()), emptyToNull(dto.getEmail()),
+                    emptyToNull(dto.getGender()), dto.getAge(), emptyToNull(dto.getEducation()),
+                    emptyToNull(dto.getCandidateNo()), emptyToNull(dto.getCurrentTitle()),
+                    emptyToNull(dto.getCurrentCompany()), user);
             Long candidateId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+            ensureCandidateNo(candidateId, dto.getCandidateNo());
             jdbc.update("""
                     INSERT INTO hr_application (requisition_id, candidate_id, channel_code, resume_status, submitter_user_id, submitter_name, submitted_at, current_stage, create_by, is_active)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
@@ -667,8 +879,15 @@ public class HrMasterService {
             throw new BusinessException("候选人不存在");
         }
         jdbc.update("""
-                UPDATE hr_candidate SET display_name = ?, phone = ?, email = ? WHERE id = ? AND is_active = 1
-                """, dto.getDisplayName().trim(), emptyToNull(dto.getPhone()), emptyToNull(dto.getEmail()), candidateId);
+                UPDATE hr_candidate
+                SET display_name = ?, phone = ?, email = ?, gender = ?, age = ?, education = ?, candidate_no = ?,
+                    current_title = ?, current_company = ?
+                WHERE id = ? AND is_active = 1
+                """, dto.getDisplayName().trim(), emptyToNull(dto.getPhone()), emptyToNull(dto.getEmail()),
+                emptyToNull(dto.getGender()), dto.getAge(), emptyToNull(dto.getEducation()),
+                emptyToNull(dto.getCandidateNo()), emptyToNull(dto.getCurrentTitle()),
+                emptyToNull(dto.getCurrentCompany()), candidateId);
+        ensureCandidateNo(candidateId, dto.getCandidateNo());
         int updated = jdbc.update("""
                 UPDATE hr_application
                 SET requisition_id = ?, channel_code = ?, resume_status = ?, submitter_user_id = ?, submitter_name = ?, submitted_at = ?, current_stage = ?

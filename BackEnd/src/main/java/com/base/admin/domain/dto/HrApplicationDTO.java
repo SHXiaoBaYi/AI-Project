@@ -24,6 +24,24 @@ public class HrApplicationDTO {
     @Schema(description = "邮箱")
     private String email;
 
+    @Schema(description = "性别 男/女")
+    private String gender;
+
+    @Schema(description = "年龄", example = "32", nullable = true)
+    private Integer age;
+
+    @Schema(description = "学历")
+    private String education;
+
+    @Schema(description = "人选编号")
+    private String candidateNo;
+
+    @Schema(description = "目前职位")
+    private String currentTitle;
+
+    @Schema(description = "目前公司")
+    private String currentCompany;
+
     @NotNull
     @Schema(description = "招聘需求")
     private Long requisitionId;

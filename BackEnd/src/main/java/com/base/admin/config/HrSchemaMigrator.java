@@ -48,6 +48,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureBaseDictTable();
         ensureRequisitionPanelColumns();
         backfillWorkAddressFromLocation();
+        ensureCandidateProfileColumns();
         log.info("招聘表结构、角色、用户和菜单已同步");
     }
 
@@ -350,6 +351,34 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 "ALTER TABLE hr_requisition ADD COLUMN job_priority_code VARCHAR(32) NULL COMMENT '岗位优先级P0/P1，独立于priority紧急优先常规' AFTER priority");
         addColumnIfMissing("hr_requisition", "work_address_id",
                 "ALTER TABLE hr_requisition ADD COLUMN work_address_id BIGINT NULL COMMENT '工作地址hr_base_dict.id' AFTER location_code");
+    }
+
+    private void ensureCandidateProfileColumns() {
+        addColumnIfMissing("hr_candidate", "gender",
+                "ALTER TABLE hr_candidate ADD COLUMN gender VARCHAR(8) NULL COMMENT '性别男/女' AFTER email");
+        addColumnIfMissing("hr_candidate", "age",
+                "ALTER TABLE hr_candidate ADD COLUMN age INT NULL COMMENT '年龄' AFTER gender");
+        addColumnIfMissing("hr_candidate", "education",
+                "ALTER TABLE hr_candidate ADD COLUMN education VARCHAR(64) NULL COMMENT '学历' AFTER age");
+        addColumnIfMissing("hr_candidate", "candidate_no",
+                "ALTER TABLE hr_candidate ADD COLUMN candidate_no VARCHAR(32) NULL COMMENT '人选编号' AFTER education");
+        addColumnIfMissing("hr_candidate", "current_title",
+                "ALTER TABLE hr_candidate ADD COLUMN current_title VARCHAR(128) NULL COMMENT '目前职位' AFTER candidate_no");
+        addColumnIfMissing("hr_candidate", "current_company",
+                "ALTER TABLE hr_candidate ADD COLUMN current_company VARCHAR(128) NULL COMMENT '目前公司' AFTER current_title");
+        jdbc.update("""
+                UPDATE hr_candidate c
+                JOIN hr_application a ON a.candidate_id = c.id AND a.is_active = 1
+                JOIN hr_resume_parse p ON p.application_id = a.id AND p.is_active = 1
+                SET c.current_company = COALESCE(NULLIF(c.current_company, ''), NULLIF(p.last_company, '')),
+                    c.education = COALESCE(NULLIF(c.education, ''), NULLIF(p.degree, ''))
+                WHERE c.is_active = 1
+                """);
+        jdbc.update("""
+                UPDATE hr_candidate
+                SET candidate_no = CAST(14000000 + id AS CHAR)
+                WHERE is_active = 1 AND (candidate_no IS NULL OR TRIM(candidate_no) = '')
+                """);
     }
 
     /** 原地点 SH/XJ 对应到工作地址：优先精确名，其次名称包含上海/新疆；新疆若缺失则补一条城市级地址 */

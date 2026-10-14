@@ -25,6 +25,7 @@ import com.base.admin.domain.dto.HrInterviewVerdictDTO;
 import com.base.admin.domain.dto.HrInviteCreateDTO;
 import com.base.admin.domain.dto.HrInviteTransferDTO;
 import com.base.admin.domain.dto.HrJobCardQueryDTO;
+import com.base.admin.domain.dto.HrJobCandidateQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrRequisitionStatusDTO;
 import com.base.admin.domain.dto.HrBaseDictDTO;
@@ -32,6 +33,7 @@ import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.domain.vo.HrBaseDictVO;
 import com.base.admin.domain.vo.HrJobCardVO;
+import com.base.admin.domain.vo.HrJobCandidateVO;
 import com.base.admin.service.HrInterviewRecordService;
 import com.base.admin.service.HrInviteService;
 import com.base.admin.service.HrMasterService;
@@ -87,11 +89,18 @@ public class HrMasterController {
         return Result.ok(masterService.requisitions(query));
     }
 
-    @Operation(summary = "岗位信息卡片（按部门分组）")
+    @Operation(summary = "岗位看板卡片（筛选+分页）")
     @PostMapping("/requisition/cards")
     @RequiresPermission("hr:job-board:list")
     public Result<HrJobCardVO> jobCards(@RequestBody(required = false) HrJobCardQueryDTO query) {
         return Result.ok(masterService.jobCards(query));
+    }
+
+    @Operation(summary = "岗位看板候选人抽屉")
+    @PostMapping("/requisition/candidates")
+    @RequiresPermission({"hr:job-board:list", "hr:application:list"})
+    public Result<PageResult<HrJobCandidateVO>> jobCandidates(@Valid @RequestBody HrJobCandidateQueryDTO query) {
+        return Result.ok(masterService.jobCandidates(query));
     }
 
     @Operation(summary = "新增招聘需求")

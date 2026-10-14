@@ -294,9 +294,15 @@ export function getHrRequisitionsApi(data: HrBoardQuery = {}) {
 export type HrJobCardStatus = 'PENDING' | 'ACTIVE' | 'CLOSED';
 
 export type HrJobCardQuery = {
+  pageNum?: number;
+  pageSize?: number;
   deptId?: number;
+  jobName?: string;
+  ownerUserId?: number;
   cardStatus?: HrJobCardStatus;
   priority?: number;
+  jobPriorityCode?: string;
+  workAddressId?: number;
 };
 
 export type HrJobCard = {
@@ -313,6 +319,7 @@ export type HrJobCard = {
   onboardDate?: string;
   ownerNames?: string;
   ownerUserIds?: number[];
+  ownerCount?: number;
   deptId?: number;
   deptName?: string;
   status?: string;
@@ -322,7 +329,13 @@ export type HrJobCard = {
   priorityLabel?: string;
   headcount?: number;
   candidateCount?: number;
+  pendingCount?: number;
+  interviewingCount?: number;
+  onboardedCount?: number;
   locationCode?: string;
+  workLocation?: string;
+  jobPriorityCode?: string;
+  jobPriorityLabel?: string;
 };
 
 export type HrJobCardGroup = {
@@ -333,12 +346,37 @@ export type HrJobCardGroup = {
 };
 
 export type HrJobCardBoard = {
-  groups: HrJobCardGroup[];
+  total?: number;
+  rows?: HrJobCard[];
+  groups?: HrJobCardGroup[];
 };
 
-/** 岗位信息卡片：按部门分组 */
+/** 岗位看板卡片：筛选 + 分页 */
 export function getHrJobCardsApi(data: HrJobCardQuery = {}) {
   return request.post<unknown, HrJobCardBoard>('/hr/requisition/cards', data);
+}
+
+export type HrJobCandidate = {
+  applicationId: number;
+  candidateId?: number;
+  displayName?: string;
+  pending?: boolean;
+  gender?: string;
+  age?: number | null;
+  education?: string;
+  basicInfo?: string;
+  candidateNo?: string;
+  currentTitle?: string;
+  currentCompany?: string;
+  recommendedAt?: string;
+  remainingHours?: number | null;
+  referrerName?: string;
+  currentStage?: string;
+  stageName?: string;
+};
+
+export function getHrJobCandidatesApi(data: { requisitionId: number; pageNum?: number; pageSize?: number }) {
+  return request.post<unknown, { total: number; rows: HrJobCandidate[] }>('/hr/requisition/candidates', data);
 }
 
 export type HrPipelinePhase = 'SCREEN' | 'PHONE' | 'INTERVIEW' | 'ONBOARD';

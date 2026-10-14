@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { App, Card, Empty, Select, Space, Spin, Tag, Typography } from 'antd';
-import { ClockCircleOutlined, EnvironmentOutlined, FlagOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
+import { useCallback, useEffect, useState } from 'react';
+import { App, Card, Drawer, Empty, Input, Pagination, Select, Space, Spin, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import { ClockCircleOutlined, UserOutlined } from '@ant-design/icons';
 import {
   getHrDepartmentsApi,
+  getHrDictOptionsApi,
   getHrJobCardsApi,
+  getHrJobCandidatesApi,
+  getHrUsersApi,
   type HrJobCard,
-  type HrJobCardGroup,
   type HrJobCardQuery,
   type HrJobCardStatus,
+  type HrJobCandidate,
 } from '@/api/hr';
 
 const CARD_STATUS: { label: string; value: HrJobCardStatus }[] = [
@@ -36,220 +39,268 @@ function flattenDepts(rows: Dept[], prefix = ''): { value: number; label: string
   });
 }
 
-function statusColor(status?: HrJobCardStatus) {
-  if (status === 'PENDING') return 'gold';
-  if (status === 'ACTIVE') return 'processing';
-  return 'default';
+function fmtDate(value?: string) {
+  if (!value) return '—';
+  return String(value).slice(0, 10).replaceAll('-', '/');
 }
 
-function priorityColor(priority?: number) {
-  if (priority === 1) return 'red';
-  if (priority === 2) return 'orange';
-  return 'blue';
-}
-
-function locationLabel(code?: string) {
-  if (code === 'XJ') return '新疆';
-  if (code === 'SH') return '上海';
-  return code || '';
-}
-
-function Field({ label, value }: { label: string; value?: string | null }) {
+function remainingLabel(hours?: number | null) {
+  if (hours == null || Number.isNaN(hours)) return '—';
+  if (hours < 0) return <span className='text-red-500'>已超时</span>;
   return (
-    <div className='min-w-0'>
-      <div className='text-[11px] text-neutral-400'>{label}</div>
-      <div
-        className='truncate text-sm text-neutral-800'
-        title={value || undefined}
-      >
-        {value?.trim() ? value : '—'}
+    <span className='inline-flex items-center gap-1 text-orange-500'>
+      <ClockCircleOutlined />
+      剩余{hours.toFixed(2)}小时
+    </span>
+  );
+}
+
+function Metric({ value, label }: { value?: number; label: string }) {
+  return (
+    <div className='flex min-w-[88px] flex-1 flex-col items-center justify-center px-3 py-1 text-center'>
+      <span className='text-xl leading-none font-semibold text-neutral-800'>{value ?? 0}</span>
+      <span className='mt-1 text-xs text-neutral-500'>{label}</span>
+    </div>
+  );
+}
+
+function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard) => void }) {
+  const tags: string[] = [];
+  if (job.jobPriorityLabel) tags.push(job.jobPriorityLabel);
+  if (job.priorityLabel) tags.push(`【${job.priorityLabel}】`);
+  if (job.cardStatusLabel) tags.push(job.cardStatusLabel);
+
+  return (
+    <div
+      className='cursor-pointer overflow-hidden rounded border border-neutral-200 bg-white hover:border-blue-300'
+      onClick={() => onOpen(job)}
+    >
+      <div className='flex flex-wrap items-center gap-2 bg-neutral-100 px-4 py-2'>
+        {tags.length === 0 ? (
+          <span className='text-xs text-neutral-400'>未标注优先级</span>
+        ) : (
+          tags.map((tag) => (
+            <Tag
+              key={tag}
+              className='m-0 rounded-full border-neutral-200 bg-white text-neutral-600'
+            >
+              {tag}
+            </Tag>
+          ))
+        )}
+      </div>
+      <div className='flex flex-col md:flex-row md:items-stretch'>
+        <div className='min-w-0 flex-1 px-4 py-3'>
+          <div className='flex flex-wrap items-baseline gap-x-4 gap-y-1'>
+            <span
+              className='max-w-full truncate text-base font-medium text-blue-600'
+              title={job.jobName}
+            >
+              {job.jobName}
+            </span>
+            <span
+              className='truncate text-sm text-orange-500'
+              title={job.ownerNames || '未指定负责人'}
+            >
+              负责人：{job.ownerNames?.trim() || '未指定'}
+            </span>
+          </div>
+          <div
+            className='mt-2 truncate text-sm text-neutral-500'
+            title={[job.workLocation, job.salaryRange, job.receivedDate].filter(Boolean).join(' | ')}
+          >
+            <span>{job.workLocation || job.deptName || '—'}</span>
+            <span className='mx-2 text-neutral-300'>|</span>
+            <span>年薪：{job.salaryRange?.trim() || '—'}</span>
+            <span className='mx-2 text-neutral-300'>|</span>
+            <span>招聘起始：{fmtDate(job.receivedDate)}</span>
+          </div>
+        </div>
+        <div className='flex divide-x divide-neutral-200 border-t border-neutral-100 md:w-[300px] md:border-t-0 md:border-l'>
+          <Metric
+            value={job.pendingCount}
+            label='未处理'
+          />
+          <Metric
+            value={job.interviewingCount}
+            label='约面中'
+          />
+          <Metric
+            value={job.onboardedCount}
+            label='已入职'
+          />
+        </div>
       </div>
     </div>
   );
 }
 
-function JobCardItem({ job, onOwnerClick }: { job: HrJobCard; onOwnerClick: (ownerUserId?: number) => void }) {
-  const firstOwnerId = job.ownerUserIds?.[0];
-  return (
-    <Card
-      size='small'
-      hoverable
-      className='h-full shadow-sm transition-shadow hover:shadow-md'
-      styles={{ body: { padding: 14 } }}
-    >
-      <div className='mb-2 flex flex-wrap items-start justify-between gap-2'>
-        <Typography.Title
-          level={5}
-          className='!mb-0 !text-base'
-          ellipsis={{ rows: 2, tooltip: job.jobName }}
-        >
-          {job.jobName}
-        </Typography.Title>
-        <Space
-          size={4}
-          wrap
-        >
-          <Tag color={statusColor(job.cardStatus)}>{job.cardStatusLabel || '—'}</Tag>
-          {job.priorityLabel ? <Tag color={priorityColor(job.priority)}>{job.priorityLabel}</Tag> : null}
-        </Space>
-      </div>
-
-      <div className='mb-3 grid grid-cols-2 gap-x-3 gap-y-2'>
-        <Field
-          label='薪资范围'
-          value={job.salaryRange}
-        />
-        <Field
-          label='简历要求'
-          value={job.resumeRequirement}
-        />
-        <Field
-          label='招聘起始'
-          value={job.receivedDate?.slice(0, 10)}
-        />
-        <Field
-          label='预计到岗'
-          value={job.onboardDate?.slice(0, 10) || job.targetText}
-        />
-      </div>
-
-      <div className='mb-3'>
-        <div className='mb-0.5 text-[11px] text-neutral-400'>工作内容</div>
-        <Typography.Paragraph
-          className='!mb-0 text-sm text-neutral-700'
-          ellipsis={{ rows: 2, tooltip: job.jobSummary }}
-        >
-          {job.jobSummary?.trim() || '—'}
-        </Typography.Paragraph>
-      </div>
-
-      <div className='flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-neutral-100 pt-2 text-xs text-neutral-500'>
-        {locationLabel(job.locationCode) ? (
-          <span className='inline-flex items-center gap-1'>
-            <EnvironmentOutlined />
-            {locationLabel(job.locationCode)}
-          </span>
-        ) : null}
-        {job.headcount != null ? (
-          <span className='inline-flex items-center gap-1'>
-            <TeamOutlined />
-            HC {job.headcount}
-          </span>
-        ) : null}
-        {job.candidateCount != null ? (
-          <span className='inline-flex items-center gap-1'>
-            <ClockCircleOutlined />
-            候选人 {job.candidateCount}
-          </span>
-        ) : null}
-        <button
-          type='button'
-          className='ml-auto inline-flex max-w-full items-center gap-1 truncate text-left text-blue-600 hover:underline'
-          title={job.ownerNames || '未指定负责人'}
-          onClick={() => onOwnerClick(firstOwnerId)}
-        >
+const candidateColumns: ColumnsType<HrJobCandidate> = [
+  {
+    title: '候选人',
+    dataIndex: 'displayName',
+    width: 120,
+    render: (_, record) => (
+      <span className='inline-flex items-center gap-1.5'>
+        <span className={`inline-block h-1.5 w-1.5 rounded-full ${record.pending ? 'bg-red-500' : 'bg-blue-500'}`} />
+        <span className='text-blue-600'>{record.displayName || '—'}</span>
+      </span>
+    ),
+  },
+  {
+    title: '基本信息',
+    dataIndex: 'basicInfo',
+    width: 160,
+    ellipsis: true,
+    render: (v) => v || '—',
+  },
+  {
+    title: '人选编号',
+    dataIndex: 'candidateNo',
+    width: 110,
+    render: (v) => v || '—',
+  },
+  {
+    title: '目前职位',
+    dataIndex: 'currentTitle',
+    width: 160,
+    ellipsis: true,
+    render: (v) => v || '—',
+  },
+  {
+    title: '目前公司',
+    dataIndex: 'currentCompany',
+    width: 200,
+    ellipsis: true,
+    render: (v) => v || '—',
+  },
+  {
+    title: '推荐时间',
+    dataIndex: 'recommendedAt',
+    width: 120,
+    render: (v) => (v ? String(v).slice(0, 10) : '—'),
+  },
+  {
+    title: '剩余处理时间',
+    dataIndex: 'remainingHours',
+    width: 150,
+    render: (v) => remainingLabel(typeof v === 'number' ? v : null),
+  },
+  {
+    title: '负责人',
+    dataIndex: 'referrerName',
+    width: 120,
+    ellipsis: true,
+    render: (v) =>
+      v ? (
+        <span className='inline-flex items-center gap-1'>
           <UserOutlined />
-          <span className='truncate'>{job.ownerNames?.trim() || '未指定负责人'}</span>
-          {firstOwnerId ? <FlagOutlined className='shrink-0 text-[10px]' /> : null}
-        </button>
-      </div>
-    </Card>
-  );
-}
-
-function DeptSection({ group, onOwnerClick }: { group: HrJobCardGroup; onOwnerClick: (ownerUserId?: number) => void }) {
-  return (
-    <section className='space-y-3'>
-      <div className='flex items-baseline gap-2 border-b border-neutral-200 pb-2'>
-        <Typography.Title
-          level={5}
-          className='!mb-0'
-        >
-          {group.deptName}
-        </Typography.Title>
-        <Typography.Text
-          type='secondary'
-          className='text-xs'
-        >
-          {group.jobCount} 个岗位
-        </Typography.Text>
-      </div>
-      <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
-        {group.jobs.map((job) => (
-          <JobCardItem
-            key={job.id}
-            job={job}
-            onOwnerClick={onOwnerClick}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
+          {v}
+        </span>
+      ) : (
+        '—'
+      ),
+  },
+];
 
 export default function HrJobBoardPage() {
   const { message } = App.useApp();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [groups, setGroups] = useState<HrJobCardGroup[]>([]);
+  const [rows, setRows] = useState<HrJobCard[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageNum, setPageNum] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [depts, setDepts] = useState<{ value: number; label: string }[]>([]);
+  const [owners, setOwners] = useState<{ value: number; label: string }[]>([]);
+  const [priorities, setPriorities] = useState<{ value: string; label: string }[]>([]);
+  const [addresses, setAddresses] = useState<{ value: number; label: string }[]>([]);
   const [filters, setFilters] = useState<HrJobCardQuery>({});
-
-  const totalJobs = useMemo(() => groups.reduce((sum, g) => sum + (g.jobCount || 0), 0), [groups]);
+  const [drawerJob, setDrawerJob] = useState<HrJobCard | null>(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerPage, setDrawerPage] = useState(1);
+  const [drawerTotal, setDrawerTotal] = useState(0);
+  const [candidates, setCandidates] = useState<HrJobCandidate[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getHrJobCardsApi(filters);
-      setGroups(data?.groups || []);
+      const data = await getHrJobCardsApi({ ...filters, pageNum, pageSize });
+      setRows(data?.rows || []);
+      setTotal(data?.total || 0);
     } catch (e) {
       message.error(e instanceof Error ? e.message : '加载岗位看板失败');
     } finally {
       setLoading(false);
     }
-  }, [filters, message]);
+  }, [filters, message, pageNum, pageSize]);
+
+  const loadCandidates = useCallback(
+    async (job: HrJobCard, page: number) => {
+      setDrawerLoading(true);
+      try {
+        const res = await getHrJobCandidatesApi({
+          requisitionId: job.id,
+          pageNum: page,
+          pageSize: 10,
+        });
+        setCandidates(res?.rows || []);
+        setDrawerTotal(res?.total || 0);
+        setDrawerPage(page);
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : '加载候选人失败');
+      } finally {
+        setDrawerLoading(false);
+      }
+    },
+    [message],
+  );
 
   useEffect(() => {
     getHrDepartmentsApi().then((tree) => setDepts(flattenDepts(tree as unknown as Dept[])));
+    void getHrUsersApi('owner').then((list) =>
+      setOwners(
+        (list ?? []).map((item) => ({
+          value: Number(
+            (item as { userId?: number; user_id?: number }).userId ?? (item as { user_id?: number }).user_id,
+          ),
+          label: String((item as { nickname?: string }).nickname || ''),
+        })),
+      ),
+    );
+    void getHrDictOptionsApi('JOB_PRIORITY').then((rows) =>
+      setPriorities(
+        (rows ?? []).map((row) => ({
+          value: row.code || '',
+          label: [row.code, row.name].filter(Boolean).join(' '),
+        })),
+      ),
+    );
+    void getHrDictOptionsApi('WORK_ADDRESS').then((rows) =>
+      setAddresses(
+        (rows ?? []).map((row) => ({
+          value: row.id,
+          label: row.category ? `${row.category} · ${row.name}` : row.name,
+        })),
+      ),
+    );
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const onOwnerClick = (ownerUserId?: number) => {
-    if (!ownerUserId) {
-      message.info('该岗位尚未关联系统负责人，无法打开 KPI');
-      return;
-    }
-    navigate(`/hr/board?tab=analytics&ownerUserId=${ownerUserId}`);
+  const patchFilter = (patch: HrJobCardQuery) => {
+    setPageNum(1);
+    setFilters((prev) => ({ ...prev, ...patch }));
+  };
+
+  const openJob = (job: HrJobCard) => {
+    setDrawerJob(job);
+    void loadCandidates(job, 1);
   };
 
   return (
     <div className='space-y-4'>
-      <div className='flex flex-wrap items-end justify-between gap-3'>
-        <div>
-          <Typography.Title
-            level={5}
-            className='!mb-0'
-          >
-            岗位看板
-          </Typography.Title>
-          <Typography.Text
-            type='secondary'
-            className='text-xs'
-          >
-            按部门分组展示岗位信息；点击负责人可跳转招聘看板查看其 KPI。
-          </Typography.Text>
-        </div>
-        <Typography.Text
-          type='secondary'
-          className='text-xs'
-        >
-          共 {totalJobs} 个岗位 / {groups.length} 个部门
-        </Typography.Text>
-      </div>
-
       <Card
         size='small'
         className='shadow-sm'
@@ -259,52 +310,132 @@ export default function HrJobBoardPage() {
           wrap
           size={[12, 8]}
         >
+          <Input.Search
+            allowClear
+            placeholder='按岗位名称筛选'
+            className='w-[200px]'
+            defaultValue={filters.jobName}
+            onSearch={(value) => patchFilter({ jobName: value.trim() || undefined })}
+          />
           <Select
             allowClear
             showSearch
             optionFilterProp='label'
             placeholder='按部门筛选'
-            className='min-w-[200px]'
+            className='min-w-[180px]'
             options={depts}
             value={filters.deptId}
-            onChange={(deptId) => setFilters((prev) => ({ ...prev, deptId }))}
+            onChange={(deptId) => patchFilter({ deptId })}
+          />
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp='label'
+            placeholder='按负责人筛选'
+            className='min-w-[160px]'
+            options={owners}
+            value={filters.ownerUserId}
+            onChange={(ownerUserId) => patchFilter({ ownerUserId })}
           />
           <Select
             allowClear
             placeholder='按岗位状态筛选'
-            className='min-w-[160px]'
+            className='min-w-[140px]'
             options={CARD_STATUS}
             value={filters.cardStatus}
-            onChange={(cardStatus) => setFilters((prev) => ({ ...prev, cardStatus }))}
+            onChange={(cardStatus) => patchFilter({ cardStatus })}
           />
           <Select
             allowClear
             placeholder='按紧急程度筛选'
-            className='min-w-[160px]'
+            className='min-w-[140px]'
             options={PRIORITY}
             value={filters.priority}
-            onChange={(priority) => setFilters((prev) => ({ ...prev, priority }))}
+            onChange={(priority) => patchFilter({ priority })}
+          />
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp='label'
+            placeholder='按岗位优先级筛选'
+            className='min-w-[180px]'
+            options={priorities}
+            value={filters.jobPriorityCode}
+            onChange={(jobPriorityCode) => patchFilter({ jobPriorityCode })}
+          />
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp='label'
+            placeholder='按工作地址筛选'
+            className='min-w-[180px]'
+            options={addresses}
+            value={filters.workAddressId}
+            onChange={(workAddressId) => patchFilter({ workAddressId })}
           />
         </Space>
       </Card>
 
       <Spin spinning={loading}>
-        {groups.length === 0 ? (
+        {rows.length === 0 ? (
           <Card className='shadow-sm'>
             <Empty description='暂无符合条件的岗位' />
           </Card>
         ) : (
-          <div className='space-y-6'>
-            {groups.map((group) => (
-              <DeptSection
-                key={group.deptId ?? group.deptName}
-                group={group}
-                onOwnerClick={onOwnerClick}
+          <div className='space-y-3'>
+            {rows.map((job) => (
+              <JobRowCard
+                key={job.id}
+                job={job}
+                onOpen={openJob}
               />
             ))}
           </div>
         )}
       </Spin>
+
+      <div className='flex justify-end'>
+        <Pagination
+          current={pageNum}
+          pageSize={pageSize}
+          total={total}
+          showSizeChanger
+          showQuickJumper
+          pageSizeOptions={[10, 20, 50]}
+          showTotal={(n) => `共 ${n} 个岗位`}
+          onChange={(page, size) => {
+            setPageNum(page);
+            setPageSize(size);
+          }}
+        />
+      </div>
+
+      <Drawer
+        title={drawerJob ? `${drawerJob.jobName} · 候选人` : '候选人'}
+        open={drawerJob != null}
+        onClose={() => {
+          setDrawerJob(null);
+          setCandidates([]);
+        }}
+        width={1100}
+        destroyOnHidden
+      >
+        <Table<HrJobCandidate>
+          rowKey='applicationId'
+          size='small'
+          loading={drawerLoading}
+          dataSource={candidates}
+          columns={candidateColumns}
+          scroll={{ x: 1100 }}
+          pagination={{
+            current: drawerPage,
+            pageSize: 10,
+            total: drawerTotal,
+            showSizeChanger: false,
+            onChange: (page) => drawerJob && void loadCandidates(drawerJob, page),
+          }}
+        />
+      </Drawer>
     </div>
   );
 }
