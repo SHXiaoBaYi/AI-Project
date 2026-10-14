@@ -27,8 +27,10 @@ import com.base.admin.domain.dto.HrInviteTransferDTO;
 import com.base.admin.domain.dto.HrJobCardQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrRequisitionStatusDTO;
+import com.base.admin.domain.dto.HrBaseDictDTO;
 import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
+import com.base.admin.domain.vo.HrBaseDictVO;
 import com.base.admin.domain.vo.HrJobCardVO;
 import com.base.admin.service.HrInterviewRecordService;
 import com.base.admin.service.HrInviteService;
@@ -414,6 +416,50 @@ public class HrMasterController {
     @Log(title = "未通过原因", businessType = 3)
     public Result<Void> deleteFailReason(@PathVariable Long id) {
         masterService.deleteFailReason(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "招聘基础数据选项")
+    @GetMapping("/dict/{type}/options")
+    @RequiresPermission("hr:*")
+    public Result<List<HrBaseDictVO>> dictOptions(@PathVariable String type) {
+        return Result.ok(masterService.dictOptions(type));
+    }
+
+    @Operation(summary = "新增招聘基础数据")
+    @PostMapping("/dict/{type}")
+    @RequiresPermission({
+            "hr:work-address:edit", "hr:bg-fail:edit", "hr:offer-unsent:edit",
+            "hr:unsuitable:edit", "hr:job-priority:edit"
+    })
+    @Log(title = "招聘基础数据", businessType = 1)
+    public Result<Void> createDict(@PathVariable String type, @Valid @RequestBody HrBaseDictDTO dto) {
+        dto.setId(null);
+        masterService.saveDict(type, dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "修改招聘基础数据")
+    @PutMapping("/dict/{type}")
+    @RequiresPermission({
+            "hr:work-address:edit", "hr:bg-fail:edit", "hr:offer-unsent:edit",
+            "hr:unsuitable:edit", "hr:job-priority:edit"
+    })
+    @Log(title = "招聘基础数据", businessType = 2)
+    public Result<Void> updateDict(@PathVariable String type, @Valid @RequestBody HrBaseDictDTO dto) {
+        masterService.saveDict(type, dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "删除招聘基础数据")
+    @DeleteMapping("/dict/{type}/{id}")
+    @RequiresPermission({
+            "hr:work-address:edit", "hr:bg-fail:edit", "hr:offer-unsent:edit",
+            "hr:unsuitable:edit", "hr:job-priority:edit"
+    })
+    @Log(title = "招聘基础数据", businessType = 3)
+    public Result<Void> deleteDict(@PathVariable String type, @PathVariable Long id) {
+        masterService.deleteDict(type, id);
         return Result.ok();
     }
 

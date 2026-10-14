@@ -8,13 +8,17 @@ import com.base.admin.domain.dto.HrApplicationDTO;
 import com.base.admin.domain.dto.HrDingTalkBindDTO;
 import com.base.admin.domain.dto.HrJobCardQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
+import com.base.admin.common.Constants;
+import com.base.admin.domain.dto.HrBaseDictDTO;
 import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.domain.dto.HrSchoolQueryDTO;
+import com.base.admin.domain.vo.HrBaseDictVO;
 import com.base.admin.domain.vo.HrDingTalkIdentityVO;
 import com.base.admin.domain.vo.HrJobCardVO;
 import com.base.admin.domain.vo.HrSchoolVO;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.security.LoginUser;
 import com.base.admin.util.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +38,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -810,6 +815,163 @@ public class HrMasterService {
         }
         jdbc.update("UPDATE hr_fail_reason SET is_active = 0, update_by = ? WHERE id = ?",
                 SecurityUtils.getCurrentUsername(), id);
+    }
+
+    public List<HrBaseDictVO> dictOptions(String type) {
+        DictKind kind = DictKind.of(type);
+        return jdbc.query("""
+                SELECT id, dict_type, code, category, name, sort_no
+                FROM hr_base_dict
+                WHERE dict_type = ? AND is_active = 1
+                ORDER BY sort_no, id
+                """, (rs, row) -> {
+            HrBaseDictVO vo = new HrBaseDictVO();
+            vo.setId(rs.getLong("id"));
+            vo.setDictType(rs.getString("dict_type"));
+            vo.setCode(rs.getString("code"));
+            vo.setCategory(rs.getString("category"));
+            vo.setName(rs.getString("name"));
+            vo.setSortNo(rs.getInt("sort_no"));
+            return vo;
+        }, kind.type);
+    }
+
+    @Transactional
+    public void saveDict(String type, HrBaseDictDTO dto) {
+        DictKind kind = DictKind.of(type);
+        assertDictEdit(kind);
+        String name = dto.getName() == null ? "" : dto.getName().trim();
+        if (name.isEmpty()) {
+            throw new BusinessException(kind.label + "不能为空");
+        }
+        String code = dto.getCode() == null ? "" : dto.getCode().trim();
+        if (kind.requireCode && code.isEmpty()) {
+            throw new BusinessException("请填写编码，例如 P0");
+        }
+        if (!kind.requireCode) {
+            code = "";
+        }
+        String category = dto.getCategory() == null ? "" : dto.getCategory().trim();
+        if (kind.requireCategory && category.isEmpty()) {
+            throw new BusinessException("请填写地址类别");
+        }
+        if (!kind.requireCategory) {
+            category = "";
+        }
+        int sort = dto.getSortNo() == null ? 0 : dto.getSortNo();
+        long excludeId = dto.getId() == null ? 0L : dto.getId();
+        Integer nameDup = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_base_dict
+                WHERE dict_type = ? AND name = ? AND is_active = 1 AND id <> ?
+                """, Integer.class, kind.type, name, excludeId);
+        if (nameDup != null && nameDup > 0) {
+            throw new BusinessException(kind.label + "已存在");
+        }
+        if (!code.isEmpty()) {
+            Integer codeDup = jdbc.queryForObject("""
+                    SELECT COUNT(1) FROM hr_base_dict
+                    WHERE dict_type = ? AND code = ? AND is_active = 1 AND id <> ?
+                    """, Integer.class, kind.type, code, excludeId);
+            if (codeDup != null && codeDup > 0) {
+                throw new BusinessException("编码「" + code + "」已存在");
+            }
+        }
+        if (dto.getId() == null) {
+            Long inactiveId = jdbc.query("""
+                    SELECT id FROM hr_base_dict WHERE dict_type = ? AND name = ? AND is_active = 0 ORDER BY id DESC LIMIT 1
+                    """, rs -> rs.next() ? rs.getLong(1) : null, kind.type, name);
+            if (inactiveId != null) {
+                jdbc.update("""
+                        UPDATE hr_base_dict SET code = ?, category = ?, sort_no = ?, is_active = 1, update_by = ? WHERE id = ?
+                        """, code, category, sort, SecurityUtils.getCurrentUsername(), inactiveId);
+                return;
+            }
+            jdbc.update("""
+                    INSERT INTO hr_base_dict (dict_type, code, category, name, sort_no, create_by, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                    """, kind.type, code, category, name, sort, SecurityUtils.getCurrentUsername());
+            return;
+        }
+        int updated = jdbc.update("""
+                UPDATE hr_base_dict SET code = ?, category = ?, name = ?, sort_no = ?, update_by = ?
+                WHERE id = ? AND dict_type = ? AND is_active = 1
+                """, code, category, name, sort, SecurityUtils.getCurrentUsername(), dto.getId(), kind.type);
+        if (updated == 0) {
+            throw new BusinessException(kind.label + "不存在");
+        }
+    }
+
+    @Transactional
+    public void deleteDict(String type, Long id) {
+        DictKind kind = DictKind.of(type);
+        assertDictEdit(kind);
+        String name = jdbc.query("""
+                SELECT name FROM hr_base_dict WHERE id = ? AND dict_type = ? AND is_active = 1
+                """, rs -> rs.next() ? rs.getString(1) : null, id, kind.type);
+        if (name == null) {
+            throw new BusinessException(kind.label + "不存在");
+        }
+        if (kind == DictKind.UNSUITABLE) {
+            Integer used = jdbc.queryForObject("""
+                    SELECT COUNT(1) FROM hr_phone_screen
+                    WHERE is_active = 1 AND TRIM(reject_reason) = ?
+                    """, Integer.class, name);
+            if (used != null && used > 0) {
+                throw new BusinessException("已有电话沟通使用该理由，不能删除");
+            }
+        }
+        jdbc.update("UPDATE hr_base_dict SET is_active = 0, update_by = ? WHERE id = ?",
+                SecurityUtils.getCurrentUsername(), id);
+    }
+
+    private void assertDictEdit(DictKind kind) {
+        LoginUser user = SecurityUtils.getCurrentUser();
+        if (user == null) {
+            throw new BusinessException(401, "未授权");
+        }
+        Set<String> perms = user.getPermissions();
+        if (perms != null && perms.contains(Constants.ADMIN_PERM)) {
+            return;
+        }
+        if (perms != null && perms.contains(kind.editPerm)) {
+            return;
+        }
+        throw new BusinessException(403, "权限不足，无法访问");
+    }
+
+    private enum DictKind {
+        WORK_ADDRESS(Constants.HR_DICT_WORK_ADDRESS, "工作地址", "hr:work-address:edit", false, true),
+        BG_FAIL(Constants.HR_DICT_BG_FAIL, "背调不通过原因", "hr:bg-fail:edit", false, false),
+        OFFER_UNSENT(Constants.HR_DICT_OFFER_UNSENT, "offer未发原因", "hr:offer-unsent:edit", false, false),
+        UNSUITABLE(Constants.HR_DICT_UNSUITABLE, "电话&面试不合适理由", "hr:unsuitable:edit", false, false),
+        JOB_PRIORITY(Constants.HR_DICT_JOB_PRIORITY, "岗位优先级", "hr:job-priority:edit", true, false);
+
+        private final String type;
+        private final String label;
+        private final String editPerm;
+        private final boolean requireCode;
+        private final boolean requireCategory;
+
+        DictKind(String type, String label, String editPerm, boolean requireCode, boolean requireCategory) {
+            this.type = type;
+            this.label = label;
+            this.editPerm = editPerm;
+            this.requireCode = requireCode;
+            this.requireCategory = requireCategory;
+        }
+
+        static DictKind of(String raw) {
+            if (raw == null || raw.isBlank()) {
+                throw new BusinessException("字典类型不能为空");
+            }
+            String key = raw.trim().toUpperCase(Locale.ROOT);
+            for (DictKind kind : values()) {
+                if (kind.type.equals(key)) {
+                    return kind;
+                }
+            }
+            throw new BusinessException("不支持的基础数据类型");
+        }
     }
 
     public List<Map<String, Object>> stages() {

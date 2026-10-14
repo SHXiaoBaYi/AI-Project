@@ -657,3 +657,26 @@ INSERT INTO hr_fail_reason (name, sort_no, create_by, is_active) VALUES
 ('岗位暂停', 4, 'hr-seed', 1),
 ('其他', 5, 'hr-seed', 1)
 ON DUPLICATE KEY UPDATE sort_no = VALUES(sort_no);
+
+CREATE TABLE IF NOT EXISTS hr_base_dict (
+  id           BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+  dict_type    VARCHAR(32)   NOT NULL                COMMENT 'WORK_ADDRESS/BG_FAIL/OFFER_UNSENT/UNSUITABLE/JOB_PRIORITY',
+  code         VARCHAR(32)   NOT NULL DEFAULT ''     COMMENT '编码，岗位优先级如P0/P1',
+  category     VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '地址类别，仅工作地址使用',
+  name         VARCHAR(128)  NOT NULL                COMMENT '名称',
+  sort_no      INT           NOT NULL DEFAULT 0      COMMENT '排序',
+  create_by    VARCHAR(50)   DEFAULT ''              COMMENT '创建者',
+  create_time  DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_by    VARCHAR(50)   DEFAULT ''              COMMENT '更新者',
+  update_time  DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  is_active    TINYINT       NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_hr_base_dict_name (dict_type, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘基础数据字典';
+
+INSERT INTO hr_base_dict (dict_type, code, name, sort_no, create_by, is_active) VALUES
+('WORK_ADDRESS', '', '上海', 1, 'hr-seed', 1),
+('WORK_ADDRESS', '', '新疆', 2, 'hr-seed', 1),
+('JOB_PRIORITY', 'P0', '本月必须到岗', 1, 'hr-seed', 1),
+('JOB_PRIORITY', 'P1', 'x份合格简历/到岗', 2, 'hr-seed', 1)
+ON DUPLICATE KEY UPDATE code = VALUES(code), sort_no = VALUES(sort_no);

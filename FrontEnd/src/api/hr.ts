@@ -630,6 +630,33 @@ export function deleteHrFailReasonApi(id: number) {
   return request.delete(`/hr/fail-reason/${id}`);
 }
 
+export type HrDictType = 'WORK_ADDRESS' | 'BG_FAIL' | 'OFFER_UNSENT' | 'UNSUITABLE' | 'JOB_PRIORITY';
+
+export type HrBaseDict = {
+  id: number;
+  dictType?: string;
+  code?: string;
+  category?: string;
+  name: string;
+  sortNo?: number;
+  sort_no?: number;
+};
+
+export function getHrDictOptionsApi(type: HrDictType) {
+  return request.get<unknown, HrBaseDict[]>(`/hr/dict/${type}/options`);
+}
+
+export function saveHrDictApi(
+  type: HrDictType,
+  data: { id?: number; code?: string; category?: string; name: string; sortNo?: number },
+) {
+  return data.id ? request.put(`/hr/dict/${type}`, data) : request.post(`/hr/dict/${type}`, data);
+}
+
+export function deleteHrDictApi(type: HrDictType, id: number) {
+  return request.delete(`/hr/dict/${type}/${id}`);
+}
+
 export function getHrUsersApi(scope?: 'owner' | 'interviewer') {
   return request.get<unknown, { userId: number; username: string; nickname: string; dingtalkBound: number }[]>(
     '/hr/user/options',

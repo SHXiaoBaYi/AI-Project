@@ -127,6 +127,17 @@ public class Constants {
     /** 招聘普通账号（钉钉扫码自动注册默认角色） */
     public static final String HR_USER_ROLE_KEY = "hr_user";
 
+    /** 招聘基础数据：工作地址 */
+    public static final String HR_DICT_WORK_ADDRESS = "WORK_ADDRESS";
+    /** 招聘基础数据：背调不通过原因 */
+    public static final String HR_DICT_BG_FAIL = "BG_FAIL";
+    /** 招聘基础数据：offer 未发原因 */
+    public static final String HR_DICT_OFFER_UNSENT = "OFFER_UNSENT";
+    /** 招聘基础数据：电话&面试不合适理由 */
+    public static final String HR_DICT_UNSUITABLE = "UNSUITABLE";
+    /** 招聘基础数据：岗位优先级（独立于紧急/优先/常规） */
+    public static final String HR_DICT_JOB_PRIORITY = "JOB_PRIORITY";
+
     /** GEO 模块选人角色：运营录入 */
     public static final String GEO_ROLE_OPS_ENTRY = "GEO运营录入";
     /** GEO 模块选人角色：管理复盘 */

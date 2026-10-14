@@ -45,6 +45,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureRequisitionCardColumns();
         ensurePipelineSchema();
         ensureKpiGradeColumns();
+        ensureBaseDictTable();
         log.info("招聘表结构、角色、用户和菜单已同步");
     }
 
@@ -206,6 +207,16 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(231, "目标到岗编辑", 230, 1, "", "", "F", "hr:target:edit", "#", "");
         menu(232, "未通过原因", 218, 3, "hr/fail-reason", "hr/fail-reason/index", "C", "hr:fail-reason:list", "TagsOutlined", "面试评价未通过可选原因");
         menu(233, "未通过原因编辑", 232, 1, "", "", "F", "hr:fail-reason:edit", "#", "");
+        menu(239, "工作地址", 218, 4, "hr/work-address", "hr/work-address/index", "C", "hr:work-address:list", "EnvironmentOutlined", "招聘工作地址");
+        menu(240, "工作地址编辑", 239, 1, "", "", "F", "hr:work-address:edit", "#", "");
+        menu(241, "背调不通过原因", 218, 5, "hr/bg-fail", "hr/bg-fail/index", "C", "hr:bg-fail:list", "StopOutlined", "背调不通过可选原因");
+        menu(242, "背调不通过原因编辑", 241, 1, "", "", "F", "hr:bg-fail:edit", "#", "");
+        menu(243, "offer未发原因", 218, 6, "hr/offer-unsent", "hr/offer-unsent/index", "C", "hr:offer-unsent:list", "ExceptionOutlined", "offer未发可选原因");
+        menu(244, "offer未发原因编辑", 243, 1, "", "", "F", "hr:offer-unsent:edit", "#", "");
+        menu(245, "电话&面试不合适理由", 218, 7, "hr/unsuitable-reason", "hr/unsuitable-reason/index", "C", "hr:unsuitable:list", "CommentOutlined", "电话沟通与面试不合适理由");
+        menu(246, "电话&面试不合适理由编辑", 245, 1, "", "", "F", "hr:unsuitable:edit", "#", "");
+        menu(247, "岗位优先级", 218, 8, "hr/job-priority", "hr/job-priority/index", "C", "hr:job-priority:list", "ThunderboltOutlined", "P0/P1等到岗优先级，独立于紧急/优先/常规");
+        menu(248, "岗位优先级编辑", 247, 1, "", "", "F", "hr:job-priority:edit", "#", "");
         menu(205, "发起邀约", 203, 1, "", "", "F", "hr:invite:add", "#", "");
         menu(206, "取消邀约", 203, 2, "", "", "F", "hr:invite:cancel", "#", "");
         menu(207, "看板导出", 201, 1, "", "", "F", "hr:board:export", "#", "");
@@ -231,10 +242,10 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247);
         grant(plain, 200, 201, 209, 234, 235, 237);
         grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235);
     }
@@ -299,6 +310,36 @@ public class HrSchemaMigrator implements ApplicationRunner {
             seedProofTaskType(45, "待入职", "终面通过后下发，完成时必须上传资料，可多份");
             seedProofTaskType(46, "办理候选人入职", "入职前任务全部完成后生成，完成时必须上传资料，可多份");
         }
+    }
+
+    private void ensureBaseDictTable() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_base_dict (
+                  id           BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  dict_type    VARCHAR(32)   NOT NULL                COMMENT 'WORK_ADDRESS/BG_FAIL/OFFER_UNSENT/UNSUITABLE/JOB_PRIORITY',
+                  code         VARCHAR(32)   NOT NULL DEFAULT ''     COMMENT '编码，岗位优先级如P0/P1',
+                  category     VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '地址类别，仅工作地址使用',
+                  name         VARCHAR(128)  NOT NULL                COMMENT '名称',
+                  sort_no      INT           NOT NULL DEFAULT 0      COMMENT '排序',
+                  create_by    VARCHAR(50)   DEFAULT ''              COMMENT '创建者',
+                  create_time  DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  update_by    VARCHAR(50)   DEFAULT ''              COMMENT '更新者',
+                  update_time  DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  is_active    TINYINT       NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+                  PRIMARY KEY (id),
+                  UNIQUE KEY uk_hr_base_dict_name (dict_type, name)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘基础数据字典'
+                """);
+        jdbc.update("""
+                INSERT INTO hr_base_dict (dict_type, code, name, sort_no, create_by, is_active) VALUES
+                ('WORK_ADDRESS', '', '上海', 1, 'hr-seed', 1),
+                ('WORK_ADDRESS', '', '新疆', 2, 'hr-seed', 1),
+                ('JOB_PRIORITY', 'P0', '本月必须到岗', 1, 'hr-seed', 1),
+                ('JOB_PRIORITY', 'P1', 'x份合格简历/到岗', 2, 'hr-seed', 1)
+                ON DUPLICATE KEY UPDATE code = VALUES(code), sort_no = VALUES(sort_no)
+                """);
+        addColumnIfMissing("hr_base_dict", "category",
+                "ALTER TABLE hr_base_dict ADD COLUMN category VARCHAR(64) NOT NULL DEFAULT '' COMMENT '地址类别，仅工作地址使用' AFTER code");
     }
 
     private void ensureFailReasonColumn() {
