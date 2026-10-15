@@ -36,6 +36,9 @@ public class SysTaskDTO {
     @Schema(description = "进度0-100", example = "0")
     private Integer progress;
 
+    @Schema(description = "任务来源人用户ID（手动创建时传入；空则记为系统）")
+    private Long sourceUserId;
+
     @NotNull(message = "负责人不能为空")
     @Schema(description = "负责人用户ID", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long ownerUserId;

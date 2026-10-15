@@ -45,6 +45,12 @@ public class SysTask extends BaseEntity {
     @Schema(description = "创建人展示名")
     private String creatorName;
 
+    @Schema(description = "任务来源人用户ID（空=系统）")
+    private Long sourceUserId;
+
+    @Schema(description = "任务来源人展示名", example = "系统")
+    private String sourceName;
+
     @Schema(description = "负责人用户ID")
     private Long ownerUserId;
 

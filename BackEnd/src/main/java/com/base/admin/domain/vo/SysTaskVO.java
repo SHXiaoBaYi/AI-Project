@@ -42,6 +42,12 @@ public class SysTaskVO {
     @Schema(description = "创建人")
     private String creatorName;
 
+    @Schema(description = "任务来源人用户ID")
+    private Long sourceUserId;
+
+    @Schema(description = "任务来源人", example = "系统")
+    private String sourceName;
+
     @Schema(description = "负责人用户ID")
     private Long ownerUserId;
 

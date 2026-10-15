@@ -22,6 +22,7 @@ import com.base.admin.domain.entity.SysUser;
 import com.base.admin.domain.vo.SysTaskAssigneeVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.domain.vo.SysTaskVO;
+import com.base.admin.domain.vo.SysUserOptionVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoContentPlacementMapper;
 import com.base.admin.mapper.SysTaskAssigneeMapper;
@@ -76,6 +77,23 @@ public class SysTaskServiceImpl implements SysTaskService {
     private final ObjectProvider<SysTaskService> selfProvider;
     private final FileStorageService fileStorageService;
     private final DataScopeFilter dataScopeFilter;
+
+    @Override
+    public List<SysUserOptionVO> listUserOptions() {
+        List<SysUser> users = userMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getStatus, Constants.STATUS_ACTIVE)
+                .orderByAsc(SysUser::getUserId));
+        List<SysUserOptionVO> options = new ArrayList<>(users.size());
+        for (SysUser user : users) {
+            SysUserOptionVO option = new SysUserOptionVO();
+            option.setUserId(user.getUserId());
+            option.setUsername(user.getUsername());
+            option.setNickname(user.getNickname());
+            option.setDisplayName(userDisplayName(user));
+            options.add(option);
+        }
+        return options;
+    }
 
     @Override
     public PageResult<SysTaskVO> list(SysTaskQueryDTO query) {
@@ -143,11 +161,34 @@ public class SysTaskServiceImpl implements SysTaskService {
                     .lt(SysTask::getPlanEndTime, LocalDateTime.now());
         }
 
+        // 历史脏数据：有进度却仍「未开始」→ 纠成「进行中」，避免我的任务里误归入未开始
+        healProgressWithoutStartStatus();
+
         dataScopeFilter.applyTask(wrapper);
         wrapper.orderByDesc(SysTask::getId);
         Page<SysTask> page = taskMapper.selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         List<SysTaskVO> rows = toVoList(page.getRecords());
         return new PageResult<>(page.getTotal(), rows);
+    }
+
+    /** 纠偏：progress&gt;0 且状态为未开始/待处理的任务升为进行中 */
+    private void healProgressWithoutStartStatus() {
+        List<SysTask> dirty = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .gt(SysTask::getProgress, 0)
+                .in(SysTask::getStatus, List.of("未开始", "待处理"))
+                .last("LIMIT 200"));
+        if (dirty.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (SysTask task : dirty) {
+            task.setStatus("进行中");
+            if (task.getActualStartTime() == null) {
+                task.setActualStartTime(now);
+            }
+            taskMapper.updateById(task);
+        }
+        log.info("已纠偏有进度仍为未开始的任务 {} 条", dirty.size());
     }
 
     @Override
@@ -168,9 +209,12 @@ public class SysTaskServiceImpl implements SysTaskService {
         SysTask task = new SysTask();
         fillTask(task, dto, owner);
         fillCreator(task);
+        fillSource(task, dto, true);
         if (!StringUtils.hasText(task.getStatus())) {
             task.setStatus("未开始");
         }
+        syncStatusWithProgress(task);
+        applyStatusSideEffects(task, null);
         taskMapper.insert(task);
         replaceAssignees(task.getId(), assigneeIds);
         return task.getId();
@@ -187,6 +231,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         SysUser owner = requireUser(dto.getOwnerUserId(), "负责人");
         String oldStatus = task.getStatus();
         fillTask(task, dto, owner);
+        fillSource(task, dto, false);
         applyStatusSideEffects(task, oldStatus);
         taskMapper.updateById(task);
         replaceAssignees(task.getId(), assigneeIds);
@@ -1158,6 +1203,23 @@ public class SysTaskServiceImpl implements SysTaskService {
         task.setCreatorName(SecurityUtils.getCurrentUsername());
     }
 
+    /**
+     * 任务来源人：DTO 指定用户则落该用户；新建未指定记为「系统」；
+     * 更新未传 sourceUserId 时保留原值（外源/自动派发不传）。
+     */
+    private void fillSource(SysTask task, SysTaskDTO dto, boolean creating) {
+        if (dto.getSourceUserId() != null) {
+            SysUser source = requireUser(dto.getSourceUserId(), "任务来源人");
+            task.setSourceUserId(source.getUserId());
+            task.setSourceName(userDisplayName(source));
+            return;
+        }
+        if (creating) {
+            task.setSourceUserId(null);
+            task.setSourceName("系统");
+        }
+    }
+
     private SysUser resolveCurrentCreator() {
         Long uid = SecurityUtils.getCurrentUserId();
         if (uid != null) {
@@ -1190,6 +1252,8 @@ public class SysTaskServiceImpl implements SysTaskService {
             throw new BusinessException("进度应在 0~100");
         }
         task.setProgress(progress);
+        // 有进度则不能再是「未开始」（我的任务里尤其易混）
+        syncStatusWithProgress(task);
         task.setOwnerUserId(owner.getUserId());
         task.setOwnerName(userDisplayName(owner));
         task.setPlanStartTime(dto.getPlanStartTime());
@@ -1210,6 +1274,7 @@ public class SysTaskServiceImpl implements SysTaskService {
     }
 
     private void applyStatusSideEffects(SysTask task, String oldStatus) {
+        syncStatusWithProgress(task);
         String status = task.getStatus();
         if ("进行中".equals(status) && task.getActualStartTime() == null) {
             task.setActualStartTime(LocalDateTime.now());
@@ -1223,6 +1288,27 @@ public class SysTaskServiceImpl implements SysTaskService {
             }
         } else if ("已完成".equals(oldStatus) && !"已完成".equals(status)) {
             task.setActualEndTime(null);
+        }
+    }
+
+    /**
+     * 进度 &gt; 0 时，「未开始/待处理」一律升为「进行中」。
+     * 已完成 / 已取消 / 待分配 不动。
+     */
+    private static void syncStatusWithProgress(SysTask task) {
+        if (task == null) {
+            return;
+        }
+        int progress = task.getProgress() == null ? 0 : task.getProgress();
+        if (progress <= 0) {
+            return;
+        }
+        String status = task.getStatus();
+        if ("未开始".equals(status) || "待处理".equals(status) || !StringUtils.hasText(status)) {
+            task.setStatus("进行中");
+            if (task.getActualStartTime() == null) {
+                task.setActualStartTime(LocalDateTime.now());
+            }
         }
     }
 
@@ -1331,6 +1417,8 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setProgress(task.getProgress());
         vo.setCreatorUserId(task.getCreatorUserId());
         vo.setCreatorName(task.getCreatorName());
+        vo.setSourceUserId(task.getSourceUserId());
+        vo.setSourceName(StringUtils.hasText(task.getSourceName()) ? task.getSourceName() : "系统");
         vo.setOwnerUserId(task.getOwnerUserId());
         vo.setOwnerName(task.getOwnerName());
         vo.setPlanStartTime(task.getPlanStartTime());

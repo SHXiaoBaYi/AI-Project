@@ -35,11 +35,48 @@ public class TaskSchemaMigrator implements ApplicationRunner {
             ensureRequireProofColumn(connection);
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v18_task_complete_proof.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v24_geo_review_task.sql"));
+            ensureTaskSourceColumns(connection);
         } catch (Exception e) {
             log.error("Task schema migrate failed", e);
             throw e;
         }
         log.info("任务模块表与菜单已同步");
+    }
+
+    /** 任务来源人：历史/系统任务默认「系统」，手动创建时可指定用户 */
+    private void ensureTaskSourceColumns(Connection connection) throws Exception {
+        if (!columnExists(connection, "sys_task", "source_user_id")) {
+            try (Statement st = connection.createStatement()) {
+                st.execute("""
+                        ALTER TABLE sys_task
+                          ADD COLUMN source_user_id BIGINT NULL
+                          COMMENT '任务来源人用户ID（空=系统）'
+                          AFTER creator_name
+                        """);
+            }
+            log.info("已为 sys_task 增加 source_user_id");
+        }
+        if (!columnExists(connection, "sys_task", "source_name")) {
+            try (Statement st = connection.createStatement()) {
+                st.execute("""
+                        ALTER TABLE sys_task
+                          ADD COLUMN source_name VARCHAR(64) NOT NULL DEFAULT '系统'
+                          COMMENT '任务来源人展示名'
+                          AFTER source_user_id
+                        """);
+            }
+            log.info("已为 sys_task 增加 source_name");
+        }
+        try (Statement st = connection.createStatement()) {
+            int n = st.executeUpdate("""
+                    UPDATE sys_task
+                       SET source_name = '系统'
+                     WHERE source_name IS NULL OR source_name = ''
+                    """);
+            if (n > 0) {
+                log.info("已回填 {} 条任务来源人为系统", n);
+            }
+        }
     }
 
     private void ensureRequireProofColumn(Connection connection) throws Exception {

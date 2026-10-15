@@ -13,6 +13,7 @@ import com.base.admin.domain.dto.SysTaskDTO;
 import com.base.admin.domain.dto.SysTaskQueryDTO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.domain.vo.SysTaskVO;
+import com.base.admin.domain.vo.SysUserOptionVO;
 import com.base.admin.service.FileStorageService;
 import com.base.admin.service.SysTaskService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -42,6 +43,13 @@ public class SysTaskController {
 
     private final SysTaskService taskService;
     private final FileStorageService fileStorageService;
+
+    @Operation(summary = "任务负责人/执行人可选用户（系统全部启用用户）")
+    @GetMapping("/user-options")
+    @RequiresPermission({"task:list", "task:mine", "task:add", "task:edit"})
+    public Result<List<SysUserOptionVO>> userOptions() {
+        return Result.ok(taskService.listUserOptions());
+    }
 
     @Operation(summary = "分页查询任务")
     @PostMapping("/list")

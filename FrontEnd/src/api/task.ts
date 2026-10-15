@@ -25,6 +25,8 @@ export type SysTask = {
   progress?: number;
   creatorUserId?: number;
   creatorName?: string;
+  sourceUserId?: number;
+  sourceName?: string;
   ownerUserId?: number;
   ownerName?: string;
   assigneeUserIds?: number[];
@@ -55,6 +57,8 @@ export type SysTaskDTO = {
   priority?: number;
   status?: string;
   progress?: number;
+  /** 手动创建时指定；不传则后端记为「系统」 */
+  sourceUserId?: number;
   ownerUserId: number;
   assigneeUserIds: number[];
   planStartTime?: string;
@@ -182,6 +186,18 @@ export function getTaskTypeListApi(data: SysTaskTypeQuery) {
 
 export function getTaskTypeOptionsApi() {
   return request.get<unknown, SysTaskType[]>('/task/type/options');
+}
+
+/** 任务负责人/执行人：系统全部启用用户 */
+export type TaskUserOption = {
+  userId: number;
+  displayName: string;
+  username?: string;
+  nickname?: string;
+};
+
+export function getTaskUserOptionsApi() {
+  return request.get<unknown, TaskUserOption[]>('/task/user-options');
 }
 
 export function createTaskTypeApi(data: SysTaskTypeDTO) {

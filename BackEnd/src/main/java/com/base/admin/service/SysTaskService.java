@@ -10,10 +10,14 @@ import com.base.admin.domain.dto.SysTaskDTO;
 import com.base.admin.domain.dto.SysTaskQueryDTO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.domain.vo.SysTaskVO;
+import com.base.admin.domain.vo.SysUserOptionVO;
 
 import java.util.List;
 
 public interface SysTaskService {
+
+    /** 任务负责人/执行人下拉：系统全部启用用户 */
+    List<SysUserOptionVO> listUserOptions();
 
     PageResult<SysTaskVO> list(SysTaskQueryDTO query);
 

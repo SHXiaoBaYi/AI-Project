@@ -3,11 +3,13 @@ import type { Key } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Button, Form, Input, Modal, Select, Tag, Upload } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
+import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
+import type { RootState } from '@/store';
 import {
   assignTaskApi,
   batchAssignTaskApi,
@@ -20,16 +22,18 @@ import {
   getTaskFilesByBizApi,
   getTaskListApi,
   getTaskTypeOptionsApi,
+  getTaskUserOptionsApi,
   updateTaskApi,
   uploadTaskFileApi,
   type SysTask,
   type SysTaskFile,
+  type TaskUserOption,
 } from '@/api/task';
-import { getGeoOwnerOptionsApi, getPendingGeoReviewsApi } from '@/api/geo';
-import type { GeoOwnerOption } from '@/types/geo';
+import { getPendingGeoReviewsApi } from '@/api/geo';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
 import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
+import { DATE_TIME_MINUTE_FORMAT, formatDateTimeMinute } from '@/utils/datetime';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
 
 type Props = {
@@ -44,12 +48,22 @@ const priorityColor: Record<number, string> = {
   4: 'error',
 };
 
+/** 任务管理列表状态色 */
 const statusColor: Record<string, string> = {
   待分配: 'default',
   未开始: 'processing',
   待处理: 'processing',
   进行中: 'blue',
   已完成: 'success',
+  已取消: 'default',
+};
+
+/** 我的任务：另一套状态 Tag（描边 + 不同色板，和任务管理区分开） */
+const mineStatusColor: Record<string, string> = {
+  未开始: 'geekblue',
+  待处理: 'geekblue',
+  进行中: 'orange',
+  已完成: 'green',
   已取消: 'default',
 };
 
@@ -60,6 +74,7 @@ function fileOpenUrl(url?: string) {
 const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Props) {
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const currentUserId = useSelector((state: RootState) => state.user.userInfo?.userId);
   const actionRef = useRef<ActionType>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SysTask | null>(null);
@@ -80,7 +95,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   const [filesTitle, setFilesTitle] = useState('附件');
   const [filesLoading, setFilesLoading] = useState(false);
   const [files, setFiles] = useState<SysTaskFile[]>([]);
-  const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
+  const [owners, setOwners] = useState<TaskUserOption[]>([]);
   const [typeOptions, setTypeOptions] = useState<{ label: string; value: string }[]>([]);
   const [writeOpen, setWriteOpen] = useState(false);
   const [writePlacementId, setWritePlacementId] = useState<number | null>(null);
@@ -113,7 +128,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   };
 
   useEffect(() => {
-    void getGeoOwnerOptionsApi().then((list) => setOwners(list ?? []));
+    void getTaskUserOptionsApi().then((list) => setOwners(list ?? []));
     void getTaskTypeOptionsApi().then((list) => {
       const opts = (list ?? []).map((t) => ({ label: t.typeName, value: t.typeName }));
       setTypeOptions(opts);
@@ -263,13 +278,33 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
     {
       title: '状态',
       dataIndex: 'status',
-      width: 100,
+      width: mineOnly ? 120 : 100,
       search: false,
       hideInSearch: true,
       valueType: 'select',
       fieldProps: { options: statusOptions, allowClear: true },
       render: (_, r) => {
         const s = r.status || '未开始';
+        if (mineOnly) {
+          return (
+            <span className='inline-flex flex-wrap items-center gap-1'>
+              <Tag
+                color={mineStatusColor[s] || 'default'}
+                variant='outlined'
+              >
+                {s}
+              </Tag>
+              {r.overdue ? (
+                <Tag
+                  color='error'
+                  variant='outlined'
+                >
+                  逾期
+                </Tag>
+              ) : null}
+            </span>
+          );
+        }
         return (
           <span className='inline-flex items-center gap-1'>
             <Tag color={statusColor[s] || 'default'}>{s}</Tag>
@@ -310,11 +345,30 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       render: (_, r) => r.ownerName || '-',
     },
     {
+      title: '任务来源人',
+      dataIndex: 'sourceUserId',
+      width: 110,
+      valueType: 'select',
+      search: false,
+      hideInForm: mineOnly,
+      fieldProps: {
+        options: userOptions,
+        showSearch: true,
+        optionFilterProp: 'label',
+        allowClear: true,
+        placeholder: '系统',
+      },
+      formItemProps: editing ? undefined : { rules: [{ required: true, message: '请选择任务来源人' }] },
+      render: (_, r) => r.sourceName || '系统',
+    },
+    {
       title: '执行人',
       dataIndex: 'assigneeUserIds',
       width: 160,
       valueType: 'select',
       search: false,
+      hideInTable: mineOnly,
+      hideInForm: mineOnly,
       fieldProps: {
         options: userOptions,
         mode: 'multiple',
@@ -322,7 +376,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
         optionFilterProp: 'label',
         maxTagCount: 'responsive',
       },
-      formItemProps: { rules: [{ required: true, message: '请至少选择一名执行人' }] },
+      formItemProps: mineOnly ? undefined : { rules: [{ required: true, message: '请至少选择一名执行人' }] },
       render: (_, r) => r.assigneeNames || '-',
     },
     {
@@ -355,11 +409,32 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
         ),
     },
     {
-      title: '计划截止',
-      dataIndex: 'planEndTime',
-      width: 170,
+      title: mineOnly ? '接收时间' : '创建时间',
+      dataIndex: 'createTime',
+      width: 160,
       valueType: 'dateTime',
       search: false,
+      hideInForm: true,
+      render: (_, r) => formatDateTimeMinute(r.createTime),
+    },
+    {
+      title: mineOnly ? '任务计划' : '计划开始',
+      dataIndex: 'planStartTime',
+      width: 160,
+      valueType: 'dateTime',
+      search: false,
+      hideInTable: !mineOnly,
+      fieldProps: { format: DATE_TIME_MINUTE_FORMAT, showSecond: false },
+      render: (_, r) => formatDateTimeMinute(r.planStartTime),
+    },
+    {
+      title: '计划截止',
+      dataIndex: 'planEndTime',
+      width: 160,
+      valueType: 'dateTime',
+      search: false,
+      fieldProps: { format: DATE_TIME_MINUTE_FORMAT, showSecond: false },
+      render: (_, r) => formatDateTimeMinute(r.planEndTime),
     },
     {
       title: '完成时间',
@@ -395,14 +470,6 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       },
     },
     {
-      title: '计划开始',
-      dataIndex: 'planStartTime',
-      width: 170,
-      valueType: 'dateTime',
-      search: false,
-      hideInTable: true,
-    },
-    {
       title: '说明',
       dataIndex: 'content',
       valueType: 'textarea',
@@ -419,13 +486,6 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       hideInTable: true,
     },
     {
-      title: '创建人',
-      dataIndex: 'creatorName',
-      width: 100,
-      search: false,
-      hideInForm: true,
-    },
-    {
       title: '创建时间',
       dataIndex: 'createTime',
       valueType: 'dateRange',
@@ -437,14 +497,6 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
           createTimeEnd: value?.[1],
         }),
       },
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'createTime',
-      width: 170,
-      valueType: 'dateTime',
-      search: false,
-      hideInForm: true,
     },
     {
       title: '操作',
@@ -671,6 +723,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             ? {
                 ...editing,
                 assigneeUserIds: editing.assigneeUserIds || [],
+                sourceUserId: editing.sourceUserId,
                 taskType: editing.taskType || defaultType,
                 priority: editing.priority ?? 2,
                 status: editing.status || defaultStatus,
@@ -682,6 +735,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
                 status: defaultStatus,
                 progress: 0,
                 assigneeUserIds: [],
+                sourceUserId: currentUserId,
               }
         }
         onFinish={async (values) => {
@@ -690,13 +744,25 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             message.error('请至少选择一名执行人');
             return false;
           }
+          const progress = Number(values.progress ?? 0);
+          let status = (values.status as string) || defaultStatus;
+          // 有进度则不能再是「未开始」
+          if (progress > 0 && (status === '未开始' || status === '待处理')) {
+            status = '进行中';
+          }
+          const sourceUserId = values.sourceUserId || (!editing ? currentUserId : undefined);
+          if (!editing && !sourceUserId) {
+            message.error('请选择任务来源人');
+            return false;
+          }
           const payload = {
             title: values.title,
             content: values.content,
             taskType: values.taskType || defaultType,
             priority: values.priority ?? 2,
-            status: values.status || defaultStatus,
-            progress: values.progress ?? 0,
+            status,
+            progress,
+            sourceUserId,
             ownerUserId: values.ownerUserId,
             assigneeUserIds,
             planStartTime: values.planStartTime,
