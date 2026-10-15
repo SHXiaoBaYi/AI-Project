@@ -69,12 +69,56 @@ public class Constants {
     /** 内容投放待分配占位 */
     public static final String CONTENT_UNASSIGNED = "待分配";
 
+    /** 稿件状态：草稿 */
+    public static final String CONTENT_STATUS_DRAFTING = "drafting";
+    /** 稿件状态：待审核 */
+    public static final String CONTENT_STATUS_PENDING_REVIEW = "pending_review";
+    /** 稿件状态：修改中 */
+    public static final String CONTENT_STATUS_REVISING = "revising";
+    /** 稿件状态：已通过 */
+    public static final String CONTENT_STATUS_APPROVED = "approved";
+    /** 稿件状态：一审已通过，可发起二审 */
+    public static final String CONTENT_STATUS_STAGE1_PASSED = "stage1_passed";
+    /** 稿件状态：待投放（审核通过，回到投放管理维护投放） */
+    public static final String CONTENT_STATUS_QUEUE = "queue";
+    /** 文章审核阶段：一审 */
+    public static final int CONTENT_REVIEW_STAGE1 = 1;
+    /** 文章审核阶段：二审 */
+    public static final int CONTENT_REVIEW_STAGE2 = 2;
+    /** 稿件状态：已发布（投放管理中已有投放成功记录） */
+    public static final String CONTENT_STATUS_PUBLISHED = "published";
+    /** 在线正文格式（一期锁定） */
+    public static final String CONTENT_FORMAT_LAKE = "text/lake";
+    /** 平台文章正文来源：沿用问题统一稿 */
+    public static final String CONTENT_MODE_SHARED = "shared";
+    /** 平台文章正文来源：该平台独立稿 */
+    public static final String CONTENT_MODE_CUSTOM = "custom";
+
     /** 任务关联业务：GEO内容投放 */
     public static final String TASK_BIZ_GEO_CONTENT_PLACEMENT = "geo_content_placement";
+    /** 任务关联业务：GEO文章审核轮次 */
+    public static final String TASK_BIZ_GEO_CONTENT_REVIEW = "geo_content_review";
+    /** 任务类型：文章撰写 */
+    public static final String TASK_TYPE_GEO_WRITE = "文章撰写";
+    /** 任务类型：审核文章 */
+    public static final String TASK_TYPE_GEO_REVIEW = "审核文章";
+    /** 任务类型：文章发布 */
+    public static final String TASK_TYPE_GEO_PUBLISH = "文章发布";
     /** 任务类型：待分配发布人 */
     public static final String TASK_TYPE_GEO_ASSIGN_PUBLISHER = "GEO文章待分配发布人";
     /** 任务类型：待分配撰写人 */
     public static final String TASK_TYPE_GEO_ASSIGN_WRITER = "GEO文章待分配撰写人";
+    /** 撰写任务：已有正文时的进度 */
+    public static final int TASK_PROGRESS_WRITE_DRAFTED = 50;
+    /** 撰写任务：一审通过后的进度（二审通过才 100%） */
+    public static final int TASK_PROGRESS_WRITE_STAGE1_PASSED = 80;
+    /**
+     * 在线撰写功能上线时间（含当日）。
+     * 「我的撰写记录」排除上线前仅因指定撰写人而存在的历史投放；
+     * 上线后新建投放、上线后派发的撰写任务、以及上线后实际保存过正文的投放仍会展示。
+     */
+    public static final java.time.LocalDateTime GEO_ONLINE_WRITE_LAUNCH_AT =
+            java.time.LocalDateTime.of(2026, 10, 13, 0, 0, 0);
     /** 分配回写字段：发布人 */
     public static final String TASK_ASSIGN_FIELD_PUBLISHER = "publisher";
     /** 分配回写字段：撰写人 */
@@ -82,6 +126,17 @@ public class Constants {
 
     /** 招聘普通账号（钉钉扫码自动注册默认角色） */
     public static final String HR_USER_ROLE_KEY = "hr_user";
+
+    /** 招聘基础数据：工作地址 */
+    public static final String HR_DICT_WORK_ADDRESS = "WORK_ADDRESS";
+    /** 招聘基础数据：背调不通过原因 */
+    public static final String HR_DICT_BG_FAIL = "BG_FAIL";
+    /** 招聘基础数据：offer 未发原因 */
+    public static final String HR_DICT_OFFER_UNSENT = "OFFER_UNSENT";
+    /** 招聘基础数据：电话&面试不合适理由 */
+    public static final String HR_DICT_UNSUITABLE = "UNSUITABLE";
+    /** 招聘基础数据：岗位优先级（独立于紧急/优先/常规） */
+    public static final String HR_DICT_JOB_PRIORITY = "JOB_PRIORITY";
 
     /** GEO 模块选人角色：运营录入 */
     public static final String GEO_ROLE_OPS_ENTRY = "GEO运营录入";

@@ -29,6 +29,7 @@ import ImportApplicationModal from '@/pages/hr/application/components/ImportAppl
 import {
   downloadHrPortfolioApi,
   getHrChannelsApi,
+  getHrDictOptionsApi,
   getHrPipelineBoardApi,
   getHrPipelineDetailApi,
   getHrRequisitionsApi,
@@ -211,13 +212,16 @@ export default function HrPipelinePage() {
   const [phoneForm] = Form.useForm();
   const [onboardForm] = Form.useForm();
   const phoneResult = Form.useWatch('result', phoneForm);
+  const screenResult = Form.useWatch('result', screenForm);
+  const [unsuitableReasons, setUnsuitableReasons] = useState<{ value: string; label: string }[]>([]);
 
   const loadMeta = useCallback(async () => {
-    const [reqRows, channelRows, stageRows, userRows] = await Promise.all([
+    const [reqRows, channelRows, stageRows, userRows, reasonRows] = await Promise.all([
       getHrRequisitionsApi({ status: 'OPEN' }),
       getHrChannelsApi(),
       getHrStagesApi(),
       getHrUsersApi(),
+      getHrDictOptionsApi('UNSUITABLE').catch(() => []),
     ]);
     setJobs(
       (reqRows || []).map((r) => ({
@@ -249,6 +253,7 @@ export default function HrPipelinePage() {
         return { value: Number(row.userId ?? row.user_id), label: String(row.nickname ?? '') };
       }),
     );
+    setUnsuitableReasons((reasonRows || []).map((row) => ({ value: row.name, label: row.name })));
   }, []);
 
   const loadBoard = useCallback(async () => {
@@ -383,7 +388,7 @@ export default function HrPipelinePage() {
                         onOpen={() => void openDetail(item.applicationId)}
                         onScreen={() => {
                           setScreenTarget(item);
-                          screenForm.setFieldsValue({ result: undefined, remark: undefined });
+                          screenForm.setFieldsValue({ result: undefined, rejectReason: undefined, remark: undefined });
                         }}
                         onPhone={() => {
                           setPhoneTarget(item);
@@ -453,6 +458,7 @@ export default function HrPipelinePage() {
           await saveHrPipelineScreenApi({
             applicationId: screenTarget!.applicationId,
             result: values.result,
+            rejectReason: values.result === 'FAIL' ? values.rejectReason : undefined,
             remark: values.remark,
           });
           message.success('初筛已保存');
@@ -472,6 +478,20 @@ export default function HrPipelinePage() {
           >
             <Select options={RESULT_OPTS} />
           </Form.Item>
+          {screenResult === 'FAIL' ? (
+            <Form.Item
+              name='rejectReason'
+              label='不合适原因'
+              rules={[{ required: true, message: '请选择原因' }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp='label'
+                options={unsuitableReasons}
+                placeholder='请选择原因'
+              />
+            </Form.Item>
+          ) : null}
           <Form.Item
             name='remark'
             label='备注'

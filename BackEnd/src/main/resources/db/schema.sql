@@ -133,7 +133,7 @@ INSERT INTO sys_user (user_id, username, password, nickname, status, remark)
 VALUES (1, 'admin', '$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2', '管理员', 0, '系统管理员');
 
 -- Assign admin role
-INSERT INTO sys_user_role (user_id, role_id) VALUES (1, 1);
+INSERT IGNORE INTO sys_user_role (user_id, role_id) VALUES (1, 1);
 
 -- System Management directory
 INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon) VALUES
@@ -165,5 +165,5 @@ INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component
 (14, '菜单删除', 4, 3, '', '', 'F', 'system:menu:delete', '#');
 
 -- Assign ALL menus to admin role
-INSERT INTO sys_role_menu (role_id, menu_id) VALUES
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES
 (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(1,7),(1,8),(1,9),(1,10),(1,11),(1,12),(1,13),(1,14);

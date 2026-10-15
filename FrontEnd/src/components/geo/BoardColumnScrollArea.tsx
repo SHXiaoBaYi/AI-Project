@@ -24,9 +24,12 @@ const Y_AXIS_WIDTH = 72;
 export function BoardColumnScrollArea({
   data,
   children,
+  onSeriesDrill,
 }: {
   data: Array<{ axis?: unknown; series?: unknown }> | undefined | null;
   children: ReactNode;
+  /** 双击图例系列名下钻（柱体点击的备用入口） */
+  onSeriesDrill?: (series: string) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -80,6 +83,7 @@ export function BoardColumnScrollArea({
         series={series}
         hidden={hidden}
         onToggle={toggle}
+        onDrill={onSeriesDrill}
       />
       <div
         ref={wrapRef}

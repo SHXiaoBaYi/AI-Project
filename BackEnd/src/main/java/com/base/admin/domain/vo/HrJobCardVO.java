@@ -8,22 +8,28 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Data
-@Schema(description = "按部门分组的岗位信息卡片")
+@Schema(description = "岗位看板卡片列表")
 public class HrJobCardVO {
 
-    @Schema(description = "部门分组")
+    @Schema(description = "符合条件的岗位总数", example = "12")
+    private Long total;
+
+    @Schema(description = "当前页岗位卡片")
+    private List<JobCard> rows = new ArrayList<>();
+
+    @Schema(description = "部门分组（兼容旧前端，可空）")
     private List<DeptGroup> groups = new ArrayList<>();
 
     @Data
     @Schema(description = "一个部门下的岗位卡片")
     public static class DeptGroup {
-        @Schema(description = "部门ID，未分配时为空")
+        @Schema(description = "部门ID，未分配时为空", example = "1", nullable = true)
         private Long deptId;
 
         @Schema(description = "部门名称")
         private String deptName;
 
-        @Schema(description = "本组岗位数")
+        @Schema(description = "本组岗位数", example = "3")
         private Integer jobCount;
 
         @Schema(description = "岗位卡片")
@@ -33,7 +39,7 @@ public class HrJobCardVO {
     @Data
     @Schema(description = "岗位信息卡片")
     public static class JobCard {
-        @Schema(description = "需求ID")
+        @Schema(description = "需求ID", example = "10")
         private Long id;
 
         @Schema(description = "岗位名称")
@@ -72,7 +78,10 @@ public class HrJobCardVO {
         @Schema(description = "招聘负责人用户ID")
         private List<Long> ownerUserIds = new ArrayList<>();
 
-        @Schema(description = "部门ID")
+        @Schema(description = "负责人人数", example = "2")
+        private Integer ownerCount;
+
+        @Schema(description = "部门ID", example = "1", nullable = true)
         private Long deptId;
 
         @Schema(description = "部门名称")
@@ -87,19 +96,37 @@ public class HrJobCardVO {
         @Schema(description = "卡片状态文案 待招/进行中/已关闭")
         private String cardStatusLabel;
 
-        @Schema(description = "紧急程度 1/2/3")
+        @Schema(description = "紧急程度 1/2/3", example = "1", nullable = true)
         private Integer priority;
 
         @Schema(description = "紧急程度文案")
         private String priorityLabel;
 
-        @Schema(description = "需求人数")
+        @Schema(description = "需求人数", example = "1", nullable = true)
         private Integer headcount;
 
-        @Schema(description = "在招候选人数量（用于区分待招/进行中）")
+        @Schema(description = "在招候选人数量（用于区分待招/进行中）", example = "3")
         private Integer candidateCount;
+
+        @Schema(description = "未处理（已录入未筛）人数", example = "7")
+        private Integer pendingCount;
+
+        @Schema(description = "约面中人数", example = "4")
+        private Integer interviewingCount;
+
+        @Schema(description = "已入职人数", example = "0")
+        private Integer onboardedCount;
 
         @Schema(description = "工作地 SH/XJ")
         private String locationCode;
+
+        @Schema(description = "工作地址展示名")
+        private String workLocation;
+
+        @Schema(description = "岗位优先级编码")
+        private String jobPriorityCode;
+
+        @Schema(description = "岗位优先级文案")
+        private String jobPriorityLabel;
     }
 }

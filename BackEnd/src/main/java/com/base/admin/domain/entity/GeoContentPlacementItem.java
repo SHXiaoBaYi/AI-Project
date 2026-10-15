@@ -51,4 +51,29 @@ public class GeoContentPlacementItem extends BaseEntity {
 
     @Schema(description = "是否演示数据 1=是 0=否", example = "0")
     private Integer isDemo;
+
+    @Schema(description = "正文来源 shared=统一稿 custom=独立稿", example = "shared")
+    private String contentMode;
+
+    @Schema(description = "独立稿标题")
+    private String contentTitle;
+
+    @Schema(description = "独立稿 Lake 正文")
+    private String contentBody;
+
+    @Schema(description = "独立稿格式", example = "text/lake")
+    private String contentFormat;
+
+    @Schema(description = "该平台文章审核状态", example = "drafting")
+    private String contentStatus;
+
+    @Schema(description = "独立稿乐观锁版本", example = "0")
+    private Long contentVersion;
+
+    @Schema(description = "正文最近保存人")
+    private String contentUpdatedBy;
+
+    @Schema(description = "正文最近保存时间", example = "2026-10-12 15:00:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime contentUpdatedAt;
 }

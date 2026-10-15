@@ -72,9 +72,11 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         vo.setTargetQuestion(trimToNull(q.getTargetQuestion()));
         vo.setPublisherUserId(q.getPublisherUserId());
         vo.setPublisherName(trimToNull(q.getPublisherName()));
+        vo.setWriterUserId(q.getWriterUserId());
+        vo.setWriterName(trimToNull(q.getWriterName()));
         vo.setContentPlatform(trimToNull(q.getContentPlatform()));
         vo.setAiPlatform(trimToNull(q.getAiPlatform()));
-        vo.setMetricLabel(metricLabel(chartType));
+        vo.setMetricLabel(metricLabel(chartType, level, q));
         if (q.getTopicId() != null) {
             vo.setTopicName(data.topicNames.getOrDefault(q.getTopicId(), "话题#" + q.getTopicId()));
         }
@@ -342,6 +344,15 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                 && !pn.equals(trim(row.placement.getPublisherName()))) {
             return false;
         }
+        if (q.getWriterUserId() != null
+                && !Objects.equals(row.placement.getOwnerUserId(), q.getWriterUserId())) {
+            return false;
+        }
+        String wn = trimToNull(q.getWriterName());
+        if (wn != null && q.getWriterUserId() == null
+                && !wn.equals(trim(row.placement.getOwnerName()))) {
+            return false;
+        }
         String cp = trimToNull(q.getContentPlatform());
         if (cp != null) {
             if (!cp.equals(trim(row.item.getPlatformName()))) {
@@ -373,6 +384,13 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                 Long uid = row.placement.getPublisherUserId();
                 String name = StringUtils.hasText(row.placement.getPublisherName())
                         ? row.placement.getPublisherName().trim() : "未分配";
+                yield new SeriesRef(uid == null ? ("n:" + name) : String.valueOf(uid), name);
+            }
+            case "writer" -> {
+                // 员工收录对比：按撰写人（owner），不是发布人
+                Long uid = row.placement.getOwnerUserId();
+                String name = StringUtils.hasText(row.placement.getOwnerName())
+                        ? row.placement.getOwnerName().trim() : "未分配";
                 yield new SeriesRef(uid == null ? ("n:" + name) : String.valueOf(uid), name);
             }
             case "contentPlatform" -> {
@@ -409,38 +427,32 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                 }
                 yield "topic";
             }
+            // 话题被AI收录率：话题 → 各 AI 平台收录率
             case "citeRate" -> {
-                if (StringUtils.hasText(q.getAiPlatform())) {
+                if (q.getTopicId() != null || StringUtils.hasText(q.getAiPlatform())) {
                     yield "aiPlatform";
-                }
-                if (q.getPublisherUserId() != null || StringUtils.hasText(q.getPublisherName())) {
-                    yield "aiPlatform";
-                }
-                if (StringUtils.hasText(q.getTargetQuestion())) {
-                    yield "employee";
-                }
-                if (q.getTopicId() != null) {
-                    yield "question";
                 }
                 yield "topic";
             }
+            // 员工AI收录对比：撰写人 → 各 AI 平台收录率
             case "employeeCiteCompare", "employeeCiteMom", "employeeCiteYoy" -> {
-                if (q.getPublisherUserId() != null || StringUtils.hasText(q.getPublisherName())) {
+                if (q.getWriterUserId() != null || StringUtils.hasText(q.getWriterName())) {
                     yield "aiPlatform";
                 }
-                yield "employee";
+                yield "writer";
             }
+            // 被引用内容发布平台数（三级，横轴始终=日期）：
+            // 第1层 各内容平台被引用次数汇总
+            // 第2层 该内容平台下各 AI 平台引用次数
+            // 第3层 该内容平台 + 该 AI 下各话题引用次数
             case "topicCiteCount" -> {
-                if (StringUtils.hasText(q.getAiPlatform())) {
+                if (StringUtils.hasText(q.getContentPlatform()) && StringUtils.hasText(q.getAiPlatform())) {
+                    yield "topic";
+                }
+                if (StringUtils.hasText(q.getContentPlatform())) {
                     yield "aiPlatform";
                 }
-                if (StringUtils.hasText(q.getTargetQuestion())) {
-                    yield "aiPlatform";
-                }
-                if (q.getTopicId() != null) {
-                    yield "question";
-                }
-                yield "topic";
+                yield "contentPlatform";
             }
             default -> "topic";
         };
@@ -449,12 +461,16 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
     private Dataset loadDataset(LocalDate start, LocalDate end, BoardTaskTofuQueryDTO q) {
         LambdaQueryWrapper<GeoContentPlacement> pw = new LambdaQueryWrapper<GeoContentPlacement>()
                 .eq(q.getTopicId() != null, GeoContentPlacement::getTopicId, q.getTopicId())
-                .eq(q.getPublisherUserId() != null, GeoContentPlacement::getPublisherUserId, q.getPublisherUserId());
+                .eq(q.getPublisherUserId() != null, GeoContentPlacement::getPublisherUserId, q.getPublisherUserId())
+                .eq(q.getWriterUserId() != null, GeoContentPlacement::getOwnerUserId, q.getWriterUserId());
         if (StringUtils.hasText(q.getTargetQuestion())) {
             pw.eq(GeoContentPlacement::getTargetQuestion, q.getTargetQuestion().trim());
         }
         if (StringUtils.hasText(q.getPublisherName()) && q.getPublisherUserId() == null) {
             pw.eq(GeoContentPlacement::getPublisherName, q.getPublisherName().trim());
+        }
+        if (StringUtils.hasText(q.getWriterName()) && q.getWriterUserId() == null) {
+            pw.eq(GeoContentPlacement::getOwnerName, q.getWriterName().trim());
         }
         dataScopeFilter.applyGeoPlacement(pw);
         List<GeoContentPlacement> placements = placementMapper.selectList(pw);
@@ -480,7 +496,11 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         }
         var snap = dataScopeFilter.snapshot();
         if (!snap.globalAll() && snap.geoEnabled() && !snap.geoPlatformNames().isEmpty()) {
-            iw.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames());
+            iw.and(w -> w.in(GeoContentPlacementItem::getPlatformName, snap.geoPlatformNames())
+                    .or()
+                    .eq(GeoContentPlacementItem::getPlatformName, "")
+                    .or()
+                    .isNull(GeoContentPlacementItem::getPlatformName));
         }
         List<ItemRow> items = new ArrayList<>();
         for (GeoContentPlacementItem item : itemMapper.selectList(iw)) {
@@ -587,14 +607,24 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         return List.of("day", "week", "month", "year").contains(g) ? g : "week";
     }
 
-    private static String metricLabel(String chartType) {
+    private static String metricLabel(String chartType, String level, BoardTaskTofuQueryDTO q) {
         return switch (chartType) {
             case "publishCount" -> "发布数量";
-            case "citeRate" -> "AI收录率%";
-            case "employeeCiteCompare" -> "员工AI收录率%";
+            case "citeRate" -> "被收录文章/发布文章%";
+            case "employeeCiteCompare" -> "被收录文章/产出文章%";
             case "employeeCiteMom" -> "收录率环比(pp)";
             case "employeeCiteYoy" -> "收录率同比(pp)";
-            case "topicCiteCount" -> "AI引用数";
+            case "topicCiteCount" -> {
+                if ("topic".equals(level)
+                        && StringUtils.hasText(q.getContentPlatform())
+                        && StringUtils.hasText(q.getAiPlatform())) {
+                    yield q.getContentPlatform().trim() + " · " + q.getAiPlatform().trim() + " · 各话题引用次数";
+                }
+                if ("aiPlatform".equals(level) && StringUtils.hasText(q.getContentPlatform())) {
+                    yield q.getContentPlatform().trim() + " · 各AI平台引用次数";
+                }
+                yield "各内容平台被引用次数";
+            }
             default -> "指标";
         };
     }

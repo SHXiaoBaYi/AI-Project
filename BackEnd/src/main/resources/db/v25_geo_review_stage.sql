@@ -1,0 +1,2 @@
+-- GEO 文章两阶段串行审核（1=一审 2=二审）
+-- 列由启动时 GeoSchemaMigrator.ensureContentReviewStage 自动补齐，本文件仅作说明。

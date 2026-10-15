@@ -1,0 +1,6 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Wed Sep 23 15:17:02 CST 2026
+@default-alimaven-http\://maven.aliyun.com/nexus/content/groups/public/.lastUpdated=1790147822488
+@default-nexus-public-http-http\://nexus.yqn.corp\:8081/repository/maven-public/.lastUpdated=1790147822419
+http\://maven.aliyun.com/nexus/content/groups/public/.error=Could not transfer artifact org.springframework.boot\:spring-boot-starter-parent\:pom\:3.4.5 from/to alimaven (http\://maven.aliyun.com/nexus/content/groups/public/)\: maven.aliyun.com\: nodename nor servname provided, or not known
+http\://nexus.yqn.corp\:8081/repository/maven-public/.error=Could not transfer artifact org.springframework.boot\:spring-boot-starter-parent\:pom\:3.4.5 from/to nexus-public-http (http\://nexus.yqn.corp\:8081/repository/maven-public/)\: nexus.yqn.corp\: nodename nor servname provided, or not known

@@ -11,9 +11,9 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /**
- * 启动时按需刷入 2014/2015 演示数据。
+ * 启动时按需刷入 2014/2015 演示数据（默认全部关闭，避免每次重启改业务数据）。
  * <ul>
- *   <li>demo.seed=true（默认）：若尚无演示数据则刷入</li>
+ *   <li>demo.seed=true：若尚无演示数据则刷入（刷完改回 false）</li>
  *   <li>demo.reseed=true：强制清理后重刷</li>
  *   <li>demo.rebuild-board=true：仅按现有日监测重建周/月/年快照</li>
  * </ul>
@@ -26,7 +26,7 @@ public class DemoYearDataSeeder implements ApplicationRunner {
 
     private final DemoYearDataService demoYearDataService;
 
-    @Value("${demo.seed:true}")
+    @Value("${demo.seed:false}")
     private boolean seedEnabled;
 
     @Value("${demo.reseed:false}")

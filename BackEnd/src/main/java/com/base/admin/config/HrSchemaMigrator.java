@@ -45,6 +45,10 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureRequisitionCardColumns();
         ensurePipelineSchema();
         ensureKpiGradeColumns();
+        ensureBaseDictTable();
+        ensureRequisitionPanelColumns();
+        backfillWorkAddressFromLocation();
+        ensureCandidateProfileColumns();
         log.info("招聘表结构、角色、用户和菜单已同步");
     }
 
@@ -89,14 +93,16 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 """);
         addColumnIfMissing("hr_offer", "salary_amount",
                 "ALTER TABLE hr_offer ADD COLUMN salary_amount DECIMAL(12,2) NULL COMMENT '最终offer金额' AFTER application_id");
+        addColumnIfMissing("hr_application", "screen_reject_reason",
+                "ALTER TABLE hr_application ADD COLUMN screen_reject_reason VARCHAR(255) NULL COMMENT '初筛不合适原因' AFTER screen_result");
         jdbc.update("""
-                INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
+                INSERT IGNORE INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
                 ('SCREEN_FAIL', '初筛不合适', 21, 0, 1, 1, 1),
                 ('PHONE_PASS', '电话沟通合适', 25, 0, 1, 0, 1),
                 ('PHONE_FAIL', '电话沟通不合适', 26, 0, 1, 1, 1)
                 ON DUPLICATE KEY UPDATE stage_name = VALUES(stage_name), sort_no = VALUES(sort_no),
                   funnel_visible = VALUES(funnel_visible), data_ready = VALUES(data_ready),
-                  terminal = VALUES(terminal), is_active = 1
+                  terminal = VALUES(terminal)
                 """);
     }
 
@@ -171,7 +177,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
                     "SELECT COUNT(1) FROM sys_user_role WHERE user_id = ? AND role_id = ?",
                     Integer.class, userId, roleId);
             if (linked == null || linked == 0) {
-                jdbc.update("INSERT INTO sys_user_role (user_id, role_id, is_active) VALUES (?, ?, 1)", userId, roleId);
+                jdbc.update("INSERT IGNORE INTO sys_user_role (user_id, role_id, is_active) VALUES (?, ?, 1)", userId, roleId);
             }
         }
     }
@@ -188,6 +194,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
             systemParent = menuId("系统管理", "M");
         }
         menu(201, "招聘看板", boardParent == 0 ? 200 : boardParent, 4, "hr/board", "hr/board/index", "C", "hr:board:view", "DashboardOutlined", "漏斗、周期、HC、面试");
+        menu(249, "招聘面板", 200, 0, "hr/panel", "hr/panel/index", "C", "hr:panel:view", "LayoutOutlined", "在招岗位、今日进展与岗位列表");
         menu(202, "招聘需求", 200, 1, "hr/requisition", "hr/requisition/index", "C", "hr:requisition:list", "ProfileOutlined", "HC与面试流程");
         menu(234, "岗位看板", 200, 2, "hr/job-board", "hr/job-board/index", "C", "hr:job-board:list", "AppstoreOutlined", "按部门分组的岗位信息卡片");
         menu(235, "简历流程", 200, 3, "hr/pipeline", "hr/pipeline/index", "C", "hr:pipeline:list", "PartitionOutlined", "单岗位简历全流程跟踪");
@@ -206,6 +213,16 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(231, "目标到岗编辑", 230, 1, "", "", "F", "hr:target:edit", "#", "");
         menu(232, "未通过原因", 218, 3, "hr/fail-reason", "hr/fail-reason/index", "C", "hr:fail-reason:list", "TagsOutlined", "面试评价未通过可选原因");
         menu(233, "未通过原因编辑", 232, 1, "", "", "F", "hr:fail-reason:edit", "#", "");
+        menu(239, "工作地址", 218, 4, "hr/work-address", "hr/work-address/index", "C", "hr:work-address:list", "EnvironmentOutlined", "招聘工作地址");
+        menu(240, "工作地址编辑", 239, 1, "", "", "F", "hr:work-address:edit", "#", "");
+        menu(241, "背调不通过原因", 218, 5, "hr/bg-fail", "hr/bg-fail/index", "C", "hr:bg-fail:list", "StopOutlined", "背调不通过可选原因");
+        menu(242, "背调不通过原因编辑", 241, 1, "", "", "F", "hr:bg-fail:edit", "#", "");
+        menu(243, "offer未发原因", 218, 6, "hr/offer-unsent", "hr/offer-unsent/index", "C", "hr:offer-unsent:list", "ExceptionOutlined", "offer未发可选原因");
+        menu(244, "offer未发原因编辑", 243, 1, "", "", "F", "hr:offer-unsent:edit", "#", "");
+        menu(245, "电话&面试不合适理由", 218, 7, "hr/unsuitable-reason", "hr/unsuitable-reason/index", "C", "hr:unsuitable:list", "CommentOutlined", "电话沟通与面试不合适理由");
+        menu(246, "电话&面试不合适理由编辑", 245, 1, "", "", "F", "hr:unsuitable:edit", "#", "");
+        menu(247, "岗位优先级", 218, 8, "hr/job-priority", "hr/job-priority/index", "C", "hr:job-priority:list", "ThunderboltOutlined", "P0/P1等到岗优先级，独立于紧急/优先/常规");
+        menu(248, "岗位优先级编辑", 247, 1, "", "", "F", "hr:job-priority:edit", "#", "");
         menu(205, "发起邀约", 203, 1, "", "", "F", "hr:invite:add", "#", "");
         menu(206, "取消邀约", 203, 2, "", "", "F", "hr:invite:cancel", "#", "");
         menu(207, "看板导出", 201, 1, "", "", "F", "hr:board:export", "#", "");
@@ -231,12 +248,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238);
-        grant(plain, 200, 201, 209, 234, 235, 237);
-        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249);
+        grant(plain, 200, 201, 209, 234, 235, 237, 249);
+        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235, 249);
     }
 
     private int menuId(String name, String type) {
@@ -256,16 +273,14 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 ON DUPLICATE KEY UPDATE
                   menu_name = VALUES(menu_name), parent_id = VALUES(parent_id), sort_order = VALUES(sort_order),
                   path = VALUES(path), component = VALUES(component), menu_type = VALUES(menu_type),
-                  perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark), is_active = 1
+                  perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark)
                 """, id, name, parent, sort, path, component, type, perms, icon, remark);
     }
 
     private void grant(long roleId, int... menuIds) {
         for (int menuId : menuIds) {
             jdbc.update("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active) VALUES (?, ?, 1)
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """, roleId, menuId);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active) VALUES (?, ?, 1);""", roleId, menuId);
         }
     }
 
@@ -303,6 +318,121 @@ public class HrSchemaMigrator implements ApplicationRunner {
         }
     }
 
+    private void ensureBaseDictTable() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_base_dict (
+                  id           BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  dict_type    VARCHAR(32)   NOT NULL                COMMENT 'WORK_ADDRESS/BG_FAIL/OFFER_UNSENT/UNSUITABLE/JOB_PRIORITY',
+                  code         VARCHAR(32)   NOT NULL DEFAULT ''     COMMENT '编码，岗位优先级如P0/P1',
+                  category     VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '地址类别，仅工作地址使用',
+                  name         VARCHAR(128)  NOT NULL                COMMENT '名称',
+                  sort_no      INT           NOT NULL DEFAULT 0      COMMENT '排序',
+                  create_by    VARCHAR(50)   DEFAULT ''              COMMENT '创建者',
+                  create_time  DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  update_by    VARCHAR(50)   DEFAULT ''              COMMENT '更新者',
+                  update_time  DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  is_active    TINYINT       NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+                  PRIMARY KEY (id),
+                  UNIQUE KEY uk_hr_base_dict_name (dict_type, name)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘基础数据字典'
+                """);
+        jdbc.update("""
+                INSERT INTO hr_base_dict (dict_type, code, name, sort_no, create_by, is_active) VALUES
+                ('WORK_ADDRESS', '', '上海', 1, 'hr-seed', 1),
+                ('WORK_ADDRESS', '', '新疆', 2, 'hr-seed', 1),
+                ('JOB_PRIORITY', 'P0', '本月必须到岗', 1, 'hr-seed', 1),
+                ('JOB_PRIORITY', 'P1', 'x份合格简历/到岗', 2, 'hr-seed', 1)
+                ON DUPLICATE KEY UPDATE code = VALUES(code), sort_no = VALUES(sort_no)
+                """);
+        addColumnIfMissing("hr_base_dict", "category",
+                "ALTER TABLE hr_base_dict ADD COLUMN category VARCHAR(64) NOT NULL DEFAULT '' COMMENT '地址类别，仅工作地址使用' AFTER code");
+    }
+
+    private void ensureRequisitionPanelColumns() {
+        addColumnIfMissing("hr_requisition", "job_priority_code",
+                "ALTER TABLE hr_requisition ADD COLUMN job_priority_code VARCHAR(32) NULL COMMENT '岗位优先级P0/P1，独立于priority紧急优先常规' AFTER priority");
+        addColumnIfMissing("hr_requisition", "work_address_id",
+                "ALTER TABLE hr_requisition ADD COLUMN work_address_id BIGINT NULL COMMENT '工作地址hr_base_dict.id' AFTER location_code");
+    }
+
+    private void ensureCandidateProfileColumns() {
+        addColumnIfMissing("hr_candidate", "gender",
+                "ALTER TABLE hr_candidate ADD COLUMN gender VARCHAR(8) NULL COMMENT '性别男/女' AFTER email");
+        addColumnIfMissing("hr_candidate", "age",
+                "ALTER TABLE hr_candidate ADD COLUMN age INT NULL COMMENT '年龄' AFTER gender");
+        addColumnIfMissing("hr_candidate", "education",
+                "ALTER TABLE hr_candidate ADD COLUMN education VARCHAR(64) NULL COMMENT '学历' AFTER age");
+        addColumnIfMissing("hr_candidate", "candidate_no",
+                "ALTER TABLE hr_candidate ADD COLUMN candidate_no VARCHAR(32) NULL COMMENT '人选编号' AFTER education");
+        addColumnIfMissing("hr_candidate", "current_title",
+                "ALTER TABLE hr_candidate ADD COLUMN current_title VARCHAR(128) NULL COMMENT '目前职位' AFTER candidate_no");
+        addColumnIfMissing("hr_candidate", "current_company",
+                "ALTER TABLE hr_candidate ADD COLUMN current_company VARCHAR(128) NULL COMMENT '目前公司' AFTER current_title");
+        jdbc.update("""
+                UPDATE hr_candidate c
+                JOIN hr_application a ON a.candidate_id = c.id AND a.is_active = 1
+                JOIN hr_resume_parse p ON p.application_id = a.id AND p.is_active = 1
+                SET c.current_company = COALESCE(NULLIF(c.current_company, ''), NULLIF(p.last_company, '')),
+                    c.education = COALESCE(NULLIF(c.education, ''), NULLIF(p.degree, ''))
+                WHERE c.is_active = 1
+                """);
+        jdbc.update("""
+                UPDATE hr_candidate
+                SET candidate_no = CAST(14000000 + id AS CHAR)
+                WHERE is_active = 1 AND (candidate_no IS NULL OR TRIM(candidate_no) = '')
+                """);
+    }
+
+    /** 原地点 SH/XJ 对应到工作地址：优先精确名，其次名称包含上海/新疆；新疆若缺失则补一条城市级地址 */
+    private void backfillWorkAddressFromLocation() {
+        ensureCityWorkAddress("新疆");
+        ensureCityWorkAddress("上海");
+        int n = jdbc.update("""
+                UPDATE hr_requisition r
+                SET r.work_address_id = (
+                    SELECT d.id FROM hr_base_dict d
+                    WHERE d.dict_type = 'WORK_ADDRESS' AND d.is_active = 1
+                      AND (
+                        (r.location_code = 'XJ' AND (d.name = '新疆' OR d.name LIKE '%新疆%'))
+                        OR (IFNULL(r.location_code, 'SH') <> 'XJ' AND (d.name = '上海' OR d.name LIKE '%上海%'))
+                      )
+                    ORDER BY CASE
+                      WHEN r.location_code = 'XJ' AND d.name = '新疆' THEN 0
+                      WHEN IFNULL(r.location_code, 'SH') <> 'XJ' AND d.name = '上海' THEN 0
+                      ELSE 1
+                    END, d.id
+                    LIMIT 1
+                )
+                WHERE r.work_address_id IS NULL
+                """);
+        if (n > 0) {
+            log.info("已将 {} 条招聘需求地点映射到工作地址", n);
+        }
+    }
+
+    private void ensureCityWorkAddress(String name) {
+        Integer active = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_base_dict
+                WHERE dict_type = 'WORK_ADDRESS' AND is_active = 1
+                  AND (name = ? OR name LIKE ?)
+                """, Integer.class, name, "%" + name + "%");
+        if (active != null && active > 0) {
+            return;
+        }
+        int revived = jdbc.update("""
+                UPDATE hr_base_dict
+                SET is_active = 1, category = IF(category = '', '城市', category)
+                WHERE dict_type = 'WORK_ADDRESS' AND name = ?
+                """, name);
+        if (revived > 0) {
+            return;
+        }
+        jdbc.update("""
+                INSERT INTO hr_base_dict (dict_type, code, category, name, sort_no, create_by, is_active)
+                VALUES ('WORK_ADDRESS', '', '城市', ?, 0, 'hr-seed', 1)
+                """, name);
+    }
+
     private void ensureFailReasonColumn() {
         addColumnIfMissing("hr_interview_record", "fail_reason",
                 "ALTER TABLE hr_interview_record ADD COLUMN fail_reason VARCHAR(64) NULL COMMENT '未通过原因' AFTER conclusion");
@@ -326,6 +456,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private void seedProofTaskType(int sort, String name, String remark) {
+        // 仅补缺失；已逻辑删除的行仍占 type_name，不再 INSERT / 不把 is_active 刷回 1
         jdbc.update("""
                 INSERT INTO sys_task_type (type_name, sort_order, remark, require_proof, biz_type, assign_field, spawn_task_type, is_active)
                 SELECT ?, ?, ?, 1, '', '', '', 1
@@ -334,8 +465,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 """, name, sort, remark, name);
         jdbc.update("""
                 UPDATE sys_task_type
-                SET require_proof = 1, sort_order = ?, remark = ?, biz_type = '', assign_field = '', spawn_task_type = '', is_active = 1
-                WHERE type_name = ?
+                SET require_proof = 1, sort_order = ?, remark = ?, biz_type = '', assign_field = '', spawn_task_type = ''
+                WHERE type_name = ? AND is_active = 1
                 """, sort, remark, name);
     }
 
@@ -358,12 +489,17 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private void alias(String alias, String displayName, Long userId) {
+        // 仅补缺失；已逻辑删除的 alias 不复活
         jdbc.update("""
                 INSERT INTO hr_owner_alias (alias, display_name, user_id, create_by, is_active)
-                VALUES (?, ?, ?, 'hr-seed', 1)
-                ON DUPLICATE KEY UPDATE display_name = VALUES(display_name),
-                  user_id = COALESCE(hr_owner_alias.user_id, VALUES(user_id)), is_active = 1
-                """, alias, displayName, userId);
+                SELECT ?, ?, ?, 'hr-seed', 1 FROM DUAL
+                WHERE NOT EXISTS (SELECT 1 FROM hr_owner_alias WHERE alias = ?)
+                """, alias, displayName, userId, alias);
+        jdbc.update("""
+                UPDATE hr_owner_alias
+                SET display_name = ?, user_id = COALESCE(user_id, ?)
+                WHERE alias = ? AND is_active = 1
+                """, displayName, userId, alias);
     }
 
     private Long userIdByNickname(String nickname) {

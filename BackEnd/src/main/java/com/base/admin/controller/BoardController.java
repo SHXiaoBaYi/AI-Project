@@ -4,16 +4,23 @@ import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.BoardChartDrillQueryDTO;
+import com.base.admin.domain.dto.BoardGeoTaskAggQueryDTO;
+import com.base.admin.domain.dto.BoardGeoTaskDrillQueryDTO;
+import com.base.admin.domain.dto.BoardGeoTaskQueryDTO;
 import com.base.admin.domain.dto.BoardTaskOpsDrillQueryDTO;
 import com.base.admin.domain.dto.BoardTaskOpsQueryDTO;
 import com.base.admin.domain.dto.BoardTaskTofuQueryDTO;
 import com.base.admin.domain.vo.BoardChartDrillVO;
+import com.base.admin.domain.vo.BoardGeoTaskAggRowVO;
+import com.base.admin.domain.vo.BoardGeoTaskRowVO;
+import com.base.admin.domain.vo.BoardGeoTaskSummaryVO;
 import com.base.admin.domain.vo.BoardTaskOpsPersonRateVO;
 import com.base.admin.domain.vo.BoardTaskOpsRowVO;
 import com.base.admin.domain.vo.BoardTaskOpsSummaryVO;
 import com.base.admin.domain.vo.BoardTaskTofuChartVO;
 import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.service.BoardChartDrillService;
+import com.base.admin.service.BoardGeoTaskService;
 import com.base.admin.service.BoardTaskOpsService;
 import com.base.admin.service.BoardTaskTofuService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,6 +42,7 @@ public class BoardController {
     private final BoardChartDrillService boardChartDrillService;
     private final BoardTaskTofuService boardTaskTofuService;
     private final BoardTaskOpsService boardTaskOpsService;
+    private final BoardGeoTaskService boardGeoTaskService;
 
     @Operation(summary = "员工收录看板豆腐块图表（发布/收录）")
     @PostMapping("/task/tofu-chart")
@@ -77,5 +85,26 @@ public class BoardController {
     @RequiresPermission({"board:view", "board:task", "task:list", "geo:weekly:list", "geo:expose:list"})
     public Result<BoardChartDrillVO> chartDrill(@RequestBody(required = false) BoardChartDrillQueryDTO query) {
         return Result.ok(boardChartDrillService.drill(query == null ? new BoardChartDrillQueryDTO() : query));
+    }
+
+    @Operation(summary = "GEO任务看板顶部汇总")
+    @PostMapping("/geo-work/summary")
+    @RequiresPermission({"board:view", "board:task", "task:list", "task:mine", "geo:content:list"})
+    public Result<BoardGeoTaskSummaryVO> geoWorkSummary(@RequestBody(required = false) BoardGeoTaskQueryDTO query) {
+        return Result.ok(boardGeoTaskService.summary(query == null ? new BoardGeoTaskQueryDTO() : query));
+    }
+
+    @Operation(summary = "GEO任务看板按话题/撰写人/任务类型汇总")
+    @PostMapping("/geo-work/agg")
+    @RequiresPermission({"board:view", "board:task", "task:list", "task:mine", "geo:content:list"})
+    public Result<List<BoardGeoTaskAggRowVO>> geoWorkAgg(@RequestBody BoardGeoTaskAggQueryDTO query) {
+        return Result.ok(boardGeoTaskService.aggregate(query));
+    }
+
+    @Operation(summary = "GEO任务看板下钻任务明细")
+    @PostMapping("/geo-work/drill")
+    @RequiresPermission({"board:view", "board:task", "task:list", "task:mine", "geo:content:list"})
+    public Result<PageResult<BoardGeoTaskRowVO>> geoWorkDrill(@RequestBody BoardGeoTaskDrillQueryDTO query) {
+        return Result.ok(boardGeoTaskService.drill(query));
     }
 }

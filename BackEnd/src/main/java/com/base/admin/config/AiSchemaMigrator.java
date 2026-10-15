@@ -61,17 +61,17 @@ public class AiSchemaMigrator implements ApplicationRunner {
 
     private void seedAiProviders(Connection connection) throws Exception {
         try (Statement statement = connection.createStatement()) {
+            // 仅补缺失厂商行；已逻辑删除的不复活，也不覆盖用户改过的名称/排序
             statement.execute("""
-                    INSERT INTO sys_ai_provider (provider, provider_name, api_key, model, base_url, enabled, sort_order, remark, is_active)
-                    VALUES
-                    ('tongyi', '通义千问', '', 'qwen-turbo', '', 1, 1, '阿里云 DashScope 兼容模式', 1),
-                    ('deepseek', 'DeepSeek', '', 'deepseek-chat', '', 1, 2, 'DeepSeek OpenAI 兼容', 1),
-                    ('zhipu', '智谱GLM', '', 'glm-4-flash', '', 1, 3, '智谱开放平台', 1),
-                    ('moonshot', '月之暗面', '', 'moonshot-v1-8k', '', 1, 4, 'Moonshot / Kimi', 1)
-                    ON DUPLICATE KEY UPDATE
-                      provider_name = VALUES(provider_name),
-                      sort_order = VALUES(sort_order),
-                      is_active = 1
+                    INSERT IGNORE INTO sys_ai_provider (provider, provider_name, api_key, model, base_url, enabled, sort_order, remark, is_active)
+                    SELECT v.provider, v.provider_name, '', v.model, '', 1, v.sort_order, v.remark, 1
+                    FROM (
+                      SELECT 'tongyi' AS provider, '通义千问' AS provider_name, 'qwen-turbo' AS model, 1 AS sort_order, '阿里云 DashScope 兼容模式' AS remark
+                      UNION ALL SELECT 'deepseek', 'DeepSeek', 'deepseek-chat', 2, 'DeepSeek OpenAI 兼容'
+                      UNION ALL SELECT 'zhipu', '智谱GLM', 'glm-4-flash', 3, '智谱开放平台'
+                      UNION ALL SELECT 'moonshot', '月之暗面', 'moonshot-v1-8k', 4, 'Moonshot / Kimi'
+                    ) v
+                    WHERE NOT EXISTS (SELECT 1 FROM sys_ai_provider p WHERE p.provider = v.provider)
                     """);
         }
     }
@@ -92,14 +92,11 @@ public class AiSchemaMigrator implements ApplicationRunner {
                       component = VALUES(component),
                       perms = VALUES(perms),
                       icon = VALUES(icon),
-                      remark = VALUES(remark),
-                      is_active = 1
+                      remark = VALUES(remark)
                     """);
             statement.execute("""
-                    INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (140, 141)
-                    ON DUPLICATE KEY UPDATE is_active = 1
-                    """);
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (140, 141);""");
         }
         if (!menuExists(connection, 140)) {
             log.warn("AI模型配置菜单写入后未查到 menu_id=140，请检查 sys_menu");

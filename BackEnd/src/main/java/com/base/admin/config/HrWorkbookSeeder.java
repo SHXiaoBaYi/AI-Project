@@ -10,6 +10,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,10 +34,15 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * 招聘 Excel 灌数 — 仅 {@code hr.seed=true} 时启动执行一次（表空才灌）。
+ * 日常保持关闭。
+ */
 @Slf4j
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE)
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "hr.seed", havingValue = "true")
 public class HrWorkbookSeeder implements ApplicationRunner {
 
     private static final Pattern OWNER_GROUP = Pattern.compile("[（(]([^）)]+)[）)]");

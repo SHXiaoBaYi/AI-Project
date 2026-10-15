@@ -18,13 +18,24 @@ import type { ColumnsType } from 'antd/es/table';
 import type { InputProps } from 'antd';
 import { useSelector } from 'react-redux';
 import dayjs, { type Dayjs } from 'dayjs';
-import { saveGeoDailyBulkApi, uploadGeoScreenshotApi, getGeoTargetQuestionsApi } from '@/api/geo';
+import {
+  saveGeoDailyBulkApi,
+  uploadGeoScreenshotApi,
+  getGeoTargetQuestionsApi,
+  getGeoPlatformOptionsApi,
+} from '@/api/geo';
 import type { GeoDailyBulkSaveResult, GeoOwnerOption, GeoTopic } from '@/types/geo';
 import type { RootState } from '@/store';
 import GeoScreenshot from '@/components/geo/GeoScreenshot';
 import { GEO_TERM_TYPES, GEO_TERM_TYPE_DEFAULT } from '@/constants/geo';
+import {
+  GEO_MENTIONED_RECOMMEND_STATUSES,
+  isGeoPlatformLink,
+  isMentionedRecommendStatus,
+} from '@/utils/geoPlatformLink';
 
 const RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({ label: v, value: v }));
+const MENTIONED_RECOMMEND_OPTIONS = GEO_MENTIONED_RECOMMEND_STATUSES.map((v) => ({ label: v, value: v }));
 /** 露出=-1 表示忽略该平台，不写入数据库 */
 const MENTION_IGNORE = -1;
 const MENTION_OPTIONS = [
@@ -126,7 +137,16 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
             variant='borderless'
             value={Number(v) === 1 ? 1 : Number(v) === MENTION_IGNORE ? MENTION_IGNORE : 0}
             options={MENTION_OPTIONS}
-            onChange={(val) => patch(row.platform, { mentioned: val })}
+            onChange={(val) => {
+              const next: Partial<PlatformRow> = { mentioned: val };
+              if (val === 1 && row.recommendStatus === '未出现') {
+                next.recommendStatus = undefined;
+              }
+              if (val === 0) {
+                next.recommendStatus = '未出现';
+              }
+              patch(row.platform, next);
+            }}
           />
         ),
       },
@@ -143,6 +163,7 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
             precision={0}
             value={v}
             controls={false}
+            placeholder={Number(row.mentioned) === 1 ? '必填' : undefined}
             parser={(text) => {
               const digits = String(text ?? '').replace(/[^\d]/g, '');
               return digits === '' ? ('' as unknown as number) : Number(digits);
@@ -169,7 +190,8 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
             className='w-full'
             variant='borderless'
             value={v}
-            options={RECOMMEND_OPTIONS}
+            placeholder={Number(row.mentioned) === 1 ? '必选' : undefined}
+            options={Number(row.mentioned) === 1 ? MENTIONED_RECOMMEND_OPTIONS : RECOMMEND_OPTIONS}
             onChange={(val) => patch(row.platform, { recommendStatus: val })}
           />
         ),
@@ -182,7 +204,7 @@ const PlatformNestedTable = memo(function PlatformNestedTable({
           <ImeSafeInput
             variant='borderless'
             value={v}
-            placeholder='链接'
+            placeholder={Number(row.mentioned) === 1 ? '必填，平台合法链接' : '链接'}
             onChange={(val) => patch(row.platform, { thirdPartyUrl: val })}
           />
         ),
@@ -339,6 +361,8 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
   const [pendingDate, setPendingDate] = useState<Dayjs>(dayjs());
   const [lockedConfirmOpen, setLockedConfirmOpen] = useState(false);
   const [lockedConflicts, setLockedConflicts] = useState<GeoDailyBulkSaveResult['lockedConflicts']>([]);
+  /** 平台名 → 登录地址，用于校验第三方链接是否属于该平台 */
+  const [platformLoginUrlMap, setPlatformLoginUrlMap] = useState<Record<string, string>>({});
   const submitBulkRef = useRef<(opts?: { ignoreLocked?: boolean; forceUpdate?: boolean }) => Promise<void>>(
     async () => undefined,
   );
@@ -350,6 +374,15 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
     setTabs([first]);
     setActiveKey(first.key);
     setPendingDate(dayjs(date));
+    void getGeoPlatformOptionsApi('AI平台').then((list) => {
+      const map: Record<string, string> = {};
+      for (const p of list || []) {
+        if (p.platformName && p.loginUrl?.trim()) {
+          map[p.platformName] = p.loginUrl.trim();
+        }
+      }
+      setPlatformLoginUrlMap(map);
+    });
     // 仅在打开时按当前平台列表初始化，避免 platforms 引用变化重置已填内容
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -490,6 +523,31 @@ const AddDailyDrawer = memo(function AddDailyDrawer({
           message.error(`${tab.inspectDate} 第 ${index + 1} 个话题：全部平台均为「忽略」，请至少保留一个平台`);
           setActiveKey(tab.key);
           return null;
+        }
+        for (const p of items) {
+          if (Number(p.mentioned) !== 1) continue;
+          const prefix = `${tab.inspectDate} 第 ${index + 1} 个话题 · ${p.platform}`;
+          if (p.rankNo == null || !Number.isFinite(Number(p.rankNo))) {
+            message.error(`${prefix}：提及为「是」时，排名必须填写数字`);
+            setActiveKey(tab.key);
+            return null;
+          }
+          if (!isMentionedRecommendStatus(p.recommendStatus)) {
+            message.error(`${prefix}：提及为「是」时，推荐状态须为「出现且推荐」或「出现未推荐」`);
+            setActiveKey(tab.key);
+            return null;
+          }
+          const link = String(p.thirdPartyUrl || '').trim();
+          if (!link) {
+            message.error(`${prefix}：提及为「是」时，链接必填`);
+            setActiveKey(tab.key);
+            return null;
+          }
+          if (!isGeoPlatformLink(p.platform, link, platformLoginUrlMap[p.platform])) {
+            message.error(`${prefix}：链接不是该平台的合法外链，请填写 ${p.platform} 对应站点的 http(s) 地址`);
+            setActiveKey(tab.key);
+            return null;
+          }
         }
         groups.push({
           inspectDate: tab.inspectDate,

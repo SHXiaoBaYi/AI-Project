@@ -7,6 +7,7 @@ export interface HrBoardQuery {
   endDate?: string;
   deptId?: number;
   locationCode?: string;
+  workAddressId?: number;
   channelCode?: string;
   requisitionId?: number;
   ownerUserId?: number;
@@ -184,6 +185,92 @@ export function getHrJobDetailsApi(data: HrBoardQuery = {}) {
   return request.post<unknown, HrJobDetailRow[]>('/hr/board/job-details', data);
 }
 
+export interface HrPanelQuery {
+  panelStatus?: string;
+  deptId?: number;
+  jobName?: string;
+  ownerUserId?: number;
+  jobPriorityCode?: string;
+  workAddressId?: number;
+  pageNum?: number;
+  pageSize?: number;
+}
+
+export interface HrPanelStats {
+  openJobCount?: number;
+  bgCheckCount?: number;
+  pendingOnboardCount?: number;
+  todayScreenCount?: number;
+  todayPhoneCount?: number;
+  todayInviteCount?: number;
+  todayInterviewCount?: number;
+  todayInterviewPassCount?: number;
+}
+
+export interface HrPanelJobRow {
+  id: number;
+  panelStatus?: string;
+  panelStatusLabel?: string;
+  deptName?: string;
+  jobName?: string;
+  ownerName?: string;
+  jobPriorityCode?: string;
+  jobPriorityLabel?: string;
+  workLocation?: string;
+  receivedDate?: string;
+  deadlineDate?: string;
+  recruitingDays?: number;
+  progressSummary?: string;
+}
+
+export interface HrPanelResult {
+  stats?: HrPanelStats;
+  total?: number;
+  rows?: HrPanelJobRow[];
+}
+
+export type HrPanelMetric =
+  | 'OPEN_JOB'
+  | 'BG_CHECK'
+  | 'PENDING_ONBOARD'
+  | 'TODAY_SCREEN'
+  | 'TODAY_PHONE'
+  | 'TODAY_INVITE'
+  | 'TODAY_INTERVIEW'
+  | 'TODAY_INTERVIEW_PASS';
+
+export interface HrPanelPersonRow {
+  applicationId: number;
+  candidateName?: string;
+  jobName?: string;
+  deptName?: string;
+  ownerName?: string;
+  stageName?: string;
+  occurredAt?: string;
+  resultLabel?: string;
+}
+
+export interface HrPanelDetailQuery extends HrPanelQuery {
+  metric: HrPanelMetric;
+}
+
+export interface HrPanelDetailResult {
+  metric?: string;
+  title?: string;
+  kind?: 'JOB' | 'PERSON' | string;
+  total?: number;
+  jobs?: HrPanelJobRow[];
+  people?: HrPanelPersonRow[];
+}
+
+export function getHrPanelApi(data: HrPanelQuery = {}) {
+  return request.post<unknown, HrPanelResult>('/hr/panel', data);
+}
+
+export function getHrPanelDetailApi(data: HrPanelDetailQuery) {
+  return request.post<unknown, HrPanelDetailResult>('/hr/panel/detail', data);
+}
+
 export function getHrDrillApi(data: HrBoardQuery) {
   return request.post<unknown, HrBoardDrill>('/hr/board/drill', data);
 }
@@ -207,9 +294,15 @@ export function getHrRequisitionsApi(data: HrBoardQuery = {}) {
 export type HrJobCardStatus = 'PENDING' | 'ACTIVE' | 'CLOSED';
 
 export type HrJobCardQuery = {
+  pageNum?: number;
+  pageSize?: number;
   deptId?: number;
+  jobName?: string;
+  ownerUserId?: number;
   cardStatus?: HrJobCardStatus;
   priority?: number;
+  jobPriorityCode?: string;
+  workAddressId?: number;
 };
 
 export type HrJobCard = {
@@ -226,6 +319,7 @@ export type HrJobCard = {
   onboardDate?: string;
   ownerNames?: string;
   ownerUserIds?: number[];
+  ownerCount?: number;
   deptId?: number;
   deptName?: string;
   status?: string;
@@ -235,7 +329,13 @@ export type HrJobCard = {
   priorityLabel?: string;
   headcount?: number;
   candidateCount?: number;
+  pendingCount?: number;
+  interviewingCount?: number;
+  onboardedCount?: number;
   locationCode?: string;
+  workLocation?: string;
+  jobPriorityCode?: string;
+  jobPriorityLabel?: string;
 };
 
 export type HrJobCardGroup = {
@@ -246,12 +346,45 @@ export type HrJobCardGroup = {
 };
 
 export type HrJobCardBoard = {
-  groups: HrJobCardGroup[];
+  total?: number;
+  rows?: HrJobCard[];
+  groups?: HrJobCardGroup[];
 };
 
-/** 岗位信息卡片：按部门分组 */
+/** 岗位看板卡片：筛选 + 分页 */
 export function getHrJobCardsApi(data: HrJobCardQuery = {}) {
   return request.post<unknown, HrJobCardBoard>('/hr/requisition/cards', data);
+}
+
+export type HrJobCandidate = {
+  applicationId: number;
+  candidateId?: number;
+  displayName?: string;
+  pending?: boolean;
+  gender?: string;
+  age?: number | null;
+  education?: string;
+  basicInfo?: string;
+  candidateNo?: string;
+  currentTitle?: string;
+  currentCompany?: string;
+  recommendedAt?: string;
+  remainingHours?: number | null;
+  referrerName?: string;
+  currentStage?: string;
+  stageName?: string;
+  resumeName?: string;
+};
+
+export type HrJobFunnelStatus = 'PENDING' | 'INTERVIEWING' | 'ONBOARDED';
+
+export function getHrJobCandidatesApi(data: {
+  requisitionId: number;
+  funnelStatus?: HrJobFunnelStatus;
+  pageNum?: number;
+  pageSize?: number;
+}) {
+  return request.post<unknown, { total: number; rows: HrJobCandidate[] }>('/hr/requisition/candidates', data);
 }
 
 export type HrPipelinePhase = 'SCREEN' | 'PHONE' | 'INTERVIEW' | 'ONBOARD';
@@ -451,7 +584,12 @@ export function getHrPipelineDetailApi(applicationId: number) {
   return request.get<unknown, HrPipelineDetail>(`/hr/pipeline/detail/${applicationId}`);
 }
 
-export function saveHrPipelineScreenApi(data: { applicationId: number; result: 'PASS' | 'FAIL'; remark?: string }) {
+export function saveHrPipelineScreenApi(data: {
+  applicationId: number;
+  result: 'PASS' | 'FAIL';
+  rejectReason?: string;
+  remark?: string;
+}) {
   return request.post<unknown, void>('/hr/pipeline/screen', data);
 }
 
@@ -628,6 +766,33 @@ export function saveHrFailReasonApi(data: { id?: number; name: string; sortNo?: 
 
 export function deleteHrFailReasonApi(id: number) {
   return request.delete(`/hr/fail-reason/${id}`);
+}
+
+export type HrDictType = 'WORK_ADDRESS' | 'BG_FAIL' | 'OFFER_UNSENT' | 'UNSUITABLE' | 'JOB_PRIORITY';
+
+export type HrBaseDict = {
+  id: number;
+  dictType?: string;
+  code?: string;
+  category?: string;
+  name: string;
+  sortNo?: number;
+  sort_no?: number;
+};
+
+export function getHrDictOptionsApi(type: HrDictType) {
+  return request.get<unknown, HrBaseDict[]>(`/hr/dict/${type}/options`);
+}
+
+export function saveHrDictApi(
+  type: HrDictType,
+  data: { id?: number; code?: string; category?: string; name: string; sortNo?: number },
+) {
+  return data.id ? request.put(`/hr/dict/${type}`, data) : request.post(`/hr/dict/${type}`, data);
+}
+
+export function deleteHrDictApi(type: HrDictType, id: number) {
+  return request.delete(`/hr/dict/${type}/${id}`);
 }
 
 export function getHrUsersApi(scope?: 'owner' | 'interviewer') {

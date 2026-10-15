@@ -1,6 +1,11 @@
 package com.base.admin.service;
 
 import com.base.admin.common.PageResult;
+import com.base.admin.domain.dto.GeoContentDraftSaveDTO;
+import com.base.admin.domain.dto.GeoContentItemDraftSaveDTO;
+import com.base.admin.domain.dto.GeoContentOpinionSaveDTO;
+import com.base.admin.domain.dto.GeoContentPlatformArticleDTO;
+import com.base.admin.domain.dto.GeoContentReviewActionDTO;
 import com.base.admin.domain.dto.GeoContentPlacementArticleQueryDTO;
 import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
@@ -8,6 +13,9 @@ import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
 import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
+import com.base.admin.domain.vo.GeoContentArticleBundleVO;
+import com.base.admin.domain.vo.GeoContentArticleVO;
+import com.base.admin.domain.vo.GeoContentDraftVO;
 import com.base.admin.domain.vo.GeoSimilarQuestionPreviewVO;
 import com.base.admin.domain.vo.GeoContentPlacementArticleListVO;
 import com.base.admin.domain.vo.GeoContentPlacementCiteVO;
@@ -41,6 +49,30 @@ public interface GeoContentPlacementService {
     /** 关联任务完成证明/业务附件 */
     List<SysTaskFileVO> listProofFiles(Long placementId);
 
+    /** 在线正文（Lakex text/lake） */
+    GeoContentDraftVO getDraft(Long placementId);
+
+    /** 保存在线正文（自动保存/手动保存） */
+    GeoContentDraftVO saveDraft(GeoContentDraftSaveDTO dto);
+
+    /** 一个问题的统一稿 + 各平台文章（含审核意见） */
+    GeoContentArticleBundleVO getArticleBundle(Long placementId);
+
+    /** 为问题增加一个内容平台文章，默认沿用统一稿 */
+    GeoContentArticleVO addPlatformArticle(GeoContentPlatformArticleDTO dto);
+
+    /** 切换统一稿/独立稿，或保存独立稿 */
+    GeoContentArticleVO saveItemDraft(GeoContentItemDraftSaveDTO dto);
+
+    /** 撰写人提交该平台文章内部审核 */
+    GeoContentArticleVO submitArticleReview(Long itemId);
+
+    /** 内部审核：通过或退回，退回必须写意见 */
+    GeoContentArticleVO reviewArticle(GeoContentReviewActionDTO dto);
+
+    /** 追加内部意见，不改变审核状态 */
+    GeoContentArticleVO addArticleOpinion(GeoContentOpinionSaveDTO dto);
+
     Long create(GeoContentPlacementDTO dto);
 
     void update(GeoContentPlacementDTO dto);
@@ -63,6 +95,12 @@ public interface GeoContentPlacementService {
 
 
     Long createItem(GeoContentPlacementItemDTO dto);
+
+    /**
+     * 审核通过进入待投放：主表稿件状态=queue、投放进度=待投放，在「投放管理」可见；
+     * 不再自动往文章列表插入空平台明细。
+     */
+    void ensureQueueArticleItems(Long placementId);
 
     void updateItem(GeoContentPlacementItemDTO dto);
 

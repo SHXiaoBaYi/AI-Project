@@ -25,8 +25,10 @@ import {
   type SysTask,
   type SysTaskFile,
 } from '@/api/task';
-import { getGeoOwnerOptionsApi } from '@/api/geo';
+import { getGeoOwnerOptionsApi, getPendingGeoReviewsApi } from '@/api/geo';
 import type { GeoOwnerOption } from '@/types/geo';
+import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
 
@@ -80,7 +82,35 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   const [files, setFiles] = useState<SysTaskFile[]>([]);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
   const [typeOptions, setTypeOptions] = useState<{ label: string; value: string }[]>([]);
+  const [writeOpen, setWriteOpen] = useState(false);
+  const [writePlacementId, setWritePlacementId] = useState<number | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewPlacementId, setReviewPlacementId] = useState<number | null>(null);
+  const [reviewId, setReviewId] = useState<number | null>(null);
   const defaultType = typeOptions[0]?.value || '日常';
+
+  const openReviewFromTask = async (record: SysTask) => {
+    if (!record.bizId) {
+      message.warning('该审核任务未关联审核轮次');
+      return;
+    }
+    try {
+      const rows = await getPendingGeoReviewsApi();
+      const row = (rows ?? []).find((r) => r.reviewId === record.bizId);
+      const fromContent = Number(/placementId=(\d+)/.exec(record.content || '')?.[1] || 0);
+      const placementId = row?.placementId || (fromContent > 0 ? fromContent : null);
+      if (!placementId) {
+        message.warning('该审核已处理或不在待审列表，请刷新任务');
+        actionRef.current?.reload();
+        return;
+      }
+      setReviewPlacementId(placementId);
+      setReviewId(record.bizId);
+      setReviewOpen(true);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '加载待审失败');
+    }
+  };
 
   useEffect(() => {
     void getGeoOwnerOptionsApi().then((list) => setOwners(list ?? []));
@@ -125,7 +155,12 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   };
 
   /** 仅未要求证明附件的任务可批量完成 */
-  const canBatchComplete = (r: SysTask) => !!r.completable && !r.requireProof && r.taskType !== '文章发布';
+  const canBatchComplete = (r: SysTask) =>
+    !!r.completable &&
+    !r.requireProof &&
+    r.taskType !== '文章发布' &&
+    r.taskType !== '文章撰写' &&
+    r.taskType !== '审核文章';
 
   const openBatchComplete = () => {
     if (!selectedRowKeys.length) {
@@ -424,6 +459,19 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
                 onClick: () => {
                   if (record.taskType === '文章发布') {
                     navigate('/geo/content-placement-work');
+                    return;
+                  }
+                  if (record.taskType === '文章撰写') {
+                    if (!record.bizId) {
+                      message.warning('该撰写任务未关联内容投放');
+                      return;
+                    }
+                    setWritePlacementId(record.bizId);
+                    setWriteOpen(true);
+                    return;
+                  }
+                  if (record.taskType === '审核文章') {
+                    void openReviewFromTask(record);
                     return;
                   }
                   openComplete(record);
@@ -1024,6 +1072,30 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
           </ul>
         )}
       </Modal>
+
+      <GeoContentWriteDrawer
+        open={writeOpen}
+        placementId={writePlacementId}
+        mode='write'
+        onClose={() => {
+          setWriteOpen(false);
+          setWritePlacementId(null);
+          actionRef.current?.reload();
+        }}
+      />
+
+      <GeoContentReviewCompareDrawer
+        open={reviewOpen}
+        placementId={reviewPlacementId}
+        focusReviewId={reviewId}
+        reviewId={reviewId}
+        onClose={() => {
+          setReviewOpen(false);
+          setReviewPlacementId(null);
+          setReviewId(null);
+          actionRef.current?.reload();
+        }}
+      />
     </>
   );
 });

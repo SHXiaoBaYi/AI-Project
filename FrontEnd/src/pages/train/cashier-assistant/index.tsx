@@ -48,6 +48,36 @@ function extractImgAlt(tag: string) {
   return m?.[1] ?? '配图';
 }
 
+const SOURCE_HINT =
+  /\b(package\s+[\w.]+;|import\s+[\w.*]+;|public\s+(class|interface|enum)|public\s+static\s+void\s+main\s*\(|System\.out\.print|console\.(log|error)\s*\(|<\?php|#include\s*[<"]|export\s+default|module\.exports)/i;
+
+function stripOfficeMarkup(s?: string) {
+  if (!s) return '';
+  if (!/<w:|<\/w:/.test(s)) return s;
+  return s
+    .replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi, '$1')
+    .replace(/<\/?w:[^>]*>/gi, '')
+    .replace(/<\/?(?:a|r|wp|wps|v|o|m):[^>]*>/gi, '');
+}
+
+function looksLikeSourceCode(answer?: string) {
+  const text = stripOfficeMarkup(answer || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length < 24) return false;
+  return SOURCE_HINT.test(text);
+}
+
+function safeQaItems(items?: TrainQaItem[]) {
+  return (items || []).map((it) => ({
+    ...it,
+    question: stripOfficeMarkup(it.question),
+    answer: stripOfficeMarkup(it.answer),
+    answerHtml: stripOfficeMarkup(it.answerHtml),
+  })).filter((it) => !looksLikeSourceCode(it.answer) && !looksLikeSourceCode(it.answerHtml));
+}
+
 /** 图文 HTML：配图可点击预览、放大缩小；纯文本段落仍按 HTML 渲染 */
 function TrainQaRichHtml({ html }: { html: string }) {
   const parts = html.split(/(<img\b[^>]*>)/gi);
@@ -496,26 +526,27 @@ export default function CashierAssistantPage() {
     }
     try {
       const res = await askTrainAssistantApi({ question: q, searchOld, category: 'cashier' });
-      if (res.status === 'HIT') {
+      const items = safeQaItems(res.items);
+      if (res.status === 'HIT' && items.length) {
         push({
           role: 'assistant',
           text: res.message || '已找到相关问答',
-          items: res.items || [],
+          items,
           userQuestion: q,
           docId: res.docId,
           versionId: res.versionId,
         });
-      } else if (res.status === 'NEED_OLD') {
+      } else if (res.status === 'NEED_OLD' || (res.status === 'HIT' && !items.length && res.hasOlderVersions)) {
         push({
           role: 'assistant',
-          text: res.message || '暂时没有找到答案，是否检索旧版？',
+          text: '暂时没有找到答案，是否检索旧版？',
           needOld: true,
           userQuestion: q,
           docId: res.docId,
           versionId: res.versionId,
         });
       } else {
-        push({ role: 'assistant', text: res.message || '没有找到答案' });
+        push({ role: 'assistant', text: res.status === 'HIT' ? '没有找到答案' : res.message || '没有找到答案' });
       }
     } catch (err) {
       message.error(err instanceof Error ? err.message : '提问失败');
@@ -781,13 +812,13 @@ export default function CashierAssistantPage() {
                               <TrainQaRichHtml html={item.answerHtml} />
                             </div>
                           ) : (
-                            <>
-                              <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap text-neutral-700'>
-                                A. {item.answer}
-                              </div>
-                              {item.images?.length ? <TrainQaImageList urls={item.images} /> : null}
-                            </>
+                            <div className='[overflow-wrap:anywhere] break-words whitespace-pre-wrap text-neutral-700'>
+                              A. {item.answer}
+                            </div>
                           )}
+                          {!/<img\b/i.test(item.answerHtml || '') && item.images?.length ? (
+                            <TrainQaImageList urls={item.images} />
+                          ) : null}
                           {item.fromCalibrate ? (
                             <div className='mt-1 text-xs text-emerald-600'>来自人工校准库</div>
                           ) : null}

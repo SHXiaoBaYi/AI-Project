@@ -26,6 +26,7 @@ public class BoardSchemaMigrator implements ApplicationRunner {
         try (Connection connection = dataSource.getConnection()) {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v13_board_menu.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v17_board_split_menu.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v21_board_geo_work_menu.sql"));
         } catch (Exception e) {
             log.error("Board schema migrate failed", e);
             throw e;

@@ -7,11 +7,22 @@ import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PlacementExecutionPanel from '@/components/geo/content-placement/PlacementExecutionPanel';
 import PlacementProofFilesModal from '@/components/geo/content-placement/PlacementProofFilesModal';
-import { AGG_COLOR } from '@/components/geo/content-placement/constants';
+import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { AGG_COLOR, hasOnlineArticle } from '@/components/geo/content-placement/constants';
 import { getGeoContentPlacementListApi, getGeoTopicOptionsApi } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoTopic } from '@/types/geo';
 import { GEO_CONTENT_AGG_STATUS } from '@/constants/geo';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
+
+const CONTENT_STATUS_TAG: Record<string, { text: string; color: string }> = {
+  drafting: { text: '草稿', color: 'default' },
+  pending_review: { text: '待审核', color: 'processing' },
+  revising: { text: '修改中', color: 'warning' },
+  approved: { text: '已通过', color: 'success' },
+  stage1_passed: { text: '一审已通过', color: 'success' },
+  queue: { text: '待投放', color: 'cyan' },
+  published: { text: '已发布', color: 'green' },
+};
 
 /** 一线视角：维护本人负责的话题/目标问题在各平台的投放详情与引用 */
 const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
@@ -22,6 +33,8 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
   const [currentPlacement, setCurrentPlacement] = useState<GeoContentPlacementListItem | null>(null);
   const [proofOpen, setProofOpen] = useState(false);
   const [proofPlacement, setProofPlacement] = useState<GeoContentPlacementListItem | null>(null);
+  const [articleOpen, setArticleOpen] = useState(false);
+  const [articlePlacementId, setArticlePlacementId] = useState<number | null>(null);
 
   useEffect(() => {
     void getGeoTopicOptionsApi().then(setTopics);
@@ -58,8 +71,17 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
       title: '目标问题',
       dataIndex: 'targetQuestion',
       ellipsis: true,
-      width: 280,
+      width: 240,
       hideInForm: true,
+    },
+    {
+      title: '正文标题',
+      dataIndex: 'contentTitle',
+      ellipsis: true,
+      width: 200,
+      search: false,
+      hideInForm: true,
+      render: (v) => v || '-',
     },
     {
       title: '发布人',
@@ -76,6 +98,17 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
       search: false,
       hideInForm: true,
       render: (v) => v || '待分配',
+    },
+    {
+      title: '稿件状态',
+      dataIndex: 'contentStatus',
+      width: 100,
+      search: false,
+      hideInForm: true,
+      render: (_, r) => {
+        const meta = CONTENT_STATUS_TAG[r.contentStatus || 'drafting'] || CONTENT_STATUS_TAG.drafting;
+        return <Tag color={meta.color}>{meta.text}</Tag>;
+      },
     },
     {
       title: '投放进度',
@@ -136,11 +169,21 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 160,
+      width: 220,
       hideInForm: true,
       render: (_, record) => (
         <ActionButtons
           items={[
+            {
+              key: 'article',
+              label: '查看文章',
+              perm: 'geo:content:work',
+              disabled: !hasOnlineArticle(record),
+              onClick: () => {
+                setArticlePlacementId(record.id);
+                setArticleOpen(true);
+              },
+            },
             {
               key: 'work',
               label: '维护投放/引用',
@@ -160,7 +203,6 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='我的投放'
-        search={{ labelWidth: 'auto' }}
         toolBarRender={() => [
           <span
             key='hint'
@@ -200,6 +242,16 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
         }}
         onChanged={(next) => {
           setCurrentPlacement((prev) => (prev ? { ...prev, ...next } : prev));
+        }}
+      />
+
+      <GeoContentWriteDrawer
+        open={articleOpen}
+        placementId={articlePlacementId}
+        mode='review'
+        onClose={() => {
+          setArticleOpen(false);
+          setArticlePlacementId(null);
         }}
       />
 

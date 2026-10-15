@@ -24,6 +24,9 @@ public class HrBoardQueryDTO {
     @Schema(description = "工作地 SH/XJ")
     private String locationCode;
 
+    @Schema(description = "工作地址字典ID", example = "1", nullable = true)
+    private Long workAddressId;
+
     @Schema(description = "渠道")
     private String channelCode;
 

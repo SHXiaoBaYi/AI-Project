@@ -5,8 +5,11 @@ import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.TrainQaCalibrateQueryDTO;
 import com.base.admin.domain.dto.TrainQaCalibrateSaveDTO;
+import com.base.admin.domain.dto.TrainQaMissQueryDTO;
 import com.base.admin.domain.vo.TrainQaCalibrateVO;
+import com.base.admin.domain.vo.TrainQaMissVO;
 import com.base.admin.service.TrainQaCalibrateService;
+import com.base.admin.service.TrainQaMissService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -20,12 +23,20 @@ import org.springframework.web.bind.annotation.*;
 public class TrainQaCalibrateController {
 
     private final TrainQaCalibrateService trainQaCalibrateService;
+    private final TrainQaMissService trainQaMissService;
 
     @Operation(summary = "校准问答分页")
     @GetMapping("/list")
     @RequiresPermission("train:qa:list")
     public Result<PageResult<TrainQaCalibrateVO>> list(TrainQaCalibrateQueryDTO query) {
         return Result.ok(trainQaCalibrateService.page(query));
+    }
+
+    @Operation(summary = "未命中提问分页")
+    @GetMapping("/miss/list")
+    @RequiresPermission("train:qa:list")
+    public Result<PageResult<TrainQaMissVO>> missList(TrainQaMissQueryDTO query) {
+        return Result.ok(trainQaMissService.page(query));
     }
 
     @Operation(summary = "新增/编辑校准答案")

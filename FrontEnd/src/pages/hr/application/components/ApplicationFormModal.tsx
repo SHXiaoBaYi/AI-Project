@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, App, Button, DatePicker, Form, Input, Select, Space, Upload } from 'antd';
+import { Alert, App, Button, DatePicker, Form, Input, InputNumber, Select, Space, Upload } from 'antd';
 import { InboxOutlined, PaperClipOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import dayjs from 'dayjs';
@@ -20,6 +20,12 @@ export interface ApplicationFormValues {
   displayName?: string;
   phone?: string;
   email?: string;
+  gender?: string;
+  age?: number;
+  education?: string;
+  candidateNo?: string;
+  currentTitle?: string;
+  currentCompany?: string;
   requisitionId?: number;
   channelCode?: string;
   currentStage?: string;
@@ -180,6 +186,12 @@ export default function ApplicationFormModal({
           displayName: formValues.displayName,
           phone: formValues.phone,
           email: formValues.email,
+          gender: formValues.gender,
+          age: formValues.age,
+          education: formValues.education,
+          candidateNo: formValues.candidateNo,
+          currentTitle: formValues.currentTitle,
+          currentCompany: formValues.currentCompany,
           requisitionId: formValues.requisitionId,
           channelCode: formValues.channelCode,
           currentStage: formValues.currentStage,
@@ -253,6 +265,67 @@ export default function ApplicationFormModal({
           <Input
             allowClear
             placeholder='请填写或核对姓名'
+          />
+        </Form.Item>
+        <Form.Item
+          name='candidateNo'
+          label='人选编号'
+        >
+          <Input
+            allowClear
+            placeholder='不填则自动生成'
+          />
+        </Form.Item>
+        <Form.Item
+          name='gender'
+          label='性别'
+        >
+          <Select
+            allowClear
+            placeholder='请选择'
+            options={[
+              { label: '男', value: '男' },
+              { label: '女', value: '女' },
+            ]}
+          />
+        </Form.Item>
+        <Form.Item
+          name='age'
+          label='年龄'
+        >
+          <InputNumber
+            min={16}
+            max={70}
+            className='w-full'
+            placeholder='岁'
+          />
+        </Form.Item>
+        <Form.Item
+          name='education'
+          label='学历'
+        >
+          <Input
+            allowClear
+            placeholder='如本科 / MBA'
+          />
+        </Form.Item>
+        <Form.Item
+          name='currentTitle'
+          label='目前职位'
+        >
+          <Input
+            allowClear
+            placeholder='目前职位'
+          />
+        </Form.Item>
+        <Form.Item
+          name='currentCompany'
+          label='目前公司'
+          className='col-span-2'
+        >
+          <Input
+            allowClear
+            placeholder='目前公司'
           />
         </Form.Item>
         <Form.Item

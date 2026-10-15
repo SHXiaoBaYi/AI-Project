@@ -37,6 +37,30 @@ public interface SysTaskService {
     /** 执行人去完成；按类型可能要求上传证明，附件关联业务并带入下一子任务 */
     void complete(Long id, SysTaskCompleteDTO dto);
 
+    /**
+     * 二审通过后自动完成「文章撰写」任务（无需证明附件）。
+     * completerUserId 记为撰写人。
+     */
+    void completeGeoWriteTasksByReview(Long placementId, Long writerUserId, String writerName);
+
+    /** 撰写正文已有内容时，将关联「文章撰写」任务进度标为 50%，状态改为进行中 */
+    void markGeoWriteDrafted(Long placementId);
+
+    /** 一审通过：关联「文章撰写」任务进度标为 80%，仍不完成 */
+    void markGeoWriteStage1Passed(Long placementId);
+
+    /**
+     * 发起审核后，为该阶段审核人生成「审核文章」任务（biz=审核轮次）。
+     */
+    void createGeoReviewTasks(Long reviewId, Long placementId, String bizTitle,
+                              java.util.List<Long> reviewerUserIds, int stageNo);
+
+    /** 审核人提交通过/退回后，完成其对应「审核文章」任务 */
+    void completeGeoReviewTask(Long reviewId, Long reviewerUserId, String reviewerName);
+
+    /** 整轮审核结束后（如退回），取消其余未完成的「审核文章」任务 */
+    void cancelPendingGeoReviewTasks(Long reviewId, String reason);
+
     /** 批量完成；要求证明附件的类型会跳过 */
     String batchComplete(SysTaskBatchCompleteDTO dto);
 

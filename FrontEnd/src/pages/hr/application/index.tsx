@@ -32,6 +32,15 @@ interface PortfolioItem {
 interface AppRow {
   id: number;
   displayName: string;
+  pending?: boolean;
+  gender?: string;
+  age?: number;
+  education?: string;
+  basicInfo?: string;
+  candidateNo?: string;
+  currentTitle?: string;
+  currentCompany?: string;
+  remainingHours?: number | null;
   phone?: string;
   email?: string;
   requisitionId?: number;
@@ -80,6 +89,15 @@ function mapRow(raw: Record<string, unknown>): AppRow {
   return {
     id: Number(raw.id),
     displayName: String(raw.display_name ?? ''),
+    pending: raw.pending === true || raw.pending === 1 || raw.pending === '1',
+    gender: textOf(raw.gender),
+    age: raw.age == null || raw.age === '' ? undefined : Number(raw.age),
+    education: textOf(raw.education),
+    basicInfo: textOf(raw.basic_info),
+    candidateNo: textOf(raw.candidate_no),
+    currentTitle: textOf(raw.current_title),
+    currentCompany: textOf(raw.current_company),
+    remainingHours: raw.remaining_hours == null || raw.remaining_hours === '' ? null : Number(raw.remaining_hours),
     phone: textOf(raw.phone),
     email: textOf(raw.email),
     requisitionId: raw.requisition_id == null ? undefined : Number(raw.requisition_id),
@@ -259,8 +277,73 @@ const ApplicationPage = memo(function ApplicationPage() {
         },
       },
       {
-        title: '姓名',
+        title: '候选人',
         dataIndex: 'displayName',
+        width: 120,
+        render: (_, record) => (
+          <span className='inline-flex items-center gap-1.5'>
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${record.pending ? 'bg-red-500' : 'bg-blue-500'}`}
+            />
+            <span className='text-blue-600'>{record.displayName}</span>
+          </span>
+        ),
+      },
+      {
+        title: '基本信息',
+        dataIndex: 'basicInfo',
+        search: false,
+        width: 160,
+        ellipsis: true,
+        render: (_, record) => record.basicInfo || '—',
+      },
+      {
+        title: '人选编号',
+        dataIndex: 'candidateNo',
+        search: false,
+        width: 110,
+        render: (_, record) => record.candidateNo || '—',
+      },
+      {
+        title: '目前职位',
+        dataIndex: 'currentTitle',
+        search: false,
+        width: 160,
+        ellipsis: true,
+        render: (_, record) => record.currentTitle || '—',
+      },
+      {
+        title: '目前公司',
+        dataIndex: 'currentCompany',
+        search: false,
+        width: 180,
+        ellipsis: true,
+        render: (_, record) => record.currentCompany || '—',
+      },
+      {
+        title: '推荐时间',
+        dataIndex: 'submittedAt',
+        valueType: 'date',
+        width: 120,
+        search: false,
+      },
+      {
+        title: '剩余处理时间',
+        dataIndex: 'remainingHours',
+        search: false,
+        width: 140,
+        render: (_, record) => {
+          if (record.remainingHours == null || Number.isNaN(record.remainingHours)) return '—';
+          if (record.remainingHours < 0) return <span className='text-red-500'>已超时</span>;
+          return <span className='text-orange-500'>剩余{record.remainingHours.toFixed(2)}小时</span>;
+        },
+      },
+      {
+        title: '负责人',
+        dataIndex: 'submitterName',
+        search: false,
+        width: 110,
+        render: (_, record) => record.submitterName || '—',
       },
       {
         title: '岗位',
@@ -342,31 +425,18 @@ const ApplicationPage = memo(function ApplicationPage() {
         ),
       },
       {
-        title: '提交人',
-        dataIndex: 'submitterName',
-        search: false,
-        render: (_, record) => record.submitterName || '—',
-      },
-      {
-        title: '提交人',
+        title: '推荐猎头',
         dataIndex: 'submitterUserId',
         valueType: 'select',
         hideInTable: true,
         fieldProps: { options: users, allowClear: true, showSearch: true, optionFilterProp: 'label' },
       },
       {
-        title: '投递日期',
+        title: '推荐时间',
         dataIndex: 'submittedRange',
         valueType: 'dateRange',
         hideInTable: true,
         search: { transform: (value: string[]) => ({ startDate: value?.[0], endDate: value?.[1] }) },
-      },
-      {
-        title: '投递日期',
-        dataIndex: 'submittedAt',
-        valueType: 'date',
-        width: 120,
-        search: false,
       },
     ],
     [ccRoundPlans, channels, jobs, message, roundPlans, stages, users],
@@ -379,6 +449,7 @@ const ApplicationPage = memo(function ApplicationPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='候选人'
+        scroll={{ x: 1800 }}
         // 仅从招聘需求跳转带入时注入；勿传 requisitionId: undefined，否则会覆盖搜索栏选中的岗位
         params={presetRequisitionId ? { requisitionId: presetRequisitionId } : undefined}
         request={async (params) => {

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS geo_platform_account (
   KEY idx_status (account_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO平台账号';
 
-INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
 VALUES
 (133, '平台账号管理', 130, 3, 'geo/platform-account', '', 'C', 'geo:platformAccount:list', 'IdcardOutlined', 0, 0,
  '平台侧运营账号与持有人管理', 1),
@@ -55,9 +55,7 @@ ON DUPLICATE KEY UPDATE
   component = VALUES(component),
   perms = VALUES(perms),
   icon = VALUES(icon),
-  remark = VALUES(remark),
-  is_active = 1;
+  remark = VALUES(remark);
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 133 AND 136
-ON DUPLICATE KEY UPDATE is_active = 1;
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 133 AND 136;

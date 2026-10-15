@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS geo_year_target (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO全年目标配置（看板实时计算，不存快照）';
 
 -- GEO 菜单（ID 从 100 起，避免与示例菜单冲突）
-INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
 VALUES
 (100, 'GEO监测', 0, 1, 'geo', '', 'M', '', 'RadarChartOutlined', 0, 0, 'GEO监测目录', 1),
 (101, '话题管理', 100, 1, 'geo/topic', '', 'C', 'geo:topic:list', 'TagsOutlined', 0, 0, '', 1),
@@ -91,8 +91,7 @@ VALUES
 (110, '日监测删除', 102, 3, '', '', 'F', 'geo:daily:delete', '#', 0, 0, '', 1),
 (111, '日监测导入', 102, 4, '', '', 'F', 'geo:daily:import', '#', 0, 0, '', 1),
 (112, '目标配置', 104, 1, '', '', 'F', 'geo:yearly:target', '#', 0, 0, '', 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), path = VALUES(path), perms = VALUES(perms), is_active = 1;
+ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), path = VALUES(path), perms = VALUES(perms);
 
-INSERT INTO sys_role_menu (role_id, menu_id, is_active)
-SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 100 AND 112
-ON DUPLICATE KEY UPDATE is_active = 1;
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 100 AND 112;

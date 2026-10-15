@@ -4,9 +4,12 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.base.admin.common.BaseEntity;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+
+import java.time.LocalDateTime;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -59,4 +62,26 @@ public class GeoContentPlacement extends BaseEntity {
 
     @Schema(description = "是否演示数据 1=是 0=否", example = "0")
     private Integer isDemo;
+
+    @Schema(description = "稿件状态 drafting/pending_review/revising/approved/queue", example = "drafting")
+    private String contentStatus;
+
+    @Schema(description = "正文标题", example = "中秋送礼指南")
+    private String contentTitle;
+
+    @Schema(description = "内容格式（一期固定 text/lake）", example = "text/lake")
+    private String contentFormat;
+
+    @Schema(description = "Lake 正文")
+    private String contentBody;
+
+    @Schema(description = "正文乐观锁版本", example = "1")
+    private Long contentVersion;
+
+    @Schema(description = "正文最近保存人", example = "admin")
+    private String contentUpdatedBy;
+
+    @Schema(description = "正文最近保存时间", example = "2026-10-12 14:00:00")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime contentUpdatedAt;
 }

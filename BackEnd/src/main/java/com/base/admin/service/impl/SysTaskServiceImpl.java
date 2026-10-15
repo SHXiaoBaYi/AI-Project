@@ -167,15 +167,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         SysUser owner = requireUser(dto.getOwnerUserId(), "负责人");
         SysTask task = new SysTask();
         fillTask(task, dto, owner);
-        Long uid = SecurityUtils.getCurrentUserId();
-        if (uid != null) {
-            SysUser creator = userMapper.selectById(uid);
-            task.setCreatorUserId(uid);
-            task.setCreatorName(userDisplayName(creator));
-        } else {
-            task.setCreatorUserId(null);
-            task.setCreatorName(SecurityUtils.getCurrentUsername());
-        }
+        fillCreator(task);
         if (!StringUtils.hasText(task.getStatus())) {
             task.setStatus("未开始");
         }
@@ -357,8 +349,14 @@ public class SysTaskServiceImpl implements SysTaskService {
         if (!isOwner && !isAssignee) {
             throw new BusinessException("仅负责人或执行人可完成该任务");
         }
-        if ("文章发布".equals(task.getTaskType())) {
+        if (Constants.TASK_TYPE_GEO_PUBLISH.equals(task.getTaskType())) {
             throw new BusinessException("文章发布任务请到「我的投放」填写发布记录，系统会自动完成");
+        }
+        if (Constants.TASK_TYPE_GEO_WRITE.equals(task.getTaskType())) {
+            throw new BusinessException("文章撰写请在「我的任务」打开在线撰写，并在「我的撰写记录」发起审核；一审通过进度80%，二审通过后系统自动完成");
+        }
+        if (Constants.TASK_TYPE_GEO_REVIEW.equals(task.getTaskType())) {
+            throw new BusinessException("审核文章请在「我的任务」打开审核抽屉完成通过/退回");
         }
         if ("已完成".equals(task.getStatus()) || "已取消".equals(task.getStatus())) {
             throw new BusinessException("任务已结束，无法再次完成");
@@ -408,6 +406,222 @@ public class SysTaskServiceImpl implements SysTaskService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void completeGeoWriteTasksByReview(Long placementId, Long writerUserId, String writerName) {
+        if (placementId == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, placementId)
+                .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_WRITE)
+                .ne(SysTask::getStatus, "已完成")
+                .ne(SysTask::getStatus, "已取消"));
+        if (tasks.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        String by = StringUtils.hasText(writerName) ? writerName.trim() : SecurityUtils.getCurrentUsername();
+        for (SysTask task : tasks) {
+            String oldStatus = task.getStatus();
+            String note = "二审通过，系统自动完成（完成人：" + by + "）";
+            if (StringUtils.hasText(task.getRemark())) {
+                task.setRemark(task.getRemark().trim() + "；" + note);
+            } else {
+                task.setRemark(note);
+            }
+            task.setStatus("已完成");
+            task.setProgress(100);
+            task.setActualEndTime(now);
+            if (writerUserId != null) {
+                task.setOwnerUserId(writerUserId);
+                if (StringUtils.hasText(writerName)) {
+                    task.setOwnerName(writerName.trim());
+                }
+            }
+            applyStatusSideEffects(task, oldStatus);
+            taskMapper.updateById(task);
+            if (writerUserId != null) {
+                assigneeMapper.update(null, new LambdaUpdateWrapper<SysTaskAssignee>()
+                        .eq(SysTaskAssignee::getTaskId, task.getId())
+                        .eq(SysTaskAssignee::getUserId, writerUserId)
+                        .set(SysTaskAssignee::getDone, 1));
+            }
+            HrHirePipelineService pipeline = hirePipeline.getIfAvailable();
+            if (pipeline != null) {
+                pipeline.afterTaskCompleted(task);
+            }
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void markGeoWriteDrafted(Long placementId) {
+        if (placementId == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, placementId)
+                .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_WRITE)
+                .ne(SysTask::getStatus, "已完成")
+                .ne(SysTask::getStatus, "已取消"));
+        for (SysTask task : tasks) {
+            Integer progress = task.getProgress() == null ? 0 : task.getProgress();
+            if (progress >= Constants.TASK_PROGRESS_WRITE_DRAFTED) {
+                continue;
+            }
+            String oldStatus = task.getStatus();
+            task.setProgress(Constants.TASK_PROGRESS_WRITE_DRAFTED);
+            if ("未开始".equals(task.getStatus()) || "待处理".equals(task.getStatus())) {
+                task.setStatus("进行中");
+            }
+            applyStatusSideEffects(task, oldStatus);
+            taskMapper.updateById(task);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void markGeoWriteStage1Passed(Long placementId) {
+        if (placementId == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, placementId)
+                .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_WRITE)
+                .ne(SysTask::getStatus, "已完成")
+                .ne(SysTask::getStatus, "已取消"));
+        for (SysTask task : tasks) {
+            Integer progress = task.getProgress() == null ? 0 : task.getProgress();
+            if (progress >= Constants.TASK_PROGRESS_WRITE_STAGE1_PASSED) {
+                continue;
+            }
+            String oldStatus = task.getStatus();
+            task.setProgress(Constants.TASK_PROGRESS_WRITE_STAGE1_PASSED);
+            if ("未开始".equals(task.getStatus()) || "待处理".equals(task.getStatus())) {
+                task.setStatus("进行中");
+            }
+            String note = "一审通过，撰写进度 80%";
+            if (StringUtils.hasText(task.getRemark())) {
+                if (!task.getRemark().contains("一审通过")) {
+                    task.setRemark(task.getRemark().trim() + "；" + note);
+                }
+            } else {
+                task.setRemark(note);
+            }
+            applyStatusSideEffects(task, oldStatus);
+            taskMapper.updateById(task);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void createGeoReviewTasks(Long reviewId, Long placementId, String bizTitle, List<Long> reviewerUserIds, int stageNo) {
+        if (reviewId == null || reviewerUserIds == null || reviewerUserIds.isEmpty()) {
+            return;
+        }
+        taskTypeService.resolveTypeName(Constants.TASK_TYPE_GEO_REVIEW);
+        String titleBase = StringUtils.hasText(bizTitle) ? bizTitle.trim() : ("投放#" + placementId);
+        for (Long reviewerId : reviewerUserIds) {
+            if (reviewerId == null) {
+                continue;
+            }
+            Long exists = taskMapper.selectCount(new LambdaQueryWrapper<SysTask>()
+                    .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_REVIEW)
+                    .eq(SysTask::getBizId, reviewId)
+                    .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_REVIEW)
+                    .eq(SysTask::getOwnerUserId, reviewerId)
+                    .ne(SysTask::getStatus, "已取消"));
+            if (exists != null && exists > 0) {
+                continue;
+            }
+            SysUser user = requireUser(reviewerId, "审核人");
+            SysTaskDTO dto = new SysTaskDTO();
+            String stageName = stageNo == Constants.CONTENT_REVIEW_STAGE2 ? "二审" : "一审";
+            dto.setTitle("【审核文章·" + stageName + "】" + abbreviate(titleBase, 80));
+            dto.setContent(placementId == null ? "" : ("placementId=" + placementId));
+            dto.setTaskType(Constants.TASK_TYPE_GEO_REVIEW);
+            dto.setPriority(2);
+            dto.setStatus("未开始");
+            dto.setProgress(0);
+            dto.setOwnerUserId(user.getUserId());
+            dto.setAssigneeUserIds(List.of(user.getUserId()));
+            dto.setBizType(Constants.TASK_BIZ_GEO_CONTENT_REVIEW);
+            dto.setBizId(reviewId);
+            dto.setBizTitle(titleBase);
+            dto.setRemark("由撰写人发起" + stageName + "后自动生成");
+            create(dto);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void completeGeoReviewTask(Long reviewId, Long reviewerUserId, String reviewerName) {
+        if (reviewId == null || reviewerUserId == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_REVIEW)
+                .eq(SysTask::getBizId, reviewId)
+                .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_REVIEW)
+                .eq(SysTask::getOwnerUserId, reviewerUserId)
+                .ne(SysTask::getStatus, "已完成")
+                .ne(SysTask::getStatus, "已取消"));
+        LocalDateTime now = LocalDateTime.now();
+        String by = StringUtils.hasText(reviewerName) ? reviewerName.trim() : SecurityUtils.getCurrentUsername();
+        for (SysTask task : tasks) {
+            String oldStatus = task.getStatus();
+            String note = "审核意见已提交，系统自动完成（完成人：" + by + "）";
+            if (StringUtils.hasText(task.getRemark())) {
+                task.setRemark(task.getRemark().trim() + "；" + note);
+            } else {
+                task.setRemark(note);
+            }
+            task.setStatus("已完成");
+            task.setProgress(100);
+            task.setActualEndTime(now);
+            applyStatusSideEffects(task, oldStatus);
+            taskMapper.updateById(task);
+            assigneeMapper.update(null, new LambdaUpdateWrapper<SysTaskAssignee>()
+                    .eq(SysTaskAssignee::getTaskId, task.getId())
+                    .eq(SysTaskAssignee::getUserId, reviewerUserId)
+                    .set(SysTaskAssignee::getDone, 1));
+            HrHirePipelineService pipeline = hirePipeline.getIfAvailable();
+            if (pipeline != null) {
+                pipeline.afterTaskCompleted(task);
+            }
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelPendingGeoReviewTasks(Long reviewId, String reason) {
+        if (reviewId == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_REVIEW)
+                .eq(SysTask::getBizId, reviewId)
+                .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_REVIEW)
+                .ne(SysTask::getStatus, "已完成")
+                .ne(SysTask::getStatus, "已取消"));
+        String note = StringUtils.hasText(reason) ? reason.trim() : "本轮审核已结束，系统取消未完成的审核任务";
+        for (SysTask task : tasks) {
+            String oldStatus = task.getStatus();
+            if (StringUtils.hasText(task.getRemark())) {
+                task.setRemark(task.getRemark().trim() + "；" + note);
+            } else {
+                task.setRemark(note);
+            }
+            task.setStatus("已取消");
+            applyStatusSideEffects(task, oldStatus);
+            taskMapper.updateById(task);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public String batchComplete(SysTaskBatchCompleteDTO dto) {
         if (dto.getTaskIds() == null || dto.getTaskIds().isEmpty()) {
             throw new BusinessException("请选择至少一条任务");
@@ -434,7 +648,9 @@ public class SysTaskServiceImpl implements SysTaskService {
                 continue;
             }
             SysTaskType typeCfg = taskTypeService.getByTypeName(task.getTaskType());
-            if ("文章发布".equals(task.getTaskType())
+            if (Constants.TASK_TYPE_GEO_PUBLISH.equals(task.getTaskType())
+                    || Constants.TASK_TYPE_GEO_WRITE.equals(task.getTaskType())
+                    || Constants.TASK_TYPE_GEO_REVIEW.equals(task.getTaskType())
                     || (typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1))) {
                 skip++;
                 continue;
@@ -925,6 +1141,38 @@ public class SysTaskServiceImpl implements SysTaskService {
             return t;
         }
         return t.substring(0, Math.max(0, max - 1)) + "…";
+    }
+
+    /** 优先用登录用户；仅无登录上下文时才落成 system（后台刷数等） */
+    private void fillCreator(SysTask task) {
+        SysUser creator = resolveCurrentCreator();
+        if (creator != null) {
+            task.setCreatorUserId(creator.getUserId());
+            task.setCreatorName(userDisplayName(creator));
+            if (StringUtils.hasText(creator.getUsername())) {
+                task.setCreateBy(creator.getUsername());
+            }
+            return;
+        }
+        task.setCreatorUserId(null);
+        task.setCreatorName(SecurityUtils.getCurrentUsername());
+    }
+
+    private SysUser resolveCurrentCreator() {
+        Long uid = SecurityUtils.getCurrentUserId();
+        if (uid != null) {
+            SysUser user = userMapper.selectById(uid);
+            if (user != null) {
+                return user;
+            }
+        }
+        String username = SecurityUtils.getCurrentUsername();
+        if (!StringUtils.hasText(username) || "system".equals(username)) {
+            return null;
+        }
+        return userMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, username.trim())
+                .last("LIMIT 1"));
     }
 
     private void fillTask(SysTask task, SysTaskDTO dto, SysUser owner) {

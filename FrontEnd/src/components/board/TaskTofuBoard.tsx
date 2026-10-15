@@ -11,7 +11,9 @@ import {
   type BoardTaskTofuQuery,
 } from '@/api/board';
 import { BoardColumnScrollArea } from '@/components/geo/BoardColumnScrollArea';
+import { bindBoardColumnDrill, buildBoardDrillLookup, resolveBoardSeriesName } from '@/components/geo/boardChartDrill';
 import { boardColumnChartProps } from '@/components/geo/boardColumnChartProps';
+import { uniqueBoardSeries } from '@/components/geo/BoardChartLegend';
 import type { DemoBoardGrain } from '@/constants/demoData';
 
 const Column = lazy(() => import('@/components/geo/GeoAntCharts').then((m) => ({ default: m.Column })));
@@ -45,6 +47,8 @@ type DrillState = {
   targetQuestion?: string;
   publisherUserId?: number;
   publisherName?: string;
+  writerUserId?: number;
+  writerName?: string;
   contentPlatform?: string;
   aiPlatform?: string;
 };
@@ -57,6 +61,10 @@ type ChartDef = {
   publishDetail?: boolean;
   /** 环比/同比可为负，只允许点表格下钻，不响应柱体点击 */
   tableDrill?: boolean;
+  /** 员工收录：按撰写人下钻 */
+  writerDrill?: boolean;
+  /** 被引用内容发布平台：内容平台 → AI平台 → 话题（三级） */
+  citePlatformDrill?: boolean;
 };
 
 type CiteTableRow = {
@@ -102,29 +110,33 @@ const CHARTS: ChartDef[] = [
   {
     chartType: 'citeRate',
     title: '话题被AI收录率',
-    hint: '话题 → 目标问题 → 员工 → AI平台',
+    hint: '第1层：各话题被收录文章/发布文章 · 第2层：各AI平台收录率',
   },
   {
     chartType: 'employeeCiteCompare',
     title: '员工AI收录对比',
-    hint: '员工 → AI平台',
+    hint: '第1层：撰写人 被收录/产出 · 第2层：各AI平台收录率',
+    writerDrill: true,
   },
   {
     chartType: 'employeeCiteMom',
     title: '员工AI收录环比',
-    hint: '员工 → AI平台 · 百分点，可为负 · 点表格下钻',
+    hint: '撰写人 → AI平台 · 百分点，可为负 · 点表格下钻',
     tableDrill: true,
+    writerDrill: true,
   },
   {
     chartType: 'employeeCiteYoy',
     title: '员工AI收录同比',
-    hint: '员工 → AI平台 · 百分点，可为负 · 点表格下钻',
+    hint: '撰写人 → AI平台 · 百分点，可为负 · 点表格下钻',
     tableDrill: true,
+    writerDrill: true,
   },
   {
     chartType: 'topicCiteCount',
-    title: '话题被AI平台引用数',
-    hint: '话题 → 目标问题 → AI平台',
+    title: '被引用内容发布平台数',
+    hint: '第1层：各内容平台引用数 · 第2层：该平台下各AI引用数 · 第3层：该平台+AI下各话题引用数',
+    citePlatformDrill: true,
   },
 ];
 
@@ -137,7 +149,12 @@ function IndependentTaskTofuCard({
   grain: DemoBoardGrain;
   range: [Dayjs, Dayjs];
 }) {
-  const [level, setLevel] = useState('topic');
+  const rootLevel = def.citePlatformDrill
+    ? 'contentPlatform'
+    : def.writerDrill || def.chartType.startsWith('employee')
+      ? 'writer'
+      : 'topic';
+  const [level, setLevel] = useState(rootLevel);
   const [drill, setDrill] = useState<DrillState>({});
   const [metricLabel, setMetricLabel] = useState(def.title);
   const [charts, setCharts] = useState<{ axis: string; series: string; value: number; key?: string }[]>([]);
@@ -146,6 +163,10 @@ function IndependentTaskTofuCard({
   const [drawerTitle, setDrawerTitle] = useState('');
   const [details, setDetails] = useState<BoardTaskPublishDetail[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const chartsRef = useRef(charts);
+  chartsRef.current = charts;
+  const drillLookupRef = useRef(new Map<string, string>());
+  const seriesOrderRef = useRef<string[]>([]);
 
   const load = useCallback(
     async (next: DrillState) => {
@@ -160,11 +181,13 @@ function IndependentTaskTofuCard({
           targetQuestion: next.targetQuestion,
           publisherUserId: next.publisherUserId,
           publisherName: next.publisherName,
+          writerUserId: next.writerUserId,
+          writerName: next.writerName,
           contentPlatform: next.contentPlatform,
           aiPlatform: next.aiPlatform,
         };
         const data = await boardTaskTofuChartApi(query);
-        setLevel(data?.level || 'topic');
+        setLevel(data?.level || rootLevel);
         setMetricLabel(data?.metricLabel || def.title);
         setDrill({
           topicId: data?.topicId ?? next.topicId,
@@ -172,6 +195,8 @@ function IndependentTaskTofuCard({
           targetQuestion: data?.targetQuestion || next.targetQuestion,
           publisherUserId: data?.publisherUserId ?? next.publisherUserId,
           publisherName: data?.publisherName || next.publisherName,
+          writerUserId: data?.writerUserId ?? next.writerUserId,
+          writerName: data?.writerName || next.writerName,
           contentPlatform: data?.contentPlatform || next.contentPlatform,
           aiPlatform: data?.aiPlatform || next.aiPlatform,
         });
@@ -182,11 +207,13 @@ function IndependentTaskTofuCard({
         setLoading(false);
       }
     },
-    [def.chartType, def.title, grain, range],
+    [def.chartType, def.title, grain, range, rootLevel],
   );
 
   useEffect(() => {
     setDrill({});
+    setLevel(rootLevel);
+    setCharts([]);
     void load({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grain, range]);
@@ -219,21 +246,67 @@ function IndependentTaskTofuCard({
     [grain, range],
   );
 
+  const resolveSeriesName = useCallback(
+    (series?: string, drillKey?: string) => {
+      return (
+        resolveBoardSeriesName(series, drillKey, charts, seriesOrderRef.current) ||
+        (series && seriesOrderRef.current.includes(series) ? series : undefined) ||
+        (drillKey && seriesOrderRef.current.includes(drillKey) ? drillKey : undefined)
+      );
+    },
+    [charts],
+  );
+
   const onSeriesClick = useCallback(
     (series?: string, drillKey?: string) => {
       const key = drillKey || series;
       if (!key) return;
+
+      // 被引用内容发布平台：内容平台 → AI平台 → 话题
+      if (def.citePlatformDrill) {
+        const name = resolveSeriesName(series, drillKey);
+        if (!name) {
+          message.warning('无法识别系列，请点柱体或双击图例');
+          return;
+        }
+        if (!drill.contentPlatform) {
+          void load({ contentPlatform: name });
+          return;
+        }
+        if (!drill.aiPlatform) {
+          void load({ contentPlatform: drill.contentPlatform, aiPlatform: name });
+          return;
+        }
+        // 第3层话题，不再下钻
+        return;
+      }
+
       if (level === 'topic') {
-        const id = Number(key);
+        let id = Number(key);
+        let topicName = series || key;
+        if (!Number.isFinite(id)) {
+          const hit = charts.find((p) => p.series === series || p.series === key || p.key === key);
+          id = Number(hit?.key);
+          topicName = hit?.series || topicName;
+        }
         if (!Number.isFinite(id)) {
           message.warning('无法识别话题');
           return;
         }
-        void load({ topicId: id, topicName: series || key });
+        void load({ ...drill, topicId: id, topicName });
         return;
       }
       if (level === 'question') {
         void load({ ...drill, targetQuestion: key });
+        return;
+      }
+      if (level === 'writer') {
+        const uid = key.startsWith('n:') ? undefined : Number(key);
+        void load({
+          ...drill,
+          writerUserId: Number.isFinite(uid as number) ? (uid as number) : undefined,
+          writerName: series || (key.startsWith('n:') ? key.slice(2) : key),
+        });
         return;
       }
       if (level === 'employee') {
@@ -249,31 +322,55 @@ function IndependentTaskTofuCard({
         void openPublishDrawer(key, drill);
         return;
       }
-      // aiPlatform leaf: no further drill
+      // aiPlatform leaf（非 citePlatformDrill）: no further drill
     },
-    [def.publishDetail, drill, level, load, openPublishDrawer],
+    [charts, def.citePlatformDrill, def.publishDetail, drill, level, load, openPublishDrawer, resolveSeriesName],
   );
 
   const clickRef = useRef(onSeriesClick);
   clickRef.current = onSeriesClick;
 
   const bindChartClick = useCallback(
-    (plot: { chart?: { on: (event: string, handler: (evt: any) => void) => void } }) => {
-      const c = plot?.chart;
-      if (!c?.on) return;
-      c.on('element:click', (evt: any) => {
-        const raw = evt?.data?.data ?? evt?.data ?? {};
-        const datum = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined;
-        if (!datum) return;
-        const series = datum.fullSeries != null ? String(datum.fullSeries) : String(datum.series ?? '');
-        const key = datum.drillKey != null ? String(datum.drillKey) : undefined;
-        clickRef.current(series, key);
-      });
+    (plot: { chart?: { on?: (event: string, handler: (evt: unknown) => void) => void } }) => {
+      bindBoardColumnDrill(
+        plot,
+        (hit) => {
+          const name =
+            resolveBoardSeriesName(hit.series, hit.drillKey, chartsRef.current, seriesOrderRef.current) ||
+            (seriesOrderRef.current.includes(hit.series) ? hit.series : undefined);
+          if (!name) return;
+          const key = drillLookupRef.current.get(name) || name;
+          clickRef.current(name, key);
+        },
+        drillLookupRef,
+        seriesOrderRef,
+      );
     },
     [],
   );
 
   const onBack = () => {
+    // 被引用内容发布平台：话题层 → AI层 → 内容平台层
+    if (def.citePlatformDrill) {
+      if (drill.contentPlatform && drill.aiPlatform) {
+        void load({ contentPlatform: drill.contentPlatform });
+        return;
+      }
+      if (drill.contentPlatform) {
+        void load({});
+        return;
+      }
+    }
+    // 员工收录：AI平台层 → 回撰写人层
+    if (level === 'aiPlatform' && (drill.writerUserId != null || !!drill.writerName)) {
+      void load({});
+      return;
+    }
+    // 话题收录率：AI平台层 → 回话题层
+    if (level === 'aiPlatform' && drill.topicId != null && def.chartType === 'citeRate') {
+      void load({});
+      return;
+    }
     if (
       level === 'contentPlatform' ||
       (level === 'aiPlatform' && (drill.publisherUserId != null || !!drill.publisherName))
@@ -308,32 +405,48 @@ function IndependentTaskTofuCard({
     }
   };
 
-  // 系列必须用完整原文；截断会把目标问题前缀撞名合并成少量柱
+  // 系列必须用完整原文；下钻键只用 drillKey，禁止再写 key（G2 会把 key 当系列，话题层变成数字 ID）
   const chartData = charts.map((p) => ({
     axis: formatAxis(p.axis),
     series: p.series,
     fullSeries: p.series,
     value: p.value,
-    drillKey: p.key,
+    drillKey: p.key ?? p.series,
   }));
+  drillLookupRef.current = buildBoardDrillLookup(chartData);
+  seriesOrderRef.current = uniqueBoardSeries(chartData);
   const citeTable = def.tableDrill ? buildCiteTable(charts) : null;
+  const citeL3 = !!def.citePlatformDrill && !!drill.contentPlatform && !!drill.aiPlatform;
+  const citeL2 = !!def.citePlatformDrill && !!drill.contentPlatform && !drill.aiPlatform;
+  const displayMetric = metricLabel;
 
-  const isEmployeeRootChart = def.chartType.startsWith('employee');
+  const isEmployeeRootChart = def.writerDrill || def.chartType.startsWith('employee');
   const showBack =
     level === 'question' ||
     (level === 'employee' && !isEmployeeRootChart) ||
-    level === 'contentPlatform' ||
-    level === 'aiPlatform';
+    (def.citePlatformDrill && !!drill.contentPlatform) ||
+    (level === 'contentPlatform' && !!def.publishDetail) ||
+    (level === 'aiPlatform' && !def.citePlatformDrill);
 
   const crumbs = [
-    { title: def.chartType.startsWith('employee') ? '员工' : '话题' },
-    ...(drill.topicName ? [{ title: drill.topicName }] : []),
+    {
+      title: def.citePlatformDrill
+        ? '内容平台'
+        : def.writerDrill || def.chartType.startsWith('employee')
+          ? '撰写人'
+          : '话题',
+    },
+    ...(def.citePlatformDrill && drill.contentPlatform ? [{ title: drill.contentPlatform }] : []),
+    ...(def.citePlatformDrill && drill.contentPlatform && !drill.aiPlatform ? [{ title: 'AI平台' }] : []),
+    ...(def.citePlatformDrill && drill.aiPlatform ? [{ title: drill.aiPlatform }, { title: '各话题' }] : []),
+    ...(drill.topicName && !def.citePlatformDrill ? [{ title: drill.topicName }] : []),
     ...(drill.targetQuestion
       ? [{ title: drill.targetQuestion.length > 14 ? `${drill.targetQuestion.slice(0, 13)}…` : drill.targetQuestion }]
       : []),
     ...(drill.publisherName ? [{ title: drill.publisherName }] : []),
-    ...(level === 'contentPlatform' ? [{ title: '内容平台' }] : []),
-    ...(level === 'aiPlatform' ? [{ title: 'AI平台' }] : []),
+    ...(drill.writerName ? [{ title: drill.writerName }] : []),
+    ...(level === 'contentPlatform' && def.publishDetail ? [{ title: '内容平台' }] : []),
+    ...(level === 'aiPlatform' && !def.citePlatformDrill ? [{ title: 'AI平台' }] : []),
   ];
 
   const detailColumns: ColumnsType<BoardTaskPublishDetail> = [
@@ -389,12 +502,24 @@ function IndependentTaskTofuCard({
         items={crumbs}
       />
       <div className='mb-2 text-xs text-neutral-400'>
-        {def.hint} · {metricLabel} · 横轴=日期
+        {def.hint} · {displayMetric} · 横轴=日期
+        {def.citePlatformDrill ? (citeL3 ? ' · 系列=话题' : citeL2 ? ' · 系列=AI平台' : ' · 系列=内容平台') : ''}
       </div>
       <Suspense fallback={<ChartFallback />}>
-        <BoardColumnScrollArea data={chartData}>
+        <BoardColumnScrollArea
+          data={chartData}
+          onSeriesDrill={
+            def.tableDrill
+              ? undefined
+              : (name) => {
+                  // 图例双击：name 已是真实系列名
+                  const key = drillLookupRef.current.get(name) || name;
+                  onSeriesClick(name, key);
+                }
+          }
+        >
           <Column
-            key={`${def.chartType}-${level}-${chartData.length}-${drill.topicId || ''}-${drill.targetQuestion || ''}`}
+            key={`${def.chartType}-${level}-${chartData.length}-${drill.contentPlatform || ''}-${drill.aiPlatform || ''}-${drill.topicId || ''}-${drill.targetQuestion || ''}-${drill.writerUserId || ''}`}
             data={chartData}
             xField='axis'
             yField='value'
@@ -447,12 +572,12 @@ function IndependentTaskTofuCard({
           dataSource={citeTable?.rows || []}
           columns={[
             {
-              title: level === 'aiPlatform' ? 'AI平台' : '员工',
+              title: level === 'aiPlatform' ? 'AI平台' : '撰写人',
               dataIndex: 'series',
               width: 140,
               fixed: 'left',
               render: (name: string, row) =>
-                level === 'employee' ? (
+                level === 'writer' || level === 'employee' ? (
                   <Button
                     type='link'
                     size='small'
@@ -485,14 +610,20 @@ function IndependentTaskTofuCard({
       ) : null}
       <div className='mt-1 text-xs text-neutral-400'>
         {def.tableDrill
-          ? level === 'employee'
-            ? '环比/同比可能为负，请点击表格中的员工姓名下钻，图表不可下钻'
+          ? level === 'writer' || level === 'employee'
+            ? '环比/同比可能为负，请点击表格中的撰写人姓名下钻，图表不可下钻'
             : '已到最细层级'
-          : level === 'contentPlatform' && def.publishDetail
-            ? '点击柱体查看该内容平台发布明细'
-            : level === 'aiPlatform'
-              ? '已到最细层级'
-              : '点击柱体下钻下一级'}
+          : def.citePlatformDrill
+            ? citeL3
+              ? '第3层：该内容平台 + AI 下各话题引用次数 · 已到最细层级'
+              : citeL2
+                ? '第2层：该内容平台下各AI平台引用次数 · 点柱继续下钻到话题'
+                : '第1层：各内容平台引用数汇总 · 点柱下钻到AI平台'
+            : level === 'contentPlatform' && def.publishDetail
+              ? '点击柱体或双击图例查看该内容平台发布明细'
+              : level === 'aiPlatform'
+                ? '已到最细层级'
+                : '点柱或双击图例下钻下一级'}
       </div>
 
       <Drawer
@@ -521,7 +652,7 @@ export function TaskTofuBoard({ grain, range }: { grain: DemoBoardGrain; range: 
   return (
     <div className='flex flex-col gap-3'>
       <div className='text-xs text-neutral-400'>
-        六个看板相互独立；页顶日期筛选统一生效。环比、同比可能为负，只点表格下钻；其余看板点击柱体下钻
+        六个看板相互独立；页顶日期筛选统一生效。环比、同比可能为负，只点表格下钻；其余看板点柱或双击图例下钻
       </div>
       <Row gutter={[12, 12]}>
         {CHARTS.map((def) => (

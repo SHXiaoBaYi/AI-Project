@@ -8,6 +8,8 @@ import com.base.admin.domain.vo.TrainAssistantAskVO;
 import com.base.admin.domain.vo.TrainQaCalibrateVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
+import com.base.admin.util.TrainQaAnswerSanitizer;
+import com.base.admin.util.TrainQaIntentMatcher;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -63,10 +65,15 @@ public class TrainQaCalibrateService {
                 """, STATUS_APPROVED, docId, versionId);
         Map<String, Object> best = null;
         for (Map<String, Object> row : rows) {
-            if (matchesIntent(norm, row)) {
-                best = row;
-                break;
+            if (!matchesIntent(norm, row)) {
+                continue;
             }
+            if (TrainQaAnswerSanitizer.looksLikeSourceCode(str(row.get("answer_text")), str(row.get("answer_html")))) {
+                log.warn("跳过疑似代码的校准命中 id={}", row.get("id"));
+                continue;
+            }
+            best = row;
+            break;
         }
         if (best == null) {
             return null;
@@ -77,9 +84,10 @@ public class TrainQaCalibrateService {
         item.setCalibrateId(id);
         item.setFromCalibrate(true);
         String topic = str(best.get("topic_title"));
-        item.setQuestion(StringUtils.hasText(topic) ? topic : str(best.get("user_question")));
-        item.setAnswer(str(best.get("answer_text")));
-        item.setAnswerHtml(str(best.get("answer_html")));
+        item.setQuestion(TrainQaAnswerSanitizer.stripOfficeMarkup(
+                StringUtils.hasText(topic) ? topic : str(best.get("user_question"))));
+        item.setAnswer(TrainQaAnswerSanitizer.stripOfficeMarkup(str(best.get("answer_text"))));
+        item.setAnswerHtml(TrainQaAnswerSanitizer.stripOfficeMarkup(str(best.get("answer_html"))));
         item.setImages(parseImages(str(best.get("images_json"))));
         item.setVersionLabel(versionLabel);
         return item;
@@ -104,6 +112,7 @@ public class TrainQaCalibrateService {
         }
         String operator = SecurityUtils.getCurrentUsername();
         String imagesJson = toImagesJson(dto.getImages());
+        rejectIfCodeAnswer(status, dto.getAnswer(), dto.getAnswerHtml());
         if (id != null) {
             jdbc.update("""
                     UPDATE train_qa_calibrate SET
@@ -227,6 +236,7 @@ public class TrainQaCalibrateService {
         if (!List.of(STATUS_APPROVED, STATUS_REJECTED, STATUS_PENDING, STATUS_STALE).contains(status)) {
             throw new BusinessException("状态不合法");
         }
+        rejectIfCodeAnswer(status, dto.getAnswer(), dto.getAnswerHtml());
         String operator = SecurityUtils.getCurrentUsername();
         String aliasesJson = aliasesToJson(dto.getAliases());
         String imagesJson = toImagesJson(dto.getImages());
@@ -300,6 +310,9 @@ public class TrainQaCalibrateService {
             throw new BusinessException("重新识别未找到答案，请手动校准");
         }
         TrainAssistantAskVO.QaItem hit = items.get(0);
+        if (TrainQaAnswerSanitizer.looksLikeSourceCode(hit.getAnswer(), hit.getAnswerHtml())) {
+            throw new BusinessException("重新识别结果疑似程序代码，已拦截，请手动填写收银操作说明");
+        }
         String operator = SecurityUtils.getCurrentUsername();
         // 重新识别后进入待审，避免不准内容直接上线
         jdbc.update("""
@@ -346,8 +359,13 @@ public class TrainQaCalibrateService {
                 return true;
             }
         }
-        String topic = normalizeIntent(str(row.get("topic_title")));
-        return StringUtils.hasText(topic) && (norm.equals(topic) || topic.contains(norm) || norm.contains(topic));
+        String topic = str(row.get("topic_title"));
+        String storedQ = str(row.get("user_question"));
+        if (TrainQaIntentMatcher.titleMatches(norm, storedQ) || TrainQaIntentMatcher.titleMatches(norm, topic)) {
+            return true;
+        }
+        String topicNorm = normalizeIntent(topic);
+        return StringUtils.hasText(topicNorm) && (norm.equals(topicNorm) || topicNorm.contains(norm) || norm.contains(topicNorm));
     }
 
     private Long findIdByNorm(long docId, long versionId, String norm) {
@@ -396,6 +414,15 @@ public class TrainQaCalibrateService {
         return q.replaceAll("[\\s\\p{Punct}？?！!，,。、；;：:\\\"'（）()【】\\[\\]《》<>·…—\\-_/\\\\|]+", "")
                 .toLowerCase(Locale.ROOT)
                 .trim();
+    }
+
+    private static void rejectIfCodeAnswer(String status, String answer, String answerHtml) {
+        if (!STATUS_APPROVED.equals(status) && !STATUS_PENDING.equals(status)) {
+            return;
+        }
+        if (TrainQaAnswerSanitizer.looksLikeSourceCode(answer, answerHtml)) {
+            throw new BusinessException("答案疑似程序代码，不能下发给前台收银员，请改为操作说明");
+        }
     }
 
     private static String normalizeCategory(String category) {
