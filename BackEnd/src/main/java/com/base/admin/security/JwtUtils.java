@@ -26,14 +26,22 @@ public class JwtUtils {
     }
 
     public String generateToken(Long userId, String username) {
-        return generateToken(userId, username, UUID.randomUUID().toString().replace("-", ""));
+        return generateToken(userId, username, UUID.randomUUID().toString().replace("-", ""), true);
     }
 
     public String generateToken(Long userId, String username, String tokenId) {
+        return generateToken(userId, username, tokenId, true);
+    }
+
+    /**
+     * @param deviceExclusive true=参与单设备互踢（扫码/密码）；false=免登，不参与互踢
+     */
+    public String generateToken(Long userId, String username, String tokenId, boolean deviceExclusive) {
         return Jwts.builder()
                 .id(tokenId)
                 .subject(String.valueOf(userId))
                 .claim("username", username)
+                .claim("deviceExclusive", deviceExclusive)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey())
@@ -56,6 +64,14 @@ public class JwtUtils {
     public String getTokenId(String token) {
         Claims claims = parseToken(token);
         return claims.getId();
+    }
+
+    /**
+     * 是否参与设备互踢。旧 token 无该 claim 时按互踢会话处理（兼容已发 token）。
+     */
+    public boolean isDeviceExclusive(String token) {
+        Boolean exclusive = parseToken(token).get("deviceExclusive", Boolean.class);
+        return exclusive == null || exclusive;
     }
 
     public boolean validateToken(String token) {

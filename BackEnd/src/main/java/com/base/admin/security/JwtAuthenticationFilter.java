@@ -36,11 +36,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             Long userId = jwtUtils.getUserIdFromToken(token);
             String tokenId = jwtUtils.getTokenId(token);
 
-            // 旧 token 无 jti、已超时、或会话已被替换：强制重新登录
-            OnlineSessionService.TokenStatus status = onlineSessionService.checkToken(userId, tokenId);
-            if (status != OnlineSessionService.TokenStatus.ACTIVE) {
-                writeSessionInvalid(response, status);
-                return;
+            // 免登 token 不参与单设备互踢：只校验 JWT 本身；扫码/密码等仍校验在线会话
+            if (jwtUtils.isDeviceExclusive(token)) {
+                OnlineSessionService.TokenStatus status = onlineSessionService.checkToken(userId, tokenId);
+                if (status != OnlineSessionService.TokenStatus.ACTIVE) {
+                    writeSessionInvalid(response, status);
+                    return;
+                }
             }
 
             String username = jwtUtils.parseToken(token).get("username", String.class);

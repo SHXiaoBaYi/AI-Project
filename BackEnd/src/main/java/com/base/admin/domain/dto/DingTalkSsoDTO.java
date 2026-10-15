@@ -13,9 +13,9 @@ public class DingTalkSsoDTO {
     @Schema(description = "登录模式：corp=企业内免登；oauth=开放平台扫码/授权", example = "corp")
     private String mode;
 
-    @Schema(description = "是否强制登录（踢掉其他设备）；H5 免登建议 true", example = "true")
+    @Schema(description = "是否强制登录（免登不参与互踢，此字段忽略）", example = "false", deprecated = true)
     private Boolean force;
 
-    @Schema(description = "冲突后下发的一次性强制登录票据")
+    @Schema(description = "冲突后下发的一次性强制登录票据（免登不再使用）", deprecated = true)
     private String forceTicket;
 }

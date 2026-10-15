@@ -70,12 +70,14 @@ function looksLikeSourceCode(answer?: string) {
 }
 
 function safeQaItems(items?: TrainQaItem[]) {
-  return (items || []).map((it) => ({
-    ...it,
-    question: stripOfficeMarkup(it.question),
-    answer: stripOfficeMarkup(it.answer),
-    answerHtml: stripOfficeMarkup(it.answerHtml),
-  })).filter((it) => !looksLikeSourceCode(it.answer) && !looksLikeSourceCode(it.answerHtml));
+  return (items || [])
+    .map((it) => ({
+      ...it,
+      question: stripOfficeMarkup(it.question),
+      answer: stripOfficeMarkup(it.answer),
+      answerHtml: stripOfficeMarkup(it.answerHtml),
+    }))
+    .filter((it) => !looksLikeSourceCode(it.answer) && !looksLikeSourceCode(it.answerHtml));
 }
 
 /** 图文 HTML：配图可点击预览、放大缩小；纯文本段落仍按 HTML 渲染 */
@@ -474,7 +476,7 @@ export default function CashierAssistantPage() {
     // 每次进入都重新免登，避免沿用外部扫码/后台 token 绕过企业校验
     removeToken();
     const code = await requestCorpAuthCode(corpId);
-    const res = await dingTalkSsoApi(code, 'corp', true);
+    const res = await dingTalkSsoApi(code, 'corp');
     setToken(res.token);
 
     // 语音 JSAPI 鉴权（失败不阻断答疑，仅禁用语音）

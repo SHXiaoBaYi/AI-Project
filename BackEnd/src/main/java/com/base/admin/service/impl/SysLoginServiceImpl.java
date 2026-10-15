@@ -84,10 +84,7 @@ public class SysLoginServiceImpl implements SysLoginService {
         if (!force && onlineSessionService.hasActiveSession(loginUser.getUserId())) {
             throw new BusinessException(Constants.CODE_LOGIN_CONFLICT, "该账号已在其他设备登录，是否强制对方下线？");
         }
-        String tokenId = UUID.randomUUID().toString().replace("-", "");
-        String token = jwtUtils.generateToken(loginUser.getUserId(), loginUser.getUsername(), tokenId);
-        onlineSessionService.saveSession(loginUser.getUserId(), loginUser.getUsername(), tokenId, ip, userAgent);
-        return LoginVO.builder().token(token).build();
+        return issueLoginToken(loginUser.getUserId(), loginUser.getUsername(), ip, userAgent, true);
     }
 
     @Override
@@ -148,25 +145,18 @@ public class SysLoginServiceImpl implements SysLoginService {
             }
         }
 
-        return issueLoginToken(userId, username, ip, userAgent);
+        return issueLoginToken(userId, username, ip, userAgent, true);
     }
 
     @Override
     @Transactional
     public LoginVO loginByDingTalkSso(DingTalkSsoDTO dto, String ip, String userAgent) {
+        // 免登不参与设备互踢：不检查冲突、不写入/覆盖 online 会话，也不被扫码/密码登录顶掉
         String mode = dto.getMode() == null ? "corp" : dto.getMode().trim().toLowerCase();
-        boolean force = dto.getForce() == null || Boolean.TRUE.equals(dto.getForce());
         Long userId;
         String username;
 
-        if (force && StringUtils.hasText(dto.getForceTicket())) {
-            DingTalkForceLoginTicketStore.Entry pending = forceLoginTicketStore.consume(dto.getForceTicket());
-            if (pending == null) {
-                throw new BusinessException("强制登录已失效，请重新授权");
-            }
-            userId = pending.userId();
-            username = pending.username();
-        } else if ("oauth".equals(mode)) {
+        if ("oauth".equals(mode)) {
             if (!StringUtils.hasText(dto.getAuthCode())) {
                 throw new BusinessException("缺少钉钉授权码");
             }
@@ -174,13 +164,6 @@ public class SysLoginServiceImpl implements SysLoginService {
             BoundUser bound = resolveSystemUser(profile);
             userId = bound.userId();
             username = bound.username();
-            if (!force && onlineSessionService.hasActiveSession(userId)) {
-                String ticket = forceLoginTicketStore.issue(userId, username);
-                throw new BusinessException(
-                        Constants.CODE_LOGIN_CONFLICT,
-                        "该账号已在其他设备登录，是否强制对方下线？",
-                        Map.of("forceTicket", ticket));
-            }
         } else {
             if (!StringUtils.hasText(dto.getAuthCode())) {
                 throw new BusinessException("缺少钉钉免登授权码");
@@ -189,19 +172,16 @@ public class SysLoginServiceImpl implements SysLoginService {
             BoundUser bound = resolveBoundByCorp(identity);
             userId = bound.userId();
             username = bound.username();
-            if (!force && onlineSessionService.hasActiveSession(userId)) {
-                String ticket = forceLoginTicketStore.issue(userId, username);
-                throw new BusinessException(
-                        Constants.CODE_LOGIN_CONFLICT,
-                        "该账号已在其他设备登录，是否强制对方下线？",
-                        Map.of("forceTicket", ticket));
-            }
         }
 
-        return issueLoginToken(userId, username, ip, userAgent);
+        return issueLoginToken(userId, username, ip, userAgent, false);
     }
 
-    private LoginVO issueLoginToken(Long userId, String username, String ip, String userAgent) {
+    /**
+     * @param deviceExclusive true=写入 online 并参与互踢；false=免登，仅发 JWT
+     */
+    private LoginVO issueLoginToken(Long userId, String username, String ip, String userAgent,
+                                    boolean deviceExclusive) {
         SysUser user = userMapper.selectById(userId);
         if (user == null || (user.getIsActive() != null && user.getIsActive() == 0)) {
             throw new BusinessException("系统账号不存在或已删除");
@@ -212,8 +192,10 @@ public class SysLoginServiceImpl implements SysLoginService {
         username = user.getUsername();
 
         String tokenId = UUID.randomUUID().toString().replace("-", "");
-        String token = jwtUtils.generateToken(userId, username, tokenId);
-        onlineSessionService.saveSession(userId, username, tokenId, ip, userAgent);
+        String token = jwtUtils.generateToken(userId, username, tokenId, deviceExclusive);
+        if (deviceExclusive) {
+            onlineSessionService.saveSession(userId, username, tokenId, ip, userAgent);
+        }
         return LoginVO.builder().token(token).build();
     }
 

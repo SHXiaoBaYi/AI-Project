@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { App, Button, Result, Spin, Typography } from 'antd';
 import { getDingTalkLoginConfigApi, dingTalkSsoApi } from '@/api/auth';
 import { executeDingTalkIntentApi, type DingTalkIntentExecuteResult } from '@/api/dingtalk';
-import { CODE_LOGIN_CONFLICT } from '@/api/request';
 import MeetingFormModal from '@/components/dingtalk/MeetingFormModal';
 import ReportFormModal from '@/components/dingtalk/ReportFormModal';
 import type { RecommendSlotOption } from '@/components/dingtalk/RecommendSlotRadio';
@@ -120,20 +119,9 @@ function requestCorpAuthCode(corpId: string) {
   });
 }
 
-async function ssoWithForce(authCode: string, mode: 'corp' | 'oauth') {
-  try {
-    return await dingTalkSsoApi(authCode, mode, true);
-  } catch (err) {
-    const e = err as Error & { code?: number; data?: { forceTicket?: string } };
-    if (e.code === CODE_LOGIN_CONFLICT) {
-      const forceTicket =
-        e.data && typeof e.data === 'object' && 'forceTicket' in e.data
-          ? String((e.data as { forceTicket?: string }).forceTicket || '')
-          : '';
-      return dingTalkSsoApi(authCode, mode, true, forceTicket || undefined);
-    }
-    throw err;
-  }
+async function ssoLogin(authCode: string, mode: 'corp' | 'oauth') {
+  // 免登不参与互踢，直接换票即可
+  return dingTalkSsoApi(authCode, mode);
 }
 
 type FormKind = 'invite' | 'meeting' | 'report';
@@ -255,7 +243,7 @@ export default function DingTalkBridgePage() {
 
     if (oauthCode) {
       setTip('正在登录…');
-      const res = await ssoWithForce(oauthCode, 'oauth');
+      const res = await ssoLogin(oauthCode, 'oauth');
       setToken(res.token);
       if (ticket) {
         window.history.replaceState(
@@ -287,7 +275,7 @@ export default function DingTalkBridgePage() {
     await loadDingTalkJsapi();
     removeToken();
     const code = await requestCorpAuthCode(corpId);
-    const res = await ssoWithForce(code, 'corp');
+    const res = await ssoLogin(code, 'corp');
     setToken(res.token);
   }, []);
 

@@ -35,12 +35,16 @@ export function dingTalkLoginApi(authCode: string, force = false, forceTicket?: 
   });
 }
 
-export function dingTalkSsoApi(authCode: string, mode: 'corp' | 'oauth' = 'corp', force = true, forceTicket?: string) {
+/** 钉钉免登：不参与设备互踢（force/forceTicket 已忽略，保留参数兼容旧调用） */
+export function dingTalkSsoApi(
+  authCode: string,
+  mode: 'corp' | 'oauth' = 'corp',
+  _force = false,
+  _forceTicket?: string,
+) {
   return request.post<unknown, { token: string }>('/auth/dingtalk/sso', {
-    authCode: forceTicket ? undefined : authCode,
+    authCode,
     mode,
-    force,
-    forceTicket,
   });
 }
 
