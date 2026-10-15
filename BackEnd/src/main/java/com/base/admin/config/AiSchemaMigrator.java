@@ -66,13 +66,28 @@ public class AiSchemaMigrator implements ApplicationRunner {
                     INSERT IGNORE INTO sys_ai_provider (provider, provider_name, api_key, model, base_url, enabled, sort_order, remark, is_active)
                     SELECT v.provider, v.provider_name, '', v.model, '', 1, v.sort_order, v.remark, 1
                     FROM (
-                      SELECT 'tongyi' AS provider, '通义千问' AS provider_name, 'qwen-turbo' AS model, 1 AS sort_order, '阿里云 DashScope 兼容模式' AS remark
+                      SELECT 'tongyi' AS provider, '通义千问' AS provider_name, 'qwen-plus' AS model, 1 AS sort_order, '阿里云 DashScope 兼容模式' AS remark
                       UNION ALL SELECT 'deepseek', 'DeepSeek', 'deepseek-chat', 2, 'DeepSeek OpenAI 兼容'
                       UNION ALL SELECT 'zhipu', '智谱GLM', 'glm-4-flash', 3, '智谱开放平台'
                       UNION ALL SELECT 'moonshot', '月之暗面', 'moonshot-v1-8k', 4, 'Moonshot / Kimi'
                     ) v
                     WHERE NOT EXISTS (SELECT 1 FROM sys_ai_provider p WHERE p.provider = v.provider)
                     """);
+            // 通义按模型独立限流：历史默认 qwen-turbo 在部分账号会「零调用仍 limit_requests」，统一迁到 qwen-plus
+            int migrated = statement.executeUpdate("""
+                    UPDATE sys_ai_provider
+                    SET model = 'qwen-plus',
+                        remark = CASE
+                          WHEN remark IS NULL OR remark = '' THEN '已从 qwen-turbo 迁移为 qwen-plus（规避异常限流）'
+                          ELSE remark
+                        END
+                    WHERE provider = 'tongyi'
+                      AND is_active = 1
+                      AND model IN ('qwen-turbo', 'qwen-turbo-latest', '')
+                    """);
+            if (migrated > 0) {
+                log.info("已将通义默认模型从 qwen-turbo 迁移为 qwen-plus，影响 {} 行", migrated);
+            }
         }
     }
 

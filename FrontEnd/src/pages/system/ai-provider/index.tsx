@@ -3,15 +3,49 @@ import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Form, Input, Modal, Switch, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
-import { getAiProviderListApi, updateAiProviderApi, type AiProviderVO } from '@/api/aiProvider';
+import { getAiProviderListApi, testAiProviderApi, updateAiProviderApi, type AiProviderVO } from '@/api/aiProvider';
 
 const AiProviderPage = memo(function AiProviderPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const actionRef = useRef<ActionType>(null);
   const [editing, setEditing] = useState<AiProviderVO | null>(null);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testingProvider, setTestingProvider] = useState<string>();
   const [form] = Form.useForm();
+
+  const runTest = async (record: AiProviderVO) => {
+    if (!record.hasApiKey) {
+      message.warning('请先配置 API Key');
+      return;
+    }
+    setTestingProvider(record.provider);
+    try {
+      const res = await testAiProviderApi(record.provider);
+      if (res.success) {
+        message.success(res.message || `连通成功（${res.model}）`);
+      } else {
+        modal.warning({
+          title: `${record.providerName} 探测失败`,
+          width: 560,
+          content: (
+            <div className='space-y-2 text-sm'>
+              <div>{res.message}</div>
+              {(res.attempts ?? []).length > 0 ? (
+                <pre className='max-h-48 overflow-auto rounded bg-neutral-50 p-2 text-xs whitespace-pre-wrap'>
+                  {(res.attempts ?? []).join('\n')}
+                </pre>
+              ) : null}
+            </div>
+          ),
+        });
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '探测失败');
+    } finally {
+      setTestingProvider(undefined);
+    }
+  };
 
   const openEdit = (record: AiProviderVO) => {
     setEditing(record);
@@ -89,7 +123,7 @@ const AiProviderPage = memo(function AiProviderPage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 100,
+      width: 180,
       render: (_, record) => (
         <ActionButtons
           items={[
@@ -98,6 +132,13 @@ const AiProviderPage = memo(function AiProviderPage() {
               label: '配置',
               perm: 'system:ai:edit',
               onClick: () => openEdit(record),
+            },
+            {
+              key: 'test',
+              label: testingProvider === record.provider ? '探测中…' : '探测',
+              perm: 'system:ai:list',
+              disabled: testingProvider === record.provider,
+              onClick: () => void runTest(record),
             },
           ]}
         />
@@ -168,8 +209,13 @@ const AiProviderPage = memo(function AiProviderPage() {
             name='model'
             label='模型名'
             rules={[{ required: true, message: '请输入模型名' }]}
+            extra={
+              editing?.provider === 'tongyi'
+                ? '通义建议用 qwen-plus 或 qwen-flash；qwen-turbo 在部分账号会异常 429，换 Key 通常无效'
+                : undefined
+            }
           >
-            <Input placeholder='如 qwen-turbo / deepseek-chat' />
+            <Input placeholder='如 qwen-plus / deepseek-chat / glm-4-flash' />
           </Form.Item>
           <Form.Item
             name='baseUrl'

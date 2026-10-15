@@ -115,7 +115,8 @@ public class AiProperties {
             return model.trim();
         }
         return switch (normalizeProvider(provider)) {
-            case PROVIDER_TONGYI -> "qwen-turbo";
+            // qwen-turbo 部分账号易出现「几乎无调用却 limit_requests」；默认改用更稳的 plus
+            case PROVIDER_TONGYI -> "qwen-plus";
             case PROVIDER_ZHIPU -> "glm-4-flash";
             case PROVIDER_MOONSHOT -> "moonshot-v1-8k";
             case PROVIDER_DEEPSEEK -> "deepseek-chat";
