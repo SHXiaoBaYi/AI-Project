@@ -11,8 +11,10 @@ import com.base.admin.domain.dto.GeoContentPlacementCiteDTO;
 import com.base.admin.domain.dto.GeoContentPlacementDTO;
 import com.base.admin.domain.dto.GeoContentPlacementItemDTO;
 import com.base.admin.domain.dto.GeoContentPlacementQueryDTO;
+import com.base.admin.domain.dto.GeoContentAiGenerateDTO;
 import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
+import com.base.admin.domain.vo.GeoContentAiGenerateVO;
 import com.base.admin.domain.vo.GeoContentArticleBundleVO;
 import com.base.admin.domain.vo.GeoContentArticleVO;
 import com.base.admin.domain.vo.GeoContentDraftVO;
@@ -93,6 +95,8 @@ public interface GeoContentPlacementService {
     /** 生成相似问题可用的 AI 厂商列表 */
     List<GeoAiProviderOptionVO> listAiProviders();
 
+    /** 按卖点库 + 话题/目标问题 AI 生成文章草稿并写入统一稿或独立稿 */
+    GeoContentAiGenerateVO generateArticle(GeoContentAiGenerateDTO dto);
 
     Long createItem(GeoContentPlacementItemDTO dto);
 

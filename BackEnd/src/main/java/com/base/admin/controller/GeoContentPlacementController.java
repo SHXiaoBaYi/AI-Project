@@ -4,6 +4,7 @@ import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.GeoContentAiGenerateDTO;
 import com.base.admin.domain.dto.GeoContentDraftSaveDTO;
 import com.base.admin.domain.dto.GeoContentItemDraftSaveDTO;
 import com.base.admin.domain.dto.GeoContentOpinionSaveDTO;
@@ -19,6 +20,7 @@ import com.base.admin.domain.dto.GeoGenerateSimilarDTO;
 import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
 import com.base.admin.domain.vo.GeoSimilarQuestionPreviewVO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
+import com.base.admin.domain.vo.GeoContentAiGenerateVO;
 import com.base.admin.domain.vo.GeoContentArticleBundleVO;
 import com.base.admin.domain.vo.GeoContentArticleVO;
 import com.base.admin.domain.vo.GeoContentDraftVO;
@@ -220,9 +222,17 @@ public class GeoContentPlacementController {
 
     @Operation(summary = "生成相似问题可用的 AI 厂商")
     @GetMapping("/ai-providers")
-    @RequiresPermission("geo:content:generate")
+    @RequiresPermission({"geo:content:generate", "geo:content:work", "geo:content:edit", "geo:write:mine"})
     public Result<List<GeoAiProviderOptionVO>> listAiProviders() {
         return Result.ok(contentPlacementService.listAiProviders());
+    }
+
+    @Operation(summary = "按卖点库 AI 生成文章草稿（写入统一稿或独立稿）")
+    @PostMapping("/articles/ai-generate")
+    @RequiresPermission({"geo:content:work", "geo:content:edit", "geo:write:mine"})
+    @Log(title = "GEO内容投放-AI生成文章", businessType = 1)
+    public Result<GeoContentAiGenerateVO> aiGenerateArticle(@Valid @RequestBody GeoContentAiGenerateDTO dto) {
+        return Result.ok(contentPlacementService.generateArticle(dto));
     }
 
     @Operation(summary = "预览相似目标问题，不落库")

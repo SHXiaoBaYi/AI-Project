@@ -39,6 +39,10 @@ import type {
   GeoContentReviewRow,
   GeoContentReviewRule,
   GeoContentWritingRow,
+  GeoContentAiGenerateResult,
+  GeoSellDomain,
+  GeoSellPoint,
+  GeoSellPointContext,
   GeoTargetQuestionOption,
 } from '@/types/geo';
 
@@ -584,6 +588,84 @@ export function getGeoAiProvidersApi() {
   return request.get<unknown, { provider: string; label: string; model: string; available: boolean; hint?: string }[]>(
     '/geo/content-placement/ai-providers',
   );
+}
+
+export function aiGenerateGeoContentArticleApi(data: {
+  placementId: number;
+  itemId?: number | null;
+  provider?: string;
+  /** 用户补充提示词，与话题/目标问题一并约束生成 */
+  userPrompt?: string;
+}) {
+  return request.post<unknown, GeoContentAiGenerateResult>('/geo/content-placement/articles/ai-generate', data, {
+    timeout: 180000,
+  });
+}
+
+export function getGeoSellDomainTreeApi() {
+  return request.get<unknown, GeoSellDomain[]>('/geo/sell-point/domains/tree');
+}
+
+export function createGeoSellDomainApi(data: Partial<GeoSellDomain>) {
+  return request.post('/geo/sell-point/domains', data);
+}
+
+export function updateGeoSellDomainApi(data: Partial<GeoSellDomain>) {
+  return request.put('/geo/sell-point/domains', data);
+}
+
+export function deleteGeoSellDomainApi(id: number) {
+  return request.delete(`/geo/sell-point/domains/${id}`);
+}
+
+export function getGeoSellPointListApi(
+  data: PageQuery & {
+    domainId?: number;
+    title?: string;
+    sourceSheet?: string;
+    status?: string;
+    evidenceLevel?: string;
+    keyword?: string;
+    createTimeStart?: string;
+    createTimeEnd?: string;
+  },
+) {
+  return request.post<unknown, PageResult<GeoSellPoint>>('/geo/sell-point/list', data);
+}
+
+export function createGeoSellPointApi(data: Partial<GeoSellPoint> & { domainId: number }) {
+  return request.post('/geo/sell-point', data);
+}
+
+export function updateGeoSellPointApi(data: Partial<GeoSellPoint> & { id: number; domainId: number }) {
+  return request.put('/geo/sell-point', data);
+}
+
+export function deleteGeoSellPointApi(id: number) {
+  return request.delete(`/geo/sell-point/${id}`);
+}
+
+export function deleteGeoSellPointBatchApi(ids: number[]) {
+  return request.delete('/geo/sell-point/batch', { data: ids });
+}
+
+export function previewGeoSellPointContextApi(data: { topicName?: string; targetQuestion?: string; limit?: number }) {
+  return request.post<unknown, GeoSellPointContext>('/geo/sell-point/preview-context', data);
+}
+
+export function importGeoSellPointApi(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post<unknown, GeoImportResult>('/geo/sell-point/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+  });
+}
+
+export function importGeoSellPointDefaultApi() {
+  return request.post<unknown, GeoImportResult>('/geo/sell-point/import-default', undefined, {
+    timeout: 180000,
+  });
 }
 
 export function importGeoContentPlacementApi(file: File) {

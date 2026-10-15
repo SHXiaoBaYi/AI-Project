@@ -870,3 +870,84 @@ export interface GeoContentPlacementCiteDTO {
   sortOrder?: number;
   remark?: string;
 }
+
+/** 卖点结构类型：与 Excel sheet 一一对应，勿混用字段 */
+export type GeoSellKind = 'simple' | 'quality' | 'social' | 'authority';
+
+export interface GeoSellDomain {
+  id: number;
+  parentId?: number;
+  name: string;
+  code?: string;
+  /** 根域结构类型，子域继承 */
+  rootKind?: GeoSellKind | string;
+  sortOrder?: number;
+  enabled?: number;
+  remark?: string;
+  /** 本域及子域卖点条数 */
+  pointCount?: number;
+  children?: GeoSellDomain[];
+}
+
+export interface GeoSellPoint {
+  id: number;
+  domainId: number;
+  domainName?: string;
+  kind?: GeoSellKind | string;
+  title: string;
+  claim?: string;
+  evidence?: string;
+  tags?: string[];
+  keywords?: string[];
+  evidenceLevel?: string;
+  /** quality */
+  moduleName?: string;
+  sectionName?: string;
+  itemName?: string;
+  standardText?: string;
+  /** social */
+  dimension?: string;
+  eventName?: string;
+  actionContent?: string;
+  eventRemark?: string;
+  /** authority */
+  channel?: string;
+  admission?: string;
+  processText?: string;
+  meaning?: string;
+  extraNote?: string;
+  status?: string;
+  sortOrder?: number;
+  sourceSheet?: string;
+  sourceRow?: number;
+  /** 正文/论据字数，列表展示用 */
+  evidenceLen?: number;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface GeoSellPointContext {
+  topic?: string;
+  question?: string;
+  points?: {
+    id?: number;
+    domain?: string;
+    title?: string;
+    claim?: string;
+    evidence?: string;
+    level?: string;
+    tags?: string[];
+    score?: number;
+  }[];
+  hardFacts?: string[];
+  forbiddenHints?: string[];
+}
+
+export interface GeoContentAiGenerateResult {
+  contentTitle?: string;
+  contentBody?: string;
+  sourceAiModel?: string;
+  usedPointCount?: number;
+  applied?: boolean;
+  contentVersion?: number;
+}

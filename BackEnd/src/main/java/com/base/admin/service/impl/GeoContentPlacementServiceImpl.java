@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.Constants;
 import com.base.admin.common.PageResult;
+import com.base.admin.domain.dto.GeoContentAiGenerateDTO;
 import com.base.admin.domain.dto.GeoContentArticleBoardQueryDTO;
 import com.base.admin.domain.dto.GeoContentArticleDetailQueryDTO;
 import com.base.admin.domain.dto.GeoContentDraftSaveDTO;
@@ -31,7 +32,9 @@ import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysTaskFile;
 import com.base.admin.domain.entity.SysUser;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
+import com.base.admin.domain.vo.GeoContentAiGenerateVO;
 import com.base.admin.domain.vo.GeoChartPointVO;
+import com.base.admin.domain.vo.GeoSellPointContextVO;
 import com.base.admin.domain.vo.GeoContentArticleBoardVO;
 import com.base.admin.domain.vo.GeoContentArticleDetailRowVO;
 import com.base.admin.domain.vo.GeoContentCiteAggRowVO;
@@ -71,6 +74,7 @@ import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoTopicService;
 import com.base.admin.service.PlacementTaskSyncService;
+import com.base.admin.service.SellPointContextService;
 import com.base.admin.service.SysAiProviderService;
 import com.base.admin.service.SysTaskService;
 import com.base.admin.util.ExcelCellUtils;
@@ -133,6 +137,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final GeoTopicService topicService;
     private final AiChatService aiChatService;
     private final SysAiProviderService sysAiProviderService;
+    private final SellPointContextService sellPointContextService;
     private final PlacementTaskSyncService placementTaskSyncService;
     private final ObjectMapper objectMapper;
     private final SysTaskMapper taskMapper;
@@ -1173,6 +1178,241 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     public List<GeoAiProviderOptionVO> listAiProviders() {
         // 仅返回本地模板 + 系统管理中已配 Key 且启用的云厂商
         return sysAiProviderService.listReadyOptions();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public GeoContentAiGenerateVO generateArticle(GeoContentAiGenerateDTO dto) {
+        if (dto == null || dto.getPlacementId() == null) {
+            throw new BusinessException("内容投放ID不能为空");
+        }
+        GeoContentPlacement placement = requirePlacement(dto.getPlacementId());
+        String lockStatus = placement.getContentStatus();
+        if (Constants.CONTENT_STATUS_QUEUE.equals(lockStatus)
+                || Constants.CONTENT_STATUS_PUBLISHED.equals(lockStatus)) {
+            throw new BusinessException("待投放/已发布文章不可再生成正文");
+        }
+        if (Constants.CONTENT_STATUS_PENDING_REVIEW.equals(lockStatus)
+                && hasPendingContentReview(placement.getId())) {
+            throw new BusinessException("审核中不可生成正文");
+        }
+
+        String provider = StringUtils.hasText(dto.getProvider()) ? dto.getProvider().trim() : null;
+        if (provider != null && "local".equalsIgnoreCase(provider)) {
+            throw new BusinessException("请选择已配置 API Key 的云厂商模型生成文章");
+        }
+        if (provider != null && !aiChatService.isProviderConfigured(provider)) {
+            throw new BusinessException("所选模型未配置 API Key，请到「系统管理 → AI模型配置」中填写");
+        }
+        if (provider == null && !aiChatService.isEnabled()) {
+            throw new BusinessException("未配置可用 AI 模型，请到「系统管理 → AI模型配置」中填写");
+        }
+
+        GeoSellPointContextVO ctx = sellPointContextService.build(
+                placement.getTopicName(), placement.getTargetQuestion(), 12);
+        String pointsJson;
+        try {
+            pointsJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(ctx);
+        } catch (Exception e) {
+            throw new BusinessException("组装卖点上下文失败");
+        }
+
+        String system = """
+                你是小巴依品牌 GEO 内容撰写助手。请综合「用户提示词 + 话题 + 目标问题」和给定卖点库上下文，撰写一篇可直接粘贴到微信公众号、知乎、小红书、头条等图文平台的正式中文文章。
+
+                【事实硬约束】
+                1. 只能使用卖点库 points / hard_facts 中的事实，不得编造认证编号、检测数据、门店、捐赠金额、时间节点；
+                2. 必须紧扣目标问题作答；用户提示词有额外要求（风格、角度、篇幅、必提点等）时，在不违反事实约束的前提下优先满足。
+
+                【排版硬约束——必须像能直接发布的正刊文章，禁止流水账堆砌】
+                1. 标题（title）：独立成字段，口语可检索，20 字内为宜，不要与正文首段重复一整句；
+                2. 正文（html）结构固定为：
+                   - 开篇导语 1～2 段：先直接回应目标问题，再引出下文；
+                   - 2～4 个小节：每个小节必须有 <h2> 小标题，小节内 2～4 个短段落；
+                   - 关键论据/数据用 <strong> 加粗，必要时用 <ul><li> 列出要点；
+                   - 收束段：总结立场 + 一句自然行动建议（关注/了解/对比等），不要硬广口号堆砌；
+                3. 段落要短：单段一般不超过 80 字；段与段之间靠独立 <p> 分隔，不要一整坨长文；
+                4. 默认全文 800～1500 字（用户提示词另有字数要求时从其要求）；
+                5. 禁止：Markdown（#、-、**）、代码块、表格、图片、脚本、外链、<h1>、内联 style/class；
+                6. html 仅允许标签：h2、h3、p、strong、em、ul、ol、li、blockquote、br。
+
+                【输出格式】
+                只输出 JSON，不要 markdown 围栏，不要解释：
+                {"title":"标题","html":"<p>导语…</p><h2>小节一</h2><p>…</p><ul><li>…</li></ul><h2>小节二</h2><p>…</p><p>收束…</p>"}
+                """;
+        StringBuilder userSb = new StringBuilder();
+        userSb.append("话题：").append(nz(placement.getTopicName()));
+        userSb.append("\n目标问题：").append(nz(placement.getTargetQuestion()));
+        if (StringUtils.hasText(dto.getUserPrompt())) {
+            userSb.append("\n用户提示词：\n").append(dto.getUserPrompt().trim());
+        }
+        userSb.append("\n卖点上下文：\n").append(pointsJson);
+        String user = userSb.toString();
+
+        String content;
+        try {
+            content = aiChatService.chat(system, user, provider, 0.6);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("AI 生成失败: " + e.getMessage());
+        }
+
+        ParsedArticle parsed = parseGeneratedArticle(content);
+        String title = parsed.title();
+        String lake = toLakeDocument(parsed.html());
+        String modelLabel = resolveAiSourceLabel(provider);
+
+        Long itemId = dto.getItemId();
+        Long version;
+        if (itemId != null) {
+            GeoContentPlacementItem item = itemMapper.selectById(itemId);
+            if (item == null || !Objects.equals(item.getPlacementId(), placement.getId())) {
+                throw new BusinessException("平台文章不存在");
+            }
+            GeoContentItemDraftSaveDTO save = new GeoContentItemDraftSaveDTO();
+            save.setItemId(itemId);
+            save.setContentMode(Constants.CONTENT_MODE_CUSTOM);
+            save.setContentTitle(title);
+            save.setContentBody(lake);
+            save.setContentVersion(item.getContentVersion());
+            GeoContentArticleVO saved = saveItemDraft(save);
+            version = saved.getContentVersion();
+        } else {
+            GeoContentDraftSaveDTO save = new GeoContentDraftSaveDTO();
+            save.setPlacementId(placement.getId());
+            save.setContentTitle(title);
+            save.setContentBody(lake);
+            save.setContentVersion(placement.getContentVersion());
+            GeoContentDraftVO saved = saveDraft(save);
+            version = saved.getContentVersion();
+        }
+
+        placementMapper.update(null, new LambdaUpdateWrapper<GeoContentPlacement>()
+                .eq(GeoContentPlacement::getId, placement.getId())
+                .set(GeoContentPlacement::getSource, Constants.CONTENT_SOURCE_AI)
+                .set(GeoContentPlacement::getSourceAiModel, modelLabel));
+
+        GeoContentAiGenerateVO vo = new GeoContentAiGenerateVO();
+        vo.setContentTitle(title);
+        vo.setContentBody(lake);
+        vo.setSourceAiModel(modelLabel);
+        vo.setUsedPointCount(ctx.getPoints() == null ? 0 : ctx.getPoints().size());
+        vo.setApplied(true);
+        vo.setContentVersion(version);
+        return vo;
+    }
+
+    private ParsedArticle parseGeneratedArticle(String content) {
+        String title = "";
+        String html = "";
+        try {
+            String text = content == null ? "" : content.trim();
+            int start = text.indexOf('{');
+            int end = text.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+                text = text.substring(start, end + 1);
+            }
+            JsonNode node = objectMapper.readTree(text);
+            if (node.has("title")) {
+                title = node.path("title").asText("").trim();
+            }
+            if (node.has("html")) {
+                html = node.path("html").asText("").trim();
+            } else if (node.has("body")) {
+                html = node.path("body").asText("").trim();
+            } else if (node.has("content")) {
+                html = node.path("content").asText("").trim();
+            }
+        } catch (Exception e) {
+            log.warn("解析 AI 文章 JSON 失败，按纯文本兜底: {}", e.getMessage());
+            html = content == null ? "" : content.trim();
+        }
+        if (!StringUtils.hasText(html)) {
+            throw new BusinessException("AI 未返回可用正文，请重试");
+        }
+        if (!StringUtils.hasText(title)) {
+            title = firstLineAsTitle(html);
+        }
+        if (!html.contains("<")) {
+            html = plainToHtmlParagraphs(html);
+        }
+        html = normalizePublishableHtml(html);
+        return new ParsedArticle(title, html);
+    }
+
+    private static String toLakeDocument(String html) {
+        String body = html == null ? "" : html.trim();
+        if (body.regionMatches(true, 0, "<!doctype lake>", 0, "<!doctype lake>".length())) {
+            return body;
+        }
+        return "<!doctype lake><meta name=\"doc-version\" content=\"1\" />" + body;
+    }
+
+    /**
+     * 把 AI 正文整理成内容平台可直接粘贴的语义 HTML：清掉 markdown 残留、危险标签，
+     * 并把孤立换行尽量落成段落。
+     */
+    private static String normalizePublishableHtml(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        String html = raw.trim();
+        // 去掉偶发的 markdown 标题/加粗写法
+        html = html.replaceAll("(?m)^#{1,6}\\s*", "");
+        html = html.replaceAll("\\*\\*([^*]+)\\*\\*", "<strong>$1</strong>");
+        html = html.replaceAll("(?m)^[-*•]\\s+", "• ");
+        // 降级不允许的标题级别
+        html = html.replaceAll("(?i)</?h1\\b[^>]*>", "");
+        html = html.replaceAll("(?i)<h([4-6])\\b[^>]*>", "<h3>");
+        html = html.replaceAll("(?i)</h([4-6])>", "</h3>");
+        // 去掉脚本/样式/链接与危险属性
+        html = html.replaceAll("(?is)<script[^>]*>.*?</script>", "");
+        html = html.replaceAll("(?is)<style[^>]*>.*?</style>", "");
+        html = html.replaceAll("(?i)</?a\\b[^>]*>", "");
+        html = html.replaceAll("(?i)\\s(style|class|onclick|onerror)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)", "");
+        // 若几乎没有块级标签，按空行拆段
+        if (!html.matches("(?is).*<\\s*(p|h2|h3|ul|ol|blockquote)\\b.*")) {
+            html = plainToHtmlParagraphs(html);
+        }
+        return html.trim();
+    }
+
+    private static String plainToHtmlParagraphs(String text) {
+        String[] parts = text.replace("\r\n", "\n").split("\n{2,}");
+        StringBuilder sb = new StringBuilder();
+        for (String part : parts) {
+            String line = part.trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            // 纯文本里的「一、xxx / 1. xxx」升成小标题，便于平台粘贴
+            if (line.matches("^[一二三四五六七八九十]+[、.．]\\s*.+")
+                    || line.matches("^\\d+[、.．]\\s*.+")
+                    || line.matches("^【.+】$")) {
+                String heading = line.replaceFirst("^[一二三四五六七八九十\\d]+[、.．]\\s*", "")
+                        .replaceAll("^【|】$", "");
+                sb.append("<h2>").append(heading).append("</h2>");
+                continue;
+            }
+            if (line.startsWith("• ") || line.startsWith("- ") || line.startsWith("* ")) {
+                sb.append("<ul><li>").append(line.substring(2).trim()).append("</li></ul>");
+                continue;
+            }
+            sb.append("<p>").append(line.replace("\n", "<br/>")).append("</p>");
+        }
+        return sb.isEmpty() ? "<p>" + text.trim() + "</p>" : sb.toString();
+    }
+
+    private static String firstLineAsTitle(String html) {
+        String plain = html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
+        if (plain.length() > 40) {
+            return plain.substring(0, 40);
+        }
+        return StringUtils.hasText(plain) ? plain : "未命名文章";
+    }
+
+    private record ParsedArticle(String title, String html) {
     }
 
     private record SimilarQuestionsResult(List<String> questions, String sourceAiModel) {

@@ -74,6 +74,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureGeoStaffRoles(connection);
             retireLegacyGeoRoles(connection);
             ensureContentReviewRule(connection);
+            ensureSellPointLibrary(connection);
             if (cleanupEmptyDaily) {
                 cleanupEmptyUninspectedDailyBeforeToday(connection);
             }
@@ -1287,6 +1288,172 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             }
         }
         log.info("已同步文章审核规则菜单 menu_id=178 path=geo/review-rule");
+    }
+
+    /** 卖点域树 + 卖点条目；菜单挂在内容投放下 */
+    private void ensureSellPointLibrary(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_sell_domain")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_sell_domain (
+                          id          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          parent_id   BIGINT        NOT NULL DEFAULT 0      COMMENT '父域ID，0=根',
+                          name        VARCHAR(128)  NOT NULL                COMMENT '域名称',
+                          code        VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '稳定编码',
+                          sort_order  INT           NOT NULL DEFAULT 0      COMMENT '排序',
+                          enabled     TINYINT       NOT NULL DEFAULT 1      COMMENT '1启用 0停用',
+                          remark      VARCHAR(500)  NOT NULL DEFAULT ''     COMMENT '备注',
+                          create_by   VARCHAR(64)   DEFAULT ''              COMMENT '创建者',
+                          create_time DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                          update_by   VARCHAR(64)   DEFAULT ''              COMMENT '更新者',
+                          update_time DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                          is_active   TINYINT       NOT NULL DEFAULT 1      COMMENT '是否有效',
+                          PRIMARY KEY (id),
+                          KEY idx_sell_domain_parent (parent_id, is_active),
+                          KEY idx_sell_domain_code (code)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO卖点域'
+                        """);
+            }
+            log.info("已创建 geo_sell_domain");
+        }
+        if (!tableExists(connection, "geo_sell_point")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_sell_point (
+                          id             BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          domain_id      BIGINT        NOT NULL                COMMENT '所属域',
+                          title          VARCHAR(200)  NOT NULL                COMMENT '短标题',
+                          claim          VARCHAR(500)  NOT NULL DEFAULT ''     COMMENT '一句话主张',
+                          evidence       MEDIUMTEXT    NULL                     COMMENT '论据正文',
+                          tags_json      VARCHAR(1000) NOT NULL DEFAULT '[]'   COMMENT '标签JSON',
+                          keywords_json  VARCHAR(1000) NOT NULL DEFAULT '[]'   COMMENT '检索词JSON',
+                          evidence_level VARCHAR(16)   NOT NULL DEFAULT 'soft' COMMENT 'soft/hard',
+                          source_sheet   VARCHAR(128)  NOT NULL DEFAULT ''     COMMENT '导入sheet',
+                          source_row     INT           NULL                     COMMENT '导入行号',
+                          status         VARCHAR(16)   NOT NULL DEFAULT 'active' COMMENT 'active/draft/disabled',
+                          sort_order     INT           NOT NULL DEFAULT 0      COMMENT '排序',
+                          version_no     INT           NOT NULL DEFAULT 1      COMMENT '版本',
+                          create_by      VARCHAR(64)   DEFAULT ''              COMMENT '创建者',
+                          create_time    DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                          update_by      VARCHAR(64)   DEFAULT ''              COMMENT '更新者',
+                          update_time    DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                          is_active      TINYINT       NOT NULL DEFAULT 1      COMMENT '是否有效',
+                          PRIMARY KEY (id),
+                          KEY idx_sell_point_domain (domain_id, status, is_active),
+                          KEY idx_sell_point_title (title)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO卖点条目'
+                        """);
+            }
+            log.info("已创建 geo_sell_point");
+        }
+        // 分类型明细：品控 / 社会责任 / 权威背书（字段与 Excel sheet 对齐，不再硬塞 claim/evidence）
+        if (!columnExists(connection, "geo_sell_point", "kind")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_sell_point
+                          ADD COLUMN kind VARCHAR(32) NOT NULL DEFAULT 'simple'
+                          COMMENT 'simple|quality|social|authority' AFTER domain_id
+                        """);
+            }
+            log.info("已为 geo_sell_point 增加 kind");
+        }
+        if (!tableExists(connection, "geo_sell_quality")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_sell_quality (
+                          point_id      BIGINT        NOT NULL COMMENT '卖点条目ID',
+                          module_name   VARCHAR(200)  NOT NULL DEFAULT '' COMMENT '模块',
+                          section_name  VARCHAR(200)  NOT NULL DEFAULT '' COMMENT '小节',
+                          item_name     VARCHAR(200)  NOT NULL DEFAULT '' COMMENT '项目',
+                          standard_text MEDIUMTEXT    NULL COMMENT '内容/标准/要求',
+                          PRIMARY KEY (point_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO卖点-品控明细'
+                        """);
+            }
+            log.info("已创建 geo_sell_quality");
+        }
+        if (!tableExists(connection, "geo_sell_social")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_sell_social (
+                          point_id       BIGINT        NOT NULL COMMENT '卖点条目ID',
+                          dimension      VARCHAR(200)  NOT NULL DEFAULT '' COMMENT '维度',
+                          event_name     VARCHAR(300)  NOT NULL DEFAULT '' COMMENT '卖点/事件名',
+                          action_content MEDIUMTEXT    NULL COMMENT '行动内容',
+                          event_remark   VARCHAR(1000) NOT NULL DEFAULT '' COMMENT '备注',
+                          PRIMARY KEY (point_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO卖点-社会责任明细'
+                        """);
+            }
+            log.info("已创建 geo_sell_social");
+        }
+        if (!tableExists(connection, "geo_sell_authority")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_sell_authority (
+                          point_id   BIGINT        NOT NULL COMMENT '卖点条目ID',
+                          channel    VARCHAR(300)  NOT NULL DEFAULT '' COMMENT '背书渠道',
+                          admission  MEDIUMTEXT    NULL COMMENT '准入标准',
+                          process_text MEDIUMTEXT  NULL COMMENT '遴选流程',
+                          meaning    MEDIUMTEXT    NULL COMMENT '背书意义',
+                          extra_note MEDIUMTEXT    NULL COMMENT '补充说明/总述正文',
+                          PRIMARY KEY (point_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO卖点-权威背书明细'
+                        """);
+            }
+            log.info("已创建 geo_sell_authority");
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (182, '卖点库', 132, 5, 'geo/sell-point', '', 'C', 'geo:sellPoint:list', 'BulbOutlined', 0, 0,
+                     '品牌卖点维护，供AI生成/审核引用', 1),
+                    (183, '卖点新增', 182, 1, '', '', 'F', 'geo:sellPoint:add', '#', 0, 0, '', 1),
+                    (184, '卖点修改', 182, 2, '', '', 'F', 'geo:sellPoint:edit', '#', 0, 0, '', 1),
+                    (185, '卖点删除', 182, 3, '', '', 'F', 'geo:sellPoint:delete', '#', 0, 0, '', 1),
+                    (186, '卖点导入', 182, 4, '', '', 'F', 'geo:sellPoint:import', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      parent_id = VALUES(parent_id),
+                      sort_order = VALUES(sort_order),
+                      path = VALUES(path),
+                      component = VALUES(component),
+                      menu_type = VALUES(menu_type),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      is_active = 1,
+                      visible = VALUES(visible)
+                    """);
+            statement.execute("""
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (182, 183, 184, 185, 186)
+                    """);
+            statement.execute("""
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT rm.role_id, m.menu_id, 1
+                    FROM sys_role_menu rm
+                    CROSS JOIN sys_menu m
+                    WHERE rm.menu_id = 101 AND rm.is_active = 1
+                      AND m.menu_id IN (182, 183, 184, 185, 186)
+                    """);
+            Long mgmtId = roleIdByKey(connection, "geo_mgmt_review");
+            if (mgmtId != null) {
+                statement.execute("""
+                        INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                        SELECT %d, menu_id, 1 FROM sys_menu WHERE menu_id IN (182, 183, 184, 185, 186)
+                        """.formatted(mgmtId));
+            }
+            Long opsId = roleIdByKey(connection, "geo_ops_entry");
+            if (opsId != null) {
+                statement.execute("""
+                        INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                        SELECT %d, menu_id, 1 FROM sys_menu WHERE menu_id IN (182, 183, 184, 185, 186)
+                        """.formatted(opsId));
+            }
+        }
+        log.info("已同步卖点库菜单 menu_id=182 path=geo/sell-point");
     }
 
     private void addItemColumn(Connection connection, String column, String sql) throws Exception {

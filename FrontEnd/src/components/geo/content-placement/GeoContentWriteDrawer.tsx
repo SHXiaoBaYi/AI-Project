@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Drawer, Input, Select, Space, Spin, Tag, Typography, message } from 'antd';
+import { Button, Drawer, Input, Modal, Select, Space, Spin, Tag, Typography, message } from 'antd';
 import { LakexEditorHost, type LakexEditorHostHandle } from '@/components/lakex/LakexEditorHost';
 import {
   addGeoContentArticleOpinionApi,
   addGeoContentPlatformArticleApi,
+  aiGenerateGeoContentArticleApi,
+  getGeoAiProvidersApi,
   getGeoContentArticleBundleApi,
   getGeoPlatformOptionsApi,
   decideGeoContentReviewApi,
@@ -53,6 +55,14 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const [opinion, setOpinion] = useState('');
   const [acting, setActing] = useState(false);
   const [platforms, setPlatforms] = useState<GeoPlatform[]>([]);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiProvider, setAiProvider] = useState<string>();
+  const [aiUserPrompt, setAiUserPrompt] = useState('');
+  const [aiProviders, setAiProviders] = useState<
+    { provider: string; label: string; model: string; available: boolean; hint?: string }[]
+  >([]);
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const versionRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   const bodyRef = useRef('');
@@ -275,6 +285,73 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     }
   };
 
+  const openAiGenerate = () => {
+    if (mode !== 'write' || placementId == null) return;
+    if (readOnly && !sharedEditable) {
+      message.warning('当前稿件不可编辑');
+      return;
+    }
+    void getGeoAiProvidersApi()
+      .then((list) => {
+        const ready = (list ?? []).filter((p) => p.available && p.provider !== 'local');
+        setAiProviders(ready);
+        setAiProvider(ready.find((p) => p.provider === 'tongyi')?.provider || ready[0]?.provider);
+        setAiOpen(true);
+      })
+      .catch((e) => message.error(e instanceof Error ? e.message : '加载 AI 模型失败'));
+  };
+
+  const runAiGenerate = async () => {
+    if (placementId == null || !aiProvider) {
+      message.warning('请选择 AI 模型');
+      return;
+    }
+    const hasContent = Boolean(titleRef.current?.trim() || bodyRef.current?.trim());
+    if (hasContent) {
+      const ok = await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          title: '将覆盖当前标题与正文',
+          content: 'AI 生成会写入当前编辑中的统一稿或独立稿，是否继续？',
+          okText: '继续生成',
+          cancelText: '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+      if (!ok) return;
+    }
+    clearTimer();
+    setAiGenerating(true);
+    try {
+      const itemId = active !== 'shared' && article?.contentMode === 'custom' ? article.itemId : undefined;
+      const res = await aiGenerateGeoContentArticleApi({
+        placementId,
+        itemId,
+        provider: aiProvider,
+        userPrompt: aiUserPrompt.trim() || undefined,
+      });
+      setContentTitle(res.contentTitle || '');
+      titleRef.current = res.contentTitle || '';
+      setBody(res.contentBody || '');
+      bodyRef.current = res.contentBody || '';
+      versionRef.current = res.contentVersion ?? versionRef.current + 1;
+      setEditorEpoch((n) => n + 1);
+      setEditorReady(false);
+      setSaveState('saved');
+      setAiOpen(false);
+      message.success(
+        `已生成并写入${itemId ? '独立稿' : '统一稿'}${res.sourceAiModel ? `（${res.sourceAiModel}）` : ''}`,
+      );
+      if (placementId != null) {
+        void load(placementId, active);
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : 'AI 生成失败');
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
   const usedPlatforms = new Set((bundle?.articles ?? []).map((row) => row.platformName));
   const platformOptions = platforms
     .filter((item) => item.platformName && !usedPlatforms.has(item.platformName))
@@ -324,13 +401,22 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
             {saveHint}
           </Typography.Text>
           {mode === 'write' ? (
-            <Button
-              type='primary'
-              loading={saveState === 'saving'}
-              onClick={() => void persist()}
-            >
-              保存
-            </Button>
+            <>
+              <Button
+                loading={aiGenerating}
+                disabled={readOnly && !sharedEditable}
+                onClick={openAiGenerate}
+              >
+                AI 生成
+              </Button>
+              <Button
+                type='primary'
+                loading={saveState === 'saving'}
+                onClick={() => void persist()}
+              >
+                保存
+              </Button>
+            </>
           ) : null}
           {mode === 'review' && reviewId != null ? (
             <>
@@ -527,7 +613,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
               )}
               <LakexEditorHost
                 ref={editorHostRef}
-                key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}`}
+                key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}-${editorEpoch}`}
                 value={body}
                 readOnly={readOnly && !sharedEditable}
                 onChange={(lake) => {
@@ -610,6 +696,56 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
           </section>
         </div>
       )}
+      <Modal
+        title='AI 生成文章'
+        open={aiOpen}
+        onCancel={() => !aiGenerating && setAiOpen(false)}
+        onOk={() => void runAiGenerate()}
+        okText='开始生成'
+        confirmLoading={aiGenerating}
+        destroyOnHidden
+        width={560}
+      >
+        <p className='mb-3 text-sm text-neutral-500'>
+          按「提示词 + 话题 +
+          目标问题」召回卖点，生成可直接粘贴到公众号/知乎等平台的正式排版（导语、小标题、短段落、要点），并写入
+          {active !== 'shared' && article?.contentMode === 'custom' ? '当前独立稿' : '统一稿'}。
+        </p>
+        <div className='mb-3 rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600'>
+          <div>
+            <span className='text-neutral-400'>话题：</span>
+            {bundle?.topicName || '-'}
+          </div>
+          <div className='mt-1'>
+            <span className='text-neutral-400'>目标问题：</span>
+            {bundle?.targetQuestion || '-'}
+          </div>
+        </div>
+        <div className='mb-1 text-xs text-neutral-500'>选择模型</div>
+        <Select
+          className='mb-3 w-full'
+          placeholder='请选择已配置的 AI 模型'
+          value={aiProvider}
+          options={aiProviders.map((p) => ({
+            value: p.provider,
+            label: p.model ? `${p.label}（${p.model}）` : p.label,
+          }))}
+          onChange={setAiProvider}
+        />
+        {aiProviders.length === 0 ? (
+          <p className='mb-3 text-xs text-amber-600'>暂无可用云厂商，请到「系统管理 → AI模型配置」填写 API Key。</p>
+        ) : null}
+        <div className='mb-1 text-xs text-neutral-500'>写作提示词（可选）</div>
+        <Input.TextArea
+          value={aiUserPrompt}
+          onChange={(e) => setAiUserPrompt(e.target.value)}
+          placeholder='例如：偏科普口吻，突出有机双认证与牧场自有；约 1000 字；开头先回答目标问题'
+          autoSize={{ minRows: 3, maxRows: 8 }}
+          maxLength={2000}
+          showCount
+          disabled={aiGenerating}
+        />
+      </Modal>
     </Drawer>
   );
 }

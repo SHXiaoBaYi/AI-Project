@@ -97,8 +97,10 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
     void getGeoAiProvidersApi()
       .then((list) => {
         setAiProviders(list ?? []);
+        const cloud = (list ?? []).filter((p) => p.available && p.provider !== 'local');
         const preferred =
-          list?.find((p) => p.available && p.provider !== 'local')?.provider ||
+          cloud.find((p) => p.provider === 'tongyi')?.provider ||
+          cloud[0]?.provider ||
           list?.find((p) => p.available)?.provider ||
           'local';
         setSelectedProvider(preferred);
@@ -119,8 +121,10 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       .then((list) => {
         const next = list ?? [];
         setAiProviders(next);
+        const cloud = next.filter((p) => p.available && p.provider !== 'local');
         const preferred =
-          next.find((p) => p.available && p.provider !== 'local')?.provider ||
+          cloud.find((p) => p.provider === 'tongyi')?.provider ||
+          cloud[0]?.provider ||
           next.find((p) => p.available)?.provider ||
           'local';
         setSelectedProvider(preferred);
