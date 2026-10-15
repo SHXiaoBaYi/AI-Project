@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { Spin, App as AntdApp, ConfigProvider } from 'antd';
@@ -46,7 +46,8 @@ export default function App() {
 
   const isLoggedIn = !!token && routesLoaded;
   const showLoading = token && !routesLoaded;
-  const router = createAppRouter(menus, isLoggedIn);
+  // 登录态变化才重建路由；避免每次渲染 new createBrowserRouter 导致导航丢状态
+  const router = useMemo(() => createAppRouter(menus, isLoggedIn), [menus, isLoggedIn]);
 
   return (
     <ConfigProvider
@@ -60,7 +61,10 @@ export default function App() {
             <Spin size='large' />
           </div>
         ) : (
-          <RouterProvider router={router} />
+          <RouterProvider
+            key={isLoggedIn ? 'in' : 'out'}
+            router={router}
+          />
         )}
       </AntdApp>
     </ConfigProvider>

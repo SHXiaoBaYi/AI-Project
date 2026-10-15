@@ -117,7 +117,8 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
       [
         {
           path: '/login',
-          element: <Login />,
+          element: withSuspense(Login),
+          errorElement: <RouteErrorPage />,
         },
         {
           path: '/dingtalk/bridge',

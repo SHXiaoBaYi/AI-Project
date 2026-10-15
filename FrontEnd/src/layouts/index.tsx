@@ -19,6 +19,7 @@ import avatarPng from '@/assets/avatar.png';
 import PageErrorBoundary from '@/components/PageErrorBoundary';
 import { ExternalLinkProvider } from '@/components/ExternalLinkDrawer';
 import { resolveMenuFullPath } from '@/utils/menuPath';
+import { withBase } from '@/utils/basePath';
 import { canSeeDataScopePage, canSeeEcomModule } from '@/utils/localhostAccess';
 
 function convertMenusToRoute(menus: MenuTree[], parentPath = ''): any[] {
@@ -71,7 +72,8 @@ export default function BasicLayout() {
     await dispatch(logoutRemote());
     dispatch(logout());
     dispatch(resetMenus());
-    navigate('/login', { replace: true });
+    // 退出后 App 会重建整棵 Router，旧 navigate 无法可靠切页；与 401 踢下线一致走整页跳转
+    window.location.href = withBase('/login');
   };
 
   const showDataScope = canSeeDataScopePage(userInfo?.username);
