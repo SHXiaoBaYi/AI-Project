@@ -1,0 +1,15 @@
+# 复制到 ECS：/opt/xby-admin/config/application.yml（按需覆盖密钥，勿提交真实密码到 Git）
+#
+# 测试机示例（一般可不写，jar 内 application-test.yml 已指向测试 RDS）：
+# xby:
+#   rds:
+#     username: your_test_user
+#     password: your_test_password
+#   upload-public-base: http://121.40.170.82/shxby/api
+#
+# 生产机示例：
+# xby:
+#   rds:
+#     username: your_prod_user
+#     password: your_prod_password
+#   upload-public-base: http://121.40.119.134/shxby/api

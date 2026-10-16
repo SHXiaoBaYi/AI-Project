@@ -20,7 +20,6 @@ import {
 } from 'antd';
 import { PhoneOutlined, ReloadOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import PermissionButton from '@/components/Buttons/PermissionButton';
 import InviteFormModal, { type InviteFormPreset } from '@/components/hr/InviteFormModal';
 import InterviewReviewDrawer from '@/components/hr/InterviewReviewDrawer';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';

@@ -23,10 +23,10 @@ public class FileStorageService {
     private String uploadDir;
 
     /**
-     * 对外访问根（含 /api），例如 http://121.40.119.134/shxby/api。
+     * 对外访问根（含 /api），默认测试 ECS；生产由 application-prod.yml 覆盖。
      * 落库仍用相对路径 /uploads/...；返回给前端时拼成公网地址。
      */
-    @Value("${xby.upload-public-base:http://121.40.119.134/shxby/api}")
+    @Value("${xby.upload-public-base:http://121.40.170.82/shxby/api}")
     private String uploadPublicBase;
 
     public String saveGeoImage(MultipartFile file) {

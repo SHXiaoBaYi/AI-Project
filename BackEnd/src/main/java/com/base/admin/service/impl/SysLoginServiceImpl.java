@@ -30,6 +30,7 @@ import com.base.admin.util.LocalhostAccess;
 import com.base.admin.util.TreeUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -64,10 +65,18 @@ public class SysLoginServiceImpl implements SysLoginService {
     private final AuthenticationManager authenticationManager;
     private final DingTalkForceLoginTicketStore forceLoginTicketStore;
 
+    /** 测试环境等非 localhost 场景打开账号密码登录；生产保持 false。 */
+    @Value("${xby.auth.password-login-enabled:false}")
+    private boolean passwordLoginEnabled;
+
+    private boolean allowPasswordLogin(HttpServletRequest request) {
+        return passwordLoginEnabled || LocalhostAccess.isLocalhostRequest(request);
+    }
+
     @Override
     public LoginVO login(LoginDTO dto, String ip, String userAgent, HttpServletRequest request) {
-        if (!LocalhostAccess.isLocalhostRequest(request)) {
-            throw new BusinessException("账号密码登录仅限本机 localhost 访问，请使用钉钉扫码登录");
+        if (!allowPasswordLogin(request)) {
+            throw new BusinessException("当前环境未开放账号密码登录，请使用钉钉扫码登录");
         }
         SysUser user = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, dto.getUsername()));
@@ -90,19 +99,19 @@ public class SysLoginServiceImpl implements SysLoginService {
     @Override
     public LoginOptionsVO loginOptions(HttpServletRequest request) {
         LoginOptionsVO vo = new LoginOptionsVO();
-        boolean local = LocalhostAccess.isLocalhostRequest(request);
-        vo.setPasswordLoginEnabled(local);
+        boolean passwordOk = allowPasswordLogin(request);
+        vo.setPasswordLoginEnabled(passwordOk);
         DingTalkLoginConfigVO ding = dingTalkAppService.loginConfig();
         vo.setDingTalkEnabled(ding.getEnabled() != null && ding.getEnabled() == 1);
         vo.setClientId(ding.getClientId());
         vo.setCorpId(ding.getCorpId());
         vo.setExclusiveLogin(ding.getExclusiveLogin());
-        if (Boolean.TRUE.equals(vo.getDingTalkEnabled()) && local) {
-            vo.setMessage("可使用钉钉扫码或本机账号密码登录");
+        if (Boolean.TRUE.equals(vo.getDingTalkEnabled()) && passwordOk) {
+            vo.setMessage("可使用钉钉扫码或账号密码登录");
         } else if (Boolean.TRUE.equals(vo.getDingTalkEnabled())) {
             vo.setMessage("请使用钉钉扫码登录");
-        } else if (local) {
-            vo.setMessage("本机调试：请使用账号密码登录");
+        } else if (passwordOk) {
+            vo.setMessage("请使用账号密码登录");
         } else {
             vo.setMessage("钉钉扫码登录未配置，请联系管理员");
         }

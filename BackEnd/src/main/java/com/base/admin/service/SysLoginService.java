@@ -11,7 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 public interface SysLoginService {
 
-    /** 仅本机 localhost / 127.0.0.1 允许账号密码登录。 */
+    /** 账号密码登录：localhost，或 xby.auth.password-login-enabled=true（测试环境）。 */
     LoginVO login(LoginDTO dto, String ip, String userAgent, HttpServletRequest request);
 
     LoginOptionsVO loginOptions(HttpServletRequest request);

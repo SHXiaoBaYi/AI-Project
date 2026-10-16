@@ -82,7 +82,7 @@ public class DingTalkRobotAssistantService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
-    @Value("${xby.upload-public-base:http://121.40.119.134/shxby/api}")
+    @Value("${xby.upload-public-base:http://121.40.170.82/shxby/api}")
     private String uploadPublicBase;
 
     private final ExecutorService worker = Executors.newFixedThreadPool(2, r -> {

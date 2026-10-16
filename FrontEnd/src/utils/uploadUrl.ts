@@ -1,7 +1,7 @@
 import { withBase } from '@/utils/basePath';
 
-/** 线上附件根（含 /api）。查看/下载一律拼公网地址 */
-export const UPLOAD_PUBLIC_BASE = 'http://121.40.119.134/shxby/api';
+/** 默认附件根 = 测试 ECS（含 /api）。生产构建用 nginx 同源，或设 VITE_UPLOAD_PUBLIC_BASE */
+export const UPLOAD_PUBLIC_BASE = 'http://121.40.170.82/shxby/api';
 
 function uploadPublicBase(): string {
   const fromEnv = String(import.meta.env.VITE_UPLOAD_PUBLIC_BASE || '')
@@ -34,7 +34,7 @@ function extractUploadsPath(raw: string): string | null {
 
 /**
  * 把后端落库或接口返回的附件路径，统一成公网可打开地址：
- * http://121.40.119.134/shxby/api/uploads/...
+ * http://121.40.170.82/shxby/api/uploads/...（测试默认）
  */
 export function resolveUploadUrl(url?: string | null): string {
   if (!url) return '#';

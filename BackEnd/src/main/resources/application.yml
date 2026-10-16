@@ -4,8 +4,9 @@ server:
     context-path: /api
 
 spring:
-  # local/dev：本机开发（浏览器访问 localhost）→ RDS 外网
-  # prod：ECS 等同 VPC 部署 → RDS 内网
+  # local/dev：本机开发 → 测试 RDS 外网（永不默认连生产）
+  # test：测试 ECS → 测试 RDS 内网
+  # prod：生产 ECS → 生产 RDS 内网
   profiles:
     active: local
   jackson:
@@ -18,18 +19,24 @@ spring:
       max-file-size: 10MB
       max-request-size: 10MB
 
-# RDS 地址统一管理：按 profile 选择外网/内网
+# 默认 = 测试环境（local/dev/test）。生产主机在 application-prod.yml 覆盖。
+# 测试 RDS：rm-bp15f2a3k5b93293k ；测试 ECS：121.40.170.82
+# 生产 RDS：rm-bp18jx12jxs1884h9 ；生产 ECS：121.40.119.134
+# 注意：测试库外网域名需在阿里云「申请外网地址」后才有 *so* DNS；未申请时本机请代理测试 ECS，ECS 用 internal-host。
 xby:
   rds:
-    external-host: rm-bp18jx12jxs1884h9so.mysql.rds.aliyuncs.com
-    internal-host: rm-bp18jx12jxs1884h9.mysql.rds.aliyuncs.com
+    external-host: rm-bp15f2a3k5b93293kso.mysql.rds.aliyuncs.com
+    internal-host: rm-bp15f2a3k5b93293k.mysql.rds.aliyuncs.com
     port: 3306
     database: base_admin
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
   upload-dir: ${UPLOAD_DIR:./uploads}
   # 附件对外访问根（含 /api）。落库仍用 /uploads/...，接口返回时拼成公网地址
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.119.134/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.170.82/shxby/api}
+  # 账号密码登录：默认仅 localhost；测试环境在 application-test.yml 打开
+  auth:
+    password-login-enabled: ${XBY_PASSWORD_LOGIN_ENABLED:false}
   # 通用 AI（OpenAI 兼容）。未启用或未配 key 时，相似问题走本地启发式
   # provider: deepseek | tongyi | zhipu | moonshot
   # 你有阿里云账号时优先试 tongyi（DashScope 兼容模式）

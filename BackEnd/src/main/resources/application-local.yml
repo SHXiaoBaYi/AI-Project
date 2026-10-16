@@ -1,8 +1,8 @@
-# 本机开发：浏览器访问 localhost / 127.0.0.1 时使用
-# 连接阿里云 RDS 外网地址（本机无法访问 VPC 内网）
+# 本机开发：浏览器访问 localhost / 127.0.0.1
+# 连接「测试」RDS 外网（application.yml 默认 rm-bp15f2a3k5b93293kso）
 #
-# 注意：与线上共用同一套 RDS 时，前端本地开发默认把 /api 与附件代理到
-# http://121.40.119.134/shxby ，上传落盘在服务器，避免本机有库无文件。
+# 前端本地开发默认把 /api 与附件代理到测试 ECS：
+#   http://121.40.170.82/shxby
 # 仅调试本机后端时：FrontEnd 设 VITE_API_PROXY_TARGET=http://127.0.0.1:8080
 spring:
   datasource:
@@ -11,9 +11,10 @@ spring:
     password: ${xby.rds.password}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
-# 本机后端若仍启动，附件目录固定（仅在不走线上代理时用到）
+# 本机后端若仍启动，附件目录固定（仅在不走测试代理时用到）
 xby:
   upload-dir: ${UPLOAD_DIR:D:/AI-XBY/AI-Project/BackEnd/uploads}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.170.82/shxby/api}
 
 # 钉钉机器人联调（ActionCard → H5）：
 # 王方扬在「钉钉应用配置」可选本机/线上；其他人固定线上。

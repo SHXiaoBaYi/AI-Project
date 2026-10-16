@@ -14,7 +14,7 @@ if [ ! -f target/base-admin-1.0.0.jar ]; then
   mvn -q -DskipTests package
 fi
 
-echo "Starting backend (profile=local, RDS external)..."
+echo "Starting backend (profile=local, 测试 RDS 外网)..."
 nohup env SPRING_PROFILES_ACTIVE=local java -jar target/base-admin-1.0.0.jar \
   >/tmp/xby-admin-local.log 2>&1 &
 echo $! >/tmp/xby-admin-local.pid

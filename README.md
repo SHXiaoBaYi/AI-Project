@@ -179,12 +179,13 @@ pnpm dev
 
 ## 环境配置
 
-| 配置文件               | 说明                                          |
-| ---------------------- | --------------------------------------------- |
-| `application.yml`      | 主配置，JWT 密钥与过期时间、MyBatis-Plus 配置 |
-| `application-dev.yml`  | 开发环境数据源                                |
-| `application-prod.yml` | 生产环境数据源（SQL 日志关闭）                |
-| `.env.development`     | 前端开发环境 API 地址                         |
-| `.env.production`      | 前端生产环境 API 地址                         |
+| 配置文件               | 说明                                                              |
+| ---------------------- | ----------------------------------------------------------------- |
+| `application.yml`      | 主配置；**默认连测试 RDS**（`rm-bp15f2a3k5b93293k`）               |
+| `application-local.yml`| 本机开发：测试 RDS 外网                                           |
+| `application-dev.yml`  | 同 local                                                          |
+| `application-test.yml` | 测试 ECS（`121.40.170.82`）：测试 RDS 内网                        |
+| `application-prod.yml` | 生产 ECS（`121.40.119.134`）：生产 RDS 内网，关闭 SQL/Swagger     |
+| `deploy/ENV.md`        | 生产/测试对照、初始化与 `prod→test` 数据同步说明                  |
 
-> 部署生产环境前务必更换 JWT secret 和数据库密码。
+> 本地与测试默认不连生产库。生产/测试部署与同步详见 [deploy/ENV.md](deploy/ENV.md)。

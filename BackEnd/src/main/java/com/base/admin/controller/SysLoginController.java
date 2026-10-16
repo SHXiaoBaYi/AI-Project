@@ -32,7 +32,7 @@ public class SysLoginController {
         return Result.ok(loginService.loginOptions(request));
     }
 
-    @Operation(summary = "用户名密码登录（仅本机 localhost）")
+    @Operation(summary = "用户名密码登录（localhost 或测试环境）")
     @PostMapping("/auth/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginDTO dto, HttpServletRequest request) {
         LoginVO vo = loginService.login(dto, IpUtils.getClientIp(request), request.getHeader("User-Agent"), request);

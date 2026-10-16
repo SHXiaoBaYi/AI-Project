@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# 将本地已构建的前后端发布到 ECS（/opt/xby-admin）
+# 将本地已构建的前后端发布到「生产」ECS（/opt/xby-admin）
 # 用法：
+#   ./deploy/publish-ecs.sh
 #   ECS_HOST=121.40.119.134 ./deploy/publish-ecs.sh
+# 测试环境请用：./deploy/publish-ecs-test.sh
 # 可选：ECS_USER=root  ECS_DIR=/opt/xby-admin
 set -euo pipefail
 
@@ -34,11 +36,12 @@ echo "==> 上传后端 jar"
 scp "${SSH_OPTS[@]}" "$JAR" "$REMOTE:$ECS_DIR/base-admin-1.0.0.jar.new"
 ssh "${SSH_OPTS[@]}" "$REMOTE" "mv '$ECS_DIR/base-admin-1.0.0.jar.new' '$ECS_DIR/base-admin-1.0.0.jar'"
 
-echo "==> 同步前端静态资源"
+echo "==> 同步前端静态资源（VITE_BASE=/shxby/ → html/shxby/）"
+ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p '$ECS_DIR/html/shxby'"
 RSYNC_SSH="ssh ${SSH_OPTS[*]}"
 rsync -avz --delete -e "$RSYNC_SSH" \
   --exclude='.DS_Store' \
-  "$DIST/" "$REMOTE:$ECS_DIR/html/"
+  "$DIST/" "$REMOTE:$ECS_DIR/html/shxby/"
 
 echo "==> 重启后端服务"
 ssh "${SSH_OPTS[@]}" "$REMOTE" 'systemctl restart xby-admin && sleep 2 && systemctl is-active xby-admin'

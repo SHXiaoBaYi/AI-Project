@@ -36,7 +36,7 @@ function fmtDt(value?: string) {
   return String(value).replace('T', ' ').slice(0, 19);
 }
 
-function isPdf(fileName: string, contentType: string, blob?: Blob) {
+function isPdf(fileName: string, contentType: string, _blob?: Blob) {
   const lower = fileName.toLowerCase();
   if (contentType.includes('pdf') || lower.endsWith('.pdf')) {
     return true;
