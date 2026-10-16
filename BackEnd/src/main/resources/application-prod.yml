@@ -11,6 +11,8 @@ xby:
   upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.119.134/shxby/api}
   auth:
     password-login-enabled: false
+  env-sync:
+    enabled: false
 
 spring:
   datasource:

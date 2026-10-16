@@ -7,6 +7,8 @@ export interface UserInfo {
   permissions: string[];
   ecomAllowed?: boolean;
   ecomCanManageAcl?: boolean;
+  /** 测试环境同步按钮（仅测试+超管） */
+  envSyncEnabled?: boolean;
 }
 
 export interface UserVO {

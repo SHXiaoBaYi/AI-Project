@@ -1,7 +1,17 @@
-# 与 local 相同：本机开发走「测试」RDS 外网
+# 与 local 相同：本机经 SSH 隧道连测试库（禁止直连生产）
+# 先运行：.\deploy\tunnel-test-rds.ps1
 spring:
   datasource:
-    url: jdbc:mysql://${xby.rds.external-host}:${xby.rds.port}/${xby.rds.database}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=true&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://127.0.0.1:13306/base_admin?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ${xby.rds.username}
     password: ${xby.rds.password}
     driver-class-name: com.mysql.cj.jdbc.Driver
+
+xby:
+  rds:
+    external-host: rm-bp15f2a3k5b93293kso.mysql.rds.aliyuncs.com
+    internal-host: rm-bp15f2a3k5b93293k.mysql.rds.aliyuncs.com
+  auth:
+    password-login-enabled: true
+  env-sync:
+    enabled: false

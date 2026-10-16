@@ -12,6 +12,15 @@ xby:
   # 测试 ECS 允许账号密码登录（生产仍仅钉钉）
   auth:
     password-login-enabled: true
+  # 顶部「同步生产数据 / 同步表结构到生产」；生产库走外网地址
+  env-sync:
+    enabled: true
+    prod:
+      host: rm-bp18jx12jxs1884h9so.mysql.rds.aliyuncs.com
+      port: 3306
+      database: base_admin
+      username: ${RDS_USERNAME:xiaobayi0099}
+      password: ${RDS_PASSWORD:Xby@123456}
 
 # 测试环境保留 Swagger，便于联调
 springdoc:

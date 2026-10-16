@@ -24,6 +24,7 @@ import com.base.admin.service.DingTalkAppService;
 import com.base.admin.service.DingTalkAuthService;
 import com.base.admin.service.DingTalkCalendarClient;
 import com.base.admin.service.DingTalkForceLoginTicketStore;
+import com.base.admin.service.EnvSyncService;
 import com.base.admin.service.OnlineSessionService;
 import com.base.admin.service.SysLoginService;
 import com.base.admin.util.LocalhostAccess;
@@ -64,6 +65,7 @@ public class SysLoginServiceImpl implements SysLoginService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final DingTalkForceLoginTicketStore forceLoginTicketStore;
+    private final EnvSyncService envSyncService;
 
     /** 测试环境等非 localhost 场景打开账号密码登录；生产保持 false。 */
     @Value("${xby.auth.password-login-enabled:false}")
@@ -414,6 +416,10 @@ public class SysLoginServiceImpl implements SysLoginService {
 
         boolean ecomManage = LocalhostAccess.canAccessDataScope(currentRequest(), user.getUsername());
         boolean ecomAllowed = ecomManage || isEcomAclEnabled(user.getUserId());
+        LoginUser loginUser = new LoginUser();
+        loginUser.setUserId(user.getUserId());
+        loginUser.setUsername(user.getUsername());
+        loginUser.setPermissions(permissions);
         return UserInfoVO.builder()
                 .userId(user.getUserId())
                 .username(user.getUsername())
@@ -424,6 +430,7 @@ public class SysLoginServiceImpl implements SysLoginService {
                 .menus(menus)
                 .ecomAllowed(ecomAllowed)
                 .ecomCanManageAcl(ecomManage)
+                .envSyncEnabled(envSyncService.canUse(loginUser))
                 .build();
     }
 

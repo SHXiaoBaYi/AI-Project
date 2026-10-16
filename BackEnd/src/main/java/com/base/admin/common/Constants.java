@@ -6,6 +6,12 @@ public class Constants {
     public static final String TOKEN_HEADER = "Authorization";
     public static final String ADMIN_ROLE_KEY = "admin";
     public static final String ADMIN_PERM = "*:*:*";
+    /** 测试环境「同步生产数据 / 同步表结构」仅此账号可见可调 */
+    public static final String ENV_SYNC_USERNAME = "wangfangyang";
+    /** JDBC URL / host 中出现即视为生产 RDS，本地/测试严禁直连 */
+    public static final String RDS_PROD_INSTANCE_MARKER = "rm-bp18jx12jxs1884h9";
+    /** JDBC URL / host 中出现即视为测试 RDS */
+    public static final String RDS_TEST_INSTANCE_MARKER = "rm-bp15f2a3k5b93293k";
 
     public static final String MENU_TYPE_DIR = "M";
     public static final String MENU_TYPE_MENU = "C";

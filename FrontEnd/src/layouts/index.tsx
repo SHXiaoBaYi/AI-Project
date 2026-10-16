@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import { ProLayout, PageContainer } from '@ant-design/pro-components';
 import {
+  CloudDownloadOutlined,
+  CloudUploadOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -9,7 +11,7 @@ import {
   ShoppingOutlined,
 } from '@ant-design/icons';
 import { getIconComponent } from '@/utils/iconMap';
-import { Dropdown, theme } from 'antd';
+import { App, Button, Dropdown, Space, theme } from 'antd';
 import { useSelector, useDispatch } from 'react-redux';
 import { logout, logoutRemote } from '@/store/slices/userSlice';
 import { resetMenus } from '@/store/slices/menuSlice';
@@ -21,6 +23,7 @@ import { ExternalLinkProvider } from '@/components/ExternalLinkDrawer';
 import { resolveMenuFullPath } from '@/utils/menuPath';
 import { withBase } from '@/utils/basePath';
 import { canSeeDataScopePage, canSeeEcomModule } from '@/utils/localhostAccess';
+import { syncProdDataToTestApi, syncTestSchemaToProdApi } from '@/api/envSync';
 
 function convertMenusToRoute(menus: MenuTree[], parentPath = ''): any[] {
   return menus.map((item) => {
@@ -56,12 +59,15 @@ const HeaderLogo = (
 
 export default function BasicLayout() {
   const [collapsed, setCollapsed] = useState(false);
+  const [syncingData, setSyncingData] = useState(false);
+  const [syncingSchema, setSyncingSchema] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useDispatch<AppDispatch>();
   const menus = useSelector((state: RootState) => state.menu.menus);
   const userInfo = useSelector((state: RootState) => state.user.userInfo);
   const { token } = theme.useToken();
+  const { modal, message } = App.useApp();
 
   const route = {
     path: '/',
@@ -78,6 +84,45 @@ export default function BasicLayout() {
 
   const showDataScope = canSeeDataScopePage(userInfo?.username);
   const showEcom = canSeeEcomModule(userInfo?.username, userInfo?.ecomAllowed);
+  const showEnvSync = !!userInfo?.envSyncEnabled;
+
+  const runSyncData = () => {
+    modal.confirm({
+      title: '同步生产数据到测试',
+      content: '将用生产库「数据」覆盖测试库（TRUNCATE 后导入），不修改表结构。测试环境当前数据会被清空，确定继续？',
+      okText: '开始同步',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setSyncingData(true);
+        try {
+          const res = await syncProdDataToTestApi();
+          message.success(res?.message || '数据同步完成');
+        } finally {
+          setSyncingData(false);
+        }
+      },
+    });
+  };
+
+  const runSyncSchema = () => {
+    modal.confirm({
+      title: '同步测试表结构到生产',
+      content:
+        '将把测试库相对生产「多出的表/列」推送到生产（只增不删，不会删生产列/表）。请确认测试结构已验收。确定继续？',
+      okText: '推送到生产',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setSyncingSchema(true);
+        try {
+          const res = await syncTestSchemaToProdApi();
+          message.success(res?.message || '表结构同步完成');
+        } finally {
+          setSyncingSchema(false);
+        }
+      },
+    });
+  };
+
   const avatarMenuItems = [
     ...(showEcom
       ? [
@@ -140,6 +185,39 @@ export default function BasicLayout() {
           {title}
         </div>
       )}
+      actionsRender={() =>
+        showEnvSync ? (
+          <Space
+            size={8}
+            className='mr-2'
+          >
+            <Button
+              size='small'
+              type='primary'
+              ghost
+              icon={<CloudDownloadOutlined />}
+              loading={syncingData}
+              disabled={syncingSchema}
+              onClick={runSyncData}
+            >
+              同步生产数据
+            </Button>
+            <Button
+              size='small'
+              danger
+              ghost
+              icon={<CloudUploadOutlined />}
+              loading={syncingSchema}
+              disabled={syncingData}
+              onClick={runSyncSchema}
+            >
+              同步表结构到生产
+            </Button>
+          </Space>
+        ) : (
+          []
+        )
+      }
       menuItemRender={(item, dom) => {
         // 目录只展开，不跳转（避免进 /geo/config 等无页面路由）
         if (item.children?.length) {

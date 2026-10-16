@@ -38,4 +38,7 @@ public class UserInfoVO {
 
     @Schema(description = "是否可管理电商 ACL")
     private Boolean ecomCanManageAcl;
+
+    @Schema(description = "是否显示测试环境同步按钮（仅测试+超管）")
+    private Boolean envSyncEnabled;
 }
