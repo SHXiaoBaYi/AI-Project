@@ -8,6 +8,7 @@ import com.base.admin.domain.dto.HrApplicationDTO;
 import com.base.admin.domain.dto.HrDingTalkBindDTO;
 import com.base.admin.domain.dto.HrJobCardQueryDTO;
 import com.base.admin.domain.dto.HrJobCandidateQueryDTO;
+import com.base.admin.domain.dto.HrJobCommStatsQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.common.Constants;
 import com.base.admin.domain.dto.HrBaseDictDTO;
@@ -18,6 +19,7 @@ import com.base.admin.domain.vo.HrBaseDictVO;
 import com.base.admin.domain.vo.HrDingTalkIdentityVO;
 import com.base.admin.domain.vo.HrJobCardVO;
 import com.base.admin.domain.vo.HrJobCandidateVO;
+import com.base.admin.domain.vo.HrJobCommStatsVO;
 import com.base.admin.domain.vo.HrSchoolVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.security.LoginUser;
@@ -958,6 +960,137 @@ public class HrMasterService {
             page.add(toJobCandidate(row));
         }
         return new PageResult<>((long) all.size(), page);
+    }
+
+    /** 岗位候选人抽屉：该岗位下电话不通过 / 标记不合适原因饼图与明细。 */
+    public HrJobCommStatsVO jobCommStats(HrJobCommStatsQueryDTO query) {
+        if (query == null || query.getRequisitionId() == null) {
+            throw new BusinessException("请选择岗位");
+        }
+        Long requisitionId = query.getRequisitionId();
+        Integer ok = jdbc.queryForObject(
+                "SELECT COUNT(1) FROM hr_requisition WHERE id = ? AND is_active = 1", Integer.class, requisitionId);
+        if (ok == null || ok == 0) {
+            throw new BusinessException("岗位不存在");
+        }
+        HrJobCommStatsVO vo = new HrJobCommStatsVO();
+        vo.setPhoneFailReasons(buildUnsuitableReasonSlices("""
+                SELECT COALESCE(NULLIF(TRIM(p.reject_reason), ''), '未填写') reason_name, COUNT(1) cnt
+                FROM hr_phone_screen p
+                JOIN hr_application a ON a.id = p.application_id AND a.is_active = 1
+                WHERE p.is_active = 1 AND UPPER(TRIM(p.result)) = 'FAIL' AND a.requisition_id = ?
+                GROUP BY COALESCE(NULLIF(TRIM(p.reject_reason), ''), '未填写')
+                """, requisitionId));
+        vo.setScreenFailReasons(buildUnsuitableReasonSlices("""
+                SELECT COALESCE(NULLIF(TRIM(a.screen_reject_reason), ''), '未填写') reason_name, COUNT(1) cnt
+                FROM hr_application a
+                WHERE a.is_active = 1 AND UPPER(TRIM(COALESCE(a.screen_result, ''))) = 'FAIL'
+                  AND a.requisition_id = ?
+                GROUP BY COALESCE(NULLIF(TRIM(a.screen_reject_reason), ''), '未填写')
+                """, requisitionId));
+        vo.setDetails(loadJobCommDetails(requisitionId));
+        return vo;
+    }
+
+    private List<HrJobCommStatsVO.PieSlice> buildUnsuitableReasonSlices(String groupSql, Long requisitionId) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        jdbc.query(groupSql, rs -> {
+            counts.put(rs.getString("reason_name"), rs.getLong("cnt"));
+        }, requisitionId);
+        List<String> ordered = jdbc.query("""
+                SELECT name FROM hr_base_dict
+                WHERE dict_type = ? AND is_active = 1
+                ORDER BY sort_no, id
+                """, (rs, row) -> rs.getString(1), Constants.HR_DICT_UNSUITABLE);
+        List<HrJobCommStatsVO.PieSlice> slices = new ArrayList<>();
+        for (String name : ordered) {
+            long value = counts.getOrDefault(name, 0L);
+            if (value <= 0) {
+                continue;
+            }
+            HrJobCommStatsVO.PieSlice slice = new HrJobCommStatsVO.PieSlice();
+            slice.setName(name);
+            slice.setKey(name);
+            slice.setValue(value);
+            slices.add(slice);
+            counts.remove(name);
+        }
+        List<String> extras = new ArrayList<>(counts.keySet());
+        extras.sort(Comparator.naturalOrder());
+        for (String name : extras) {
+            long value = counts.getOrDefault(name, 0L);
+            if (value <= 0) {
+                continue;
+            }
+            HrJobCommStatsVO.PieSlice slice = new HrJobCommStatsVO.PieSlice();
+            slice.setName(name);
+            slice.setKey(name);
+            slice.setValue(value);
+            slices.add(slice);
+        }
+        return slices;
+    }
+
+    private List<HrJobCommStatsVO.Detail> loadJobCommDetails(Long requisitionId) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT a.id application_id, c.display_name, 'PHONE_FAIL' record_type, '电话沟通不通过' record_type_label,
+                       p.result, p.reject_reason reason, p.remark, p.called_at occurred_at,
+                       a.current_stage, s.stage_name, f.file_name resume_name
+                FROM hr_phone_screen p
+                JOIN hr_application a ON a.id = p.application_id AND a.is_active = 1
+                JOIN hr_candidate c ON c.id = a.candidate_id
+                LEFT JOIN hr_stage_def s ON s.stage_code = a.current_stage
+                LEFT JOIN hr_resume_file f ON f.application_id = a.id AND f.is_active = 1
+                WHERE p.is_active = 1 AND UPPER(TRIM(p.result)) = 'FAIL' AND a.requisition_id = ?
+                UNION ALL
+                SELECT a.id application_id, c.display_name, 'SCREEN_FAIL' record_type, '标记不合适' record_type_label,
+                       a.screen_result result, a.screen_reject_reason reason, NULL remark,
+                       COALESCE(
+                         (SELECT MAX(t.event_at) FROM hr_stage_event t
+                          WHERE t.application_id = a.id AND t.stage_code = 'SCREEN_FAIL' AND t.is_active = 1),
+                         a.update_time, a.create_time
+                       ) occurred_at,
+                       a.current_stage, s.stage_name, f.file_name resume_name
+                FROM hr_application a
+                JOIN hr_candidate c ON c.id = a.candidate_id
+                LEFT JOIN hr_stage_def s ON s.stage_code = a.current_stage
+                LEFT JOIN hr_resume_file f ON f.application_id = a.id AND f.is_active = 1
+                WHERE a.is_active = 1 AND UPPER(TRIM(COALESCE(a.screen_result, ''))) = 'FAIL'
+                  AND a.requisition_id = ?
+                ORDER BY occurred_at DESC, application_id DESC
+                """, requisitionId, requisitionId);
+        List<HrJobCommStatsVO.Detail> list = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            HrJobCommStatsVO.Detail d = new HrJobCommStatsVO.Detail();
+            Object appId = row.get("application_id");
+            d.setApplicationId(appId == null ? null : ((Number) appId).longValue());
+            d.setDisplayName(Objects.toString(row.get("display_name"), ""));
+            d.setRecordType(Objects.toString(row.get("record_type"), ""));
+            d.setRecordTypeLabel(Objects.toString(row.get("record_type_label"), ""));
+            Object result = row.get("result");
+            d.setResult(result == null ? null : String.valueOf(result));
+            Object reason = row.get("reason");
+            d.setReason(reason == null || String.valueOf(reason).isBlank() ? null : String.valueOf(reason).trim());
+            Object remark = row.get("remark");
+            d.setRemark(remark == null || String.valueOf(remark).isBlank() ? null : String.valueOf(remark).trim());
+            d.setOccurredAt(fmtDateTime(dateTimeOf(row.get("occurred_at"))));
+            Object stage = row.get("current_stage");
+            d.setCurrentStage(stage == null ? null : String.valueOf(stage));
+            Object stageName = row.get("stage_name");
+            d.setStageName(stageName == null ? null : String.valueOf(stageName));
+            Object resume = row.get("resume_name");
+            d.setResumeName(resume == null ? null : String.valueOf(resume));
+            list.add(d);
+        }
+        return list;
+    }
+
+    private static String fmtDateTime(LocalDateTime at) {
+        if (at == null) {
+            return null;
+        }
+        String text = at.toString().replace('T', ' ');
+        return text.length() > 19 ? text.substring(0, 19) : text;
     }
 
     @Transactional

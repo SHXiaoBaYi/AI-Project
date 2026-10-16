@@ -18,23 +18,18 @@ import {
   Typography,
   Upload,
 } from 'antd';
-import { PhoneOutlined, PlusOutlined, ReloadOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
+import { PhoneOutlined, ReloadOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import InviteFormModal, { type InviteFormPreset } from '@/components/hr/InviteFormModal';
 import InterviewReviewDrawer from '@/components/hr/InterviewReviewDrawer';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
-import ApplicationFormModal from '@/pages/hr/application/components/ApplicationFormModal';
-import ImportApplicationModal from '@/pages/hr/application/components/ImportApplicationModal';
 import {
   downloadHrPortfolioApi,
-  getHrChannelsApi,
   getHrDictOptionsApi,
   getHrPipelineBoardApi,
   getHrPipelineDetailApi,
   getHrRequisitionsApi,
-  getHrStagesApi,
-  getHrUsersApi,
   saveHrPipelineOnboardApi,
   saveHrPipelinePhoneApi,
   saveHrPipelineScreenApi,
@@ -189,15 +184,10 @@ function CandidateCard({
 export default function HrPipelinePage() {
   const { message } = App.useApp();
   const [jobs, setJobs] = useState<{ value: number; label: string }[]>([]);
-  const [channels, setChannels] = useState<{ value: string; label: string }[]>([]);
-  const [stages, setStages] = useState<{ value: string; label: string }[]>([]);
-  const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [requisitionId, setRequisitionId] = useState<number>();
   const [board, setBoard] = useState<HrPipelineBoard | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [manualOpen, setManualOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [detail, setDetail] = useState<HrPipelineDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
@@ -216,11 +206,8 @@ export default function HrPipelinePage() {
   const [unsuitableReasons, setUnsuitableReasons] = useState<{ value: string; label: string }[]>([]);
 
   const loadMeta = useCallback(async () => {
-    const [reqRows, channelRows, stageRows, userRows, reasonRows] = await Promise.all([
+    const [reqRows, reasonRows] = await Promise.all([
       getHrRequisitionsApi({ status: 'OPEN' }),
-      getHrChannelsApi(),
-      getHrStagesApi(),
-      getHrUsersApi(),
       getHrDictOptionsApi('UNSUITABLE').catch(() => []),
     ]);
     setJobs(
@@ -228,30 +215,6 @@ export default function HrPipelinePage() {
         value: Number(r.id),
         label: String(r.job_name ?? r.jobName ?? ''),
       })),
-    );
-    setChannels(
-      (channelRows || []).map((c) => {
-        const row = c as { channelCode?: string; channel_code?: string; channelName?: string; channel_name?: string };
-        return {
-          value: String(row.channelCode ?? row.channel_code),
-          label: String(row.channelName ?? row.channel_name),
-        };
-      }),
-    );
-    setStages(
-      (stageRows || []).map((s) => {
-        const row = s as { stageCode?: string; stage_code?: string; stageName?: string; stage_name?: string };
-        return {
-          value: String(row.stageCode ?? row.stage_code),
-          label: String(row.stageName ?? row.stage_name),
-        };
-      }),
-    );
-    setUsers(
-      (userRows || []).map((u) => {
-        const row = u as { userId?: number; user_id?: number; nickname?: string };
-        return { value: Number(row.userId ?? row.user_id), label: String(row.nickname ?? '') };
-      }),
     );
     setUnsuitableReasons((reasonRows || []).map((row) => ({ value: row.name, label: row.name })));
   }, []);
@@ -329,21 +292,6 @@ export default function HrPipelinePage() {
           >
             刷新
           </Button>
-          <PermissionButton
-            perm='hr:application:add'
-            icon={<PlusOutlined />}
-            disabled={!requisitionId}
-            onClick={() => setManualOpen(true)}
-          >
-            手动录入
-          </PermissionButton>
-          <PermissionButton
-            perm='hr:application:add'
-            disabled={!requisitionId}
-            onClick={() => setImportOpen(true)}
-          >
-            批量导入
-          </PermissionButton>
         </Space>
       </div>
 
@@ -431,23 +379,6 @@ export default function HrPipelinePage() {
           })}
         </div>
       )}
-
-      <ApplicationFormModal
-        open={manualOpen}
-        editing={null}
-        jobs={jobs}
-        channels={channels}
-        stages={stages}
-        users={users}
-        presetRequisitionId={requisitionId}
-        onOpenChange={setManualOpen}
-        onSuccess={() => void loadBoard()}
-      />
-      <ImportApplicationModal
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        onSuccess={() => void loadBoard()}
-      />
 
       <Modal
         title={`初筛 · ${screenTarget?.displayName || ''}`}

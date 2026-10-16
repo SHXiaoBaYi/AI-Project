@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { App, Card, Drawer, Empty, Input, Pagination, Select, Space, Spin, Table, Tag } from 'antd';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { App, Card, Drawer, Empty, Input, Pagination, Select, Space, Spin, Table, Tabs, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ClockCircleOutlined, PlusOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -12,14 +12,20 @@ import {
   getHrDictOptionsApi,
   getHrJobCardsApi,
   getHrJobCandidatesApi,
+  getHrJobCommStatsApi,
   getHrStagesApi,
   getHrUsersApi,
   type HrJobCard,
   type HrJobCardQuery,
   type HrJobCardStatus,
   type HrJobCandidate,
+  type HrJobCommDetail,
+  type HrJobCommPieSlice,
+  type HrJobCommStats,
   type HrJobFunnelStatus,
 } from '@/api/hr';
+
+const Pie = lazy(() => import('@/components/geo/GeoAntCharts').then((mod) => ({ default: mod.Pie })));
 
 const FUNNEL_LABEL: Record<HrJobFunnelStatus, string> = {
   PENDING: '未处理',
@@ -145,6 +151,11 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, 
         </div>
         <div className='flex shrink-0 divide-x divide-neutral-200 overflow-x-auto border-t border-neutral-100 xl:border-t-0 xl:border-l'>
           <Metric
+            value={job.todayScreenCount}
+            label='今日筛选简历'
+            onClick={() => onOpen(job, 'TODAY_SCREEN')}
+          />
+          <Metric
             value={job.pendingCount}
             label='未处理'
             onClick={() => onOpen(job, 'PENDING')}
@@ -159,11 +170,7 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, 
             label='已入职'
             onClick={() => onOpen(job, 'ONBOARDED')}
           />
-          <Metric
-            value={job.todayScreenCount}
-            label='今日筛选简历'
-            onClick={() => onOpen(job, 'TODAY_SCREEN')}
-          />
+
           <Metric
             value={job.todayPhoneCount}
             label='今日电话沟通'
@@ -268,6 +275,110 @@ const candidateColumns: ColumnsType<HrJobCandidate> = [
   },
 ];
 
+const COMM_DETAIL_COLUMNS: ColumnsType<HrJobCommDetail> = [
+  {
+    title: '类型',
+    dataIndex: 'recordTypeLabel',
+    width: 120,
+    fixed: 'left',
+    render: (v, row) => v || row.recordType || '—',
+  },
+  {
+    title: '姓名',
+    dataIndex: 'displayName',
+    width: 100,
+    ellipsis: true,
+  },
+  {
+    title: '原因',
+    dataIndex: 'reason',
+    width: 160,
+    ellipsis: true,
+    render: (v) => v || '未填写',
+  },
+  {
+    title: '备注',
+    dataIndex: 'remark',
+    width: 180,
+    ellipsis: true,
+    render: (v) => v || '—',
+  },
+  {
+    title: '时间',
+    dataIndex: 'occurredAt',
+    width: 160,
+    render: (v) => v || '—',
+  },
+  {
+    title: '当前阶段',
+    dataIndex: 'stageName',
+    width: 120,
+    ellipsis: true,
+    render: (v, row) => v || row.currentStage || '—',
+  },
+];
+
+type CommFilter = { recordType?: string; reason?: string };
+
+function ReasonPie({
+  title,
+  data,
+  activeReason,
+  onSliceClick,
+}: {
+  title: string;
+  data: HrJobCommPieSlice[];
+  activeReason?: string;
+  onSliceClick: (reason: string) => void;
+}) {
+  return (
+    <Card
+      size='small'
+      title={title}
+      className='shadow-sm'
+      styles={{ body: { minHeight: 280 } }}
+    >
+      {data.length === 0 ? (
+        <div className='flex h-[240px] items-center justify-center text-sm text-neutral-400'>暂无数据</div>
+      ) : (
+        <Suspense
+          fallback={<div className='flex h-[240px] items-center justify-center text-sm text-neutral-400'>加载中…</div>}
+        >
+          <Pie
+            data={data}
+            angleField='value'
+            colorField='name'
+            height={240}
+            legend={{ position: 'bottom' }}
+            label={{ text: 'name' }}
+            tooltip={{
+              items: [{ channel: 'y', valueFormatter: (value: number) => `${value} 人` }],
+            }}
+            onReady={(plot: {
+              chart?: {
+                on: (
+                  event: string,
+                  handler: (evt: { data?: { data?: { name?: string; key?: string } } }) => void,
+                ) => void;
+              };
+            }) => {
+              plot.chart?.on('element:click', (evt) => {
+                const raw = evt?.data?.data;
+                const reason = raw?.key || raw?.name;
+                if (!reason) return;
+                onSliceClick(reason);
+              });
+            }}
+          />
+        </Suspense>
+      )}
+      {activeReason ? (
+        <div className='mt-1 text-center text-xs text-neutral-500'>已筛选原因：{activeReason}（再点同一块可取消）</div>
+      ) : null}
+    </Card>
+  );
+}
+
 export default function HrJobBoardPage() {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
@@ -292,6 +403,10 @@ export default function HrJobBoardPage() {
   const [channels, setChannels] = useState<{ value: string; label: string }[]>([]);
   const [stages, setStages] = useState<{ value: string; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
+  const [commStats, setCommStats] = useState<HrJobCommStats | null>(null);
+  const [commLoading, setCommLoading] = useState(false);
+  const [commFilter, setCommFilter] = useState<CommFilter>({});
+  const [drawerTab, setDrawerTab] = useState('candidates');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -327,6 +442,37 @@ export default function HrJobBoardPage() {
     },
     [message],
   );
+
+  const loadCommStats = useCallback(
+    async (job: HrJobCard) => {
+      setCommLoading(true);
+      try {
+        setCommStats(await getHrJobCommStatsApi({ requisitionId: job.id }));
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : '加载沟通统计失败');
+        setCommStats(null);
+      } finally {
+        setCommLoading(false);
+      }
+    },
+    [message],
+  );
+
+  const filteredCommDetails = useMemo(() => {
+    const rows = commStats?.details || [];
+    return rows.filter((row) => {
+      if (commFilter.recordType && row.recordType !== commFilter.recordType) return false;
+      if (commFilter.reason) {
+        const reason = (row.reason || '未填写').trim();
+        if (reason !== commFilter.reason) return false;
+      }
+      return true;
+    });
+  }, [commFilter, commStats?.details]);
+
+  const togglePieFilter = (recordType: string, reason: string) => {
+    setCommFilter((prev) => (prev.recordType === recordType && prev.reason === reason ? {} : { recordType, reason }));
+  };
 
   useEffect(() => {
     getHrDepartmentsApi().then((tree) => setDepts(flattenDepts(tree as unknown as Dept[])));
@@ -405,7 +551,17 @@ export default function HrJobBoardPage() {
   const openJob = (job: HrJobCard, funnel?: HrJobFunnelStatus) => {
     setDrawerJob(job);
     setDrawerFunnel(funnel);
+    setDrawerTab('candidates');
+    setCommFilter({});
     void loadCandidates(job, 1, funnel);
+    void loadCommStats(job);
+  };
+
+  const refreshDrawer = () => {
+    if (!drawerJob) return;
+    void loadCandidates(drawerJob, drawerPage, drawerFunnel);
+    void loadCommStats(drawerJob);
+    void load();
   };
 
   return (
@@ -527,6 +683,9 @@ export default function HrJobBoardPage() {
           setDrawerFunnel(undefined);
           setCandidates([]);
           setResumeRow(null);
+          setCommStats(null);
+          setCommFilter({});
+          setDrawerTab('candidates');
         }}
         width={1100}
         destroyOnHidden
@@ -552,24 +711,100 @@ export default function HrJobBoardPage() {
           ) : null
         }
       >
-        <Table<HrJobCandidate>
-          rowKey='applicationId'
-          size='small'
-          loading={drawerLoading}
-          dataSource={candidates}
-          columns={candidateColumns}
-          scroll={{ x: 1100 }}
-          onRow={(record) => ({
-            className: 'cursor-pointer',
-            onClick: () => setResumeRow(record),
-          })}
-          pagination={{
-            current: drawerPage,
-            pageSize: 10,
-            total: drawerTotal,
-            showSizeChanger: false,
-            onChange: (page) => drawerJob && void loadCandidates(drawerJob, page, drawerFunnel),
-          }}
+        <Tabs
+          activeKey={drawerTab}
+          onChange={setDrawerTab}
+          items={[
+            {
+              key: 'candidates',
+              label: '候选人列表',
+              children: (
+                <Table<HrJobCandidate>
+                  rowKey='applicationId'
+                  size='small'
+                  loading={drawerLoading}
+                  dataSource={candidates}
+                  columns={candidateColumns}
+                  scroll={{ x: 1100 }}
+                  onRow={(record) => ({
+                    className: 'cursor-pointer',
+                    onClick: () => setResumeRow(record),
+                  })}
+                  pagination={{
+                    current: drawerPage,
+                    pageSize: 10,
+                    total: drawerTotal,
+                    showSizeChanger: false,
+                    onChange: (page) => drawerJob && void loadCandidates(drawerJob, page, drawerFunnel),
+                  }}
+                />
+              ),
+            },
+            {
+              key: 'comm',
+              label: '沟通统计',
+              children: (
+                <Spin spinning={commLoading}>
+                  <div className='space-y-4'>
+                    <div className='grid gap-3 md:grid-cols-2'>
+                      <ReasonPie
+                        title='电话不通过原因'
+                        data={commStats?.phoneFailReasons || []}
+                        activeReason={commFilter.recordType === 'PHONE_FAIL' ? commFilter.reason : undefined}
+                        onSliceClick={(reason) => togglePieFilter('PHONE_FAIL', reason)}
+                      />
+                      <ReasonPie
+                        title='标记不合适原因'
+                        data={commStats?.screenFailReasons || []}
+                        activeReason={commFilter.recordType === 'SCREEN_FAIL' ? commFilter.reason : undefined}
+                        onSliceClick={(reason) => togglePieFilter('SCREEN_FAIL', reason)}
+                      />
+                    </div>
+                    <Card
+                      size='small'
+                      title={
+                        <div className='flex flex-wrap items-center gap-2'>
+                          <span>沟通明细</span>
+                          {commFilter.reason ? (
+                            <Tag
+                              closable
+                              onClose={() => setCommFilter({})}
+                            >
+                              {(commFilter.recordType === 'PHONE_FAIL' ? '电话不通过' : '标记不合适') +
+                                ' · ' +
+                                commFilter.reason}
+                            </Tag>
+                          ) : null}
+                        </div>
+                      }
+                      className='shadow-sm'
+                    >
+                      <Table<HrJobCommDetail>
+                        rowKey={(row) => `${row.recordType}-${row.applicationId}-${row.occurredAt || ''}`}
+                        size='small'
+                        dataSource={filteredCommDetails}
+                        columns={COMM_DETAIL_COLUMNS}
+                        scroll={{ x: 900 }}
+                        pagination={{ pageSize: 10, showSizeChanger: false }}
+                        locale={{ emptyText: <Empty description='暂无电话不通过或标记不合适记录' /> }}
+                        onRow={(record) => ({
+                          className: record.resumeName ? 'cursor-pointer' : undefined,
+                          onClick: () => {
+                            if (!record.applicationId) return;
+                            setResumeRow({
+                              applicationId: record.applicationId,
+                              displayName: record.displayName,
+                              resumeName: record.resumeName,
+                            } as HrJobCandidate);
+                          },
+                        })}
+                      />
+                    </Card>
+                  </div>
+                </Spin>
+              ),
+            },
+          ]}
         />
       </Drawer>
       {resumeRow ? (
@@ -578,10 +813,8 @@ export default function HrJobBoardPage() {
           fileName={resumeRow.resumeName}
           open
           onClose={() => setResumeRow(null)}
-          onActionSuccess={() => {
-            if (drawerJob) void loadCandidates(drawerJob, drawerPage, drawerFunnel);
-            void load();
-          }}
+          onActionSuccess={refreshDrawer}
+          showCommRecords
         />
       ) : null}
       <ApplicationFormModal
@@ -594,7 +827,10 @@ export default function HrJobBoardPage() {
         presetRequisitionId={drawerJob?.id}
         onOpenChange={setManualOpen}
         onSuccess={() => {
-          if (drawerJob) void loadCandidates(drawerJob, 1, drawerFunnel);
+          if (drawerJob) {
+            void loadCandidates(drawerJob, 1, drawerFunnel);
+            void loadCommStats(drawerJob);
+          }
           void load();
         }}
       />
@@ -602,7 +838,10 @@ export default function HrJobBoardPage() {
         open={importOpen}
         onOpenChange={setImportOpen}
         onSuccess={() => {
-          if (drawerJob) void loadCandidates(drawerJob, 1, drawerFunnel);
+          if (drawerJob) {
+            void loadCandidates(drawerJob, 1, drawerFunnel);
+            void loadCommStats(drawerJob);
+          }
           void load();
         }}
       />

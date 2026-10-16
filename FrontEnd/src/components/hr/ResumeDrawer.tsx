@@ -95,12 +95,15 @@ export function ResumeDrawer({
   open,
   onClose,
   onActionSuccess,
+  showCommRecords,
 }: {
   applicationId: number;
   fileName?: string;
   open: boolean;
   onClose: () => void;
   onActionSuccess?: () => void;
+  /** 岗位看板打开简历时显示「沟通记录」 */
+  showCommRecords?: boolean;
 }) {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string>();
@@ -338,12 +341,14 @@ export function ResumeDrawer({
         }}
         extra={
           <Space wrap>
-            <Button
-              icon={<HistoryOutlined />}
-              onClick={() => void openRecords()}
-            >
-              沟通记录
-            </Button>
+            {showCommRecords ? (
+              <Button
+                icon={<HistoryOutlined />}
+                onClick={() => void openRecords()}
+              >
+                沟通记录
+              </Button>
+            ) : null}
             {canAct ? (
               <PermissionButton
                 perm='hr:pipeline:edit'
@@ -499,12 +504,14 @@ export function ResumeDrawer({
           </Form.Item>
         </Form>
       </Modal>
-      <Drawer
+      <Modal
         title={`沟通记录 · ${String(detail?.display_name || pipelineDetail?.displayName || '')}`}
         open={recordOpen}
-        onClose={() => setRecordOpen(false)}
-        width={480}
+        onCancel={() => setRecordOpen(false)}
+        footer={null}
+        width={560}
         destroyOnHidden
+        zIndex={1200}
       >
         {recordLoading ? (
           <div className='flex justify-center py-10'>
@@ -513,7 +520,7 @@ export function ResumeDrawer({
         ) : !pipelineDetail ? (
           <Empty description='暂无记录' />
         ) : (
-          <div className='space-y-3'>
+          <div className='max-h-[70vh] space-y-3 overflow-y-auto pr-1'>
             <Card
               size='small'
               title='标记不合适 / 初筛'
@@ -599,7 +606,7 @@ export function ResumeDrawer({
             ) : null}
           </div>
         )}
-      </Drawer>
+      </Modal>
       <Modal
         title={`标记不合适 · ${String(detail?.display_name || '')}`}
         open={unsuitableOpen}

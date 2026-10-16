@@ -406,6 +406,36 @@ export function getHrJobCandidatesApi(data: {
   return request.post<unknown, { total: number; rows: HrJobCandidate[] }>('/hr/requisition/candidates', data);
 }
 
+export type HrJobCommPieSlice = {
+  name: string;
+  key?: string;
+  value: number;
+};
+
+export type HrJobCommDetail = {
+  applicationId: number;
+  displayName: string;
+  recordType: 'PHONE_FAIL' | 'SCREEN_FAIL' | string;
+  recordTypeLabel?: string;
+  result?: string;
+  reason?: string;
+  remark?: string;
+  occurredAt?: string;
+  currentStage?: string;
+  stageName?: string;
+  resumeName?: string;
+};
+
+export type HrJobCommStats = {
+  phoneFailReasons: HrJobCommPieSlice[];
+  screenFailReasons: HrJobCommPieSlice[];
+  details: HrJobCommDetail[];
+};
+
+export function getHrJobCommStatsApi(data: { requisitionId: number }) {
+  return request.post<unknown, HrJobCommStats>('/hr/requisition/comm-stats', data);
+}
+
 export type HrPipelinePhase = 'SCREEN' | 'PHONE' | 'INTERVIEW' | 'ONBOARD';
 
 export type HrPipelineCandidate = {

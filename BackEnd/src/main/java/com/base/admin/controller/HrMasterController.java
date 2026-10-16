@@ -26,6 +26,7 @@ import com.base.admin.domain.dto.HrInviteCreateDTO;
 import com.base.admin.domain.dto.HrInviteTransferDTO;
 import com.base.admin.domain.dto.HrJobCardQueryDTO;
 import com.base.admin.domain.dto.HrJobCandidateQueryDTO;
+import com.base.admin.domain.dto.HrJobCommStatsQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrRequisitionStatusDTO;
 import com.base.admin.domain.dto.HrBaseDictDTO;
@@ -34,6 +35,7 @@ import com.base.admin.domain.dto.HrTargetOptionDTO;
 import com.base.admin.domain.vo.HrBaseDictVO;
 import com.base.admin.domain.vo.HrJobCardVO;
 import com.base.admin.domain.vo.HrJobCandidateVO;
+import com.base.admin.domain.vo.HrJobCommStatsVO;
 import com.base.admin.service.HrInterviewRecordService;
 import com.base.admin.service.HrInviteService;
 import com.base.admin.service.HrMasterService;
@@ -101,6 +103,13 @@ public class HrMasterController {
     @RequiresPermission({"hr:job-board:list", "hr:application:list"})
     public Result<PageResult<HrJobCandidateVO>> jobCandidates(@Valid @RequestBody HrJobCandidateQueryDTO query) {
         return Result.ok(masterService.jobCandidates(query));
+    }
+
+    @Operation(summary = "岗位候选人抽屉沟通统计（电话不通过/标记不合适饼图与明细）")
+    @PostMapping("/requisition/comm-stats")
+    @RequiresPermission({"hr:job-board:list", "hr:application:list"})
+    public Result<HrJobCommStatsVO> jobCommStats(@Valid @RequestBody HrJobCommStatsQueryDTO query) {
+        return Result.ok(masterService.jobCommStats(query));
     }
 
     @Operation(summary = "新增招聘需求")
