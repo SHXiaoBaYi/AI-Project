@@ -21,7 +21,7 @@ RDS 地址约定（阿里云）：
 | 生产 RDS 外网 | 可连通，`base_admin` 约 88 表 |
 | 测试 RDS `…so.mysql…` | **DNS 不存在** → 尚未申请外网地址 |
 | 测试 RDS 内网 | 仅解析到 VPC 私网 `172.18.x.x`，本机不可达 |
-| SSH `root@121.40.170.82` | Permission denied（本机无可用密钥） |
+| SSH `root@121.40.170.82` | 密码登录可用（`sshpass`）；无密钥时不要用 `BatchMode` |
 
 因此：**数据库全量同步必须在测试 ECS 上跑**（见 `sync-prod-to-test-on-ecs.sh`）；本机开发在申请测试库外网前，前端默认代理到测试 ECS API。
 
@@ -81,13 +81,18 @@ ssh -i "$ECS_IDENTITY" root@121.40.170.82 'systemctl restart xby-admin && system
 
 ## 日常发布
 
+必须指定环境，不要默认打生产。
+
 ```bash
 # 测试
-./deploy/publish-ecs-test.sh
+./deploy/publish-ecs.sh test
+# 或 ./deploy/publish-ecs-test.sh
 
 # 生产（验收通过后）
-./deploy/publish-ecs.sh
+./deploy/publish-ecs.sh prod
 ```
+
+本机无密钥时导出 `SSHPASS` 再用脚本（依赖 `sshpass`）。有密钥则 `ECS_IDENTITY=/path/to.pem`。
 
 ## 前端本地代理
 
