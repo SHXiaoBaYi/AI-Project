@@ -686,65 +686,89 @@ public class TrainDocService {
     }
 
     /**
-     * 文档答疑主路径（可随文档换版，不靠同义词规则续命）：
-     * 1) 结构化抽出手册里全部「问：」题干目录（只做切段，不做语义）
-     * 2) 交给 AI 按语义选最贴近的一条（订货≈要货、厂子≈厂家 等由模型理解）
-     * 3) AI 不可用或未选中时，才回退到规则召回
+     * 答疑三步（保持简单）：
+     * 1) 文档已是一问一答 → 按「问 → 下一问」切块（块内图文一体）
+     * 2) AI 把用户意图匹配到真实题干序号
+     * 3) 命中后原样返回该答的全部内容（清洗后的纯文 + 配图，不下发 Word/HTML 源码）
      */
     private List<TrainAssistantAskVO.QaItem> aiExtractQa(String question, DocBundle doc) {
         IndexedDoc indexed = prepareIndexedDoc(doc);
-        // 切段尽量用 content_text，避免 HTML 兜底丢题干
-        preferStructuredPlainText(indexed, doc == null ? null : doc.text);
-        String plain = qaSource(indexed);
-        List<TitleCandidate> catalog = listAllQaCandidates(indexed);
-        log.info("答疑题干目录 versionId={} textLen={} catalog={} aiEnabled={}",
-                doc.versionId,
-                plain == null ? 0 : plain.length(),
-                catalog.size(),
-                aiChatService.isEnabled());
-        if (catalog.isEmpty()) {
-            log.warn("答疑题干目录为空 versionId={} sample={}",
-                    doc.versionId, sampleSectionTitles(plain, 15));
+        List<QaBlock> blocks = buildQaBlocks(indexed, doc == null ? null : doc.text);
+        log.info("答疑一问一答切块 versionId={} blocks={} aiEnabled={}",
+                doc.versionId, blocks.size(), aiChatService.isEnabled());
+        if (blocks.isEmpty()) {
+            log.warn("答疑切块为空 versionId={}", doc.versionId);
             return List.of();
         }
 
-        TitleCandidate chosen = null;
+        int pick = -1;
         if (aiChatService.isEnabled()) {
-            chosen = pickTitleWithAi(question, catalog);
-            if (chosen != null) {
-                log.info("答疑AI选段 question={} pick={}", question, chosen.title);
-            } else {
-                log.info("答疑AI未命中，回退规则召回 question={}", question);
-            }
+            pick = pickBlockIndexWithAi(question, blocks);
+            log.info("答疑AI选题 question={} index={} title={}",
+                    question, pick,
+                    pick > 0 && pick <= blocks.size() ? blocks.get(pick - 1).question : "-");
         }
-        if (chosen == null) {
-            List<TitleCandidate> recalled = recallTitleCandidates(question, indexed);
-            chosen = resolveTitleCandidate(question, recalled);
-            if (chosen != null) {
-                log.info("答疑规则兜底 pick={} score={}", chosen.title, chosen.score);
-            }
+        if (pick <= 0) {
+            pick = pickBlockIndexByRules(question, blocks);
+            log.info("答疑规则选题 question={} index={}", question, pick);
         }
-        if (chosen == null) {
+        if (pick <= 0 || pick > blocks.size()) {
             return List.of();
         }
 
-        SectionHit hit = sectionHitFromCandidate(chosen, indexed);
-        if (hit == null) {
-            return List.of();
-        }
-        TrainAssistantAskVO.QaItem item = materializeFromSection(hit, indexed);
+        TrainAssistantAskVO.QaItem item = materializeFromBlock(blocks.get(pick - 1), indexed);
         if (item == null) {
             return List.of();
         }
-        appendImagesToAnswerHtml(item);
         item.setVersionLabel(doc.versionLabel);
         return List.of(item);
     }
 
-    /** 全量题干目录：只切段，不做关键词/同义过滤。 */
-    private List<TitleCandidate> listAllQaCandidates(IndexedDoc indexed) {
-        String plain = qaSource(indexed);
-        List<TitleCandidate> list = new ArrayList<>();
+    /**
+     * 一问一答切块：只认一条「结构正文 + [图N]」源，按问→下一问切开。
+     * 禁止 HTML 切块与 content_text 按序号硬对齐（题干对了、图却在另一块）。
+     */
+    private List<QaBlock> buildQaBlocks(IndexedDoc indexed, String contentText) {
+        String plain = qaCutPlain(indexed, contentText);
+        List<QaBlock> blocks = cutQaBlocks(plain);
+        if (!blocks.isEmpty()) {
+            return blocks;
+        }
+        // 极端兜底：无图时仍按 content_text 切题干
+        if (StringUtils.hasText(contentText) && !contentText.equals(plain)) {
+            return cutQaBlocks(contentText);
+        }
+        return blocks;
+    }
+
+    /**
+     * 切块正文优先级：
+     * 1) textForAi（preferStructured 已把 [图N] 合进 content_text）
+     * 2) markedText（纯 HTML 抽字带图）
+     * 3) content_text
+     */
+    private static String qaCutPlain(IndexedDoc indexed, String contentText) {
+        if (indexed != null) {
+            String text = TrainQaAnswerSanitizer.stripOfficeMarkup(nullToEmpty(indexed.textForAi));
+            if (StringUtils.hasText(text) && text.contains("[图")) {
+                return text;
+            }
+            String marked = TrainQaAnswerSanitizer.stripOfficeMarkup(nullToEmpty(indexed.markedText));
+            if (StringUtils.hasText(marked) && marked.contains("[图")) {
+                return marked;
+            }
+            if (StringUtils.hasText(text)) {
+                return text;
+            }
+            if (StringUtils.hasText(marked)) {
+                return marked;
+            }
+        }
+        return nullToEmpty(contentText);
+    }
+
+    private List<QaBlock> cutQaBlocks(String plain) {
+        List<QaBlock> list = new ArrayList<>();
         if (!StringUtils.hasText(plain)) {
             return list;
         }
@@ -756,17 +780,127 @@ public class TrainDocService {
             int from = starts.get(i);
             int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
             String sec = plain.substring(from, to);
-            String title = sectionTitle(sec);
+            if (to < plain.length()) {
+                sec = sec + stealHeadingImages(plain.substring(to));
+            }
+            sec = sec.trim();
+            String title = cleanTopicTitle(sectionTitle(sec));
             if (compact(title).length() < 2) {
                 continue;
             }
-            String bodyProbe = stripImageMarkers(trimSectionForDisplay(sec));
-            if (bodyProbe.length() < 2 && countMarkers(sec) == 0) {
+            String mixed = trimSectionForDisplay(sec);
+            if (!StringUtils.hasText(stripImageMarkers(mixed)) && countMarkers(mixed) == 0) {
                 continue;
             }
-            list.add(new TitleCandidate(from, to, title, 0));
+            QaBlock b = new QaBlock();
+            b.question = title;
+            b.mixed = mixed;
+            b.fullSection = sec;
+            b.from = from;
+            b.to = to;
+            list.add(b);
         }
         return list;
+    }
+
+    private int pickBlockIndexWithAi(String question, List<QaBlock> blocks) {
+        if (blocks == null || blocks.isEmpty()) {
+            return -1;
+        }
+        List<QaBlock> pool = blocks.size() > 80 ? blocks.subList(0, 80) : blocks;
+        StringBuilder catalog = new StringBuilder();
+        for (int i = 0; i < pool.size(); i++) {
+            catalog.append(i + 1).append(". ").append(pool.get(i).question).append('\n');
+        }
+        String system = """
+                你是收银操作培训手册的答疑选段助手。
+                任务：根据用户问题，从「一问一答」题干列表中选出最贴近的一条。
+                要求：
+                1. 按语义理解，不要只做字面相等。近义词、同一操作的不同说法都算匹配
+                   （例如：订货≈要货、厂子≈厂家、怎么找≈如何找、要货单操作≈找厂子要货）。
+                2. 只能从给定候选中选，禁止编造标题。
+                3. 只输出 JSON，不要 markdown、不要解释。格式：{"index":1}
+                   index 从 1 开始；若明显都不相关则 {"index":0}。
+                """;
+        String user = "用户问题：\n" + question + "\n\n候选问法：\n" + catalog;
+        try {
+            String raw = aiChatService.chat(system, user, null, 0.1);
+            Integer idx = parseCandidateIndex(raw, pool.size());
+            log.info("答疑AI选题原始返回 index={} raw={}", idx, raw == null ? "" : raw.replace('\n', ' '));
+            if (idx == null || idx <= 0) {
+                return -1;
+            }
+            return idx;
+        } catch (Exception e) {
+            log.warn("答疑AI选题失败，将回退规则: {}", e.getMessage());
+            return -1;
+        }
+    }
+
+    private int pickBlockIndexByRules(String question, List<QaBlock> blocks) {
+        int best = -1;
+        int bestScore = -1;
+        for (int i = 0; i < blocks.size(); i++) {
+            String title = blocks.get(i).question;
+            if (!titleMatchesTopic(question, title)) {
+                continue;
+            }
+            int score = scoreUserAgainstTitle(question, title);
+            String left = TrainQaIntentMatcher.leftover(question);
+            if (left.length() >= 4 && compact(title).contains(left)) {
+                score += 500;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = i + 1;
+            }
+        }
+        return bestScore >= MIN_SECTION_SCORE ? best : -1;
+    }
+
+    private TrainAssistantAskVO.QaItem materializeFromBlock(QaBlock block, IndexedDoc indexed) {
+        TrainAssistantAskVO.QaItem item = new TrainAssistantAskVO.QaItem();
+        item.setQuestion(cleanTopicTitle(TrainQaAnswerSanitizer.stripOfficeMarkup(block.question)));
+        // 本问答块全文（答文 + 块内 [图N]），只清洗 Word 泄漏，不跨问补图
+        String mixed = TrainQaAnswerSanitizer.stripOfficeMarkup(nullToEmpty(block.mixed));
+        if (countMarkers(mixed) == 0 && StringUtils.hasText(block.fullSection)) {
+            String again = TrainQaAnswerSanitizer.stripOfficeMarkup(trimSectionForDisplay(block.fullSection));
+            if (countMarkers(again) > 0) {
+                mixed = again;
+            }
+        }
+        if (countMarkers(mixed) == 0) {
+            String fromMarked = reloadSectionMixedFromMarked(block.question, indexed);
+            if (StringUtils.hasText(fromMarked) && countMarkers(fromMarked) > 0) {
+                String body = stripImageMarkers(mixed).trim();
+                mixed = StringUtils.hasText(body)
+                        ? (body + "\n" + keepImageMarkersOnly(fromMarked)).trim()
+                        : fromMarked;
+            }
+        }
+        List<Integer> refs = extractMarkers(mixed, indexed);
+        String answer = stripImageMarkers(mixed).trim();
+        item.setAnswer(answer);
+        item.setImages(toImageUrls(refs, indexed));
+        // answerHtml 仅由纯文 + 受控 <img> 拼出，禁止把文档 HTML/OOXML 原样下发
+        item.setAnswerHtml(buildMixedAnswerHtml(mixed, indexed));
+        if (TrainQaAnswerSanitizer.looksLikeSourceCode(item.getAnswer(), item.getAnswerHtml())) {
+            log.warn("答疑切块疑似源码，丢弃 title={}", item.getQuestion());
+            return null;
+        }
+        log.info("答疑返回问答块 title={} imgs={} bodyLen={}",
+                item.getQuestion(), refs.size(), answer.length());
+        return item;
+    }
+
+    private static final class QaBlock {
+        String question;
+        /** 答案正文 + 本问 [图N] */
+        String mixed;
+        /** 问→下一问 原始整段（含题干），仅用于本问收图 */
+        String fullSection;
+        int from;
+        int to;
     }
 
     private TitleCandidate resolveTitleCandidate(String question, List<TitleCandidate> candidates) {
@@ -1070,15 +1204,54 @@ public class TrainDocService {
     }
 
     private SectionHit sectionHitFromCandidate(TitleCandidate c, IndexedDoc indexed) {
+        // AI/目录可能在 content_text 上选段；配图在 HTML 抽的 markedText（含 [图N]）。
+        // 一律按题干标题回定位到带图正文，避免用错坐标系导致 imgs=0。
+        String marked = TrainQaAnswerSanitizer.stripOfficeMarkup(
+                indexed == null ? "" : nullToEmpty(indexed.markedText));
+        if (StringUtils.hasText(marked) && marked.contains("[图")) {
+            SectionHit withImg = hitByTitleInSource(c, marked);
+            // 只有真正带 [图N] 才优先用 marked；无图的短段不要挡住后续补图逻辑
+            if (withImg != null && countMarkers(withImg.bodyWithMarkers) > 0) {
+                return withImg;
+            }
+        }
         String source = qaSource(indexed);
         if (!StringUtils.hasText(source)) {
             return null;
         }
+        SectionHit hit = hitByTitleInSource(c, source);
+        if (hit != null) {
+            return hit;
+        }
+        // 最后才用候选偏移（仅当 source 与建目录时同一份文本）
+        if (c.from < 0 || c.from >= source.length()) {
+            return null;
+        }
+        int from = c.from;
+        int to = nextQaAfter(source, from);
+        String sec = source.substring(from, Math.min(to, source.length()));
+        if (to < source.length()) {
+            sec = sec + stealHeadingImages(source.substring(to));
+        }
+        sec = sec.trim();
+        if (!StringUtils.hasText(sec)) {
+            return null;
+        }
+        SectionHit fallback = new SectionHit();
+        fallback.from = from;
+        fallback.to = to;
+        fallback.score = c.score;
+        fallback.title = StringUtils.hasText(c.title) ? c.title : sectionTitle(sec);
+        fallback.bodyWithMarkers = trimSectionForDisplay(sec);
+        return fallback;
+    }
+
+    private SectionHit hitByTitleInSource(TitleCandidate c, String source) {
+        if (c == null || !StringUtils.hasText(source)) {
+            return null;
+        }
         int from = indexOfQaTitle(source, c.title);
         if (from < 0) {
-            from = c.from;
-        }
-        if (from < 0 || from >= source.length()) {
             return null;
         }
         int to = nextQaAfter(source, from);
@@ -1143,6 +1316,18 @@ public class TrainDocService {
                 score = 100;
             } else if (got.contains(want) || want.contains(got)) {
                 score = 70;
+            } else {
+                // 语义近义：content_text 题干 vs HTML 题干用词不一致时也能回定位
+                String wantCore = TrainQaIntentMatcher.canonicalCore(want);
+                String gotCore = TrainQaIntentMatcher.canonicalCore(got);
+                if (wantCore.length() >= 4 && gotCore.contains(wantCore)) {
+                    score = 85;
+                } else if (gotCore.length() >= 4 && wantCore.contains(gotCore)) {
+                    score = 80;
+                } else if (wantCore.length() >= 4 && gotCore.length() >= 4
+                        && TrainQaIntentMatcher.titleMatches(want, got)) {
+                    score = 75;
+                }
             }
             if (score > bestScore) {
                 bestScore = score;
@@ -1302,8 +1487,8 @@ public class TrainDocService {
     private static final String INDEX_TEXT_FILE = "_index.txt";
 
     /**
-     * 从原文件按阅读顺序抽配图。优先：磁盘 _index.txt 缓存 → 本地原文件重抽 → 最后才用库里 HTML。
-     * 不信任旧 content_html（易把配图堆错位置，导致答疑一次甩出 10 张无关图）。
+     * 答疑索引：磁盘缓存 → 本地原文件 → 公网拉原文件按段落重抽 → 最后才 HTML。
+     * 必须按 Word 段落顺序落 [图N]，才能保证「一问一答」块内图文不错位。
      */
     private IndexedDoc prepareIndexedDoc(DocBundle doc) {
         IndexedDoc empty = new IndexedDoc();
@@ -1314,41 +1499,33 @@ public class TrainDocService {
         try {
             IndexedDoc cached = loadCachedIndexedFromDisk(doc.versionId);
             if (cached != null && !cached.images.isEmpty()) {
+                preferStructuredPlainText(cached, doc.text);
                 return cached;
             }
-            Path path = fileStorage.resolveUploadPath(doc.filePath);
-            byte[] bytes = null;
-            if (path != null && Files.isRegularFile(path)) {
-                bytes = Files.readAllBytes(path);
-            }
+            byte[] bytes = readDocBytes(doc);
             if (bytes != null && bytes.length > 0) {
-                String lower = doc.fileName == null ? "" : doc.fileName.toLowerCase(Locale.ROOT);
-                IndexedDoc indexed;
-                if (lower.endsWith(".docx") || (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K')) {
-                    indexed = indexDocxPackage(bytes, doc.versionId, doc.text);
-                } else if (lower.endsWith(".doc")) {
-                    indexed = indexDocHwpf(bytes, doc.versionId, doc.text);
-                } else {
-                    indexed = indexHtmlImages(doc.html, doc.text);
-                }
-                if (!indexed.images.isEmpty()) {
+                IndexedDoc indexed = indexOriginalBytes(bytes, doc);
+                if (indexed != null && !indexed.images.isEmpty()) {
+                    preferStructuredPlainText(indexed, doc.text);
                     saveIndexedText(doc.versionId, indexed.textForAi);
                     String rich = buildUrlPreviewHtml(indexed);
                     if (StringUtils.hasText(rich)) {
                         doc.html = rich;
                         jdbc.update("UPDATE train_doc_version SET content_html = ? WHERE id = ?", rich, doc.versionId);
                     }
+                    log.info("答疑原文件索引完成 versionId={} images={} textLen={} hasMarkers={}",
+                            doc.versionId, indexed.images.size(),
+                            indexed.textForAi == null ? 0 : indexed.textForAi.length(),
+                            indexed.textForAi != null && indexed.textForAi.contains("[图"));
                     return indexed;
                 }
             }
-            // 本地没有原文件时，才退回 HTML（可能串图，仅兜底）
-            String marker = "/uploads/train/img/" + doc.versionId + "/";
-            if (StringUtils.hasText(doc.html) && doc.html.contains("<img")
-                    && (doc.html.contains(marker) || doc.html.contains("/uploads/train/img/"))) {
+            // 仅无原文件时退回 HTML（图位可能错，仅兜底）
+            if (StringUtils.hasText(doc.html) && doc.html.contains("<img")) {
                 IndexedDoc fromHtml = indexHtmlImages(doc.html, doc.text);
                 if (!fromHtml.images.isEmpty()) {
                     preferStructuredPlainText(fromHtml, doc.text);
-                    log.warn("答疑使用 HTML 兜底索引 versionId={} images={} textLen={}（建议本机保留原文件以重抽）",
+                    log.warn("答疑使用 HTML 兜底索引 versionId={} images={} textLen={}（原文件不可用，图位可能不准）",
                             doc.versionId, fromHtml.images.size(),
                             fromHtml.textForAi == null ? 0 : fromHtml.textForAi.length());
                     return fromHtml;
@@ -1363,6 +1540,69 @@ public class TrainDocService {
         }
     }
 
+    /** 本地有文件读本地；没有则按公网 URL 拉取并落盘，供下次直读。 */
+    private byte[] readDocBytes(DocBundle doc) {
+        if (doc == null || !StringUtils.hasText(doc.filePath)) {
+            return null;
+        }
+        Path path = fileStorage.resolveUploadPath(doc.filePath);
+        try {
+            if (path != null && Files.isRegularFile(path)) {
+                return Files.readAllBytes(path);
+            }
+        } catch (Exception e) {
+            log.warn("读取本地培训原文件失败 path={}: {}", path, e.getMessage());
+        }
+        String publicUrl = fileStorage.toPublicUrl(doc.filePath);
+        byte[] remote = readPublicDocBytes(publicUrl);
+        if (remote == null || remote.length == 0) {
+            log.warn("培训原文件本地与公网均不可用 versionId={} path={} url={}",
+                    doc.versionId, doc.filePath, publicUrl);
+            return null;
+        }
+        Path saveTo = resolveTrainDocSavePath(doc.filePath);
+        if (saveTo != null) {
+            try {
+                Files.createDirectories(saveTo.getParent());
+                Files.write(saveTo, remote);
+                log.info("已缓存公网培训原文件 versionId={} path={} bytes={}",
+                        doc.versionId, saveTo, remote.length);
+            } catch (Exception e) {
+                log.warn("缓存公网培训原文件失败 versionId={}: {}", doc.versionId, e.getMessage());
+            }
+        }
+        return remote;
+    }
+
+    private Path resolveTrainDocSavePath(String filePath) {
+        String stored = fileStorage.normalizeStoragePath(filePath);
+        if (!StringUtils.hasText(stored) || !stored.startsWith("/uploads/")) {
+            return null;
+        }
+        Path existing = fileStorage.resolveUploadPath(stored);
+        if (existing != null) {
+            return existing;
+        }
+        // resolveUploadPath 在文件不存在时返回 null：uploads/train/img/{id} → 上溯两级到 uploads/
+        // trainVersionImageDir = {uploadDir}/train/img/{id} → parent×3 = uploadDir
+        String relative = stored.substring("/uploads/".length());
+        Path uploadRoot = fileStorage.trainVersionImageDir(0).getParent().getParent().getParent();
+        return uploadRoot.resolve(relative).toAbsolutePath().normalize();
+    }
+
+    private IndexedDoc indexOriginalBytes(byte[] bytes, DocBundle doc) throws Exception {
+        String lower = doc.fileName == null ? "" : doc.fileName.toLowerCase(Locale.ROOT);
+        String pathLower = doc.filePath == null ? "" : doc.filePath.toLowerCase(Locale.ROOT);
+        boolean zip = bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K';
+        if (lower.endsWith(".docx") || pathLower.endsWith(".docx") || zip) {
+            return indexDocxPackage(bytes, doc.versionId, doc.text);
+        }
+        if (lower.endsWith(".doc") || pathLower.endsWith(".doc")) {
+            return indexDocHwpf(bytes, doc.versionId, doc.text);
+        }
+        return null;
+    }
+
     /**
      * HTML 抽正文常打乱「一、标题」换行，导致登录等章节进不了 SECTION_START。
      * 切段优先改用结构更好的 content_text；配图列表与上下文仍保留自 HTML。
@@ -1371,24 +1611,38 @@ public class TrainDocService {
         if (indexed == null || !StringUtils.hasText(contentText)) {
             return;
         }
-        String htmlPlain = nullToEmpty(indexed.textForAi);
-        int htmlQa = listQaStarts(htmlPlain).size();
+        String withMarkers = StringUtils.hasText(indexed.markedText) && indexed.markedText.contains("[图")
+                ? indexed.markedText
+                : nullToEmpty(indexed.textForAi);
+        int markerQa = listQaStarts(withMarkers).size();
         int textQa = listQaStarts(contentText).size();
-        int htmlStarts = listSectionStarts(htmlPlain).size();
+        // 原文件段落序已带 [图N] 且一问一答够用：直接用，禁止再 merge 进 content_text（会冲掉末段图）
+        if (StringUtils.hasText(withMarkers) && withMarkers.contains("[图")
+                && markerQa >= Math.max(textQa, 1)) {
+            indexed.markedText = withMarkers;
+            indexed.textForAi = withMarkers;
+            fillImageContexts(indexed);
+            log.info("答疑沿用原文件带图正文：markerQa={} textQa={} textLen={}",
+                    markerQa, textQa, withMarkers.length());
+            return;
+        }
+        int htmlStarts = listSectionStarts(withMarkers).size();
         int textStarts = listSectionStarts(contentText).size();
-        boolean textRicherBiz = contentTextRicherInBizTerms(htmlPlain, contentText);
-        // 有可用 content_text 时优先用它做题干目录（换版只改文档，不改规则）；HTML 仅补配图标记
-        boolean preferText = textQa > 0 && (textQa >= htmlQa || textRicherBiz || textStarts >= htmlStarts
-                || contentText.length() >= Math.max(htmlPlain.length(), 200));
+        boolean textRicherBiz = contentTextRicherInBizTerms(withMarkers, contentText);
+        // 仅当 content_text 题干明显更全、而带图正文问法不够时，才把图合进 content_text
+        boolean preferText = textQa > markerQa
+                || (textQa > 0 && markerQa == 0)
+                || (textQa > 0 && textRicherBiz && textQa >= markerQa)
+                || (textQa > 0 && textStarts > htmlStarts + 2);
         if (!preferText) {
             return;
         }
-        log.info("答疑切段改用 content_text：htmlQa={} textQa={} htmlStarts={} textStarts={} richerBiz={}",
-                htmlQa, textQa, htmlStarts, textStarts, textRicherBiz);
-        if (!StringUtils.hasText(indexed.markedText) && htmlPlain.contains("[图")) {
-            indexed.markedText = htmlPlain;
+        log.info("答疑切段改用 content_text：markerQa={} textQa={} htmlStarts={} textStarts={} richerBiz={}",
+                markerQa, textQa, htmlStarts, textStarts, textRicherBiz);
+        if (withMarkers.contains("[图")) {
+            indexed.markedText = withMarkers;
         }
-        indexed.textForAi = mergeMarkersIntoStructured(contentText, htmlPlain);
+        indexed.textForAi = mergeMarkersIntoStructured(contentText, withMarkers);
         fillImageContexts(indexed);
     }
 
@@ -1682,8 +1936,8 @@ public class TrainDocService {
         try {
             conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
             conn.setInstanceFollowRedirects(true);
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(30000);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(120000);
             conn.setRequestMethod("GET");
             int code = conn.getResponseCode();
             if (code >= 400) {
@@ -1701,6 +1955,54 @@ public class TrainDocService {
                 conn.disconnect();
             }
         }
+    }
+
+    /**
+     * 段落内按 document.xml 出现顺序输出 w:t 与图片。
+     * Word 常把多组「问/答」挤在同一 &lt;w:p&gt;，若先抽全文再挂图，图会整坨落到上一段或段末。
+     */
+    private void appendDocxParagraphInOrder(String paraXml, ZipFile zip, Map<String, String> relTarget,
+                                            Map<String, Integer> targetToFig, IndexedDoc indexed,
+                                            long versionId, StringBuilder ai) {
+        if (!StringUtils.hasText(paraXml)) {
+            return;
+        }
+        Pattern textPat = Pattern.compile("(?is)<w:t[^>]*>(.*?)</w:t>");
+        Pattern blipPat = Pattern.compile(
+                "(?is)<(?:a:blip|asvg:svgBlip|v:imagedata)\\b[^>]*?(?:r:embed|r:link|r:id)\\s*=\\s*\"(rId[^\"]+)\"");
+        List<int[]> events = new ArrayList<>();
+        Matcher tm = textPat.matcher(paraXml);
+        while (tm.find()) {
+            events.add(new int[]{tm.start(), 0, tm.start(), tm.end()});
+        }
+        Matcher bm = blipPat.matcher(paraXml);
+        while (bm.find()) {
+            events.add(new int[]{bm.start(), 1, bm.start(1), bm.end(1)});
+        }
+        if (events.isEmpty()) {
+            return;
+        }
+        events.sort(Comparator.comparingInt(a -> a[0]));
+        StringBuilder out = new StringBuilder();
+        for (int[] ev : events) {
+            if (ev[1] == 0) {
+                out.append(unescapeXml(paraXml.substring(ev[2], ev[3])));
+            } else {
+                String rId = paraXml.substring(ev[2], ev[3]);
+                StringBuilder marks = new StringBuilder();
+                appendDocxImage(zip, relTarget, targetToFig, indexed, versionId, rId, marks);
+                if (!marks.isEmpty()) {
+                    out.append(marks);
+                }
+            }
+        }
+        String s = out.toString().replaceAll("[ \\t\\x0B\\f\\r]+", " ").trim();
+        if (!StringUtils.hasText(s)) {
+            return;
+        }
+        // 同一段粘了多问时，在后续「问：」前断开，保证一问一答切块能切开
+        s = s.replaceAll("(?<=\\S)(?=(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：])", "\n");
+        ai.append(s).append('\n');
     }
 
     private void appendDocxImage(ZipFile zip, Map<String, String> relTarget, Map<String, Integer> targetToFig,
@@ -1763,39 +2065,11 @@ public class TrainDocService {
                     return indexed;
                 }
                 Map<String, String> relTarget = parseDocxRels(relsXml);
-                Pattern textPat = Pattern.compile("(?is)<w:t[^>]*>(.*?)</w:t>");
-                Pattern blipPat = Pattern.compile(
-                        "(?is)<(?:a:blip|asvg:svgBlip|v:imagedata)\\b[^>]*?(?:r:embed|r:link|r:id)\\s*=\\s*\"(rId[^\"]+)\"");
                 StringBuilder ai = new StringBuilder();
                 Map<String, Integer> targetToFig = new HashMap<>();
                 for (String paraXml : splitDocxParagraphs(documentXml)) {
-                    StringBuilder line = new StringBuilder();
-                    Matcher tm = textPat.matcher(paraXml);
-                    while (tm.find()) {
-                        line.append(unescapeXml(tm.group(1)));
-                    }
-                    StringBuilder marks = new StringBuilder();
-                    Matcher bm = blipPat.matcher(paraXml);
-                    while (bm.find()) {
-                        appendDocxImage(zip, relTarget, targetToFig, indexed, versionId, bm.group(1), marks);
-                    }
-                    String lineStr = line.toString();
-                    boolean qaTitle = isQaTitleLine(lineStr);
-                    if (qaTitle) {
-                        if (!marks.isEmpty()) {
-                            ai.append(marks).append('\n');
-                        }
-                        if (!line.isEmpty()) {
-                            ai.append(lineStr).append('\n');
-                        }
-                    } else {
-                        if (!line.isEmpty()) {
-                            ai.append(lineStr).append('\n');
-                        }
-                        if (!marks.isEmpty()) {
-                            ai.append(marks).append('\n');
-                        }
-                    }
+                    // 按 XML 出现顺序交错输出文字与配图；禁止「整段图挂到上一段」
+                    appendDocxParagraphInOrder(paraXml, zip, relTarget, targetToFig, indexed, versionId, ai);
                 }
                 // 未挂到段落的媒体不再追加到文末，避免「问→下一问」区间被无关图污染
                 indexed.textForAi = TrainQaAnswerSanitizer.stripOfficeMarkup(
@@ -2082,7 +2356,20 @@ public class TrainDocService {
         String mixed = StringUtils.hasText(hit.bodyWithMarkers) ? hit.bodyWithMarkers : "";
         mixed = TrainQaAnswerSanitizer.stripOfficeMarkup(mixed);
         mixed = cutAtNextTopic(mixed);
+        // 目录在 content_text、配图在 HTML marked：无图时按题干回带图正文再抽一次
+        if (countMarkers(mixed) == 0) {
+            String fromMarked = reloadSectionMixedFromMarked(title, indexed);
+            if (StringUtils.hasText(fromMarked) && countMarkers(fromMarked) > 0) {
+                String markedAnswer = stripImageMarkers(fromMarked).trim();
+                if (!StringUtils.hasText(stripImageMarkers(mixed)) && StringUtils.hasText(markedAnswer)) {
+                    mixed = fromMarked;
+                } else {
+                    mixed = (stripImageMarkers(mixed).trim() + "\n" + keepImageMarkersOnly(fromMarked)).trim();
+                }
+            }
+        }
         List<Integer> refs = extractMarkers(mixed, indexed);
+        // 禁止按上下文猜图：配图只认本问答块内的 [图N]
         item.setAnswer(stripImageMarkers(mixed).trim());
         item.setImages(toImageUrls(refs, indexed));
         item.setAnswerHtml(buildMixedAnswerHtml(mixed, indexed));
@@ -2095,6 +2382,30 @@ public class TrainDocService {
                 hit.score, hit.from, hit.to, item.getQuestion(), refs.size(),
                 item.getAnswer() == null ? 0 : item.getAnswer().length());
         return item;
+    }
+
+    /** 按题干在带 [图N] 的 markedText 中重切本问，收回答前/答后配图。 */
+    private String reloadSectionMixedFromMarked(String title, IndexedDoc indexed) {
+        String marked = TrainQaAnswerSanitizer.stripOfficeMarkup(
+                indexed == null ? "" : nullToEmpty(indexed.markedText));
+        if (!StringUtils.hasText(marked) || !marked.contains("[图")) {
+            // textForAi 本身也可能带图（未分 marked 时）
+            marked = TrainQaAnswerSanitizer.stripOfficeMarkup(
+                    indexed == null ? "" : nullToEmpty(indexed.textForAi));
+        }
+        if (!StringUtils.hasText(marked) || !marked.contains("[图")) {
+            return "";
+        }
+        int from = indexOfQaTitle(marked, title);
+        if (from < 0) {
+            return "";
+        }
+        int to = nextQaAfter(marked, from);
+        String sec = marked.substring(from, Math.min(to, marked.length()));
+        if (to < marked.length()) {
+            sec = sec + stealHeadingImages(marked.substring(to));
+        }
+        return trimSectionForDisplay(sec.trim());
     }
 
     /** 标题对齐意图分：只看标题，不看正文（避免串段）。 */
@@ -2203,7 +2514,10 @@ public class TrainDocService {
         }
     }
 
-    /** 去掉题干；问与答之间的图属于上一问，丢掉；答后到下一问的图文混排全部保留。 */
+    /**
+     * 去掉题干行，保留答案与配图。
+     * 「问」与「答」之间的 [图N]、以及答后到下一问的 [图N] 都保留（培训截图常在答前/答后）。
+     */
     private static String trimSectionForDisplay(String sec) {
         if (!StringUtils.hasText(sec)) {
             return "";
@@ -2217,20 +2531,36 @@ public class TrainDocService {
             } else {
                 int ans = indexOfAnswerMark(s);
                 if (ans < 0) {
-                    return "";
+                    return keepImageMarkersOnly(s);
                 }
                 s = s.substring(ans);
             }
         }
         int ans = indexOfAnswerMark(s);
         if (ans >= 0) {
-            return s.substring(ans).replaceFirst("^答\\s*[：:：]\\s*", "").trim();
+            String preImgs = keepImageMarkersOnly(s.substring(0, ans));
+            String after = s.substring(ans).replaceFirst("^答\\s*[：:：]\\s*", "").trim();
+            if (StringUtils.hasText(preImgs)) {
+                return (preImgs + "\n" + after).trim();
+            }
+            return after;
         }
-        String dropped = s.replaceFirst("^(\\s*\\[图\\d+]\\s*)+", "");
-        if (!StringUtils.hasText(stripImageMarkers(dropped))) {
-            return s.trim();
+        return s.trim();
+    }
+
+    private static String keepImageMarkersOnly(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
         }
-        return dropped.trim();
+        StringBuilder sb = new StringBuilder();
+        Matcher m = Pattern.compile("\\[图\\d+]").matcher(text);
+        while (m.find()) {
+            if (!sb.isEmpty()) {
+                sb.append(' ');
+            }
+            sb.append(m.group());
+        }
+        return sb.toString();
     }
 
     private static String stripImageMarkers(String text) {
