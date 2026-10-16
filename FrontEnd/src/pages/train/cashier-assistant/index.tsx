@@ -824,6 +824,9 @@ export default function CashierAssistantPage() {
                           {item.fromCalibrate ? (
                             <div className='mt-1 text-xs text-emerald-600'>来自人工校准库</div>
                           ) : null}
+                          {item.referenceNote ? (
+                            <div className='mt-1 text-xs text-amber-600'>{item.referenceNote}</div>
+                          ) : null}
                         </div>
                       ))}
                       {msg.userQuestion && msg.items?.length ? (

@@ -573,36 +573,73 @@ public class TrainDocService {
         }
         boolean searchOld = Boolean.TRUE.equals(dto.getSearchOld());
         if (!searchOld) {
-            TrainAssistantAskVO.QaItem calibrated = trainQaCalibrateService.findApprovedHit(
-                    question, latest.docId, latest.versionId, latest.versionLabel);
-            List<TrainAssistantAskVO.QaItem> hits = aiExtractQa(question, latest);
-            if (!hits.isEmpty()) {
-                TrainAssistantAskVO.QaItem item = hits.get(0);
-                if (calibrated != null) {
-                    item.setCalibrateId(calibrated.getCalibrateId());
-                    item.setFromCalibrate(true);
-                }
-                TrainAssistantAskVO vo = new TrainAssistantAskVO();
-                vo.setStatus("HIT");
-                vo.setMessage("已根据最新版培训文档找到相关问答");
-                vo.setItems(hits);
-                vo.setVersionLabel(latest.versionLabel);
-                vo.setHasOlderVersions(latest.hasOlder);
-                vo.setDocId(latest.docId);
-                vo.setVersionId(latest.versionId);
-                return vo;
-            }
-            if (calibrated != null) {
+            /*
+             * 答疑优先级：
+             * 1) 校准有准确答案且绑定最新文档版 → 直接返回校准答案
+             * 2) 校准有准确答案但绑定旧版 → 先搜最新文档同意图；有则返回文档答案；
+             *    无则返回校准答案并备注「参考 XXX 版本」
+             * 3) 校准无准确答案 → 搜最新文档；有则返回；无则找不到答案
+             */
+            TrainQaCalibrateService.AccurateHit calibrated =
+                    trainQaCalibrateService.findAccurateHit(question, latest.docId, latest.versionId);
+
+            // 一：最新版校准直接返回（不必再搜文档）
+            if (calibrated != null && calibrated.onLatest()) {
                 TrainAssistantAskVO vo = new TrainAssistantAskVO();
                 vo.setStatus("HIT");
                 vo.setMessage("已命中人工校准答案");
-                vo.setItems(List.of(calibrated));
+                vo.setItems(List.of(calibrated.item()));
                 vo.setVersionLabel(latest.versionLabel);
                 vo.setHasOlderVersions(latest.hasOlder);
                 vo.setDocId(latest.docId);
                 vo.setVersionId(latest.versionId);
                 return vo;
             }
+
+            List<TrainAssistantAskVO.QaItem> latestHits = aiExtractQa(question, latest);
+
+            // 二：旧版校准存在
+            if (calibrated != null) {
+                if (!latestHits.isEmpty()) {
+                    TrainAssistantAskVO vo = new TrainAssistantAskVO();
+                    vo.setStatus("HIT");
+                    vo.setMessage("已根据最新版培训文档找到相关问答");
+                    vo.setItems(latestHits);
+                    vo.setVersionLabel(latest.versionLabel);
+                    vo.setHasOlderVersions(latest.hasOlder);
+                    vo.setDocId(latest.docId);
+                    vo.setVersionId(latest.versionId);
+                    return vo;
+                }
+                TrainAssistantAskVO.QaItem item = calibrated.item();
+                String refLabel = StringUtils.hasText(calibrated.versionLabel())
+                        ? calibrated.versionLabel()
+                        : ("版本#" + calibrated.versionId());
+                item.setReferenceNote("该答案是参考「" + refLabel + "」版本的培训文档");
+                TrainAssistantAskVO vo = new TrainAssistantAskVO();
+                vo.setStatus("HIT");
+                vo.setMessage("已命中校准答案（参考历史版本）");
+                vo.setItems(List.of(item));
+                vo.setVersionLabel(latest.versionLabel);
+                vo.setHasOlderVersions(latest.hasOlder);
+                vo.setDocId(latest.docId);
+                vo.setVersionId(latest.versionId);
+                return vo;
+            }
+
+            // 三：无校准准确答案 → 仅依赖最新文档
+            if (!latestHits.isEmpty()) {
+                TrainAssistantAskVO vo = new TrainAssistantAskVO();
+                vo.setStatus("HIT");
+                vo.setMessage("已根据最新版培训文档找到相关问答");
+                vo.setItems(latestHits);
+                vo.setVersionLabel(latest.versionLabel);
+                vo.setHasOlderVersions(latest.hasOlder);
+                vo.setDocId(latest.docId);
+                vo.setVersionId(latest.versionId);
+                return vo;
+            }
+
             TrainAssistantAskVO vo = new TrainAssistantAskVO();
             vo.setHasOlderVersions(latest.hasOlder);
             vo.setVersionLabel(latest.versionLabel);

@@ -54,5 +54,8 @@ public class TrainAssistantAskVO {
 
         @Schema(description = "是否来自人工校准库", example = "false")
         private Boolean fromCalibrate;
+
+        @Schema(description = "参考旧版说明（校准答案绑定版本非最新时）", example = "该答案是参考「v1」版本的培训文档", nullable = true)
+        private String referenceNote;
     }
 }

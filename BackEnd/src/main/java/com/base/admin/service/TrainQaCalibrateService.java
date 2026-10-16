@@ -29,7 +29,8 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 培训答疑人工校准库：准的答案绑定文档版本，同意图优先命中；文档换版后旧校准不再生效。
+ * 培训答疑人工校准库：准的答案绑定文档版本。
+ * 换版后旧「准」标为 STALE，答疑仍可作兜底（需标注参考版本）；最新版「准」优先直接返回。
  */
 @Slf4j
 @Service
@@ -50,19 +51,27 @@ public class TrainQaCalibrateService {
         this.trainDocService = trainDocService;
     }
 
-    /** 答疑优先命中：当前文档最新版 + 已标记准确 + 同意图。 */
-    public TrainAssistantAskVO.QaItem findApprovedHit(String userQuestion, long docId, long versionId, String versionLabel) {
+    /**
+     * 答疑校准命中：本培训文档下「准」(APPROVED) 或换版后遗留的准 (STALE)，同意图。
+     * 优先最新版校准；无则返回历史版本准确答案（由调用方决定是否先搜最新文档）。
+     */
+    public AccurateHit findAccurateHit(String userQuestion, long docId, long latestVersionId) {
         String norm = normalizeIntent(userQuestion);
         if (!StringUtils.hasText(norm)) {
             return null;
         }
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT id, user_question, topic_title, answer_text, answer_html, images_json, aliases_json
-                FROM train_qa_calibrate
-                WHERE is_active = 1 AND status = ? AND doc_id = ? AND version_id = ?
-                ORDER BY update_time DESC
-                LIMIT 200
-                """, STATUS_APPROVED, docId, versionId);
+                SELECT c.id, c.version_id, c.user_question, c.topic_title, c.answer_text, c.answer_html,
+                       c.images_json, c.aliases_json, c.status,
+                       IFNULL(v.version_label, CONCAT('v', IFNULL(v.version_no, c.version_id))) version_label
+                FROM train_qa_calibrate c
+                LEFT JOIN train_doc_version v ON v.id = c.version_id
+                WHERE c.is_active = 1 AND c.doc_id = ? AND c.status IN (?, ?)
+                ORDER BY CASE WHEN c.version_id = ? THEN 0 ELSE 1 END,
+                         CASE WHEN c.status = ? THEN 0 ELSE 1 END,
+                         c.update_time DESC
+                LIMIT 300
+                """, docId, STATUS_APPROVED, STATUS_STALE, latestVersionId, STATUS_APPROVED);
         Map<String, Object> best = null;
         for (Map<String, Object> row : rows) {
             if (!matchesIntent(norm, row)) {
@@ -79,6 +88,7 @@ public class TrainQaCalibrateService {
             return null;
         }
         Long id = ((Number) best.get("id")).longValue();
+        long hitVersionId = ((Number) best.get("version_id")).longValue();
         jdbc.update("UPDATE train_qa_calibrate SET hit_count = IFNULL(hit_count,0) + 1 WHERE id = ?", id);
         TrainAssistantAskVO.QaItem item = new TrainAssistantAskVO.QaItem();
         item.setCalibrateId(id);
@@ -89,8 +99,19 @@ public class TrainQaCalibrateService {
         item.setAnswer(TrainQaAnswerSanitizer.stripOfficeMarkup(str(best.get("answer_text"))));
         item.setAnswerHtml(TrainQaAnswerSanitizer.stripOfficeMarkup(str(best.get("answer_html"))));
         item.setImages(parseImages(str(best.get("images_json"))));
+        String versionLabel = str(best.get("version_label"));
         item.setVersionLabel(versionLabel);
-        return item;
+        boolean onLatest = hitVersionId == latestVersionId;
+        return new AccurateHit(item, hitVersionId, versionLabel, onLatest);
+    }
+
+    /** 校准准确命中（可能绑定最新版或历史版） */
+    public record AccurateHit(
+            TrainAssistantAskVO.QaItem item,
+            long versionId,
+            String versionLabel,
+            boolean onLatest
+    ) {
     }
 
     @Transactional
@@ -337,7 +358,7 @@ public class TrainQaCalibrateService {
         return vo;
     }
 
-    /** 文档上传新版本后：旧版校准标记为过期（不再参与答疑优先命中）。 */
+    /** 文档上传新版本后：旧版「准」标为 STALE（答疑仍可作历史兜底，需标注参考版本）。 */
     public void markStaleForDocExceptVersion(long docId, long keepVersionId) {
         int n = jdbc.update("""
                 UPDATE train_qa_calibrate SET status = ?

@@ -74,6 +74,8 @@ export type TrainQaItem = {
   versionLabel?: string;
   calibrateId?: number;
   fromCalibrate?: boolean;
+  /** 校准答案绑定旧版时的参考说明 */
+  referenceNote?: string;
 };
 
 export type TrainAssistantAskResult = {
