@@ -10,8 +10,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 收银答疑意图：对用户问法做停用词切除 + 分词/二字切分，再和手册标题对齐。
- * 「如何折扣」应对上「如何进行折扣改价/改价」，而不是要求整句连续相等。
+ * 收银答疑意图：对用户问法做停用词切除 + 分词/二字切分，再和手册标题/正文对齐。
+ * 「如何折扣」应对上「如何进行折扣改价/改价」；「找厂子订货」应对上「找厂家要货」。
  */
 public final class TrainQaIntentMatcher {
 
@@ -32,29 +32,89 @@ public final class TrainQaIntentMatcher {
             {"会员", "积分"},
             {"发票", "开票"},
             {"支付", "收款", "结算", "收银"},
+            {"订货", "要货", "下单", "采购", "补货"},
+            {"厂子", "厂家", "厂商", "厂方", "工厂", "供应商"},
+    };
+
+    /** 归一：同义写法落到同一核心词，便于「订货/要货」「厂子/厂家」同意图。 */
+    private static final String[][] CANON_REPLACEMENTS = {
+            {"供应商", "厂家"},
+            {"厂子", "厂家"},
+            {"厂商", "厂家"},
+            {"厂方", "厂家"},
+            {"工厂", "厂家"},
+            {"要货", "订货"},
+            {"下单", "订货"},
+            {"补货", "订货"},
+            {"采购", "订货"},
     };
 
     private TrainQaIntentMatcher() {}
 
     public static boolean titleMatches(String userQuestion, String title) {
-        String t = compact(title);
+        return textMatches(userQuestion, title, 1);
+    }
+
+    /**
+     * 正文召回：整段核心意图命中，或（问句同时含厂家类+订货类时）正文两类都要出现；
+     * 其余情况至少 2 个业务词命中，避免长文误中。
+     */
+    public static boolean bodyMatches(String userQuestion, String body) {
+        String t = canonicalize(compact(body));
+        if (t.length() < 4) {
+            return false;
+        }
+        if (conflicts(userQuestion, body)) {
+            return false;
+        }
+        String canon = canonicalCore(userQuestion);
+        if (canon.length() >= 4 && t.contains(canon)) {
+            return true;
+        }
+        boolean needFactory = familyPresent(canon, FAMILIES[9]);
+        boolean needOrder = familyPresent(canon, FAMILIES[8]);
+        if (needFactory && needOrder) {
+            return familyPresent(t, FAMILIES[9]) && familyPresent(t, FAMILIES[8]);
+        }
+        return textMatches(userQuestion, body, 2);
+    }
+
+    private static boolean textMatches(String userQuestion, String text, int minTokenHits) {
+        String t = canonicalize(compact(text));
         if (t.length() < 2) {
             return false;
         }
-        if (conflicts(userQuestion, title)) {
+        if (conflicts(userQuestion, text)) {
             return false;
         }
         String leftover = leftover(userQuestion);
-        if (leftover.length() >= 2 && t.contains(leftover)) {
+        String canon = canonicalCore(userQuestion);
+        if (canon.length() >= 2 && t.contains(canon)) {
             return true;
         }
+        if (leftover.length() >= 2 && (t.contains(leftover) || t.contains(canonicalize(leftover)))) {
+            return true;
+        }
+        int hits = 0;
         for (String tok : contentTokens(userQuestion)) {
-            if (tok.length() >= 2 && (t.contains(tok) || familyHit(tok, t))) {
-                return true;
+            if (tok.length() < 2) {
+                continue;
+            }
+            String cTok = canonicalize(tok);
+            if (t.contains(tok) || t.contains(cTok) || familyHit(tok, t) || familyHit(cTok, t)) {
+                hits++;
+                if (hits >= minTokenHits) {
+                    return true;
+                }
             }
         }
-        String user = compact(userQuestion);
-        return user.length() >= 2 && user.length() <= 8 && (t.contains(user) || leftover.length() >= 2 && t.contains(leftover));
+        if (minTokenHits <= 1) {
+            String user = compact(userQuestion);
+            return user.length() >= 2 && user.length() <= 8
+                    && (t.contains(user) || t.contains(canonicalize(user))
+                    || leftover.length() >= 2 && t.contains(canonicalize(leftover)));
+        }
+        return false;
     }
 
     /**
@@ -62,7 +122,7 @@ public final class TrainQaIntentMatcher {
      * 「如何进行折扣」会叠中 如何+折扣，「扫码、…、折扣、…」只中一次折扣，应落选。
      */
     public static int score(String userQuestion, String title) {
-        String t = compact(title);
+        String t = canonicalize(compact(title));
         if (t.length() < 2 || !StringUtils.hasText(userQuestion)) {
             return 0;
         }
@@ -70,32 +130,39 @@ public final class TrainQaIntentMatcher {
             return 0;
         }
         String leftover = leftover(userQuestion);
+        String canon = canonicalCore(userQuestion);
         String user = compact(userQuestion);
         int hits = 0;
-        if (leftover.length() >= 2) {
+        if (canon.length() >= 2) {
+            hits += countOccurrences(t, canon);
+            for (int i = 0; i + 2 <= canon.length(); i++) {
+                hits += countOccurrences(t, canon.substring(i, i + 2));
+            }
+            if (canon.length() >= 3) {
+                for (int i = 0; i + 3 <= canon.length(); i++) {
+                    hits += countOccurrences(t, canon.substring(i, i + 3));
+                }
+            }
+        } else if (leftover.length() >= 2) {
             hits += countOccurrences(t, leftover);
             for (int i = 0; i + 2 <= leftover.length(); i++) {
                 hits += countOccurrences(t, leftover.substring(i, i + 2));
             }
-            if (leftover.length() >= 3) {
-                for (int i = 0; i + 3 <= leftover.length(); i++) {
-                    hits += countOccurrences(t, leftover.substring(i, i + 3));
-                }
-            }
         }
-        // 用户原问里的问法词（如何/怎么/进行）叠中标题，专用问答题干会明显高于「罗列词条」
         hits += cueHits(userQuestion, title);
-        if (hits == 0 && leftover.length() >= 2 && familyHit(leftover, t)) {
+        if (hits == 0 && canon.length() >= 2 && familyHit(canon, t)) {
             hits = 1;
         }
         int score = hits * 100;
+        if (canon.length() >= 2 && t.contains(canon)) {
+            score += 50;
+        }
         if (leftover.length() >= 2 && t.contains(leftover)) {
             score += 30;
         }
-        if (user.length() >= 2 && t.contains(user)) {
+        if (user.length() >= 2 && t.contains(canonicalize(user))) {
             score += 80;
         }
-        // 顿号/逗号罗列多个主题：即使夹着核心词，命中次数也远少于专问标题
         int catalog = catalogTopics(title);
         if (catalog >= 3) {
             score -= (catalog - 2) * 80;
@@ -129,21 +196,42 @@ public final class TrainQaIntentMatcher {
         return s;
     }
 
+    /** 去停用词后再做同义归一，用作校准 intent_norm / 同意图判断。 */
+    public static String canonicalCore(String q) {
+        return canonicalize(leftover(q));
+    }
+
+    public static String canonicalize(String s) {
+        if (s == null || s.isEmpty()) {
+            return "";
+        }
+        String out = s;
+        for (String[] pair : CANON_REPLACEMENTS) {
+            out = out.replace(pair[0], pair[1]);
+        }
+        return out;
+    }
+
     public static Set<String> contentTokens(String q) {
         LinkedHashSet<String> tokens = new LinkedHashSet<>();
-        String left = leftover(q);
-        if (left.length() >= 2) {
-            tokens.add(left);
-            for (int i = 0; i + 2 <= left.length(); i++) {
-                tokens.add(left.substring(i, i + 2));
-            }
-            if (left.length() >= 3) {
-                for (int i = 0; i + 3 <= left.length(); i++) {
-                    tokens.add(left.substring(i, i + 3));
-                }
+        addTokens(tokens, leftover(q));
+        addTokens(tokens, canonicalCore(q));
+        return tokens;
+    }
+
+    private static void addTokens(Set<String> tokens, String left) {
+        if (left.length() < 2) {
+            return;
+        }
+        tokens.add(left);
+        for (int i = 0; i + 2 <= left.length(); i++) {
+            tokens.add(left.substring(i, i + 2));
+        }
+        if (left.length() >= 3) {
+            for (int i = 0; i + 3 <= left.length(); i++) {
+                tokens.add(left.substring(i, i + 3));
             }
         }
-        return tokens;
     }
 
     public static String compact(String s) {
@@ -154,8 +242,8 @@ public final class TrainQaIntentMatcher {
     }
 
     private static boolean conflicts(String userQuestion, String title) {
-        String u = compact(userQuestion);
-        String t = compact(title);
+        String u = canonicalize(compact(userQuestion));
+        String t = canonicalize(compact(title));
         boolean userDiscount = familyPresent(u, FAMILIES[0]);
         boolean userRefund = familyPresent(u, FAMILIES[1]);
         boolean titleDiscount = familyPresent(t, FAMILIES[0]);
@@ -173,7 +261,7 @@ public final class TrainQaIntentMatcher {
         for (String[] fam : FAMILIES) {
             boolean inTok = false;
             for (String w : fam) {
-                if (tok.contains(w) || w.contains(tok) && tok.length() >= 2) {
+                if (tok.contains(w) || (w.contains(tok) && tok.length() >= 2)) {
                     inTok = true;
                     break;
                 }
@@ -182,7 +270,7 @@ public final class TrainQaIntentMatcher {
                 continue;
             }
             for (String w : fam) {
-                if (titleCompact.contains(w)) {
+                if (titleCompact.contains(w) || titleCompact.contains(canonicalize(w))) {
                     return true;
                 }
             }
@@ -192,7 +280,7 @@ public final class TrainQaIntentMatcher {
 
     private static boolean familyPresent(String text, String[] fam) {
         for (String w : fam) {
-            if (text.contains(w)) {
+            if (text.contains(w) || text.contains(canonicalize(w))) {
                 return true;
             }
         }

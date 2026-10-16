@@ -429,12 +429,8 @@ public class TrainQaCalibrateService {
     }
 
     public static String normalizeIntent(String q) {
-        if (q == null) {
-            return "";
-        }
-        return q.replaceAll("[\\s\\p{Punct}？?！!，,。、；;：:\\\"'（）()【】\\[\\]《》<>·…—\\-_/\\\\|]+", "")
-                .toLowerCase(Locale.ROOT)
-                .trim();
+        // 与答疑召回同一套：去停用词 + 同义归一（订货/要货、厂子/厂家 等）
+        return TrainQaIntentMatcher.canonicalCore(q);
     }
 
     private static void rejectIfCodeAnswer(String status, String answer, String answerHtml) {

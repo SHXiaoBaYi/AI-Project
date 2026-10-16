@@ -686,27 +686,48 @@ public class TrainDocService {
     }
 
     /**
-     * 答疑意图：先按「用户原话 vs 话题标题」硬召回候选，再（必要时）让模型只在候选里选。
-     * 禁止把整篇正文扔给模型自由指题——短问如「登录」时模型会概率性乱指到无关话题。
+     * 文档答疑主路径（可随文档换版，不靠同义词规则续命）：
+     * 1) 结构化抽出手册里全部「问：」题干目录（只做切段，不做语义）
+     * 2) 交给 AI 按语义选最贴近的一条（订货≈要货、厂子≈厂家 等由模型理解）
+     * 3) AI 不可用或未选中时，才回退到规则召回
      */
     private List<TrainAssistantAskVO.QaItem> aiExtractQa(String question, DocBundle doc) {
         IndexedDoc indexed = prepareIndexedDoc(doc);
-        log.info("答疑索引 versionId={} images={} textLen={}",
-                doc.versionId, indexed.images.size(), indexed.textForAi == null ? 0 : indexed.textForAi.length());
-        List<TitleCandidate> candidates = recallTitleCandidates(question, indexed);
-        log.info("答疑标题召回 questionLen={} candidates={} top={}",
-                question == null ? 0 : question.trim().length(),
-                candidates.size(),
-                candidates.isEmpty() ? "-" : candidates.get(0).title);
-        if (candidates.isEmpty()) {
+        // 切段尽量用 content_text，避免 HTML 兜底丢题干
+        preferStructuredPlainText(indexed, doc == null ? null : doc.text);
+        String plain = qaSource(indexed);
+        List<TitleCandidate> catalog = listAllQaCandidates(indexed);
+        log.info("答疑题干目录 versionId={} textLen={} catalog={} aiEnabled={}",
+                doc.versionId,
+                plain == null ? 0 : plain.length(),
+                catalog.size(),
+                aiChatService.isEnabled());
+        if (catalog.isEmpty()) {
+            log.warn("答疑题干目录为空 versionId={} sample={}",
+                    doc.versionId, sampleSectionTitles(plain, 15));
             return List.of();
         }
-        TitleCandidate chosen = resolveTitleCandidate(question, candidates);
-        if (chosen == null || !passesUserAlignment(question, chosen.title)) {
-            log.info("答疑意图未过用户对齐门控 question={} chosen={}",
-                    question, chosen == null ? null : chosen.title);
+
+        TitleCandidate chosen = null;
+        if (aiChatService.isEnabled()) {
+            chosen = pickTitleWithAi(question, catalog);
+            if (chosen != null) {
+                log.info("答疑AI选段 question={} pick={}", question, chosen.title);
+            } else {
+                log.info("答疑AI未命中，回退规则召回 question={}", question);
+            }
+        }
+        if (chosen == null) {
+            List<TitleCandidate> recalled = recallTitleCandidates(question, indexed);
+            chosen = resolveTitleCandidate(question, recalled);
+            if (chosen != null) {
+                log.info("答疑规则兜底 pick={} score={}", chosen.title, chosen.score);
+            }
+        }
+        if (chosen == null) {
             return List.of();
         }
+
         SectionHit hit = sectionHitFromCandidate(chosen, indexed);
         if (hit == null) {
             return List.of();
@@ -720,46 +741,82 @@ public class TrainDocService {
         return List.of(item);
     }
 
-    private TitleCandidate resolveTitleCandidate(String question, List<TitleCandidate> candidates) {
-        List<TitleCandidate> aligned = new ArrayList<>();
-        for (TitleCandidate c : candidates) {
-            if (titleMatchesTopic(question, c.title)) {
-                aligned.add(c);
-            }
+    /** 全量题干目录：只切段，不做关键词/同义过滤。 */
+    private List<TitleCandidate> listAllQaCandidates(IndexedDoc indexed) {
+        String plain = qaSource(indexed);
+        List<TitleCandidate> list = new ArrayList<>();
+        if (!StringUtils.hasText(plain)) {
+            return list;
         }
-        if (!aligned.isEmpty()) {
-            candidates = aligned;
-        } else {
+        List<Integer> starts = listQaStarts(plain);
+        if (starts.isEmpty()) {
+            starts = listSectionStarts(plain);
+        }
+        for (int i = 0; i < starts.size(); i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+            String sec = plain.substring(from, to);
+            String title = sectionTitle(sec);
+            if (compact(title).length() < 2) {
+                continue;
+            }
+            String bodyProbe = stripImageMarkers(trimSectionForDisplay(sec));
+            if (bodyProbe.length() < 2 && countMarkers(sec) == 0) {
+                continue;
+            }
+            list.add(new TitleCandidate(from, to, title, 0));
+        }
+        return list;
+    }
+
+    private TitleCandidate resolveTitleCandidate(String question, List<TitleCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
             return null;
         }
-        candidates.sort(Comparator.comparingInt((TitleCandidate c) -> c.score).reversed());
-        return candidates.get(0);
+        List<TitleCandidate> titleAligned = new ArrayList<>();
+        for (TitleCandidate c : candidates) {
+            if (titleMatchesTopic(question, c.title)) {
+                titleAligned.add(c);
+            }
+        }
+        List<TitleCandidate> pool = !titleAligned.isEmpty() ? titleAligned : candidates;
+        pool.sort(Comparator.comparingInt((TitleCandidate c) -> c.score).reversed());
+        return pool.get(0);
     }
 
     private TitleCandidate pickTitleWithAi(String question, List<TitleCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        // 收银手册通常几十条；过长时截断，避免撑爆上下文
+        List<TitleCandidate> pool = candidates.size() > 80
+                ? new ArrayList<>(candidates.subList(0, 80))
+                : candidates;
         StringBuilder catalog = new StringBuilder();
-        for (int i = 0; i < candidates.size(); i++) {
-            catalog.append(i + 1).append(". ").append(candidates.get(i).title).append('\n');
+        for (int i = 0; i < pool.size(); i++) {
+            catalog.append(i + 1).append(". ").append(pool.get(i).title).append('\n');
         }
         String system = """
-                你是收银培训答疑的意图分类器。只能从给定候选标题中选一个最贴近用户问题的。
-                只输出 JSON，不要 markdown。格式：{"index":1} 或没有把握时 {"index":0}
-                硬性规则：
-                1. index 必须是候选序号（从 1 开始），禁止编造标题。
-                2. 用户问题与所有候选都明显无关时，必须输出 {"index":0}。
-                3. 短词（如「登录」）必须与标题字面相关，禁止选无关的支付/结算类标题。
-                4. 用户核心词必须出现在所选标题中：问「折扣/改价」禁止选「退货/退款」；问「退货」禁止选「折扣」。
+                你是收银操作培训手册的答疑选段助手。
+                任务：根据用户问题，从「候选问法」列表中选出最贴近的一条。
+                要求：
+                1. 按语义理解，不要只做字面相等。近义词、同一操作的不同说法都算匹配
+                   （例如：订货≈要货、厂子≈厂家、怎么找≈如何找、要货单操作≈找厂子要货）。
+                2. 只能从给定候选中选，禁止编造标题。
+                3. 只输出 JSON，不要 markdown、不要解释。格式：{"index":1}
+                   index 从 1 开始；若明显都不相关则 {"index":0}。
                 """;
-        String user = "用户问题：\n" + question + "\n\n候选标题：\n" + catalog;
+        String user = "用户问题：\n" + question + "\n\n候选问法：\n" + catalog;
         try {
             String raw = aiChatService.chat(system, user, null, 0.1);
-            Integer idx = parseCandidateIndex(raw, candidates.size());
+            Integer idx = parseCandidateIndex(raw, pool.size());
+            log.info("答疑AI选段原始返回 index={} raw={}", idx, raw == null ? "" : raw.replace('\n', ' '));
             if (idx == null || idx <= 0) {
                 return null;
             }
-            return candidates.get(idx - 1);
+            return pool.get(idx - 1);
         } catch (Exception e) {
-            log.warn("答疑候选意图识别失败，回退规则: {}", e.getMessage());
+            log.warn("答疑AI选段失败，将回退规则: {}", e.getMessage());
             return null;
         }
     }
@@ -831,21 +888,97 @@ public class TrainDocService {
             if (bodyProbe.length() < 4 && countMarkers(sec) == 0) {
                 continue;
             }
-            if (!titleMatchesTopic(userQuestion, title)) {
+            boolean titleHit = titleMatchesTopic(userQuestion, title);
+            boolean bodyHit = TrainQaIntentMatcher.bodyMatches(userQuestion, bodyProbe);
+            if (!titleHit && !bodyHit) {
                 continue;
             }
-            int score = scoreUserAgainstTitle(userQuestion, title);
-            if (score >= MIN_SECTION_SCORE || TrainQaIntentMatcher.titleMatches(userQuestion, title)) {
-                list.add(new TitleCandidate(from, to, title, score));
+            if (titleHit) {
+                int score = scoreUserAgainstTitle(userQuestion, title) + 400;
+                // 题干几乎整句命中（如「怎么找厂子要货，要货单操作」）再加权
+                String left = TrainQaIntentMatcher.leftover(userQuestion);
+                String titleCompact = TrainQaIntentMatcher.compact(title);
+                if (left.length() >= 4 && titleCompact.contains(left)) {
+                    score += 600;
+                }
+                if (score >= MIN_SECTION_SCORE || titleHit) {
+                    list.add(new TitleCandidate(from, to, title, score));
+                }
+                continue;
+            }
+            // 正文命中但标题不对：在段内回找真正的「问：…」题干，禁止用父标题（如导购）冒充
+            List<TitleCandidate> nested = recallNestedQaInSection(userQuestion, plain, from, to, sec);
+            if (!nested.isEmpty()) {
+                list.addAll(nested);
             }
         }
         // HTML 兜底常把「一、系统概述与登录」拆成无标记短行，SECTION_START 认不出 → 行级兜底
         if (list.isEmpty()) {
             list.addAll(recallLineTitleCandidates(userQuestion, plain, starts));
         }
+        if (list.isEmpty()) {
+            list.addAll(recallByAskPrefixScan(userQuestion, plain));
+        }
         list.sort(Comparator.comparingInt((TitleCandidate c) -> c.score).reversed());
         if (list.size() > 12) {
             return new ArrayList<>(list.subList(0, 12));
+        }
+        return list;
+    }
+
+    /**
+     * 父段标题未对齐、但正文里埋了真正「问：」题干时（HTML 切段失败常见），
+     * 在段内再扫一层问答起点。
+     */
+    private List<TitleCandidate> recallNestedQaInSection(String userQuestion, String plain,
+                                                         int sectionFrom, int sectionTo, String sec) {
+        List<TitleCandidate> list = new ArrayList<>();
+        List<Integer> nested = listQaStarts(sec);
+        if (nested.isEmpty()) {
+            return list;
+        }
+        for (int i = 0; i < nested.size(); i++) {
+            int relFrom = nested.get(i);
+            int relTo = i + 1 < nested.size() ? nested.get(i + 1) : sec.length();
+            if (relFrom <= 2) {
+                continue; // 仍是父段自己的题干
+            }
+            String nestSec = sec.substring(relFrom, relTo);
+            String nestTitle = sectionTitle(nestSec);
+            if (!titleMatchesTopic(userQuestion, nestTitle)) {
+                continue;
+            }
+            int absFrom = sectionFrom + relFrom;
+            int absTo = sectionFrom + relTo;
+            int score = scoreUserAgainstTitle(userQuestion, nestTitle) + 800;
+            list.add(new TitleCandidate(absFrom, Math.min(absTo, plain.length()), nestTitle, score));
+        }
+        return list;
+    }
+
+    /**
+     * 全篇扫描「问：…」题干：即使用户问法与题干高度重合（怎么找厂子要货），也要能直接命中。
+     */
+    private List<TitleCandidate> recallByAskPrefixScan(String userQuestion, String plain) {
+        List<TitleCandidate> list = new ArrayList<>();
+        if (!StringUtils.hasText(plain)) {
+            return list;
+        }
+        List<Integer> starts = listQaStarts(plain);
+        for (int i = 0; i < starts.size(); i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
+            String sec = plain.substring(from, to);
+            String title = sectionTitle(sec);
+            if (!titleMatchesTopic(userQuestion, title)) {
+                continue;
+            }
+            int score = scoreUserAgainstTitle(userQuestion, title) + 500;
+            String left = TrainQaIntentMatcher.leftover(userQuestion);
+            if (left.length() >= 4 && TrainQaIntentMatcher.compact(title).contains(left)) {
+                score += 800;
+            }
+            list.add(new TitleCandidate(from, to, title, score));
         }
         return list;
     }
@@ -864,11 +997,15 @@ public class TrainDocService {
                 continue;
             }
             String titleNorm = compact(title);
-            if (titleNorm.length() < 2 || !TrainQaIntentMatcher.titleMatches(userNorm, title)) {
+            if (titleNorm.length() < 2) {
                 continue;
             }
             // 跳过答句/过长说明
             if (title.contains("答：") || title.contains("答:") || titleNorm.length() > 36) {
+                continue;
+            }
+            if (!TrainQaIntentMatcher.titleMatches(userQuestion, title)
+                    && !TrainQaIntentMatcher.titleMatches(userNorm, title)) {
                 continue;
             }
             int score = scoreUserAgainstTitle(userQuestion, title);
@@ -1067,14 +1204,51 @@ public class TrainDocService {
         if (!StringUtils.hasText(plain)) {
             return starts;
         }
-        Matcher m = QA_LINE.matcher(plain);
+        // 不要求必须行首：HTML 兜底常把「问：」粘在上一段末尾，导致整题被吞进上一问答正文
+        Matcher m = Pattern.compile("(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]").matcher(plain);
         while (m.find()) {
             int at = m.start();
             if (starts.isEmpty() || at > starts.get(starts.size() - 1)) {
                 starts.add(at);
             }
         }
+        Matcher lineHow = Pattern.compile("(?m)^[\\t　 ]*(?:如何|怎么)[^\\n\\r]{1,50}$").matcher(plain);
+        while (lineHow.find()) {
+            int at = lineHow.start();
+            boolean near = false;
+            for (int s : starts) {
+                if (Math.abs(s - at) <= 2) {
+                    near = true;
+                    break;
+                }
+            }
+            if (!near) {
+                starts.add(at);
+            }
+        }
+        starts.sort(Integer::compareTo);
         return starts;
+    }
+
+    /** 诊断用：抽若干段标题，便于排查召回为空。 */
+    private static String sampleSectionTitles(String plain, int limit) {
+        if (!StringUtils.hasText(plain) || limit <= 0) {
+            return "-";
+        }
+        List<Integer> starts = listQaStarts(plain);
+        if (starts.isEmpty()) {
+            starts = listSectionStarts(plain);
+        }
+        List<String> titles = new ArrayList<>();
+        for (int i = 0; i < starts.size() && titles.size() < limit; i++) {
+            int from = starts.get(i);
+            int to = i + 1 < starts.size() ? starts.get(i + 1) : Math.min(plain.length(), from + 80);
+            String title = cleanTopicTitle(sectionTitle(plain.substring(from, to)));
+            if (StringUtils.hasText(title)) {
+                titles.add(title);
+            }
+        }
+        return titles.isEmpty() ? "-" : String.join(" | ", titles);
     }
 
     private static boolean htmlHasImg(String html) {
@@ -1198,22 +1372,45 @@ public class TrainDocService {
             return;
         }
         String htmlPlain = nullToEmpty(indexed.textForAi);
-        if (listQaStarts(htmlPlain).size() >= 2 && htmlPlain.contains("[图")) {
-            return;
-        }
+        int htmlQa = listQaStarts(htmlPlain).size();
+        int textQa = listQaStarts(contentText).size();
         int htmlStarts = listSectionStarts(htmlPlain).size();
         int textStarts = listSectionStarts(contentText).size();
-        boolean htmlHasLoginTitle = sectionTitlesContain(htmlPlain, "登录");
-        boolean textHasLoginTitle = sectionTitlesContain(contentText, "登录");
-        if (textStarts > htmlStarts || (textHasLoginTitle && !htmlHasLoginTitle) || textStarts >= htmlStarts + 2) {
-            log.info("答疑切段改用 content_text：htmlStarts={} textStarts={} htmlLoginTitle={} textLoginTitle={}",
-                    htmlStarts, textStarts, htmlHasLoginTitle, textHasLoginTitle);
-            if (!StringUtils.hasText(indexed.markedText) && htmlPlain.contains("[图")) {
-                indexed.markedText = htmlPlain;
-            }
-            indexed.textForAi = mergeMarkersIntoStructured(contentText, htmlPlain);
-            fillImageContexts(indexed);
+        boolean textRicherBiz = contentTextRicherInBizTerms(htmlPlain, contentText);
+        // 有可用 content_text 时优先用它做题干目录（换版只改文档，不改规则）；HTML 仅补配图标记
+        boolean preferText = textQa > 0 && (textQa >= htmlQa || textRicherBiz || textStarts >= htmlStarts
+                || contentText.length() >= Math.max(htmlPlain.length(), 200));
+        if (!preferText) {
+            return;
         }
+        log.info("答疑切段改用 content_text：htmlQa={} textQa={} htmlStarts={} textStarts={} richerBiz={}",
+                htmlQa, textQa, htmlStarts, textStarts, textRicherBiz);
+        if (!StringUtils.hasText(indexed.markedText) && htmlPlain.contains("[图")) {
+            indexed.markedText = htmlPlain;
+        }
+        indexed.textForAi = mergeMarkersIntoStructured(contentText, htmlPlain);
+        fillImageContexts(indexed);
+    }
+
+    /** content_text 比 HTML 抽字多出关键业务词（厂家+订货等）时，切段应改用 content_text。 */
+    private static boolean contentTextRicherInBizTerms(String htmlPlain, String contentText) {
+        String hc = TrainQaIntentMatcher.canonicalize(TrainQaIntentMatcher.compact(htmlPlain));
+        String tc = TrainQaIntentMatcher.canonicalize(TrainQaIntentMatcher.compact(contentText));
+        if (tc.contains("厂家") && tc.contains("订货") && !(hc.contains("厂家") && hc.contains("订货"))) {
+            return true;
+        }
+        String[] keys = {"厂家", "订货", "寄存", "挂单", "折扣", "退货", "登录", "导购"};
+        int htmlHit = 0;
+        int textHit = 0;
+        for (String k : keys) {
+            if (hc.contains(k)) {
+                htmlHit++;
+            }
+            if (tc.contains(k)) {
+                textHit++;
+            }
+        }
+        return textHit >= htmlHit + 2;
     }
 
     /** 把带位置的 [图N] 插回结构更好的纯文本，避免切段把段末配图丢掉。 */
