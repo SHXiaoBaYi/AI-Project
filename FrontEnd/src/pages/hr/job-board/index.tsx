@@ -161,20 +161,14 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, 
             onClick={() => onOpen(job, 'PENDING')}
           />
           <Metric
-            value={job.interviewingCount}
-            label='约面中'
-            onClick={() => onOpen(job, 'INTERVIEWING')}
-          />
-          <Metric
-            value={job.onboardedCount}
-            label='已入职'
-            onClick={() => onOpen(job, 'ONBOARDED')}
-          />
-
-          <Metric
             value={job.todayPhoneCount}
             label='今日电话沟通'
             onClick={() => onOpen(job, 'TODAY_PHONE')}
+          />
+          <Metric
+            value={job.interviewingCount}
+            label='约面中'
+            onClick={() => onOpen(job, 'INTERVIEWING')}
           />
           <Metric
             value={job.todayInviteCount}
@@ -200,6 +194,11 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, 
             value={job.pendingOnboardCount}
             label='待入职'
             onClick={() => onOpen(job, 'PENDING_ONBOARD')}
+          />
+          <Metric
+            value={job.onboardedCount}
+            label='已入职'
+            onClick={() => onOpen(job, 'ONBOARDED')}
           />
         </div>
       </div>
