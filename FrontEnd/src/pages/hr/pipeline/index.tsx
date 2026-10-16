@@ -495,6 +495,7 @@ export default function HrPipelinePage() {
           <Form.Item
             name='remark'
             label='备注'
+            rules={screenResult === 'FAIL' ? [{ required: true, message: '请填写备注' }] : undefined}
           >
             <Input.TextArea rows={3} />
           </Form.Item>
@@ -566,6 +567,7 @@ export default function HrPipelinePage() {
           <Form.Item
             name='remark'
             label='备注'
+            rules={[{ required: true, message: '请填写备注' }]}
           >
             <Input.TextArea rows={2} />
           </Form.Item>

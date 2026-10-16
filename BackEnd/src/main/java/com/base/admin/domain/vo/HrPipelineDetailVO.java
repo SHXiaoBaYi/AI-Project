@@ -25,6 +25,8 @@ public class HrPipelineDetailVO {
     private String phase;
     private String phaseLabel;
     private String screenResult;
+    @Schema(description = "初筛/标记不合适原因")
+    private String screenRejectReason;
     private String resumeName;
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate submittedAt;

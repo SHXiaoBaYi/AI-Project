@@ -22,6 +22,9 @@ public class HrPanelJobVO {
     @Schema(description = "岗位名称", example = "内容运营")
     private String jobName;
 
+    @Schema(description = "HC 需求人数", example = "2")
+    private Integer headcount;
+
     @Schema(description = "负责人", example = "王艳")
     private String ownerName;
 

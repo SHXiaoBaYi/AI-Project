@@ -213,6 +213,8 @@ export interface HrPanelJobRow {
   panelStatusLabel?: string;
   deptName?: string;
   jobName?: string;
+  /** HC 需求人数 */
+  headcount?: number;
   ownerName?: string;
   jobPriorityCode?: string;
   jobPriorityLabel?: string;
@@ -332,6 +334,13 @@ export type HrJobCard = {
   pendingCount?: number;
   interviewingCount?: number;
   onboardedCount?: number;
+  todayScreenCount?: number;
+  todayPhoneCount?: number;
+  todayInviteCount?: number;
+  todayInterviewCount?: number;
+  todayInterviewPassCount?: number;
+  bgCheckCount?: number;
+  pendingOnboardCount?: number;
   locationCode?: string;
   workLocation?: string;
   jobPriorityCode?: string;
@@ -376,7 +385,17 @@ export type HrJobCandidate = {
   resumeName?: string;
 };
 
-export type HrJobFunnelStatus = 'PENDING' | 'INTERVIEWING' | 'ONBOARDED';
+export type HrJobFunnelStatus =
+  | 'PENDING'
+  | 'INTERVIEWING'
+  | 'ONBOARDED'
+  | 'TODAY_SCREEN'
+  | 'TODAY_PHONE'
+  | 'TODAY_INVITE'
+  | 'TODAY_INTERVIEW'
+  | 'TODAY_INTERVIEW_PASS'
+  | 'BG_CHECK'
+  | 'PENDING_ONBOARD';
 
 export function getHrJobCandidatesApi(data: {
   requisitionId: number;
@@ -436,6 +455,7 @@ export type HrPipelineDetail = {
   phase?: HrPipelinePhase;
   phaseLabel?: string;
   screenResult?: string;
+  screenRejectReason?: string;
   resumeName?: string;
   submittedAt?: string;
   phoneScreen?: {

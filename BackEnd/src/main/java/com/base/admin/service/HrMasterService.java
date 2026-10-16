@@ -39,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -206,7 +207,41 @@ public class HrMasterService {
                           )) interviewing_count,
                        (SELECT COUNT(1) FROM hr_application a
                         WHERE a.requisition_id = r.id AND a.is_active = 1
-                          AND a.current_stage = 'ONBOARDED') onboarded_count
+                          AND a.current_stage = 'ONBOARDED') onboarded_count,
+                       (SELECT COUNT(1) FROM hr_application a
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND a.create_time >= CURDATE()
+                          AND a.create_time < DATE_ADD(CURDATE(), INTERVAL 1 DAY)) today_screen_count,
+                       (SELECT COUNT(DISTINCT a.id) FROM hr_application a
+                        JOIN hr_phone_screen p ON p.application_id = a.id AND p.is_active = 1
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND p.called_at >= CURDATE()
+                          AND p.called_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)) today_phone_count,
+                       (SELECT COUNT(DISTINCT a.id) FROM hr_application a
+                        JOIN hr_interview_invite i ON i.application_id = a.id AND i.is_active = 1
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND i.status <> 'CANCELLED'
+                          AND i.interview_at >= CURDATE()
+                          AND i.interview_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)) today_invite_count,
+                       (SELECT COUNT(DISTINCT a.id) FROM hr_application a
+                        JOIN hr_interview_record rec ON rec.application_id = a.id AND rec.is_active = 1
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND COALESCE(rec.interviewed_at, rec.create_time) >= CURDATE()
+                          AND COALESCE(rec.interviewed_at, rec.create_time) < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                       ) today_interview_count,
+                       (SELECT COUNT(DISTINCT a.id) FROM hr_application a
+                        JOIN hr_interview_record rec ON rec.application_id = a.id AND rec.is_active = 1
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND rec.conclusion = 'PASS'
+                          AND COALESCE(rec.interviewed_at, rec.create_time) >= CURDATE()
+                          AND COALESCE(rec.interviewed_at, rec.create_time) < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                       ) today_interview_pass_count,
+                       (SELECT COUNT(1) FROM hr_application a
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND a.current_stage = 'BG_CHECK') bg_check_count,
+                       (SELECT COUNT(1) FROM hr_application a
+                        WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND a.current_stage = 'PENDING_ONBOARD') pending_onboard_count
                 """ + filter + """
                  ORDER BY FIELD(r.priority,1,2,3), r.received_date DESC, r.id DESC
                  LIMIT ? OFFSET ?
@@ -327,6 +362,13 @@ public class HrMasterService {
         card.setPendingCount(intOf(row.get("pending_count")));
         card.setInterviewingCount(intOf(row.get("interviewing_count")));
         card.setOnboardedCount(intOf(row.get("onboarded_count")));
+        card.setTodayScreenCount(intOf(row.get("today_screen_count")));
+        card.setTodayPhoneCount(intOf(row.get("today_phone_count")));
+        card.setTodayInviteCount(intOf(row.get("today_invite_count")));
+        card.setTodayInterviewCount(intOf(row.get("today_interview_count")));
+        card.setTodayInterviewPassCount(intOf(row.get("today_interview_pass_count")));
+        card.setBgCheckCount(intOf(row.get("bg_check_count")));
+        card.setPendingOnboardCount(intOf(row.get("pending_onboard_count")));
         String addr = stringOf(row.get("work_address_name"));
         if (addr == null || addr.isBlank()) {
             String loc = card.getLocationCode();
@@ -691,8 +733,58 @@ public class HrMasterService {
             case "PENDING" -> "ENTERED".equalsIgnoreCase(stage);
             case "INTERVIEWING" -> JOB_FUNNEL_INTERVIEWING.contains(stage.toUpperCase(Locale.ROOT));
             case "ONBOARDED" -> "ONBOARDED".equalsIgnoreCase(stage);
+            case "BG_CHECK" -> "BG_CHECK".equalsIgnoreCase(stage);
+            case "PENDING_ONBOARD" -> "PENDING_ONBOARD".equalsIgnoreCase(stage);
             default -> true;
         };
+    }
+
+    /** 按日/沟通类漏斗查出 application_id；非此类漏斗返回 null（走阶段匹配）。 */
+    private Set<Long> resolveTodayFunnelIds(Long requisitionId, String funnelStatus) {
+        String bucket = funnelStatus == null ? "" : funnelStatus.trim().toUpperCase(Locale.ROOT);
+        String sql = switch (bucket) {
+            case "TODAY_SCREEN" -> """
+                    SELECT a.id FROM hr_application a
+                    WHERE a.is_active = 1 AND a.requisition_id = ?
+                      AND a.create_time >= CURDATE()
+                      AND a.create_time < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                    """;
+            case "TODAY_PHONE" -> """
+                    SELECT DISTINCT a.id FROM hr_application a
+                    JOIN hr_phone_screen p ON p.application_id = a.id AND p.is_active = 1
+                    WHERE a.is_active = 1 AND a.requisition_id = ?
+                      AND p.called_at >= CURDATE()
+                      AND p.called_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                    """;
+            case "TODAY_INVITE" -> """
+                    SELECT DISTINCT a.id FROM hr_application a
+                    JOIN hr_interview_invite i ON i.application_id = a.id AND i.is_active = 1
+                    WHERE a.is_active = 1 AND a.requisition_id = ?
+                      AND i.status <> 'CANCELLED'
+                      AND i.interview_at >= CURDATE()
+                      AND i.interview_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                    """;
+            case "TODAY_INTERVIEW" -> """
+                    SELECT DISTINCT a.id FROM hr_application a
+                    JOIN hr_interview_record rec ON rec.application_id = a.id AND rec.is_active = 1
+                    WHERE a.is_active = 1 AND a.requisition_id = ?
+                      AND COALESCE(rec.interviewed_at, rec.create_time) >= CURDATE()
+                      AND COALESCE(rec.interviewed_at, rec.create_time) < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                    """;
+            case "TODAY_INTERVIEW_PASS" -> """
+                    SELECT DISTINCT a.id FROM hr_application a
+                    JOIN hr_interview_record rec ON rec.application_id = a.id AND rec.is_active = 1
+                    WHERE a.is_active = 1 AND a.requisition_id = ?
+                      AND rec.conclusion = 'PASS'
+                      AND COALESCE(rec.interviewed_at, rec.create_time) >= CURDATE()
+                      AND COALESCE(rec.interviewed_at, rec.create_time) < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                    """;
+            default -> null;
+        };
+        if (sql == null) {
+            return null;
+        }
+        return new LinkedHashSet<>(jdbc.query(sql, (rs, i) -> rs.getLong(1), requisitionId));
     }
 
     private static void attachCandidateDisplay(Map<String, Object> row) {
@@ -849,8 +941,15 @@ public class HrMasterService {
         int pageSize = q.getPageSize() == null || q.getPageSize() < 1 ? 10 : Math.min(q.getPageSize(), 100);
         HrBoardQueryDTO filter = new HrBoardQueryDTO();
         filter.setRequisitionId(q.getRequisitionId());
+        Set<Long> todayIds = resolveTodayFunnelIds(q.getRequisitionId(), q.getFunnelStatus());
         List<Map<String, Object>> all = applications(filter).stream()
-                .filter(row -> matchJobFunnel(row, q.getFunnelStatus()))
+                .filter(row -> {
+                    if (todayIds != null) {
+                        Object id = row.get("id");
+                        return id != null && todayIds.contains(((Number) id).longValue());
+                    }
+                    return matchJobFunnel(row, q.getFunnelStatus());
+                })
                 .toList();
         int from = Math.min((pageNum - 1) * pageSize, all.size());
         int to = Math.min(from + pageSize, all.size());

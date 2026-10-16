@@ -119,7 +119,7 @@ public class HrPipelineService {
         }
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT a.id, a.requisition_id, c.display_name, c.phone, c.email, r.job_name,
-                       a.current_stage, s.stage_name, a.screen_result, a.submitted_at, f.file_name,
+                       a.current_stage, s.stage_name, a.screen_result, a.screen_reject_reason, a.submitted_at, f.file_name,
                        ph.called_at, ph.result phone_result, ph.interview_at, ph.reject_reason, ph.remark phone_remark,
                        off.salary_amount, off.status offer_status, off.offered_at,
                        ob.onboard_date, ob.probation_status
@@ -151,6 +151,7 @@ public class HrPipelineService {
         vo.setPhase(phase);
         vo.setPhaseLabel(phaseLabel(phase));
         vo.setScreenResult(str(row.get("screen_result")));
+        vo.setScreenRejectReason(str(row.get("screen_reject_reason")));
         vo.setResumeName(str(row.get("file_name")));
         vo.setSubmittedAt(toDate(row.get("submitted_at")));
 
@@ -190,6 +191,9 @@ public class HrPipelineService {
         if ("FAIL".equals(result) && !StringUtils.hasText(dto.getRejectReason())) {
             throw new BusinessException("不合适时请选择原因");
         }
+        if ("FAIL".equals(result) && !StringUtils.hasText(dto.getRemark())) {
+            throw new BusinessException("不合适时请填写备注");
+        }
         String stage = "PASS".equals(result) ? "SCREEN_PASS" : "SCREEN_FAIL";
         String reason = "FAIL".equals(result) ? emptyToNull(dto.getRejectReason()) : null;
         jdbc.update("""
@@ -212,6 +216,9 @@ public class HrPipelineService {
     public void phone(HrPipelinePhoneDTO dto) {
         String result = normalizePassFail(dto.getResult(), "沟通结果");
         ensureApplication(dto.getApplicationId());
+        if (!StringUtils.hasText(dto.getRemark())) {
+            throw new BusinessException("请填写电话沟通备注");
+        }
         if ("PASS".equals(result) && dto.getInterviewAt() == null) {
             throw new BusinessException("合适时请填写约面时间");
         }

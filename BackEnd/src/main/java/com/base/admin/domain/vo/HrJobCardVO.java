@@ -117,6 +117,27 @@ public class HrJobCardVO {
         @Schema(description = "已入职人数", example = "0")
         private Integer onboardedCount;
 
+        @Schema(description = "今日筛选简历（今日新增候选人）", example = "2")
+        private Integer todayScreenCount;
+
+        @Schema(description = "今日电话沟通", example = "1")
+        private Integer todayPhoneCount;
+
+        @Schema(description = "今日约面", example = "1")
+        private Integer todayInviteCount;
+
+        @Schema(description = "今日实际面试", example = "1")
+        private Integer todayInterviewCount;
+
+        @Schema(description = "今日通过面试", example = "0")
+        private Integer todayInterviewPassCount;
+
+        @Schema(description = "背调中人数", example = "1")
+        private Integer bgCheckCount;
+
+        @Schema(description = "待入职人数", example = "0")
+        private Integer pendingOnboardCount;
+
         @Schema(description = "工作地 SH/XJ")
         private String locationCode;
 

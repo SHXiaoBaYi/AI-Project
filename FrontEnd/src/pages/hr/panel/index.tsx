@@ -133,6 +133,13 @@ const HrPanelPage = memo(function HrPanelPage() {
         width: 160,
       },
       {
+        title: 'HC',
+        dataIndex: 'headcount',
+        search: false,
+        width: 70,
+        render: (_, record) => (record.headcount == null ? '—' : record.headcount),
+      },
+      {
         title: '负责人',
         dataIndex: 'ownerUserId',
         valueType: 'select',
@@ -216,6 +223,7 @@ const HrPanelPage = memo(function HrPanelPage() {
       },
       { title: '需求部门', dataIndex: 'deptName', ellipsis: true, width: 140, render: (v) => v || '—' },
       { title: '岗位名称', dataIndex: 'jobName', ellipsis: true, width: 160 },
+      { title: 'HC', dataIndex: 'headcount', width: 70, render: (v) => (v == null ? '—' : v) },
       { title: '负责人', dataIndex: 'ownerName', ellipsis: true, width: 120, render: (v) => v || '—' },
       { title: '岗位优先级', dataIndex: 'jobPriorityLabel', width: 160, render: (v) => v || '—' },
       { title: '工作地点', dataIndex: 'workLocation', width: 120, render: (v) => v || '—' },
@@ -275,7 +283,7 @@ const HrPanelPage = memo(function HrPanelPage() {
         headerTitle='招聘面板'
         columns={columns}
         pagination={{ defaultPageSize: 10 }}
-        scroll={{ x: 1400 }}
+        scroll={{ x: 1480 }}
         tableExtraRender={() => (
           <div className='mb-3 grid grid-cols-2 gap-3 md:grid-cols-4'>
             {STATS.map((item) => (

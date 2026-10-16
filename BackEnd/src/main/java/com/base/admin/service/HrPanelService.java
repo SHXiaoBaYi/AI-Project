@@ -74,16 +74,14 @@ public class HrPanelService {
             case "BG_CHECK" -> stagePeopleDetail("背调中", metric, filter, reqIds, "BG_CHECK", pageNum, pageSize);
             case "PENDING_ONBOARD" -> stagePeopleDetail("待入职", metric, filter, reqIds, "PENDING_ONBOARD", pageNum, pageSize);
             case "TODAY_SCREEN" -> todayPeopleDetail("今日筛选简历", metric, filter, reqIds, from, to, pageNum, pageSize, """
-                    SELECT e.application_id,
-                           MAX(e.create_time) occurred_at,
-                           SUBSTRING_INDEX(GROUP_CONCAT(e.stage_code ORDER BY e.create_time DESC, e.id DESC), ',', 1) last_code
-                    FROM hr_stage_event e
-                    JOIN hr_application ax ON ax.id = e.application_id AND ax.is_active = 1
-                    WHERE e.is_active = 1 AND ax.requisition_id IN (%s)
-                      AND e.stage_code IN ('SCREEN_PASS','SCREEN_FAIL')
-                      AND e.create_time >= ? AND e.create_time < ?
-                    GROUP BY e.application_id
-                    """, "CASE x.last_code WHEN 'SCREEN_PASS' THEN '通过' WHEN 'SCREEN_FAIL' THEN '不通过' ELSE x.last_code END");
+                    SELECT ax.id application_id,
+                           MAX(ax.create_time) occurred_at,
+                           '新增' last_code
+                    FROM hr_application ax
+                    WHERE ax.is_active = 1 AND ax.requisition_id IN (%s)
+                      AND ax.create_time >= ? AND ax.create_time < ?
+                    GROUP BY ax.id
+                    """, "'新增'");
             case "TODAY_PHONE" -> todayPeopleDetail("今日电话沟通", metric, filter, reqIds, from, to, pageNum, pageSize, """
                     SELECT p.application_id,
                            MAX(p.called_at) occurred_at,
@@ -219,7 +217,7 @@ public class HrPanelService {
 
     private List<HrPanelJobVO> queryJobs(FilterSql filter, LocalDate today, int pageNum, int pageSize, boolean withProgress) {
         String listSql = """
-                SELECT r.id, r.job_name, r.status, r.received_date, r.onboard_date, r.location_code,
+                SELECT r.id, r.job_name, r.headcount, r.status, r.received_date, r.onboard_date, r.location_code,
                        r.job_priority_code, d.name dept_name,
                        (SELECT jp.code FROM hr_base_dict jp
                          WHERE jp.dict_type = 'JOB_PRIORITY' AND jp.is_active = 1
@@ -248,6 +246,8 @@ public class HrPanelService {
             row.setPanelStatusLabel(open ? "招聘中" : "已关闭");
             row.setDeptName(rs.getString("dept_name"));
             row.setJobName(rs.getString("job_name"));
+            int hc = rs.getInt("headcount");
+            row.setHeadcount(rs.wasNull() ? null : hc);
             row.setOwnerName(rs.getString("owner_name"));
             String code = rs.getString("priority_code");
             if (!StringUtils.hasText(code)) {
@@ -294,13 +294,12 @@ public class HrPanelService {
                 "SELECT COUNT(1) " + filter.fromWhere + " AND r.status = 'OPEN'", filter.args));
         stats.setBgCheckCount(countPeople(reqIds, filter.args, "a.current_stage = 'BG_CHECK'"));
         stats.setPendingOnboardCount(countPeople(reqIds, filter.args, "a.current_stage = 'PENDING_ONBOARD'"));
+        // 今日筛选简历 = 今日新增候选人（投递记录）
         stats.setTodayScreenCount(countDistinctApp(filter.args, """
                 SELECT COUNT(DISTINCT a.id)
                 FROM hr_application a
-                JOIN hr_stage_event e ON e.application_id = a.id AND e.is_active = 1
                 WHERE a.is_active = 1 AND a.requisition_id IN (%s)
-                  AND e.stage_code IN ('SCREEN_PASS','SCREEN_FAIL')
-                  AND e.create_time >= ? AND e.create_time < ?
+                  AND a.create_time >= ? AND a.create_time < ?
                 """.formatted(reqIds), from, to));
         stats.setTodayPhoneCount(countDistinctApp(filter.args, """
                 SELECT COUNT(DISTINCT a.id)

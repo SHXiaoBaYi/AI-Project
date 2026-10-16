@@ -1,5 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { App, Button, Descriptions, Drawer, Form, Input, Modal, Select, Space } from 'antd';
+import {
+  App,
+  Button,
+  Card,
+  DatePicker,
+  Descriptions,
+  Drawer,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Spin,
+} from 'antd';
+import { HistoryOutlined, PhoneOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { renderAsync } from 'docx-preview';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import InviteFormModal, { type InviteFormPreset } from '@/components/hr/InviteFormModal';
@@ -8,9 +24,17 @@ import {
   fetchHrResumeApi,
   getHrApplicationApi,
   getHrDictOptionsApi,
+  getHrPipelineDetailApi,
+  saveHrPipelinePhoneApi,
   saveHrPipelineScreenApi,
   type HrBaseDict,
+  type HrPipelineDetail,
 } from '@/api/hr';
+
+function fmtDt(value?: string) {
+  if (!value) return '—';
+  return String(value).replace('T', ' ').slice(0, 19);
+}
 
 function isPdf(fileName: string, contentType: string, blob?: Blob) {
   const lower = fileName.toLowerCase();
@@ -60,6 +84,11 @@ export function ResumeViewButton({ applicationId, fileName }: { applicationId?: 
   );
 }
 
+const PHONE_RESULT_OPTS = [
+  { value: 'PASS', label: '合适' },
+  { value: 'FAIL', label: '不合适' },
+];
+
 export function ResumeDrawer({
   applicationId,
   fileName,
@@ -84,8 +113,21 @@ export function ResumeDrawer({
   const [invitePreset, setInvitePreset] = useState<InviteFormPreset | null>(null);
   const [unsuitableOpen, setUnsuitableOpen] = useState(false);
   const [unsuitableSaving, setUnsuitableSaving] = useState(false);
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  const [phoneSaving, setPhoneSaving] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [recordLoading, setRecordLoading] = useState(false);
+  const [pipelineDetail, setPipelineDetail] = useState<HrPipelineDetail | null>(null);
   const [reasons, setReasons] = useState<HrBaseDict[]>([]);
-  const [unsuitableForm] = Form.useForm<{ rejectReason: string; remark?: string }>();
+  const [unsuitableForm] = Form.useForm<{ rejectReason: string; remark: string }>();
+  const [phoneForm] = Form.useForm<{
+    calledAt: dayjs.Dayjs;
+    result: 'PASS' | 'FAIL';
+    interviewAt?: dayjs.Dayjs;
+    rejectReason?: string;
+    remark: string;
+  }>();
+  const phoneResult = Form.useWatch('result', phoneForm);
 
   useEffect(() => {
     if (!open) return;
@@ -182,6 +224,13 @@ export function ResumeDrawer({
   const stage = String(detail?.current_stage || '');
   const alreadyUnsuitable = /FAIL/i.test(stage);
   const alreadyOnboarded = stage === 'ONBOARDED';
+  const canAct = !alreadyUnsuitable && !alreadyOnboarded;
+
+  const ensureReasons = () => {
+    if (reasons.length === 0) {
+      void getHrDictOptionsApi('UNSUITABLE').then((rows) => setReasons(rows || []));
+    }
+  };
 
   const openInvite = () => {
     const roundNo = nextInviteRound(stage) ?? 1;
@@ -196,10 +245,28 @@ export function ResumeDrawer({
 
   const openUnsuitable = () => {
     unsuitableForm.resetFields();
-    if (reasons.length === 0) {
-      void getHrDictOptionsApi('UNSUITABLE').then((rows) => setReasons(rows || []));
-    }
+    ensureReasons();
     setUnsuitableOpen(true);
+  };
+
+  const openPhone = () => {
+    phoneForm.resetFields();
+    phoneForm.setFieldsValue({ calledAt: dayjs(), result: undefined, remark: undefined });
+    ensureReasons();
+    setPhoneOpen(true);
+  };
+
+  const openRecords = async () => {
+    setRecordOpen(true);
+    setRecordLoading(true);
+    try {
+      setPipelineDetail(await getHrPipelineDetailApi(applicationId));
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '加载沟通记录失败');
+      setPipelineDetail(null);
+    } finally {
+      setRecordLoading(false);
+    }
   };
 
   const submitUnsuitable = async () => {
@@ -218,6 +285,27 @@ export function ResumeDrawer({
       onClose();
     } finally {
       setUnsuitableSaving(false);
+    }
+  };
+
+  const submitPhone = async () => {
+    const values = await phoneForm.validateFields();
+    setPhoneSaving(true);
+    try {
+      await saveHrPipelinePhoneApi({
+        applicationId,
+        calledAt: values.calledAt.format('YYYY-MM-DD HH:mm:ss'),
+        result: values.result,
+        interviewAt: values.interviewAt ? values.interviewAt.format('YYYY-MM-DD HH:mm:ss') : undefined,
+        rejectReason: values.rejectReason,
+        remark: values.remark,
+      });
+      message.success(values.result === 'PASS' ? '已记录电话沟通并创建面试提醒' : '已记录电话沟通');
+      setPhoneOpen(false);
+      onActionSuccess?.();
+      onClose();
+    } finally {
+      setPhoneSaving(false);
     }
   };
 
@@ -250,7 +338,22 @@ export function ResumeDrawer({
         }}
         extra={
           <Space wrap>
-            {alreadyOnboarded || alreadyUnsuitable ? null : (
+            <Button
+              icon={<HistoryOutlined />}
+              onClick={() => void openRecords()}
+            >
+              沟通记录
+            </Button>
+            {canAct ? (
+              <PermissionButton
+                perm='hr:pipeline:edit'
+                icon={<PhoneOutlined />}
+                onClick={openPhone}
+              >
+                电话沟通
+              </PermissionButton>
+            ) : null}
+            {canAct ? (
               <PermissionButton
                 perm='hr:invite:add'
                 type='primary'
@@ -258,8 +361,8 @@ export function ResumeDrawer({
               >
                 发起面试邀约
               </PermissionButton>
-            )}
-            {alreadyUnsuitable || alreadyOnboarded ? null : (
+            ) : null}
+            {canAct ? (
               <PermissionButton
                 perm='hr:pipeline:edit'
                 danger
@@ -267,7 +370,7 @@ export function ResumeDrawer({
               >
                 标记此人不合适
               </PermissionButton>
-            )}
+            ) : null}
             <Button
               type='link'
               onClick={download}
@@ -325,6 +428,179 @@ export function ResumeDrawer({
         onSuccess={() => onActionSuccess?.()}
       />
       <Modal
+        title={`电话沟通 · ${String(detail?.display_name || '')}`}
+        open={phoneOpen}
+        confirmLoading={phoneSaving}
+        okText='确认提交'
+        destroyOnHidden
+        onCancel={() => setPhoneOpen(false)}
+        onOk={() => void submitPhone()}
+      >
+        <Form
+          form={phoneForm}
+          layout='vertical'
+          className='mt-2'
+        >
+          <Form.Item
+            name='calledAt'
+            label='沟通时间'
+            rules={[{ required: true, message: '请选择沟通时间' }]}
+          >
+            <DatePicker
+              showTime
+              className='w-full'
+            />
+          </Form.Item>
+          <Form.Item
+            name='result'
+            label='沟通结果'
+            rules={[{ required: true, message: '请选择沟通结果' }]}
+          >
+            <Select
+              options={PHONE_RESULT_OPTS}
+              placeholder='请选择结果'
+            />
+          </Form.Item>
+          {phoneResult === 'PASS' ? (
+            <Form.Item
+              name='interviewAt'
+              label='约面时间'
+              rules={[{ required: true, message: '请填写约面时间' }]}
+            >
+              <DatePicker
+                showTime
+                className='w-full'
+              />
+            </Form.Item>
+          ) : null}
+          {phoneResult === 'FAIL' ? (
+            <Form.Item
+              name='rejectReason'
+              label='不合适原因'
+              rules={[{ required: true, message: '请选择原因' }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp='label'
+                placeholder='请选择原因'
+                options={reasons.map((row) => ({ value: row.name, label: row.name }))}
+              />
+            </Form.Item>
+          ) : null}
+          <Form.Item
+            name='remark'
+            label='备注'
+            rules={[{ required: true, message: '请填写备注' }]}
+          >
+            <Input.TextArea
+              rows={3}
+              placeholder='请填写沟通备注'
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Drawer
+        title={`沟通记录 · ${String(detail?.display_name || pipelineDetail?.displayName || '')}`}
+        open={recordOpen}
+        onClose={() => setRecordOpen(false)}
+        width={480}
+        destroyOnHidden
+      >
+        {recordLoading ? (
+          <div className='flex justify-center py-10'>
+            <Spin />
+          </div>
+        ) : !pipelineDetail ? (
+          <Empty description='暂无记录' />
+        ) : (
+          <div className='space-y-3'>
+            <Card
+              size='small'
+              title='标记不合适 / 初筛'
+            >
+              {pipelineDetail.screenResult ? (
+                <Descriptions
+                  size='small'
+                  column={1}
+                >
+                  <Descriptions.Item label='结果'>
+                    {pipelineDetail.screenResult === 'PASS'
+                      ? '合适'
+                      : pipelineDetail.screenResult === 'FAIL'
+                        ? '不合适'
+                        : pipelineDetail.screenResult}
+                  </Descriptions.Item>
+                  <Descriptions.Item label='原因'>{pipelineDetail.screenRejectReason || '—'}</Descriptions.Item>
+                  <Descriptions.Item label='阶段'>
+                    {pipelineDetail.stageName || pipelineDetail.currentStage || '—'}
+                  </Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description='尚未初筛或标记不合适'
+                />
+              )}
+            </Card>
+            <Card
+              size='small'
+              title='电话沟通'
+            >
+              {pipelineDetail.phoneScreen ? (
+                <Descriptions
+                  size='small'
+                  column={1}
+                >
+                  <Descriptions.Item label='沟通时间'>{fmtDt(pipelineDetail.phoneScreen.calledAt)}</Descriptions.Item>
+                  <Descriptions.Item label='结果'>
+                    {pipelineDetail.phoneScreen.result === 'PASS'
+                      ? '合适'
+                      : pipelineDetail.phoneScreen.result === 'FAIL'
+                        ? '不合适'
+                        : pipelineDetail.phoneScreen.result || '—'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label='约面时间'>
+                    {fmtDt(pipelineDetail.phoneScreen.interviewAt)}
+                  </Descriptions.Item>
+                  <Descriptions.Item label='不合适原因'>
+                    {pipelineDetail.phoneScreen.rejectReason || '—'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label='备注'>{pipelineDetail.phoneScreen.remark || '—'}</Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description='暂无电话沟通记录'
+                />
+              )}
+            </Card>
+            {(pipelineDetail.timeline || []).filter((item) =>
+              /SCREEN|PHONE/i.test(String(item.stageCode || item.source || '')),
+            ).length > 0 ? (
+              <Card
+                size='small'
+                title='相关时间线'
+              >
+                <div className='space-y-2'>
+                  {(pipelineDetail.timeline || [])
+                    .filter((item) => /SCREEN|PHONE/i.test(String(item.stageCode || item.source || '')))
+                    .map((item, idx) => (
+                      <div
+                        key={`${item.stageCode}-${item.eventAt}-${idx}`}
+                        className='rounded border border-neutral-100 px-3 py-2 text-sm'
+                      >
+                        <div className='font-medium text-neutral-800'>{item.stageName || item.stageCode || '节点'}</div>
+                        <div className='mt-0.5 text-xs text-neutral-400'>{fmtDt(item.eventAt)}</div>
+                        <div className='mt-1 text-neutral-600'>{item.summary || '—'}</div>
+                      </div>
+                    ))}
+                </div>
+              </Card>
+            ) : null}
+          </div>
+        )}
+      </Drawer>
+      <Modal
         title={`标记不合适 · ${String(detail?.display_name || '')}`}
         open={unsuitableOpen}
         confirmLoading={unsuitableSaving}
@@ -354,10 +630,11 @@ export function ResumeDrawer({
           <Form.Item
             name='remark'
             label='备注'
+            rules={[{ required: true, message: '请填写备注' }]}
           >
             <Input.TextArea
               rows={3}
-              placeholder='补充说明（选填）'
+              placeholder='请填写备注'
             />
           </Form.Item>
         </Form>

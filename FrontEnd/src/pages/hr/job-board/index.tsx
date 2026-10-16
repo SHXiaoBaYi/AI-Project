@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App, Card, Drawer, Empty, Input, Pagination, Select, Space, Spin, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ClockCircleOutlined, UserOutlined } from '@ant-design/icons';
+import { ClockCircleOutlined, PlusOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
+import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ResumeDrawer } from '@/components/hr/ResumeDrawer';
+import ApplicationFormModal from '@/pages/hr/application/components/ApplicationFormModal';
+import ImportApplicationModal from '@/pages/hr/application/components/ImportApplicationModal';
 import {
+  getHrChannelsApi,
   getHrDepartmentsApi,
   getHrDictOptionsApi,
   getHrJobCardsApi,
   getHrJobCandidatesApi,
+  getHrStagesApi,
   getHrUsersApi,
   type HrJobCard,
   type HrJobCardQuery,
@@ -20,6 +25,13 @@ const FUNNEL_LABEL: Record<HrJobFunnelStatus, string> = {
   PENDING: '未处理',
   INTERVIEWING: '约面中',
   ONBOARDED: '已入职',
+  TODAY_SCREEN: '今日筛选简历',
+  TODAY_PHONE: '今日电话沟通',
+  TODAY_INVITE: '今日约面',
+  TODAY_INTERVIEW: '今日实际面试',
+  TODAY_INTERVIEW_PASS: '今日通过面试',
+  BG_CHECK: '背调中',
+  PENDING_ONBOARD: '待入职',
 };
 
 const CARD_STATUS: { label: string; value: HrJobCardStatus }[] = [
@@ -67,7 +79,7 @@ function Metric({ value, label, onClick }: { value?: number; label: string; onCl
   return (
     <button
       type='button'
-      className='flex min-w-[88px] flex-1 flex-col items-center justify-center px-3 py-1 text-center hover:bg-neutral-50'
+      className='flex min-w-[72px] flex-1 flex-col items-center justify-center px-2 py-2 text-center hover:bg-neutral-50'
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -104,7 +116,7 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, 
           ))
         )}
       </div>
-      <div className='flex flex-col md:flex-row md:items-stretch'>
+      <div className='flex flex-col xl:flex-row xl:items-stretch'>
         <div className='min-w-0 flex-1 px-4 py-3'>
           <div className='flex flex-wrap items-baseline gap-x-4 gap-y-1'>
             <span
@@ -131,7 +143,7 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, 
             <span>招聘起始：{fmtDate(job.receivedDate)}</span>
           </div>
         </div>
-        <div className='flex divide-x divide-neutral-200 border-t border-neutral-100 md:w-[300px] md:border-t-0 md:border-l'>
+        <div className='flex shrink-0 divide-x divide-neutral-200 overflow-x-auto border-t border-neutral-100 xl:border-t-0 xl:border-l'>
           <Metric
             value={job.pendingCount}
             label='未处理'
@@ -146,6 +158,41 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, 
             value={job.onboardedCount}
             label='已入职'
             onClick={() => onOpen(job, 'ONBOARDED')}
+          />
+          <Metric
+            value={job.todayScreenCount}
+            label='今日筛选简历'
+            onClick={() => onOpen(job, 'TODAY_SCREEN')}
+          />
+          <Metric
+            value={job.todayPhoneCount}
+            label='今日电话沟通'
+            onClick={() => onOpen(job, 'TODAY_PHONE')}
+          />
+          <Metric
+            value={job.todayInviteCount}
+            label='今日约面'
+            onClick={() => onOpen(job, 'TODAY_INVITE')}
+          />
+          <Metric
+            value={job.todayInterviewCount}
+            label='今日实际面试'
+            onClick={() => onOpen(job, 'TODAY_INTERVIEW')}
+          />
+          <Metric
+            value={job.todayInterviewPassCount}
+            label='今日通过面试'
+            onClick={() => onOpen(job, 'TODAY_INTERVIEW_PASS')}
+          />
+          <Metric
+            value={job.bgCheckCount}
+            label='背调中'
+            onClick={() => onOpen(job, 'BG_CHECK')}
+          />
+          <Metric
+            value={job.pendingOnboardCount}
+            label='待入职'
+            onClick={() => onOpen(job, 'PENDING_ONBOARD')}
           />
         </div>
       </div>
@@ -240,6 +287,11 @@ export default function HrJobBoardPage() {
   const [drawerTotal, setDrawerTotal] = useState(0);
   const [candidates, setCandidates] = useState<HrJobCandidate[]>([]);
   const [resumeRow, setResumeRow] = useState<HrJobCandidate | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [channels, setChannels] = useState<{ value: string; label: string }[]>([]);
+  const [stages, setStages] = useState<{ value: string; label: string }[]>([]);
+  const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -302,6 +354,41 @@ export default function HrJobBoardPage() {
           value: row.id,
           label: row.category ? `${row.category} · ${row.name}` : row.name,
         })),
+      ),
+    );
+    void getHrChannelsApi().then((rows) =>
+      setChannels(
+        (rows ?? []).map((item) => {
+          const row = item as {
+            channelCode?: string;
+            channel_code?: string;
+            channelName?: string;
+            channel_name?: string;
+          };
+          return {
+            value: String(row.channelCode ?? row.channel_code),
+            label: String(row.channelName ?? row.channel_name),
+          };
+        }),
+      ),
+    );
+    void getHrStagesApi().then((rows) =>
+      setStages(
+        (rows ?? []).map((item) => ({
+          value: String(item.stageCode ?? item.stage_code),
+          label: String(item.stageName ?? item.stage_name),
+        })),
+      ),
+    );
+    void getHrUsersApi().then((list) =>
+      setUsers(
+        (list ?? []).map((item) => {
+          const row = item as { userId?: number; user_id?: number; nickname?: string; username?: string };
+          return {
+            value: Number(row.userId ?? row.user_id),
+            label: String(row.nickname || row.username || ''),
+          };
+        }),
       ),
     );
   }, []);
@@ -443,6 +530,27 @@ export default function HrJobBoardPage() {
         }}
         width={1100}
         destroyOnHidden
+        extra={
+          drawerJob ? (
+            <Space wrap>
+              <PermissionButton
+                perm='hr:application:add'
+                icon={<UploadOutlined />}
+                onClick={() => setImportOpen(true)}
+              >
+                导入候选人
+              </PermissionButton>
+              <PermissionButton
+                perm='hr:application:add'
+                type='primary'
+                icon={<PlusOutlined />}
+                onClick={() => setManualOpen(true)}
+              >
+                新增候选人
+              </PermissionButton>
+            </Space>
+          ) : null
+        }
       >
         <Table<HrJobCandidate>
           rowKey='applicationId'
@@ -476,6 +584,28 @@ export default function HrJobBoardPage() {
           }}
         />
       ) : null}
+      <ApplicationFormModal
+        open={manualOpen}
+        editing={null}
+        jobs={drawerJob ? [{ value: drawerJob.id, label: drawerJob.jobName || `岗位#${drawerJob.id}` }] : []}
+        channels={channels}
+        stages={stages}
+        users={users}
+        presetRequisitionId={drawerJob?.id}
+        onOpenChange={setManualOpen}
+        onSuccess={() => {
+          if (drawerJob) void loadCandidates(drawerJob, 1, drawerFunnel);
+          void load();
+        }}
+      />
+      <ImportApplicationModal
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onSuccess={() => {
+          if (drawerJob) void loadCandidates(drawerJob, 1, drawerFunnel);
+          void load();
+        }}
+      />
     </div>
   );
 }
