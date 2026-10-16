@@ -11,6 +11,7 @@ import type { ProColumns } from '@ant-design/pro-components';
 import { App, Button, Space, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
+import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
 import { getHrJobDetailsApi, type HrJobDetailRow } from '@/api/hr';
 
 const DEFAULT_HIDE = new Set(['deptName', 'headcount']);
@@ -105,6 +106,7 @@ export default function JobDetailPanel() {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<HrJobDetailRow[]>([]);
   const [widths, setWidths] = useState<Record<string, number>>(loadStoredWidths);
+  const [detailRow, setDetailRow] = useState<HrJobDetailRow | null>(null);
 
   const setColumnWidth = useCallback((key: string, width: number) => {
     setWidths((prev) => {
@@ -156,6 +158,15 @@ export default function JobDetailPanel() {
         filters: jobFilters,
         onFilter: (value, record) => (record.jobName || '') === value,
         sorter: (a, b) => cmpText(a.jobName, b.jobName),
+        render: (_, record) => (
+          <Button
+            type='link'
+            className='h-auto max-w-full truncate px-0'
+            onClick={() => setDetailRow(record)}
+          >
+            {record.jobName || '—'}
+          </Button>
+        ),
       },
       {
         title: '岗位状态',
@@ -339,6 +350,12 @@ export default function JobDetailPanel() {
         components={components}
         scroll={{ x: 'max-content', y: 'calc(100vh - 260px)' }}
         cardProps={{ bodyStyle: { padding: 0 } }}
+      />
+      <HrJobDetailDrawer
+        open={detailRow != null}
+        requisitionId={detailRow?.id}
+        fallback={detailRow}
+        onClose={() => setDetailRow(null)}
       />
     </div>
   );

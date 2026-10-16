@@ -113,8 +113,13 @@ function textOf(value: unknown) {
 
 function dateOf(value: unknown) {
   if (value == null || value === '') return undefined;
+  if (dayjs.isDayjs(value)) return value.format('YYYY-MM-DD');
+  if (value instanceof Date) return dayjs(value).format('YYYY-MM-DD');
   if (Array.isArray(value)) return dayjs(`${value[0]}-${value[1]}-${value[2]}`).format('YYYY-MM-DD');
-  return String(value).slice(0, 10);
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const parsed = dayjs(value as string | number);
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD') : undefined;
 }
 
 function roundsOf(value: unknown) {

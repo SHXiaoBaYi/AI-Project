@@ -1,8 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { Card, Drawer, Statistic, Table, Tag } from 'antd';
+import { Button, Card, Drawer, Statistic, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import BaseProTable from '@/components/BaseProTable';
+import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
 import {
   getHrDepartmentsApi,
   getHrDictOptionsApi,
@@ -68,6 +69,7 @@ const HrPanelPage = memo(function HrPanelPage() {
   const [drawerTotal, setDrawerTotal] = useState(0);
   const [jobRows, setJobRows] = useState<HrPanelJobRow[]>([]);
   const [peopleRows, setPeopleRows] = useState<HrPanelPersonRow[]>([]);
+  const [jobDetail, setJobDetail] = useState<HrPanelJobRow | null>(null);
 
   useEffect(() => {
     void getHrDepartmentsApi().then((tree) => setDepts(flattenDepts((tree ?? []) as unknown as Dept[])));
@@ -131,6 +133,15 @@ const HrPanelPage = memo(function HrPanelPage() {
         dataIndex: 'jobName',
         ellipsis: true,
         width: 160,
+        render: (_, record) => (
+          <Button
+            type='link'
+            className='h-auto max-w-full truncate px-0'
+            onClick={() => setJobDetail(record)}
+          >
+            {record.jobName || '—'}
+          </Button>
+        ),
       },
       {
         title: 'HC',
@@ -222,7 +233,21 @@ const HrPanelPage = memo(function HrPanelPage() {
         ),
       },
       { title: '需求部门', dataIndex: 'deptName', ellipsis: true, width: 140, render: (v) => v || '—' },
-      { title: '岗位名称', dataIndex: 'jobName', ellipsis: true, width: 160 },
+      {
+        title: '岗位名称',
+        dataIndex: 'jobName',
+        ellipsis: true,
+        width: 160,
+        render: (_, record) => (
+          <Button
+            type='link'
+            className='h-auto max-w-full truncate px-0'
+            onClick={() => setJobDetail(record)}
+          >
+            {record.jobName || '—'}
+          </Button>
+        ),
+      },
       { title: 'HC', dataIndex: 'headcount', width: 70, render: (v) => (v == null ? '—' : v) },
       { title: '负责人', dataIndex: 'ownerName', ellipsis: true, width: 120, render: (v) => v || '—' },
       { title: '岗位优先级', dataIndex: 'jobPriorityLabel', width: 160, render: (v) => v || '—' },
@@ -363,6 +388,24 @@ const HrPanelPage = memo(function HrPanelPage() {
           />
         )}
       </Drawer>
+      <HrJobDetailDrawer
+        open={jobDetail != null}
+        requisitionId={jobDetail?.id}
+        fallback={{
+          jobName: jobDetail?.jobName,
+          deptName: jobDetail?.deptName,
+          cardStatusLabel: jobDetail?.panelStatusLabel,
+          ownerName: jobDetail?.ownerName,
+          headcount: jobDetail?.headcount,
+          workLocation: jobDetail?.workLocation,
+          jobPriorityLabel: jobDetail?.jobPriorityLabel,
+          jobPriorityCode: jobDetail?.jobPriorityCode,
+          receivedDate: jobDetail?.receivedDate,
+          status: jobDetail?.panelStatus,
+          statusLabel: jobDetail?.panelStatusLabel,
+        }}
+        onClose={() => setJobDetail(null)}
+      />
     </>
   );
 });

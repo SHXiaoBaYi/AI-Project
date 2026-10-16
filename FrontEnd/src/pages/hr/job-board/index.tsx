@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { App, Card, Drawer, Empty, Input, Pagination, Select, Space, Spin, Table, Tabs, Tag } from 'antd';
+import { App, Button, Card, Drawer, Empty, Input, Pagination, Select, Space, Spin, Table, Tabs, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ClockCircleOutlined, PlusOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
+import { ClockCircleOutlined, EyeOutlined, PlusOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import { ResumeDrawer } from '@/components/hr/ResumeDrawer';
+import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
 import ApplicationFormModal from '@/pages/hr/application/components/ApplicationFormModal';
 import ImportApplicationModal from '@/pages/hr/application/components/ImportApplicationModal';
 import {
@@ -97,7 +98,15 @@ function Metric({ value, label, onClick }: { value?: number; label: string; onCl
   );
 }
 
-function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, funnel?: HrJobFunnelStatus) => void }) {
+function JobRowCard({
+  job,
+  onOpen,
+  onViewDetail,
+}: {
+  job: HrJobCard;
+  onOpen: (job: HrJobCard, funnel?: HrJobFunnelStatus) => void;
+  onViewDetail: (job: HrJobCard) => void;
+}) {
   const tags: string[] = [];
   if (job.jobPriorityLabel) tags.push(job.jobPriorityLabel);
   if (job.priorityLabel) tags.push(`【${job.priorityLabel}】`);
@@ -121,6 +130,18 @@ function JobRowCard({ job, onOpen }: { job: HrJobCard; onOpen: (job: HrJobCard, 
             </Tag>
           ))
         )}
+        <Button
+          type='link'
+          size='small'
+          className='h-auto px-1'
+          icon={<EyeOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewDetail(job);
+          }}
+        >
+          查看岗位详情
+        </Button>
       </div>
       <div className='flex flex-col xl:flex-row xl:items-stretch'>
         <div className='min-w-0 flex-1 px-4 py-3'>
@@ -406,6 +427,7 @@ export default function HrJobBoardPage() {
   const [commLoading, setCommLoading] = useState(false);
   const [commFilter, setCommFilter] = useState<CommFilter>({});
   const [drawerTab, setDrawerTab] = useState('candidates');
+  const [detailJob, setDetailJob] = useState<HrJobCard | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -652,6 +674,7 @@ export default function HrJobBoardPage() {
                 key={job.id}
                 job={job}
                 onOpen={openJob}
+                onViewDetail={setDetailJob}
               />
             ))}
           </div>
@@ -843,6 +866,12 @@ export default function HrJobBoardPage() {
           }
           void load();
         }}
+      />
+      <HrJobDetailDrawer
+        open={detailJob != null}
+        requisitionId={detailJob?.id}
+        fallback={detailJob}
+        onClose={() => setDetailJob(null)}
       />
     </div>
   );

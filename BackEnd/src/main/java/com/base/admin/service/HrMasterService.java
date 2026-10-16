@@ -115,6 +115,10 @@ public class HrMasterService {
                 WHERE r.is_active = 1
                 """);
         List<Object> args = new ArrayList<>();
+        if (q.getRequisitionId() != null) {
+            sql.append(" AND r.id = ? ");
+            args.add(q.getRequisitionId());
+        }
         if (q.getStatus() != null && !q.getStatus().isBlank()) {
             sql.append(" AND r.status = ? ");
             args.add(q.getStatus());
@@ -488,7 +492,7 @@ public class HrMasterService {
                                                job_priority_code, work_address_id,
                                                importance_level, urgency_level, difficulty_level,
                                                received_date, onboard_date, create_by, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
                     emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
                     locationCode, dto.getDeptId(), headcount, target, dto.getPriority(),
