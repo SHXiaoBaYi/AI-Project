@@ -33,7 +33,7 @@ import { getPendingGeoReviewsApi } from '@/api/geo';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
 import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
-import { DATE_TIME_MINUTE_FORMAT, formatDateTimeMinute } from '@/utils/datetime';
+import { DATE_TIME_MINUTE_FORMAT, formatDateTimeMinute, toDateTimeParam } from '@/utils/datetime';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
 
 type Props = {
@@ -765,8 +765,9 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             sourceUserId,
             ownerUserId: values.ownerUserId,
             assigneeUserIds,
-            planStartTime: values.planStartTime,
-            planEndTime: values.planEndTime,
+            // 表单展示到分钟，提交统一补齐秒，避免后端 LocalDateTime 反序列化失败
+            planStartTime: toDateTimeParam(values.planStartTime),
+            planEndTime: toDateTimeParam(values.planEndTime),
             remark: values.remark,
           };
           if (editing) {
