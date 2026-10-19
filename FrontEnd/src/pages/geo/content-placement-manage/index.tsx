@@ -20,6 +20,7 @@ import {
   saveSimilarGeoContentPlacementApi,
   getGeoAiProvidersApi,
   getGeoContentPlacementListApi,
+  getGeoDefaultPublisherApi,
   getGeoOwnerOptionsApi,
   getGeoTopicOptionsApi,
   downloadGeoContentPlacementTemplateApi,
@@ -62,6 +63,9 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const [file, setFile] = useState<File | null>(null);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
   const [topics, setTopics] = useState<GeoTopic[]>([]);
+  /** 发布人规则中的默认发布人，新增目标问题时预填 */
+  const [defaultPublisherUserId, setDefaultPublisherUserId] = useState<number | null>(null);
+  const [defaultPublisherName, setDefaultPublisherName] = useState('');
   const [placementOpen, setPlacementOpen] = useState(false);
   const [editingPlacement, setEditingPlacement] = useState<GeoContentPlacementListItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -87,9 +91,20 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
 
   useEffect(() => {
     void (async () => {
-      const [ownerOpts, topicOpts] = await Promise.all([getGeoOwnerOptionsApi(), getGeoTopicOptionsApi()]);
+      const [ownerOpts, topicOpts, defPub] = await Promise.all([
+        getGeoOwnerOptionsApi(),
+        getGeoTopicOptionsApi(),
+        getGeoDefaultPublisherApi().catch(() => null),
+      ]);
       setOwners(ownerOpts);
       setTopics(topicOpts);
+      if (defPub?.publisherUserId) {
+        setDefaultPublisherUserId(defPub.publisherUserId);
+        setDefaultPublisherName(defPub.publisherName?.trim() || '');
+      } else {
+        setDefaultPublisherUserId(null);
+        setDefaultPublisherName('');
+      }
     })();
   }, []);
 
@@ -256,7 +271,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
         optionFilterProp: 'label',
         allowClear: true,
         options: userOptions,
-        placeholder: '待分配',
+        placeholder: defaultPublisherName ? `默认：${defaultPublisherName}` : '待分配',
       },
       formItemProps: { rules: [] },
       render: (_, r) => r.publisherName || '待分配',
@@ -581,6 +596,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       />
 
       <TableModal
+        key={editingPlacement ? `edit-${editingPlacement.id}` : `add-${defaultPublisherUserId ?? 'none'}`}
         readonly={false}
         title={editingPlacement ? '分配 / 编辑目标问题' : '新增目标问题'}
         columns={columns as any}
@@ -595,7 +611,9 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
                 targetQuestion: editingPlacement.targetQuestion,
                 remark: editingPlacement.remark,
               }
-            : {}
+            : {
+                publisherUserId: defaultPublisherUserId ?? undefined,
+              }
         }
         onFinish={async (values) => {
           const payload = {

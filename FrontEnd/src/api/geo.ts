@@ -96,6 +96,11 @@ export function getGeoPublisherRuleListApi(data: PageQuery & { publisherUserId?:
   return request.post<unknown, PageResult<GeoContentPublisherRule>>('/geo/publisher-rule/list', data);
 }
 
+/** 当前默认发布人（新增目标问题预填） */
+export function getGeoDefaultPublisherApi() {
+  return request.get<unknown, GeoContentPublisherRule | null>('/geo/publisher-rule/default');
+}
+
 export function createGeoPublisherRuleApi(data: Partial<GeoContentPublisherRule>) {
   return request.post('/geo/publisher-rule', data);
 }

@@ -116,6 +116,11 @@ public class GeoContentPublisherRuleServiceImpl implements GeoContentPublisherRu
         return Optional.ofNullable(rule);
     }
 
+    @Override
+    public Optional<GeoContentPublisherRule> getDefaultForForm() {
+        return resolveDefault();
+    }
+
     private void clearOtherDefaults(Long excludeId) {
         ruleMapper.update(null, new LambdaUpdateWrapper<GeoContentPublisherRule>()
                 .set(GeoContentPublisherRule::getIsDefault, 0)

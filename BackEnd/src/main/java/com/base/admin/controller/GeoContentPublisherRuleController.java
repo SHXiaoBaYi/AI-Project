@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -35,6 +36,13 @@ public class GeoContentPublisherRuleController {
     @RequiresPermission("geo:publisherRule:list")
     public Result<PageResult<GeoContentPublisherRule>> list(@RequestBody GeoContentPublisherRuleQueryDTO query) {
         return Result.ok(publisherRuleService.list(query));
+    }
+
+    @Operation(summary = "当前默认发布人（新增目标问题预填；投放管理可读）")
+    @GetMapping("/default")
+    @RequiresPermission({"geo:publisherRule:list", "geo:content:list", "geo:content:add"})
+    public Result<GeoContentPublisherRule> currentDefault() {
+        return Result.ok(publisherRuleService.getDefaultForForm().orElse(null));
     }
 
     @Operation(summary = "新增发布人规则")
