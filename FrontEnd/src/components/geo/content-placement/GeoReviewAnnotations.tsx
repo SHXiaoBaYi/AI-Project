@@ -1,7 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Button, Input, Modal, Popconfirm, Popover, Space, message } from 'antd';
 import { LakexEditorHost } from '@/components/lakex/LakexEditorHost';
-import { addGeoContentReviewAnnotationApi, deleteGeoContentReviewAnnotationApi } from '@/api/geo';
+import { prefetchLakexAssets } from '@/components/lakex/loadLakexAssets';
+import {
+  addGeoContentReviewAnnotationApi,
+  deleteGeoContentReviewAnnotationApi,
+  updateGeoContentReviewAnnotationApi,
+} from '@/api/geo';
 import type { GeoContentReviewAnnotation } from '@/types/geo';
 import { lakeToBlocks } from '@/utils/articleDiff';
 
@@ -19,41 +25,157 @@ function resolveAnnotationRanges(plain: string, annotations: GeoContentReviewAnn
   annotations.forEach((a, i) => {
     const quote = (a.quoteText || '').trim();
     if (!quote) return;
-    let start = a.startOffset ?? -1;
-    let end = a.endOffset ?? -1;
-    if (start < 0 || end <= start || plain.slice(start, end) !== quote) {
-      start = -1;
-      end = -1;
+    let hit = findQuoteOffsets(plain, quote, a.startOffset, a.endOffset, occupied);
+    if (!hit && (a.quotePrefix || '').trim()) {
       const prefix = (a.quotePrefix || '').trim();
-      if (prefix) {
-        const needle = prefix + quote;
-        const p = plain.indexOf(needle);
-        if (p >= 0) {
-          start = p + prefix.length;
-          end = start + quote.length;
-        }
-      }
-      if (start < 0) {
-        let from = 0;
-        while (from < plain.length) {
-          const p = plain.indexOf(quote, from);
-          if (p < 0) break;
-          const candidateEnd = p + quote.length;
-          const overlap = occupied.some((o) => !(candidateEnd <= o.start || p >= o.end));
-          if (!overlap) {
-            start = p;
-            end = candidateEnd;
-            break;
-          }
-          from = p + 1;
-        }
+      const withPrefix = findQuoteOffsets(plain, `${prefix}${quote}`, null, null, occupied);
+      if (withPrefix) {
+        const prefHit = findQuoteOffsets(plain.slice(withPrefix.start, withPrefix.end), prefix, null, null);
+        const quoteStart = withPrefix.start + (prefHit ? prefHit.end : prefix.length);
+        hit = { start: quoteStart, end: withPrefix.end };
+        if (occupied.some((o) => !(hit!.end <= o.start || hit!.start >= o.end))) hit = null;
       }
     }
-    if (start < 0 || end <= start) return;
-    occupied.push({ start, end });
-    markers.push({ no: i + 1, annotation: a, start, end });
+    if (!hit) return;
+    occupied.push(hit);
+    markers.push({ no: i + 1, annotation: a, start: hit.start, end: hit.end });
   });
   return markers.sort((a, b) => a.start - b.start || a.no - b.no);
+}
+
+/** 批注数字旁的浮层：查看 / 修改 / 删除 */
+function AnnotationTipContent({
+  no,
+  annotation,
+  canEdit,
+  onUpdated,
+  onDeleted,
+  onClose,
+}: {
+  no: number;
+  annotation: GeoContentReviewAnnotation;
+  canEdit?: boolean;
+  onUpdated?: (next: GeoContentReviewAnnotation) => void;
+  onDeleted?: (id: number) => void;
+  onClose?: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(annotation.commentText || '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setText(annotation.commentText || '');
+    setEditing(false);
+  }, [annotation.id, annotation.commentText]);
+
+  const saveEdit = async () => {
+    const next = text.trim();
+    if (!next) {
+      message.warning('请填写批注内容');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await updateGeoContentReviewAnnotationApi({ id: annotation.id, commentText: next });
+      onUpdated?.(updated);
+      setEditing(false);
+      message.success('已修改');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '修改失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    setSaving(true);
+    try {
+      await deleteGeoContentReviewAnnotationApi(annotation.id);
+      onDeleted?.(annotation.id);
+      onClose?.();
+      message.success('已删除');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '删除失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className='w-72 space-y-2 text-sm'>
+      <div className='flex items-center gap-2 text-xs text-neutral-500'>
+        <span className='font-semibold text-amber-800'>批注 {no}</span>
+        <span>{annotation.authorName || '审核人'}</span>
+        {annotation.createTime ? <span>{annotation.createTime}</span> : null}
+      </div>
+      <blockquote className='mb-0 border-l-2 border-amber-300 bg-amber-50/50 px-2 py-1 text-neutral-600'>
+        「{annotation.quoteText}」
+      </blockquote>
+      {editing ? (
+        <Input.TextArea
+          rows={3}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          maxLength={2000}
+          showCount
+          autoFocus
+        />
+      ) : (
+        <div className='whitespace-pre-wrap text-neutral-800'>{annotation.commentText}</div>
+      )}
+      {canEdit ? (
+        <div className='flex flex-wrap items-center gap-1 border-t border-neutral-100 pt-2'>
+          {editing ? (
+            <>
+              <Button
+                type='primary'
+                size='small'
+                loading={saving}
+                onClick={() => void saveEdit()}
+              >
+                保存
+              </Button>
+              <Button
+                size='small'
+                disabled={saving}
+                onClick={() => {
+                  setEditing(false);
+                  setText(annotation.commentText || '');
+                }}
+              >
+                取消
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                type='link'
+                size='small'
+                className='h-auto px-0'
+                onClick={() => setEditing(true)}
+              >
+                修改
+              </Button>
+              <Popconfirm
+                title='删除这条批注？'
+                onConfirm={() => void remove()}
+              >
+                <Button
+                  type='link'
+                  size='small'
+                  danger
+                  className='h-auto px-0'
+                  loading={saving}
+                >
+                  删除
+                </Button>
+              </Popconfirm>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function AnnotationMarkerBadge({
@@ -61,32 +183,43 @@ function AnnotationMarkerBadge({
   annotation,
   active,
   onOpen,
+  canEdit,
+  onUpdated,
+  onDeleted,
 }: {
   no: number;
   annotation: GeoContentReviewAnnotation;
   active?: boolean;
   onOpen?: (no: number) => void;
+  canEdit?: boolean;
+  onUpdated?: (next: GeoContentReviewAnnotation) => void;
+  onDeleted?: (id: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
   return (
     <Popover
       trigger='click'
       placement='top'
-      title={`批注 ${no}`}
-      content={
-        <div className='max-w-xs space-y-2 text-sm'>
-          <blockquote className='mb-0 border-l-2 border-amber-300 pl-2 text-neutral-600'>
-            「{annotation.quoteText}」
-          </blockquote>
-          <div className='text-neutral-800'>{annotation.commentText}</div>
-          <div className='text-xs text-neutral-400'>
-            {annotation.authorName || '审核人'}
-            {annotation.createTime ? ` · ${annotation.createTime}` : ''}
-          </div>
-        </div>
-      }
-      onOpenChange={(open) => {
-        if (open) onOpen?.(no);
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) onOpen?.(no);
       }}
+      content={
+        <AnnotationTipContent
+          no={no}
+          annotation={annotation}
+          canEdit={canEdit}
+          onUpdated={(next) => {
+            onUpdated?.(next);
+          }}
+          onDeleted={(id) => {
+            onDeleted?.(id);
+            setOpen(false);
+          }}
+          onClose={() => setOpen(false)}
+        />
+      }
     >
       <button
         type='button'
@@ -128,6 +261,8 @@ export function AnnotatedOriginalWithMarkers({
   selectable = false,
   onAdd,
   hint,
+  editableReviewId = null,
+  onAnnotationsChange,
 }: {
   contentBody?: string;
   annotations: GeoContentReviewAnnotation[];
@@ -137,6 +272,8 @@ export function AnnotatedOriginalWithMarkers({
   selectable?: boolean;
   onAdd?: (draft: Omit<SelectionDraft, 'top' | 'left'>) => void;
   hint?: string;
+  editableReviewId?: number | null;
+  onAnnotationsChange?: (next: GeoContentReviewAnnotation[]) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -156,11 +293,13 @@ export function AnnotatedOriginalWithMarkers({
       clearDraft();
       return;
     }
-    const onDocClick = (e: MouseEvent) => {
+    const onDocDown = (e: MouseEvent) => {
+      const el = e.target instanceof Element ? e.target : (e.target as Node | null)?.parentElement;
+      if (el?.closest?.('[data-geo-anno-add], [data-geo-anno-tip], [data-geo-anno-badge]')) return;
       if (!rootRef.current?.contains(e.target as Node)) clearDraft();
     };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
   }, [selectable, clearDraft]);
 
   const nodes = useMemo(() => {
@@ -190,6 +329,13 @@ export function AnnotatedOriginalWithMarkers({
             annotation={m.annotation}
             active={activeNo === m.no}
             onOpen={setActiveNo}
+            canEdit={editableReviewId != null && m.annotation.reviewId === editableReviewId}
+            onUpdated={(next) => {
+              onAnnotationsChange?.(annotations.map((a) => (a.id === next.id ? next : a)));
+            }}
+            onDeleted={(id) => {
+              onAnnotationsChange?.(annotations.filter((a) => a.id !== id));
+            }}
           />
         </Fragment>,
       );
@@ -206,7 +352,7 @@ export function AnnotatedOriginalWithMarkers({
       );
     }
     return out;
-  }, [plain, markers, activeNo]);
+  }, [plain, markers, activeNo, annotations, editableReviewId, onAnnotationsChange]);
 
   if (!plain) {
     return <p className='mb-0 p-4 text-sm text-neutral-400'>暂无原文快照</p>;
@@ -221,10 +367,24 @@ export function AnnotatedOriginalWithMarkers({
     <div
       ref={rootRef}
       className={`${fill ? 'flex h-full min-h-0 flex-col' : ''} ${className || ''}`}
-      onMouseUp={() => {
+      onMouseUp={(e) => {
         if (!selectable || !onAdd) return;
+        const t = e.target as Element | null;
+        if (t?.closest?.('[data-geo-anno-add], [data-geo-anno-tip], [data-geo-anno-badge]')) return;
         window.requestAnimationFrame(() => {
           const next = captureSelectionIn(bodyRef.current);
+          if (!next) {
+            setDraft(null);
+            return;
+          }
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            const rect = sel.getRangeAt(0).getBoundingClientRect();
+            if (rect.width > 0 || rect.height > 0) {
+              next.top = rect.bottom + 8;
+              next.left = Math.min(Math.max(8, rect.left), window.innerWidth - 120);
+            }
+          }
           setDraft(next);
         });
       }}
@@ -245,31 +405,48 @@ export function AnnotatedOriginalWithMarkers({
         >
           {nodes}
         </div>
-        {selectable && onAdd && draft ? (
-          <div
-            className='pointer-events-auto absolute z-30'
-            style={{ top: Math.max(8, draft.top), left: Math.max(8, draft.left) }}
-          >
-            <Button
-              type='primary'
-              size='small'
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                onAdd({
-                  quoteText: draft.quoteText,
-                  quotePrefix: draft.quotePrefix,
-                  quoteSuffix: draft.quoteSuffix,
-                  startOffset: draft.startOffset,
-                  endOffset: draft.endOffset,
-                });
-                clearDraft();
-                window.getSelection()?.removeAllRanges();
-              }}
-            >
-              添加批注
-            </Button>
-          </div>
-        ) : null}
+        {selectable && onAdd && draft
+          ? createPortal(
+              <div
+                data-geo-anno-add
+                className='pointer-events-auto'
+                style={{
+                  position: 'fixed',
+                  top: Math.min(Math.max(8, draft.top), window.innerHeight - 48),
+                  left: Math.min(Math.max(8, draft.left), window.innerWidth - 120),
+                  zIndex: 11000,
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+              >
+                <Button
+                  type='primary'
+                  size='small'
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAdd({
+                      quoteText: draft.quoteText,
+                      quotePrefix: draft.quotePrefix,
+                      quoteSuffix: draft.quoteSuffix,
+                      startOffset: draft.startOffset,
+                      endOffset: draft.endOffset,
+                    });
+                    clearDraft();
+                    window.getSelection()?.removeAllRanges();
+                  }}
+                >
+                  添加批注
+                </Button>
+              </div>,
+              document.body,
+            )
+          : null}
       </div>
       {unmatched > 0 ? (
         <ul className='m-0 shrink-0 list-none space-y-1 border-t border-neutral-100 px-3 py-2'>
@@ -315,27 +492,80 @@ function buildPlainFromLake(body?: string) {
   return lakeToBlocks(body).join('\n');
 }
 
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 是否为批注角标等非正文节点（计入 plain 会打乱偏移） */
+function isAnnoChromeNode(node: Node): boolean {
+  const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  return !!el?.closest?.('[data-geo-anno-badge]');
+}
+
+/** 与 rangeFromTextOffsets 同一套：拼接可见正文 Text，跳过角标 */
+function collectDomPlain(root: HTMLElement): string {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let plain = '';
+  let node = walker.nextNode() as Text | null;
+  while (node) {
+    if (!isAnnoChromeNode(node)) plain += node.data;
+    node = walker.nextNode() as Text | null;
+  }
+  return plain;
+}
+
+/** 将选区映射到 collectDomPlain 偏移 */
+function offsetsFromRange(root: HTMLElement, range: Range): { start: number; end: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let pos = 0;
+  let start = -1;
+  let end = -1;
+  let node = walker.nextNode() as Text | null;
+  while (node) {
+    if (isAnnoChromeNode(node)) {
+      node = walker.nextNode() as Text | null;
+      continue;
+    }
+    const len = node.data.length;
+    if (range.startContainer === node) start = pos + Math.min(range.startOffset, len);
+    if (range.endContainer === node) {
+      end = pos + Math.min(range.endOffset, len);
+      break;
+    }
+    pos += len;
+    node = walker.nextNode() as Text | null;
+  }
+  if (start < 0 || end <= start) return null;
+  return { start, end };
+}
+
 function captureSelectionIn(root: HTMLElement | null): SelectionDraft | null {
   if (!root) return null;
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
   if (!root.contains(range.commonAncestorContainer)) return null;
-  const quoteText = normalizePlain(sel.toString());
+  const rawQuote = (sel.toString() || '').replace(/\u00a0/g, ' ');
+  const quoteText = normalizePlain(rawQuote);
   if (!quoteText || quoteText.length < 1) return null;
 
-  const plain = normalizePlain(root.innerText || '');
+  const plain = collectDomPlain(root);
   let startOffset: number | null = null;
   let endOffset: number | null = null;
-  const idx = plain.indexOf(quoteText);
-  if (idx >= 0) {
-    startOffset = idx;
-    endOffset = idx + quoteText.length;
+  const fromRange = offsetsFromRange(root, range);
+  if (fromRange) {
+    startOffset = fromRange.start;
+    endOffset = fromRange.end;
+  } else {
+    const hit = findQuoteOffsets(plain, quoteText, null, null);
+    if (hit) {
+      startOffset = hit.start;
+      endOffset = hit.end;
+    }
   }
   const prefix = startOffset != null ? plain.slice(Math.max(0, startOffset - 40), startOffset) : '';
   const suffix = endOffset != null ? plain.slice(endOffset, Math.min(plain.length, endOffset + 40)) : '';
 
-  // getBoundingClientRect 相对视口；相对 root 可见区域定位即可（子节点滚动无需再加 scrollTop）
   const rect = range.getBoundingClientRect();
   const rootRect = root.getBoundingClientRect();
   return {
@@ -347,6 +577,51 @@ function captureSelectionIn(root: HTMLElement | null): SelectionDraft | null {
     top: rect.bottom - rootRect.top + 8,
     left: Math.min(Math.max(8, rect.left - rootRect.left), Math.max(8, root.clientWidth - 120)),
   };
+}
+
+/** 在 DOM plain 中定位引用（支持空白差异；优先用存储的偏移） */
+function findQuoteOffsets(
+  plain: string,
+  quote: string,
+  preferStart: number | null | undefined,
+  preferEnd: number | null | undefined,
+  occupied: Array<{ start: number; end: number }> = [],
+): { start: number; end: number } | null {
+  const q = (quote || '').trim();
+  if (!q || !plain) return null;
+
+  const overlaps = (s: number, e: number) => occupied.some((o) => !(e <= o.start || s >= o.end));
+
+  if (
+    preferStart != null &&
+    preferEnd != null &&
+    preferStart >= 0 &&
+    preferEnd > preferStart &&
+    preferEnd <= plain.length
+  ) {
+    const slice = plain.slice(preferStart, preferEnd);
+    if (normalizePlain(slice) === normalizePlain(q) && !overlaps(preferStart, preferEnd)) {
+      return { start: preferStart, end: preferEnd };
+    }
+  }
+
+  const exact = plain.indexOf(q);
+  if (exact >= 0 && !overlaps(exact, exact + q.length)) {
+    return { start: exact, end: exact + q.length };
+  }
+
+  const re = new RegExp(q.split(/\s+/).filter(Boolean).map(escapeRegExp).join('\\s+'));
+  let from = 0;
+  while (from < plain.length) {
+    const slice = plain.slice(from);
+    const m = re.exec(slice);
+    if (!m || m.index < 0) break;
+    const start = from + m.index;
+    const end = start + m[0].length;
+    if (!overlaps(start, end)) return { start, end };
+    from = start + 1;
+  }
+  return null;
 }
 
 export function ReviewAnnotationList({
@@ -422,93 +697,357 @@ export function ReviewAnnotationList({
   );
 }
 
-/** 在 Lake 原文只读预览上划选 + 浮动「添加批注」 */
+/** 在 Lake 渲染结果中按纯文本偏移定位 Range（跳过角标文字） */
+function rangeFromTextOffsets(root: HTMLElement, start: number, end: number): Range | null {
+  if (start < 0 || end <= start) return null;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let pos = 0;
+  let startNode: Text | null = null;
+  let startOff = 0;
+  let endNode: Text | null = null;
+  let endOff = 0;
+  let node = walker.nextNode() as Text | null;
+  while (node) {
+    if (isAnnoChromeNode(node)) {
+      node = walker.nextNode() as Text | null;
+      continue;
+    }
+    const len = node.data.length;
+    if (!startNode && pos + len > start) {
+      startNode = node;
+      startOff = start - pos;
+    }
+    if (pos + len >= end) {
+      endNode = node;
+      endOff = end - pos;
+      break;
+    }
+    pos += len;
+    node = walker.nextNode() as Text | null;
+  }
+  if (!startNode || !endNode) return null;
+  try {
+    const range = document.createRange();
+    range.setStart(startNode, Math.max(0, Math.min(startOff, startNode.data.length)));
+    range.setEnd(endNode, Math.max(0, Math.min(endOff, endNode.data.length)));
+    return range;
+  } catch {
+    return null;
+  }
+}
+
+function clearLakeAnnoMarks(root: HTMLElement) {
+  root.querySelectorAll('mark[data-geo-anno]').forEach((el) => {
+    const parent = el.parentNode;
+    if (!parent) return;
+    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    parent.removeChild(el);
+    parent.normalize();
+  });
+  root.querySelectorAll('[data-geo-anno-badge]').forEach((el) => el.remove());
+}
+
+function makeAnnoBadge(no: number, onOpen?: (no: number, anchor: HTMLElement) => void) {
+  const badge = document.createElement('button');
+  badge.type = 'button';
+  badge.dataset.geoAnnoBadge = String(no);
+  badge.className =
+    'geo-lake-anno-badge mx-0.5 inline-flex h-5 min-w-5 cursor-pointer items-center justify-center rounded-full border border-amber-400 bg-amber-100 px-1 align-super text-[11px] font-semibold leading-none text-amber-900 hover:bg-amber-200';
+  badge.textContent = String(no);
+  badge.title = `查看批注 ${no}`;
+  badge.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onOpen?.(no, badge);
+  });
+  return badge;
+}
+
+function applyLakeHighlight(range: Range, no: number, onOpen?: (no: number, anchor: HTMLElement) => void) {
+  const badge = makeAnnoBadge(no, onOpen);
+  try {
+    const mark = document.createElement('mark');
+    mark.dataset.geoAnno = String(no);
+    mark.className = 'geo-lake-anno-mark rounded bg-amber-100 px-0.5 text-amber-950';
+    range.surroundContents(mark);
+    mark.insertAdjacentElement('afterend', badge);
+    return;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const contents = range.extractContents();
+    const mark = document.createElement('mark');
+    mark.dataset.geoAnno = String(no);
+    mark.className = 'geo-lake-anno-mark rounded bg-amber-100 px-0.5 text-amber-950';
+    mark.appendChild(contents);
+    range.insertNode(mark);
+    mark.insertAdjacentElement('afterend', badge);
+  } catch {
+    try {
+      range.collapse(false);
+      range.insertNode(badge);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** 在已渲染的 Lake 原文上叠批注高亮 + 数字角标（不破坏撰写排版） */
+function paintLakeAnnotations(
+  root: HTMLElement,
+  annotations: GeoContentReviewAnnotation[],
+  onOpen?: (no: number, anchor: HTMLElement) => void,
+) {
+  clearLakeAnnoMarks(root);
+  if (annotations.length === 0) return;
+  const plain = collectDomPlain(root);
+  const markers = resolveAnnotationRanges(plain, annotations);
+  // 先算好 Range，再从后往前插入，避免前面包装打乱后面偏移
+  const planned = markers
+    .map((m) => ({ m, range: rangeFromTextOffsets(root, m.start, m.end) }))
+    .filter((p): p is { m: AnnoMarker; range: Range } => p.range != null)
+    .sort((a, b) => b.m.start - a.m.start || b.m.no - a.m.no);
+  planned.forEach(({ m, range }) => applyLakeHighlight(range, m.no, onOpen));
+}
+
+function resolvePaintRoot(wrap: HTMLElement | null): HTMLElement | null {
+  if (!wrap) return null;
+  const host = wrap.querySelector('.lakex-host') as HTMLElement | null;
+  return (
+    (host?.querySelector('.ne-viewer-body, .ne-editor, .lake-content, [contenteditable]') as HTMLElement | null) ||
+    host ||
+    wrap
+  );
+}
+
+/** 在 Lake 原文只读预览上划选 + 浮动「添加批注」；已有批注直接叠在 Lake 排版上 */
 export function SelectableReviewBody({
   contentBody,
   enabled,
   onAdd,
   contentKey,
+  annotations = [],
+  onOpenAnnotation,
+  editableReviewId = null,
+  onAnnotationsChange,
 }: {
   contentBody?: string;
   enabled: boolean;
-  onAdd: (draft: Omit<SelectionDraft, 'top' | 'left'>) => void;
+  onAdd?: (draft: Omit<SelectionDraft, 'top' | 'left'>) => void;
   /** 换稿时重挂载编辑器 */
   contentKey?: string | number;
+  /** 已有划词批注：叠在 Lake 原文上显示高亮与数字 */
+  annotations?: GeoContentReviewAnnotation[];
+  onOpenAnnotation?: (no: number) => void;
+  /** 本轮可改删时传入 reviewId */
+  editableReviewId?: number | null;
+  onAnnotationsChange?: (next: GeoContentReviewAnnotation[]) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const hostWrapRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<SelectionDraft | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
+  const [tip, setTip] = useState<{ no: number; top: number; left: number } | null>(null);
   const body = contentBody || '';
   const hasBody = body.trim().length > 0;
+  const annoKey = useMemo(
+    () => annotations.map((a) => `${a.id}:${a.quoteText}:${a.commentText}`).join('|'),
+    [annotations],
+  );
 
   const clearDraft = useCallback(() => setDraft(null), []);
+  const closeTip = useCallback(() => setTip(null), []);
 
   useEffect(() => {
-    if (!enabled) {
-      clearDraft();
-      return;
-    }
-    const onDocClick = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) {
+    void prefetchLakexAssets();
+  }, []);
+
+  useEffect(() => {
+    setEditorReady(false);
+    setTip(null);
+  }, [contentKey, body]);
+
+  useEffect(() => {
+    const onDocDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      const el = t instanceof Element ? t : t.parentElement;
+      // 点「添加批注」/批注浮层/数字角标时不要清 draft，否则按钮尚未 click 就被卸掉
+      if (el?.closest?.('[data-geo-anno-add], [data-geo-anno-tip], [data-geo-anno-badge]')) return;
+      if (!rootRef.current?.contains(t)) {
         clearDraft();
+        closeTip();
+        return;
       }
+      if (enabled) clearDraft();
+      closeTip();
     };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [enabled, clearDraft]);
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [enabled, clearDraft, closeTip]);
+
+  useEffect(() => {
+    if (!editorReady || !hostWrapRef.current) return;
+    const paintRoot = resolvePaintRoot(hostWrapRef.current);
+    if (!paintRoot) return;
+    const open = (no: number, anchor: HTMLElement) => {
+      const badgeRect = anchor.getBoundingClientRect();
+      setTip({
+        no,
+        top: badgeRect.bottom + 6,
+        left: Math.min(Math.max(8, badgeRect.left - 20), window.innerWidth - 300),
+      });
+      setDraft(null);
+      onOpenAnnotation?.(no);
+    };
+    paintLakeAnnotations(paintRoot, annotations, open);
+    // Lake 异步排版 / 虚拟滚动会冲掉 mark，多刷几轮保证批注保存后高亮仍在
+    const timers = [80, 280, 600, 1200].map((ms) =>
+      window.setTimeout(() => paintLakeAnnotations(paintRoot, annotations, open), ms),
+    );
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      clearLakeAnnoMarks(paintRoot);
+    };
+  }, [editorReady, annoKey, annotations, onOpenAnnotation]);
 
   if (!hasBody) {
     return <div className='p-4 text-sm text-neutral-400'>暂无提审原文，无法划词</div>;
   }
 
+  const tipAnno = tip != null ? annotations[tip.no - 1] : null;
+  const tipCanEdit = tipAnno != null && editableReviewId != null && tipAnno.reviewId === editableReviewId;
+
   return (
     <div
       ref={rootRef}
       className='relative flex h-full min-h-0 flex-col bg-white'
-      onMouseUp={() => {
-        if (!enabled) return;
-        // 等浏览器选区稳定后再取
+      onMouseUp={(e) => {
+        if (!enabled || !onAdd) return;
+        const t = e.target as Element | null;
+        if (t?.closest?.('[data-geo-anno-add], [data-geo-anno-tip], [data-geo-anno-badge]')) return;
         window.requestAnimationFrame(() => {
-          const next = captureSelectionIn(rootRef.current);
-          setDraft(next);
+          const paintRoot = resolvePaintRoot(hostWrapRef.current);
+          const next = captureSelectionIn(paintRoot);
+          if (next) {
+            // 用视口坐标，按钮 Portal 到 body，避开 Lake 内部 stacking
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+              const rect = sel.getRangeAt(0).getBoundingClientRect();
+              if (rect.width > 0 || rect.height > 0) {
+                next.top = rect.bottom + 8;
+                next.left = Math.min(Math.max(8, rect.left), window.innerWidth - 120);
+              }
+            }
+            setTip(null);
+            setDraft(next);
+          }
         });
       }}
     >
-      {enabled ? (
-        <div className='shrink-0 border-b border-neutral-100 px-3 py-1.5 text-xs text-neutral-500'>
-          在下方原文中划选文字后点「添加批注」；可划词、划句或整段。
-        </div>
-      ) : null}
-      <div className='relative min-h-0 flex-1 overflow-hidden select-text'>
+      <div className='shrink-0 border-b border-neutral-100 px-3 py-1.5 text-xs text-neutral-500'>
+        {enabled
+          ? '划选原文后点「添加批注」；点高亮旁数字可查看/修改/删除'
+          : annotations.length > 0
+            ? '点高亮旁数字查看批注'
+            : 'Lake 原文预览'}
+        {annotations.length > 0 ? ` · 批注 ${annotations.length}` : ''}
+      </div>
+      <div
+        ref={hostWrapRef}
+        className='relative min-h-0 flex-1 overflow-auto select-text'
+      >
+        {!editorReady ? (
+          <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70 text-sm text-neutral-400'>
+            加载原文…
+          </div>
+        ) : null}
         <LakexEditorHost
           key={contentKey ?? `lakex-anno-${body.length}`}
           value={body}
           readOnly
+          onReady={() => setEditorReady(true)}
         />
-        {enabled && draft ? (
-          <div
-            className='pointer-events-auto absolute z-30'
-            style={{ top: Math.max(8, draft.top), left: Math.max(8, draft.left) }}
-          >
-            <Button
-              type='primary'
-              size='small'
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                onAdd({
-                  quoteText: draft.quoteText,
-                  quotePrefix: draft.quotePrefix,
-                  quoteSuffix: draft.quoteSuffix,
-                  startOffset: draft.startOffset,
-                  endOffset: draft.endOffset,
-                });
-                clearDraft();
-                window.getSelection()?.removeAllRanges();
-              }}
-            >
-              添加批注
-            </Button>
-          </div>
-        ) : null}
+        {enabled && onAdd && draft
+          ? createPortal(
+              <div
+                data-geo-anno-add
+                className='pointer-events-auto'
+                style={{
+                  position: 'fixed',
+                  top: Math.min(Math.max(8, draft.top), window.innerHeight - 48),
+                  left: Math.min(Math.max(8, draft.left), window.innerWidth - 120),
+                  zIndex: 11000,
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+              >
+                <Button
+                  type='primary'
+                  size='small'
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAdd({
+                      quoteText: draft.quoteText,
+                      quotePrefix: draft.quotePrefix,
+                      quoteSuffix: draft.quoteSuffix,
+                      startOffset: draft.startOffset,
+                      endOffset: draft.endOffset,
+                    });
+                    clearDraft();
+                    window.getSelection()?.removeAllRanges();
+                  }}
+                >
+                  添加批注
+                </Button>
+              </div>,
+              document.body,
+            )
+          : null}
+        {tip && tipAnno
+          ? createPortal(
+              <div
+                data-geo-anno-tip
+                className='pointer-events-auto max-w-xs rounded-lg border border-amber-200 bg-white p-3 shadow-lg'
+                style={{
+                  position: 'fixed',
+                  top: Math.min(Math.max(8, tip.top), window.innerHeight - 200),
+                  left: Math.min(Math.max(8, tip.left), window.innerWidth - 300),
+                  zIndex: 11010,
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <AnnotationTipContent
+                  no={tip.no}
+                  annotation={tipAnno}
+                  canEdit={tipCanEdit}
+                  onUpdated={(next) => {
+                    onAnnotationsChange?.(annotations.map((a) => (a.id === next.id ? next : a)));
+                  }}
+                  onDeleted={(id) => {
+                    onAnnotationsChange?.(annotations.filter((a) => a.id !== id));
+                    closeTip();
+                  }}
+                  onClose={closeTip}
+                />
+                <Button
+                  type='link'
+                  size='small'
+                  className='mt-1 h-auto px-0 text-xs text-neutral-400'
+                  onClick={closeTip}
+                >
+                  关闭
+                </Button>
+              </div>,
+              document.body,
+            )
+          : null}
       </div>
     </div>
   );
@@ -583,6 +1122,8 @@ export function GeoReviewAnnotationPanel({
             annotations={list}
             fill
             selectable
+            editableReviewId={editableReviewId}
+            onAnnotationsChange={sync}
             onAdd={(d) => {
               setPending(d);
               setComment('');

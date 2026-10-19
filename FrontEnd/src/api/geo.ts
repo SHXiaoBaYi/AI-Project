@@ -509,6 +509,10 @@ export function addGeoContentReviewAnnotationApi(data: {
   return request.post<unknown, GeoContentReviewAnnotation>('/geo/content-write/annotation', data);
 }
 
+export function updateGeoContentReviewAnnotationApi(data: { id: number; commentText: string }) {
+  return request.put<unknown, GeoContentReviewAnnotation>('/geo/content-write/annotation', data);
+}
+
 export function deleteGeoContentReviewAnnotationApi(id: number) {
   return request.delete(`/geo/content-write/annotation/${id}`);
 }

@@ -9,6 +9,7 @@ import PlacementExecutionPanel from '@/components/geo/content-placement/Placemen
 import PlacementProofFilesModal from '@/components/geo/content-placement/PlacementProofFilesModal';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
 import { AGG_COLOR, hasOnlineArticle } from '@/components/geo/content-placement/constants';
+import { warmLakexAssetsOnIdle } from '@/components/lakex/loadLakexAssets';
 import { getGeoContentPlacementListApi, getGeoTopicOptionsApi } from '@/api/geo';
 import type { GeoContentPlacementListItem, GeoTopic } from '@/types/geo';
 import { GEO_CONTENT_AGG_STATUS } from '@/constants/geo';
@@ -37,6 +38,7 @@ const ContentPlacementWorkPage = memo(function ContentPlacementWorkPage() {
   const [articlePlacementId, setArticlePlacementId] = useState<number | null>(null);
 
   useEffect(() => {
+    warmLakexAssetsOnIdle();
     void getGeoTopicOptionsApi().then(setTopics);
   }, []);
 

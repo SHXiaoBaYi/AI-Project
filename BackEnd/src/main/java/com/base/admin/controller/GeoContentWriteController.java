@@ -4,6 +4,7 @@ import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.GeoContentReviewAnnotationSaveDTO;
+import com.base.admin.domain.dto.GeoContentReviewAnnotationUpdateDTO;
 import com.base.admin.domain.dto.GeoContentReviewDecideDTO;
 import com.base.admin.domain.dto.GeoContentReviewQueryDTO;
 import com.base.admin.domain.dto.GeoContentSubmitReviewDTO;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -86,6 +88,14 @@ public class GeoContentWriteController {
     @Log(title = "GEO文章审核划词批注", businessType = 1)
     public Result<GeoContentReviewAnnotationVO> addAnnotation(@Valid @RequestBody GeoContentReviewAnnotationSaveDTO dto) {
         return Result.ok(writeService.addAnnotation(dto));
+    }
+
+    @Operation(summary = "修改本人本轮划词批注内容")
+    @PutMapping("/annotation")
+    @RequiresPermission("geo:write:review")
+    @Log(title = "GEO文章审核划词批注", businessType = 2)
+    public Result<GeoContentReviewAnnotationVO> updateAnnotation(@Valid @RequestBody GeoContentReviewAnnotationUpdateDTO dto) {
+        return Result.ok(writeService.updateAnnotation(dto));
     }
 
     @Operation(summary = "删除本人本轮划词批注")

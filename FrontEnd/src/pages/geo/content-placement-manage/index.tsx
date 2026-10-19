@@ -11,6 +11,7 @@ import PlacementExecutionPanel from '@/components/geo/content-placement/Placemen
 import PlacementProofFilesModal from '@/components/geo/content-placement/PlacementProofFilesModal';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
 import { AGG_COLOR, SOURCE_COLOR, hasOnlineArticle } from '@/components/geo/content-placement/constants';
+import { warmLakexAssetsOnIdle } from '@/components/lakex/loadLakexAssets';
 import {
   createGeoContentPlacementApi,
   deleteGeoContentPlacementApi,
@@ -90,6 +91,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
   const [savingPreview, setSavingPreview] = useState(false);
 
   useEffect(() => {
+    warmLakexAssetsOnIdle();
     void (async () => {
       const [ownerOpts, topicOpts, defPub] = await Promise.all([
         getGeoOwnerOptionsApi(),

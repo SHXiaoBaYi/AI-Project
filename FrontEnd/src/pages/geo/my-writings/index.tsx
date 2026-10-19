@@ -7,6 +7,7 @@ import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { warmLakexAssetsOnIdle } from '@/components/lakex/loadLakexAssets';
 import {
   getGeoContentReviewCompareApi,
   getGeoOwnerOptionsApi,
@@ -67,6 +68,7 @@ const MyWritingsPage = memo(function MyWritingsPage() {
   const [compareFocusId, setCompareFocusId] = useState<number | null>(null);
 
   useEffect(() => {
+    warmLakexAssetsOnIdle();
     void Promise.all([getGeoOwnerOptionsApi(), getGeoTopicOptionsApi()]).then(([ownerOpts, topicOpts]) => {
       setOwners(ownerOpts ?? []);
       setTopics(topicOpts ?? []);

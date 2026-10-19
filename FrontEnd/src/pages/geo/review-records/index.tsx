@@ -5,6 +5,7 @@ import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { warmLakexAssetsOnIdle } from '@/components/lakex/loadLakexAssets';
 import { getGeoOwnerOptionsApi, getGeoReviewRecordsApi, getGeoTopicOptionsApi } from '@/api/geo';
 import type { GeoContentReviewRow, GeoOwnerOption, GeoTopic } from '@/types/geo';
 
@@ -25,6 +26,7 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
   const [compareFocusId, setCompareFocusId] = useState<number | null>(null);
 
   useEffect(() => {
+    warmLakexAssetsOnIdle();
     void Promise.all([getGeoTopicOptionsApi(), getGeoOwnerOptionsApi()]).then(([topicOpts, ownerOpts]) => {
       setTopics(topicOpts ?? []);
       setOwners(ownerOpts ?? []);

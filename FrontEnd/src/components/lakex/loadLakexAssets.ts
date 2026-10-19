@@ -58,6 +58,16 @@ export function removeLakexAntdCss() {
   });
 }
 
+function preloadScript(src: string) {
+  if (document.querySelector(`link[data-lakex-preload="${src}"]`)) return;
+  const link = document.createElement('link');
+  link.rel = 'preload';
+  link.as = 'script';
+  link.href = src;
+  link.dataset.lakexPreload = src;
+  document.head.appendChild(link);
+}
+
 function loadScriptOnce(src: string) {
   if (loadedScripts.has(src) || document.querySelector(`script[data-lakex="${src}"]`)) {
     loadedScripts.add(src);
@@ -86,15 +96,18 @@ export function loadLakexAssets(): Promise<LakexDocApi> {
 
   loadPromise = (async () => {
     removeLakexAntdCss();
+    // 先 preload 大包，再顺序执行，缩短「空等 → 下载」间隙
+    preloadScript(asset('kitchen.js'));
+    preloadScript(asset('doc.umd.js'));
+    // 首屏只拉编辑器本体；CodeMirror / KaTeX 由编辑器按需通过 URL 再加载，避免每次打开卡顿
     await loadStyleOnce(asset('doc.css'));
-    await Promise.all([
-      loadScriptOnce(asset('react.production.min.js')),
-      loadScriptOnce(asset('react-dom.production.min.js')),
-      loadScriptOnce(asset('CodeMirror.js')),
-      loadScriptOnce(asset('katex.js')),
-    ]);
-    // doc.umd 外部依赖名为 React / ReactDOM
     const g = window as Window & { react?: unknown; ReactDOM?: unknown; React?: unknown };
+    const needReact = !g.React && !g.react;
+    const needReactDom = !g.ReactDOM;
+    await Promise.all([
+      needReact ? loadScriptOnce(asset('react.production.min.js')) : Promise.resolve(),
+      needReactDom ? loadScriptOnce(asset('react-dom.production.min.js')) : Promise.resolve(),
+    ]);
     if (!g.React && g.react) g.React = g.react;
     await loadScriptOnce(asset('kitchen.js'));
     await loadScriptOnce(asset('doc.umd.js'));
@@ -103,6 +116,10 @@ export function loadLakexAssets(): Promise<LakexDocApi> {
     if (!doc?.createOpenEditor) {
       throw new Error('Lakex 未正确加载：window.Doc.createOpenEditor 不存在');
     }
+    // 后台预热代码块/公式依赖，不阻塞首开
+    void Promise.all([loadScriptOnce(asset('CodeMirror.js')), loadScriptOnce(asset('katex.js'))]).catch(
+      () => undefined,
+    );
     return doc;
   })().catch((err) => {
     loadPromise = null;
@@ -110,6 +127,30 @@ export function loadLakexAssets(): Promise<LakexDocApi> {
   });
 
   return loadPromise;
+}
+
+/** 立即预热（抽屉打开时与接口并行） */
+export function prefetchLakexAssets() {
+  return loadLakexAssets().catch(() => undefined);
+}
+
+/** 列表页空闲时预热，避免第一次点「撰写/审核」才开始下 4MB+ 脚本 */
+export function warmLakexAssetsOnIdle() {
+  if (typeof window === 'undefined') return;
+  if (window.Doc?.createOpenEditor || loadPromise) return;
+  const run = () => {
+    void prefetchLakexAssets();
+  };
+  const ric = (
+    window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    }
+  ).requestIdleCallback;
+  if (typeof ric === 'function') {
+    ric(run, { timeout: 2500 });
+  } else {
+    window.setTimeout(run, 800);
+  }
 }
 
 export const LAKE_SCHEME = 'text/lake' as const;

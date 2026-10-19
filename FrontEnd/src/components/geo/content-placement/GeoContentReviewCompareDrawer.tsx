@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Drawer, Input, Modal, Segmented, Space, Spin, Tag, message } from 'antd';
-import { LakexEditorHost } from '@/components/lakex/LakexEditorHost';
 import {
   GeoReviewAnnotationReadonly,
   ReviewAnnotationList,
   SelectableReviewBody,
 } from '@/components/geo/content-placement/GeoReviewAnnotations';
+import { prefetchLakexAssets } from '@/components/lakex/loadLakexAssets';
 import {
   addGeoContentReviewAnnotationApi,
   decideGeoContentReviewApi,
@@ -261,10 +261,11 @@ function SidePreview({
         {!round.hasSnapshot && !(round.contentBody || '').trim() ? (
           <div className='p-4 text-sm text-amber-700'>该轮没有文章快照，无法对照当时正文（重新提审后会保存）</div>
         ) : (
-          <LakexEditorHost
-            key={`${versionKeyOf(round)}-${round.contentVersion ?? 0}-preview`}
-            value={round.contentBody || ''}
-            readOnly
+          <SelectableReviewBody
+            contentKey={`${versionKeyOf(round)}-${round.contentVersion ?? 0}-preview`}
+            contentBody={round.contentBody || ''}
+            enabled={false}
+            annotations={annotations}
           />
         )}
       </div>
@@ -328,6 +329,7 @@ export function GeoContentReviewCompareDrawer({
     setOpinion('');
     setAnnoDraft(null);
     setAnnoComment('');
+    void prefetchLakexAssets();
     void getGeoContentReviewCompareApi(placementId)
       .then((res) => {
         setData(res);
@@ -654,6 +656,11 @@ export function GeoContentReviewCompareDrawer({
                           contentKey={`review-${focusRound.reviewId}-${focusRound.contentVersion ?? 0}`}
                           contentBody={focusRound.contentBody || data.currentDraft?.contentBody || ''}
                           enabled
+                          annotations={focusAnnotations}
+                          editableReviewId={reviewId}
+                          onAnnotationsChange={(next) => {
+                            if (reviewId != null) patchRoundAnnotations(reviewId, next);
+                          }}
                           onAdd={(d) => {
                             setAnnoDraft(d);
                             setAnnoComment('');

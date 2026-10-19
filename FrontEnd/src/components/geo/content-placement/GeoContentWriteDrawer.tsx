@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Drawer, Input, Modal, Select, Space, Spin, Tag, Typography, message } from 'antd';
 import { LakexEditorHost, type LakexEditorHostHandle } from '@/components/lakex/LakexEditorHost';
+import { prefetchLakexAssets } from '@/components/lakex/loadLakexAssets';
 import {
   addGeoContentArticleOpinionApi,
   addGeoContentPlatformArticleApi,
@@ -177,6 +178,8 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     setLiveAnnotations([]);
     setAnnoDraft(null);
     setAnnoComment('');
+    setEditorReady(false);
+    void prefetchLakexAssets();
     void load(placementId, 'shared');
     if (mode === 'write') {
       void getGeoPlatformOptionsApi(GEO_PLATFORM_TYPE_CONTENT)
@@ -689,13 +692,16 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
               />
             </div>
             {reviewingLive ? (
-              <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_240px]'>
+              <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]'>
                 <div className='min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
                   {annotateBody ? (
                     <SelectableReviewBody
                       contentKey={`review-${reviewId}-${annotateBody.length}`}
                       contentBody={annotateBody}
                       enabled
+                      annotations={liveAnnotations}
+                      editableReviewId={reviewId}
+                      onAnnotationsChange={setLiveAnnotations}
                       onAdd={(d) => {
                         setAnnoDraft(d);
                         setAnnoComment('');
@@ -708,7 +714,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 <aside className='flex min-h-0 flex-col overflow-auto px-3 py-2'>
                   <div className='mb-2 text-xs text-neutral-500'>
                     批注列表{liveAnnotations.length > 0 ? `（${liveAnnotations.length}）` : ''}
-                    ；原文保持撰写排版，划选后添加批注
+                    ；左侧 Lake 原文可划选，高亮处点数字查看
                   </div>
                   <ReviewAnnotationList
                     annotations={liveAnnotations}
@@ -729,62 +735,125 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 </aside>
               </div>
             ) : (
-              <div className='relative min-h-0 flex-1'>
-                {!editorReady && (
-                  <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70'>
-                    <Spin tip='加载编辑器…' />
-                  </div>
-                )}
-                <LakexEditorHost
-                  ref={editorHostRef}
-                  key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}-${editorEpoch}`}
-                  value={body}
-                  readOnly={readOnly && !sharedEditable}
-                  onChange={(lake) => {
-                    setBody(lake);
-                    bodyRef.current = lake;
-                    scheduleSave();
-                  }}
-                  onReady={() => setEditorReady(true)}
-                  onError={(err) => message.error(err.message)}
-                  uploadImage={async (file) => {
-                    const res = await uploadGeoScreenshotApi(file);
-                    return res.url;
-                  }}
-                />
+              <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px]'>
+                <div className='relative min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
+                  {!editorReady && (
+                    <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70'>
+                      <Spin tip='加载编辑器…' />
+                    </div>
+                  )}
+                  <LakexEditorHost
+                    ref={editorHostRef}
+                    key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}-${editorEpoch}`}
+                    value={body}
+                    readOnly={readOnly && !sharedEditable}
+                    onChange={(lake) => {
+                      setBody(lake);
+                      bodyRef.current = lake;
+                      scheduleSave();
+                    }}
+                    onReady={() => setEditorReady(true)}
+                    onError={(err) => message.error(err.message)}
+                    uploadImage={async (file) => {
+                      const res = await uploadGeoScreenshotApi(file);
+                      return res.url;
+                    }}
+                  />
+                </div>
+                <aside className='flex min-h-0 flex-col overflow-auto bg-neutral-50/60 px-3 py-2'>
+                  {reviewHints &&
+                  ((reviewHints.annotations?.length ?? 0) > 0 ||
+                    (reviewHints.reviewers ?? []).some((r) => r.comment?.trim())) ? (
+                    <div className='mb-3'>
+                      <div className='mb-2 text-xs font-medium text-amber-800'>
+                        {reviewHints.roundLabel} 审核反馈
+                        {mode === 'write' ? '（改稿请对照）' : ''}
+                      </div>
+                      {(reviewHints.reviewers ?? [])
+                        .filter((r) => r.comment?.trim())
+                        .map((r) => (
+                          <div
+                            key={`${r.userId}-${r.actedAt || r.comment}`}
+                            className='mb-2 rounded border border-neutral-100 bg-white px-3 py-2 text-sm'
+                          >
+                            <span className='text-xs text-neutral-400'>{r.userName || r.userId} · 总意见</span>
+                            <div className='text-neutral-800'>{r.comment}</div>
+                          </div>
+                        ))}
+                      {(reviewHints.annotations?.length ?? 0) > 0 ? (
+                        <div className='mt-1'>
+                          <div className='mb-1 text-xs font-medium text-amber-800'>划词批注</div>
+                          <GeoReviewAnnotationReadonly
+                            annotations={reviewHints.annotations}
+                            contentBody={reviewHints.contentBody}
+                            showOriginal={false}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className='mb-3 text-xs text-neutral-400'>暂无审核/批注记录</p>
+                  )}
+                  {article ? (
+                    <div className='mt-auto border-t border-neutral-100 pt-2'>
+                      <div className='mb-1 text-xs font-medium text-neutral-500'>内部意见</div>
+                      {(article.opinions ?? []).length === 0 ? (
+                        <p className='mb-2 text-xs text-neutral-400'>还没有意见</p>
+                      ) : (
+                        <ul className='mb-2 max-h-40 space-y-1 overflow-auto'>
+                          {(article.opinions ?? []).map((note) => (
+                            <li
+                              key={note.id}
+                              className='text-xs text-neutral-700'
+                            >
+                              <span className='text-neutral-400'>
+                                {note.authorName || '内部'} {note.createTime || ''}
+                              </span>
+                              <span className='ml-2'>{note.opinion}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <Space.Compact className='w-full'>
+                        <Input
+                          placeholder='填写内部意见'
+                          value={opinion}
+                          onChange={(e) => setOpinion(e.target.value)}
+                        />
+                        <Button
+                          loading={acting}
+                          onClick={() => {
+                            const text = opinion.trim();
+                            if (!text) {
+                              message.warning('请填写意见');
+                              return;
+                            }
+                            void (async () => {
+                              setActing(true);
+                              try {
+                                const next = await addGeoContentArticleOpinionApi({
+                                  itemId: article.itemId,
+                                  opinion: text,
+                                });
+                                replaceArticle(next);
+                                setOpinion('');
+                                message.success('已记录意见');
+                              } catch (e) {
+                                message.error(e instanceof Error ? e.message : '保存意见失败');
+                              } finally {
+                                setActing(false);
+                              }
+                            })();
+                          }}
+                        >
+                          提交意见
+                        </Button>
+                      </Space.Compact>
+                    </div>
+                  ) : null}
+                </aside>
               </div>
             )}
-            {!reviewingLive &&
-            reviewHints &&
-            ((reviewHints.annotations?.length ?? 0) > 0 ||
-              (reviewHints.reviewers ?? []).some((r) => r.comment?.trim())) ? (
-              <div className='max-h-56 overflow-auto border-t border-amber-100 bg-amber-50/40 px-4 py-2'>
-                <div className='mb-1 text-xs font-medium text-amber-800'>
-                  {reviewHints.roundLabel} 审核反馈
-                  {mode === 'write' ? '（改稿时请对照）' : ''}
-                </div>
-                {(reviewHints.reviewers ?? [])
-                  .filter((r) => r.comment?.trim())
-                  .map((r) => (
-                    <div
-                      key={`${r.userId}-${r.actedAt || r.comment}`}
-                      className='mb-2 rounded border border-neutral-100 bg-white px-3 py-2 text-sm'
-                    >
-                      <span className='text-xs text-neutral-400'>{r.userName || r.userId} · 总意见</span>
-                      <div className='text-neutral-800'>{r.comment}</div>
-                    </div>
-                  ))}
-                {(reviewHints.annotations?.length ?? 0) > 0 ? (
-                  <>
-                    <div className='mb-1 text-xs font-medium text-amber-800'>划词批注 · 点原文数字查看</div>
-                    <GeoReviewAnnotationReadonly
-                      annotations={reviewHints.annotations}
-                      contentBody={reviewHints.contentBody}
-                    />
-                  </>
-                ) : null}
-              </div>
-            ) : null}
             {reviewingLive ? (
               <div className='border-t border-neutral-100 px-4 py-2'>
                 <div className='mb-1 text-xs text-neutral-500'>
@@ -798,59 +867,6 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                   value={opinion}
                   onChange={(e) => setOpinion(e.target.value)}
                 />
-              </div>
-            ) : article ? (
-              <div className='max-h-48 overflow-auto border-t border-neutral-100 px-4 py-2'>
-                <div className='mb-1 text-xs font-medium text-neutral-500'>内部意见</div>
-                {(article.opinions ?? []).length === 0 ? (
-                  <p className='mb-2 text-xs text-neutral-400'>还没有意见</p>
-                ) : (
-                  <ul className='mb-2 space-y-1'>
-                    {(article.opinions ?? []).map((note) => (
-                      <li
-                        key={note.id}
-                        className='text-xs text-neutral-700'
-                      >
-                        <span className='text-neutral-400'>
-                          {note.authorName || '内部'} {note.createTime || ''}
-                        </span>
-                        <span className='ml-2'>{note.opinion}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <Space.Compact className='w-full'>
-                  <Input
-                    placeholder='填写内部意见'
-                    value={opinion}
-                    onChange={(e) => setOpinion(e.target.value)}
-                  />
-                  <Button
-                    loading={acting}
-                    onClick={() => {
-                      const text = opinion.trim();
-                      if (!text) {
-                        message.warning('请填写意见');
-                        return;
-                      }
-                      void (async () => {
-                        setActing(true);
-                        try {
-                          const next = await addGeoContentArticleOpinionApi({ itemId: article.itemId, opinion: text });
-                          replaceArticle(next);
-                          setOpinion('');
-                          message.success('已记录意见');
-                        } catch (e) {
-                          message.error(e instanceof Error ? e.message : '保存意见失败');
-                        } finally {
-                          setActing(false);
-                        }
-                      })();
-                    }}
-                  >
-                    提交意见
-                  </Button>
-                </Space.Compact>
               </div>
             ) : null}
           </section>

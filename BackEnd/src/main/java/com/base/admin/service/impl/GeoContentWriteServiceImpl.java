@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.base.admin.common.Constants;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.domain.dto.GeoContentReviewAnnotationSaveDTO;
+import com.base.admin.domain.dto.GeoContentReviewAnnotationUpdateDTO;
 import com.base.admin.domain.dto.GeoContentReviewDecideDTO;
 import com.base.admin.domain.dto.GeoContentReviewQueryDTO;
 import com.base.admin.domain.dto.GeoContentSubmitReviewDTO;
@@ -627,6 +628,43 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         row.setAuthorUserId(uid);
         row.setAuthorName(displayName(uid));
         annotationMapper.insert(row);
+        return toAnnotationVo(row);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public GeoContentReviewAnnotationVO updateAnnotation(GeoContentReviewAnnotationUpdateDTO dto) {
+        Long uid = requireUserId();
+        if (dto.getId() == null) {
+            throw new BusinessException("批注ID不能为空");
+        }
+        GeoContentReviewAnnotation row = annotationMapper.selectById(dto.getId());
+        if (row == null) {
+            throw new BusinessException("批注不存在");
+        }
+        if (!Objects.equals(row.getAuthorUserId(), uid)) {
+            throw new BusinessException("只能修改自己的批注");
+        }
+        GeoContentReview review = reviewMapper.selectById(row.getReviewId());
+        if (review == null || !"pending".equals(review.getStatus())) {
+            throw new BusinessException("该轮审核已结束，不能修改批注");
+        }
+        GeoContentReviewer mine = reviewerMapper.selectOne(new LambdaQueryWrapper<GeoContentReviewer>()
+                .eq(GeoContentReviewer::getReviewId, review.getId())
+                .eq(GeoContentReviewer::getUserId, uid)
+                .last("LIMIT 1"));
+        if (mine == null || !"pending".equals(mine.getResult())) {
+            throw new BusinessException("审核意见已提交，不能修改批注");
+        }
+        String comment = dto.getCommentText() == null ? "" : dto.getCommentText().trim();
+        if (!StringUtils.hasText(comment)) {
+            throw new BusinessException("请填写批注内容");
+        }
+        if (comment.length() > 2000) {
+            throw new BusinessException("批注不能超过 2000 字");
+        }
+        row.setCommentText(comment);
+        annotationMapper.updateById(row);
         return toAnnotationVo(row);
     }
 

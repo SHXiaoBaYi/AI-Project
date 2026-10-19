@@ -31,6 +31,7 @@ import {
 } from '@/api/task';
 import { getPendingGeoReviewsApi } from '@/api/geo';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { warmLakexAssetsOnIdle } from '@/components/lakex/loadLakexAssets';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
 import { DATE_TIME_MINUTE_FORMAT, formatDateTimeMinute, toDateTimeParam } from '@/utils/datetime';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
@@ -126,6 +127,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   };
 
   useEffect(() => {
+    warmLakexAssetsOnIdle();
     void getTaskUserOptionsApi().then((list) => setOwners(list ?? []));
     void getTaskTypeOptionsApi().then((list) => {
       const opts = (list ?? []).map((t) => ({ label: t.typeName, value: t.typeName }));
