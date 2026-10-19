@@ -31,7 +31,6 @@ import {
 } from '@/api/task';
 import { getPendingGeoReviewsApi } from '@/api/geo';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
-import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { TASK_MINE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from '@/constants/task';
 import { DATE_TIME_MINUTE_FORMAT, formatDateTimeMinute, toDateTimeParam } from '@/utils/datetime';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
@@ -99,8 +98,6 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   const [typeOptions, setTypeOptions] = useState<{ label: string; value: string }[]>([]);
   const [writeOpen, setWriteOpen] = useState(false);
   const [writePlacementId, setWritePlacementId] = useState<number | null>(null);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewPlacementId, setReviewPlacementId] = useState<number | null>(null);
   const [reviewId, setReviewId] = useState<number | null>(null);
   const defaultType = typeOptions[0]?.value || '日常';
 
@@ -119,9 +116,10 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
         actionRef.current?.reload();
         return;
       }
-      setReviewPlacementId(placementId);
+      // 打开撰写/审核抽屉：在原文上直接划词审核
+      setWritePlacementId(placementId);
       setReviewId(record.bizId);
-      setReviewOpen(true);
+      setWriteOpen(true);
     } catch (e) {
       message.error(e instanceof Error ? e.message : '加载待审失败');
     }
@@ -531,6 +529,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
                       message.warning('该撰写任务未关联内容投放');
                       return;
                     }
+                    setReviewId(null);
                     setWritePlacementId(record.bizId);
                     setWriteOpen(true);
                     return;
@@ -1158,22 +1157,11 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       <GeoContentWriteDrawer
         open={writeOpen}
         placementId={writePlacementId}
-        mode='write'
+        mode={reviewId != null ? 'review' : 'write'}
+        reviewId={reviewId}
         onClose={() => {
           setWriteOpen(false);
           setWritePlacementId(null);
-          actionRef.current?.reload();
-        }}
-      />
-
-      <GeoContentReviewCompareDrawer
-        open={reviewOpen}
-        placementId={reviewPlacementId}
-        focusReviewId={reviewId}
-        reviewId={reviewId}
-        onClose={() => {
-          setReviewOpen(false);
-          setReviewPlacementId(null);
           setReviewId(null);
           actionRef.current?.reload();
         }}

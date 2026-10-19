@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Drawer, Input, Modal, Segmented, Space, Spin, Tag, message } from 'antd';
 import { LakexEditorHost } from '@/components/lakex/LakexEditorHost';
 import {
-  AnnotatedOriginalWithMarkers,
   GeoReviewAnnotationReadonly,
   ReviewAnnotationList,
+  SelectableReviewBody,
 } from '@/components/geo/content-placement/GeoReviewAnnotations';
 import {
   addGeoContentReviewAnnotationApi,
@@ -231,7 +231,6 @@ function SidePreview({
 }) {
   const meta = round.status ? STATUS_META[round.status] || { text: round.status, color: 'default' } : null;
   const annotations = showAnnotations ? (round.annotations ?? []) : [];
-  const useMarkedOriginal = annotations.length > 0 && !!(round.contentBody || '').trim();
   return (
     <div className='flex h-full min-h-0 flex-col'>
       <div className='shrink-0 border-b border-neutral-100 px-3 py-2'>
@@ -261,13 +260,6 @@ function SidePreview({
       <div className='min-h-0 flex-1 overflow-hidden'>
         {!round.hasSnapshot && !(round.contentBody || '').trim() ? (
           <div className='p-4 text-sm text-amber-700'>该轮没有文章快照，无法对照当时正文（重新提审后会保存）</div>
-        ) : useMarkedOriginal ? (
-          <AnnotatedOriginalWithMarkers
-            contentBody={round.contentBody || ''}
-            annotations={annotations}
-            fill
-            hint='高亮处为批注原文，点数字查看具体意见'
-          />
         ) : (
           <LakexEditorHost
             key={`${versionKeyOf(round)}-${round.contentVersion ?? 0}-preview`}
@@ -658,11 +650,10 @@ export function GeoContentReviewCompareDrawer({
                     </div>
                     <div className='min-h-0 flex-1'>
                       {focusRound.hasSnapshot || focusRound.contentBody || data.currentDraft?.contentBody ? (
-                        <AnnotatedOriginalWithMarkers
+                        <SelectableReviewBody
+                          contentKey={`review-${focusRound.reviewId}-${focusRound.contentVersion ?? 0}`}
                           contentBody={focusRound.contentBody || data.currentDraft?.contentBody || ''}
-                          annotations={focusAnnotations}
-                          fill
-                          selectable
+                          enabled
                           onAdd={(d) => {
                             setAnnoDraft(d);
                             setAnnoComment('');
@@ -678,7 +669,7 @@ export function GeoContentReviewCompareDrawer({
                   <aside className='flex min-h-0 flex-col overflow-auto px-3 py-2'>
                     <div className='mb-2 text-xs text-neutral-500'>
                       批注列表{focusAnnotations.length > 0 ? `（${focusAnnotations.length}）` : ''}
-                      。原文内高亮与数字可点开；右侧仅作清单，可删除。
+                      。左侧为撰写排版原文，划选添加；点数字可看批注。
                     </div>
                     <ReviewAnnotationList
                       annotations={focusAnnotations}

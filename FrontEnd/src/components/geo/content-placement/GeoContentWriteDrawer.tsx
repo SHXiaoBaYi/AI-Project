@@ -4,7 +4,9 @@ import { LakexEditorHost, type LakexEditorHostHandle } from '@/components/lakex/
 import {
   addGeoContentArticleOpinionApi,
   addGeoContentPlatformArticleApi,
+  addGeoContentReviewAnnotationApi,
   aiGenerateGeoContentArticleApi,
+  deleteGeoContentReviewAnnotationApi,
   getGeoAiProvidersApi,
   getGeoContentArticleBundleApi,
   getGeoContentReviewCompareApi,
@@ -14,7 +16,11 @@ import {
   saveGeoContentItemDraftApi,
   uploadGeoScreenshotApi,
 } from '@/api/geo';
-import { GeoReviewAnnotationReadonly } from '@/components/geo/content-placement/GeoReviewAnnotations';
+import {
+  GeoReviewAnnotationReadonly,
+  ReviewAnnotationList,
+  SelectableReviewBody,
+} from '@/components/geo/content-placement/GeoReviewAnnotations';
 import { GEO_PLATFORM_TYPE_CONTENT } from '@/constants/geo';
 import type {
   GeoContentArticle,
@@ -77,6 +83,17 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     annotations: GeoContentReviewAnnotation[];
     reviewers: GeoContentReviewRound['reviewers'];
   } | null>(null);
+  /** 审核进行中：可在原文上划词的批注列表 */
+  const [liveAnnotations, setLiveAnnotations] = useState<GeoContentReviewAnnotation[]>([]);
+  const [annoDraft, setAnnoDraft] = useState<{
+    quoteText: string;
+    quotePrefix: string;
+    quoteSuffix: string;
+    startOffset: number | null;
+    endOffset: number | null;
+  } | null>(null);
+  const [annoComment, setAnnoComment] = useState('');
+  const [annoSaving, setAnnoSaving] = useState(false);
   const versionRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   const bodyRef = useRef('');
@@ -95,10 +112,13 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     [active, bundle],
   );
   const usingShared = active === 'shared' || article?.contentMode !== 'custom';
+  const reviewingLive = mode === 'review' && reviewId != null;
   const readOnly =
     mode === 'review' ||
     (active !== 'shared' && article != null && !article.editable && article.contentMode === 'custom');
   const sharedEditable = mode === 'write' && (active === 'shared' || article?.contentMode !== 'custom');
+  /** 审核划词优先用提审快照，否则用当前打开的正文 */
+  const annotateBody = (reviewHints?.contentBody || body || '').trim();
 
   const clearTimer = () => {
     if (timerRef.current != null) {
@@ -154,6 +174,9 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     if (!open || placementId == null) return;
     setOpinion('');
     setReviewHints(null);
+    setLiveAnnotations([]);
+    setAnnoDraft(null);
+    setAnnoComment('');
     void load(placementId, 'shared');
     if (mode === 'write') {
       void getGeoPlatformOptionsApi(GEO_PLATFORM_TYPE_CONTENT)
@@ -173,17 +196,30 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
           null;
         if (!focus) {
           setReviewHints(null);
+          setLiveAnnotations([]);
           return;
         }
         const stage = focus.stageNo === 2 ? '二审' : focus.stageNo === 1 ? '一审' : '';
+        const annos = focus.annotations ?? [];
         setReviewHints({
           roundLabel: `${stage ? `${stage}·` : ''}第${focus.roundNo ?? '-'}轮`,
           contentBody: focus.contentBody || res.currentDraft?.contentBody || '',
-          annotations: focus.annotations ?? [],
+          annotations: annos,
           reviewers: focus.reviewers ?? [],
         });
+        if (reviewId != null && focus.reviewId === reviewId) {
+          setLiveAnnotations(annos);
+        } else if (reviewId != null) {
+          const mine = rounds.find((r) => r.reviewId === reviewId);
+          setLiveAnnotations(mine?.annotations ?? []);
+        } else {
+          setLiveAnnotations([]);
+        }
       })
-      .catch(() => setReviewHints(null));
+      .catch(() => {
+        setReviewHints(null);
+        setLiveAnnotations([]);
+      });
     return () => clearTimer();
   }, [open, placementId, mode, load, reviewId]);
 
@@ -487,8 +523,8 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 loading={acting}
                 onClick={() => {
                   void (async () => {
-                    if (!opinion.trim()) {
-                      message.warning('退回修改时请填写意见');
+                    if (!opinion.trim() && liveAnnotations.length === 0) {
+                      message.warning('退回修改时请填写意见，或先在原文划词批注');
                       return;
                     }
                     setActing(true);
@@ -496,7 +532,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                       await decideGeoContentReviewApi({
                         reviewId,
                         action: 'reject',
-                        comment: opinion.trim(),
+                        comment: opinion.trim() || undefined,
                       });
                       message.success('已退回');
                       onClose();
@@ -630,6 +666,14 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                   保存后在「我的撰写记录」发起一审/二审（串行，每阶段 1 人）
                 </span>
               ) : null}
+              {reviewingLive ? (
+                <Tag
+                  color='gold'
+                  className='mr-0'
+                >
+                  原文划词{liveAnnotations.length > 0 ? ` · ${liveAnnotations.length}` : ''}
+                </Tag>
+              ) : null}
             </div>
             <div className='border-b border-neutral-100 px-4 py-2'>
               <Input
@@ -644,31 +688,74 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 }}
               />
             </div>
-            <div className='relative min-h-0 flex-1'>
-              {!editorReady && (
-                <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70'>
-                  <Spin tip='加载编辑器…' />
+            {reviewingLive ? (
+              <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_240px]'>
+                <div className='min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
+                  {annotateBody ? (
+                    <SelectableReviewBody
+                      contentKey={`review-${reviewId}-${annotateBody.length}`}
+                      contentBody={annotateBody}
+                      enabled
+                      onAdd={(d) => {
+                        setAnnoDraft(d);
+                        setAnnoComment('');
+                      }}
+                    />
+                  ) : (
+                    <div className='p-4 text-sm text-amber-700'>暂无原文快照，无法划词（请确认已提审并保存正文）</div>
+                  )}
                 </div>
-              )}
-              <LakexEditorHost
-                ref={editorHostRef}
-                key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}-${editorEpoch}`}
-                value={body}
-                readOnly={readOnly && !sharedEditable}
-                onChange={(lake) => {
-                  setBody(lake);
-                  bodyRef.current = lake;
-                  scheduleSave();
-                }}
-                onReady={() => setEditorReady(true)}
-                onError={(err) => message.error(err.message)}
-                uploadImage={async (file) => {
-                  const res = await uploadGeoScreenshotApi(file);
-                  return res.url;
-                }}
-              />
-            </div>
-            {reviewHints &&
+                <aside className='flex min-h-0 flex-col overflow-auto px-3 py-2'>
+                  <div className='mb-2 text-xs text-neutral-500'>
+                    批注列表{liveAnnotations.length > 0 ? `（${liveAnnotations.length}）` : ''}
+                    ；原文保持撰写排版，划选后添加批注
+                  </div>
+                  <ReviewAnnotationList
+                    annotations={liveAnnotations}
+                    editableReviewId={reviewId}
+                    onDelete={(id) => {
+                      void (async () => {
+                        try {
+                          await deleteGeoContentReviewAnnotationApi(id);
+                          setLiveAnnotations((prev) => prev.filter((a) => a.id !== id));
+                          message.success('已删除');
+                        } catch (e) {
+                          message.error(e instanceof Error ? e.message : '删除失败');
+                        }
+                      })();
+                    }}
+                    variant='panel'
+                  />
+                </aside>
+              </div>
+            ) : (
+              <div className='relative min-h-0 flex-1'>
+                {!editorReady && (
+                  <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70'>
+                    <Spin tip='加载编辑器…' />
+                  </div>
+                )}
+                <LakexEditorHost
+                  ref={editorHostRef}
+                  key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}-${editorEpoch}`}
+                  value={body}
+                  readOnly={readOnly && !sharedEditable}
+                  onChange={(lake) => {
+                    setBody(lake);
+                    bodyRef.current = lake;
+                    scheduleSave();
+                  }}
+                  onReady={() => setEditorReady(true)}
+                  onError={(err) => message.error(err.message)}
+                  uploadImage={async (file) => {
+                    const res = await uploadGeoScreenshotApi(file);
+                    return res.url;
+                  }}
+                />
+              </div>
+            )}
+            {!reviewingLive &&
+            reviewHints &&
             ((reviewHints.annotations?.length ?? 0) > 0 ||
               (reviewHints.reviewers ?? []).some((r) => r.comment?.trim())) ? (
               <div className='max-h-56 overflow-auto border-t border-amber-100 bg-amber-50/40 px-4 py-2'>
@@ -698,14 +785,16 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 ) : null}
               </div>
             ) : null}
-            {mode === 'review' && reviewId != null ? (
+            {reviewingLive ? (
               <div className='border-t border-neutral-100 px-4 py-2'>
-                <div className='mb-1 text-xs font-medium text-neutral-500'>
-                  总意见（退回时必填；划词批注请到「文章对照 / 划词审核」）
+                <div className='mb-1 text-xs text-neutral-500'>
+                  总意见
+                  {opinion.trim() || liveAnnotations.length > 0 ? '' : '（退回时必填；或先在原文划词批注）'}
+                  {liveAnnotations.length > 0 ? ` · 已批注 ${liveAnnotations.length} 处` : ''}
                 </div>
                 <Input.TextArea
                   rows={2}
-                  placeholder='填写审核意见'
+                  placeholder='可写总意见；退回时也可只靠划词批注'
                   value={opinion}
                   onChange={(e) => setOpinion(e.target.value)}
                 />
@@ -767,6 +856,67 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
           </section>
         </div>
       )}
+      <Modal
+        title='添加划词批注'
+        open={annoDraft != null}
+        confirmLoading={annoSaving}
+        onCancel={() => {
+          setAnnoDraft(null);
+          setAnnoComment('');
+        }}
+        onOk={() => {
+          void (async () => {
+            if (reviewId == null || !annoDraft) return;
+            const text = annoComment.trim();
+            if (!text) {
+              message.warning('请填写批注内容');
+              return;
+            }
+            setAnnoSaving(true);
+            try {
+              const created = await addGeoContentReviewAnnotationApi({
+                reviewId,
+                quoteText: annoDraft.quoteText,
+                commentText: text,
+                quotePrefix: annoDraft.quotePrefix,
+                quoteSuffix: annoDraft.quoteSuffix,
+                startOffset: annoDraft.startOffset,
+                endOffset: annoDraft.endOffset,
+              });
+              setLiveAnnotations((prev) => [...prev, created]);
+              setAnnoDraft(null);
+              setAnnoComment('');
+              message.success('已添加划词批注');
+            } catch (e) {
+              message.error(e instanceof Error ? e.message : '添加批注失败');
+            } finally {
+              setAnnoSaving(false);
+            }
+          })();
+        }}
+        okText='保存批注'
+        destroyOnHidden
+      >
+        {annoDraft ? (
+          <Space
+            direction='vertical'
+            className='w-full'
+            size={12}
+          >
+            <blockquote className='mb-0 border-l-2 border-amber-300 bg-amber-50/60 px-3 py-2 text-sm text-neutral-700'>
+              「{annoDraft.quoteText}」
+            </blockquote>
+            <Input.TextArea
+              rows={3}
+              value={annoComment}
+              placeholder='说明这里要怎么改'
+              onChange={(e) => setAnnoComment(e.target.value)}
+              maxLength={2000}
+              showCount
+            />
+          </Space>
+        ) : null}
+      </Modal>
       <Modal
         title='AI 生成文章'
         open={aiOpen}
