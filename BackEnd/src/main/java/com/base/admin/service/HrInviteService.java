@@ -70,12 +70,12 @@ public class HrInviteService {
             finalizeInviteWithoutCalendar(inviteIds, dto);
             result = saveResult(last, null);
         } else {
-            java.util.List<String> unbound = attachSessionCalendars(inviteIds, dto, duration);
-            boolean calendarOk = unbound.size() < ids.size();
+            CalendarAttachResult attached = attachSessionCalendars(inviteIds, dto, duration);
+            boolean calendarOk = attached.unbound().size() < ids.size();
             if (calendarOk && last != null && shouldSendDingTalkWorkNotice(dto)) {
                 notifyRoundCc(last, dto);
             }
-            result = saveResult(last, unboundMessage(unbound));
+            result = saveResult(last, joinWarning(unboundMessage(attached.unbound()), attached.grantWarning()));
         }
         // 电话约面产生的「面试提醒」：候选人一旦有邀约记录即自动完成
         if (!inviteIds.isEmpty() && dto.getApplicationId() != null) {
@@ -110,8 +110,8 @@ public class HrInviteService {
             finalizeInviteWithoutCalendar(List.of(inviteId), dto);
             return new InviteWrite(inviteId, null);
         }
-        java.util.List<String> unbound = attachSessionCalendars(List.of(inviteId), dto, duration);
-        return new InviteWrite(inviteId, unbound.isEmpty() ? null : unbound.getFirst());
+        CalendarAttachResult attached = attachSessionCalendars(List.of(inviteId), dto, duration);
+        return new InviteWrite(inviteId, attached.unbound().isEmpty() ? null : attached.unbound().getFirst());
     }
 
     /** 不调钉钉：标记未建日程，并写入轮次/阶段。 */
@@ -320,12 +320,12 @@ public class HrInviteService {
             finalizeInviteWithoutCalendar(keepInviteIds, dto);
             warning = null;
         } else {
-            java.util.List<String> unbound = attachSessionCalendars(keepInviteIds, dto, duration);
-            boolean calendarOk = unbound.size() < desired.size();
+            CalendarAttachResult attached = attachSessionCalendars(keepInviteIds, dto, duration);
+            boolean calendarOk = attached.unbound().size() < desired.size();
             if (calendarOk && !keepInviteIds.isEmpty()) {
                 notifyRoundCc(keepInviteIds.getFirst(), dto);
             }
-            warning = unboundMessage(unbound);
+            warning = joinWarning(unboundMessage(attached.unbound()), attached.grantWarning());
         }
         if (!cancelMisses.isEmpty()) {
             warning = joinWarning(String.join("；", cancelMisses), warning);
@@ -453,12 +453,12 @@ public class HrInviteService {
         }
         HrInviteCreateDTO dto = copyInvite(invite, interviewerUserId);
         int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
-        java.util.List<String> unbound = attachSessionCalendars(sessionIds, dto, duration);
+        CalendarAttachResult attached = attachSessionCalendars(sessionIds, dto, duration);
         String status = jdbc.query("SELECT status FROM hr_interview_invite WHERE id = ?",
                 rs -> rs.next() ? rs.getString(1) : null, id);
         if (!"SUCCESS".equals(status)) {
-            if (!unbound.isEmpty()) {
-                throw new BusinessException("面试官" + unbound.getFirst() + "没有绑定钉钉，不能创建钉钉日程，请联系行政绑定");
+            if (!attached.unbound().isEmpty()) {
+                throw new BusinessException("面试官" + attached.unbound().getFirst() + "没有绑定钉钉，不能创建钉钉日程，请联系行政绑定");
             }
             String reason = jdbc.query("SELECT fail_reason FROM hr_interview_invite WHERE id = ?",
                     rs -> rs.next() ? rs.getString(1) : null, id);
@@ -867,10 +867,16 @@ public class HrInviteService {
         return dto == null || !Boolean.FALSE.equals(dto.getSendDingTalkWorkNotice());
     }
 
-    private java.util.List<String> attachSessionCalendars(java.util.List<Long> inviteIds, HrInviteCreateDTO dto, int duration) {
+    private record CalendarAttachResult(java.util.List<String> unbound, String grantWarning) {
+        static CalendarAttachResult empty() {
+            return new CalendarAttachResult(List.of(), null);
+        }
+    }
+
+    private CalendarAttachResult attachSessionCalendars(java.util.List<Long> inviteIds, HrInviteCreateDTO dto, int duration) {
         java.util.List<String> unbound = new ArrayList<>();
         if (inviteIds == null || inviteIds.isEmpty()) {
-            return unbound;
+            return CalendarAttachResult.empty();
         }
         Map<String, Object> basePerson = loadInvitePerson(null, dto.getApplicationId());
         if (basePerson == null) {
@@ -931,7 +937,7 @@ public class HrInviteService {
             }
         }
         if (boundInviteIds.isEmpty()) {
-            return unbound;
+            return new CalendarAttachResult(unbound, null);
         }
 
         Long organizerUserId = SecurityUtils.getCurrentUserId();
@@ -952,7 +958,8 @@ public class HrInviteService {
                             "{\"spaceId\":\"" + driveFile.spaceId() + "\",\"fileId\":\"" + driveFile.fileId() + "\"}"),
                     organizerUserId, driveFile.fileId(),
                     Map.of("spaceId", driveFile.spaceId(), "fileId", driveFile.fileId(),
-                            "fileName", blank(driveFile.fileName()), "unionId", blank(ownerUnionId)));
+                            "fileName", blank(driveFile.fileName()), "unionId", blank(ownerUnionId),
+                            "appSpace", String.valueOf(driveFile.appSpace())));
         } catch (BusinessException ex) {
             for (Long inviteId : boundInviteIds) {
                 jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
@@ -980,7 +987,27 @@ public class HrInviteService {
                 viewerStaffIds.add(staffId);
             }
         }
-        dingTalk.grantDriveFileViewer(ownerUnionId, driveFile, viewerStaffIds);
+        String grantWarning = null;
+        if (viewerStaffIds.isEmpty()) {
+            grantWarning = "未解析到面试官/抄送人的钉钉 userid，日程简历可能无法打开";
+        }
+        boolean granted = dingTalk.grantDriveFileViewer(ownerUnionId, driveFile, viewerStaffIds);
+        if (!granted) {
+            grantWarning = driveFile.appSpace()
+                    ? "钉盘简历授权失败或仅为 APP 临时空间（最长 1 小时）；面试官打开日程简历可能无权限，请配置企业盘或重新发起邀约"
+                    : "钉盘简历授权失败，面试官打开日程简历可能提示无权限";
+        }
+        writeLog(logInviteId, "GRANT_DRIVE",
+                granted
+                        ? DingTalkCalendarClient.CalendarCall.ok(driveFile.fileId(),
+                        "{\"granted\":true,\"appSpace\":" + driveFile.appSpace()
+                                + ",\"viewers\":" + viewerStaffIds.size() + "}")
+                        : DingTalkCalendarClient.CalendarCall.fail(grantWarning),
+                organizerUserId, driveFile.fileId(),
+                Map.of("spaceId", blank(driveFile.spaceId()), "fileId", blank(driveFile.fileId()),
+                        "appSpace", String.valueOf(driveFile.appSpace()),
+                        "viewers", String.valueOf(viewerStaffIds.size()),
+                        "granted", String.valueOf(granted)));
 
         String cardTitle = StringUtils.hasText(driveFile.fileName()) ? driveFile.fileName() : resume.fileName();
         if (!StringUtils.hasText(cardTitle)) {
@@ -1003,7 +1030,7 @@ public class HrInviteService {
                 jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
                         cut(call.message()), inviteId);
             }
-            return unbound;
+            return new CalendarAttachResult(unbound, grantWarning);
         }
         for (Long inviteId : boundInviteIds) {
             jdbc.update("""
@@ -1024,7 +1051,7 @@ public class HrInviteService {
                 }
             }
         }
-        return unbound;
+        return new CalendarAttachResult(unbound, grantWarning);
     }
 
     /** 建日程前强制拿到可上传钉盘的简历本地/临时文件 */
@@ -1121,8 +1148,8 @@ public class HrInviteService {
     }
 
     private String attachCalendar(Long inviteId, HrInviteCreateDTO dto, int duration) {
-        java.util.List<String> unbound = attachSessionCalendars(List.of(inviteId), dto, duration);
-        return unbound.isEmpty() ? null : unbound.getFirst();
+        CalendarAttachResult attached = attachSessionCalendars(List.of(inviteId), dto, duration);
+        return attached.unbound().isEmpty() ? null : attached.unbound().getFirst();
     }
 
     /** @return 工作通知是否发送成功（钉盘链接已写入时视为简历已送达） */
