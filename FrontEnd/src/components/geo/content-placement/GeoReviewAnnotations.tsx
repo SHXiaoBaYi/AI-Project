@@ -87,6 +87,8 @@ function AnnotationTipContent({
     }
   };
 
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   const remove = async () => {
     setSaving(true);
     try {
@@ -98,6 +100,7 @@ function AnnotationTipContent({
       message.error(e instanceof Error ? e.message : '删除失败');
     } finally {
       setSaving(false);
+      setConfirmDelete(false);
     }
   };
 
@@ -108,9 +111,6 @@ function AnnotationTipContent({
         <span>{annotation.authorName || '审核人'}</span>
         {annotation.createTime ? <span>{annotation.createTime}</span> : null}
       </div>
-      <blockquote className='mb-0 border-l-2 border-amber-300 bg-amber-50/50 px-2 py-1 text-neutral-600'>
-        「{annotation.quoteText}」
-      </blockquote>
       {editing ? (
         <Input.TextArea
           rows={3}
@@ -146,6 +146,26 @@ function AnnotationTipContent({
                 取消
               </Button>
             </>
+          ) : confirmDelete ? (
+            <>
+              <span className='mr-1 text-xs text-red-500'>确认删除？</span>
+              <Button
+                type='primary'
+                danger
+                size='small'
+                loading={saving}
+                onClick={() => void remove()}
+              >
+                确认
+              </Button>
+              <Button
+                size='small'
+                disabled={saving}
+                onClick={() => setConfirmDelete(false)}
+              >
+                取消
+              </Button>
+            </>
           ) : (
             <>
               <Button
@@ -156,20 +176,15 @@ function AnnotationTipContent({
               >
                 修改
               </Button>
-              <Popconfirm
-                title='删除这条批注？'
-                onConfirm={() => void remove()}
+              <Button
+                type='link'
+                size='small'
+                danger
+                className='h-auto px-0'
+                onClick={() => setConfirmDelete(true)}
               >
-                <Button
-                  type='link'
-                  size='small'
-                  danger
-                  className='h-auto px-0'
-                  loading={saving}
-                >
-                  删除
-                </Button>
-              </Popconfirm>
+                删除
+              </Button>
             </>
           )}
         </div>
@@ -514,7 +529,7 @@ function collectDomPlain(root: HTMLElement): string {
   return plain;
 }
 
-/** 将选区映射到 collectDomPlain 偏移 */
+/** 将选区映射到 collectDomPlain 偏移（支持起止在元素节点上的跨行选区） */
 function offsetsFromRange(root: HTMLElement, range: Range): { start: number; end: number } | null {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let pos = 0;
@@ -527,10 +542,27 @@ function offsetsFromRange(root: HTMLElement, range: Range): { start: number; end
       continue;
     }
     const len = node.data.length;
-    if (range.startContainer === node) start = pos + Math.min(range.startOffset, len);
-    if (range.endContainer === node) {
-      end = pos + Math.min(range.endOffset, len);
-      break;
+    const nodeRange = document.createRange();
+    nodeRange.selectNodeContents(node);
+    // 与选区无交集则跳过
+    const startsAfterNode = range.compareBoundaryPoints(Range.START_TO_END, nodeRange) >= 0;
+    const endsBeforeNode = range.compareBoundaryPoints(Range.END_TO_START, nodeRange) <= 0;
+    if (!startsAfterNode && !endsBeforeNode) {
+      let localStart = 0;
+      let localEnd = len;
+      if (range.startContainer === node) {
+        localStart = Math.min(range.startOffset, len);
+      } else if (range.compareBoundaryPoints(Range.START_TO_START, nodeRange) > 0) {
+        // 起点在本节点之后：不应相交
+        localStart = len;
+      }
+      if (range.endContainer === node) {
+        localEnd = Math.min(range.endOffset, len);
+      } else if (range.compareBoundaryPoints(Range.END_TO_END, nodeRange) < 0) {
+        localEnd = 0;
+      }
+      if (start < 0) start = pos + localStart;
+      end = pos + localEnd;
     }
     pos += len;
     node = walker.nextNode() as Text | null;
@@ -579,7 +611,7 @@ function captureSelectionIn(root: HTMLElement | null): SelectionDraft | null {
   };
 }
 
-/** 在 DOM plain 中定位引用（支持空白差异；优先用存储的偏移） */
+/** 在 DOM plain 中定位引用（支持跨行空白差异；优先用存储的偏移） */
 function findQuoteOffsets(
   plain: string,
   quote: string,
@@ -603,6 +635,14 @@ function findQuoteOffsets(
     if (normalizePlain(slice) === normalizePlain(q) && !overlaps(preferStart, preferEnd)) {
       return { start: preferStart, end: preferEnd };
     }
+    // 偏移附近容错：前后各扩 80 字再搜
+    const pad = 80;
+    const from = Math.max(0, preferStart - pad);
+    const to = Math.min(plain.length, preferEnd + pad);
+    const windowHit = findQuoteOffsets(plain.slice(from, to), q, null, null, []);
+    if (windowHit && !overlaps(from + windowHit.start, from + windowHit.end)) {
+      return { start: from + windowHit.start, end: from + windowHit.end };
+    }
   }
 
   const exact = plain.indexOf(q);
@@ -610,7 +650,13 @@ function findQuoteOffsets(
     return { start: exact, end: exact + q.length };
   }
 
-  const re = new RegExp(q.split(/\s+/).filter(Boolean).map(escapeRegExp).join('\\s+'));
+  // 跨行：空白任意；中文之间也可能只有换行无空格 → 字符间允许 \s*
+  const parts = q.split(/\s+/).filter(Boolean).map(escapeRegExp);
+  if (parts.length === 0) return null;
+  const re =
+    parts.length === 1
+      ? new RegExp(parts[0])
+      : new RegExp(parts.join('\\s+'));
   let from = 0;
   while (from < plain.length) {
     const slice = plain.slice(from);
@@ -620,6 +666,26 @@ function findQuoteOffsets(
     const end = start + m[0].length;
     if (!overlaps(start, end)) return { start, end };
     from = start + 1;
+  }
+
+  // 再退一步：去掉 quote 内所有空白后，在 plain 上去空白映射回原偏移
+  const compactQ = q.replace(/\s+/g, '');
+  if (compactQ.length >= 2) {
+    const map: number[] = [];
+    let compactPlain = '';
+    for (let i = 0; i < plain.length; i++) {
+      if (/\s/.test(plain[i])) continue;
+      map.push(i);
+      compactPlain += plain[i];
+    }
+    const idx = compactPlain.indexOf(compactQ);
+    if (idx >= 0) {
+      const start = map[idx];
+      const endExclusive = map[idx + compactQ.length - 1] + 1;
+      if (start != null && endExclusive > start && !overlaps(start, endExclusive)) {
+        return { start, end: endExclusive };
+      }
+    }
   }
   return null;
 }
@@ -763,30 +829,71 @@ function makeAnnoBadge(no: number, onOpen?: (no: number, anchor: HTMLElement) =>
   return badge;
 }
 
-function applyLakeHighlight(range: Range, no: number, onOpen?: (no: number, anchor: HTMLElement) => void) {
+/** 跨行/跨块：按文本节点分段包 mark，并在末段后插数字（比 surroundContents 稳） */
+function applyLakeHighlight(
+  root: HTMLElement,
+  range: Range,
+  no: number,
+  onOpen?: (no: number, anchor: HTMLElement) => void,
+) {
   const badge = makeAnnoBadge(no, onOpen);
-  try {
-    const mark = document.createElement('mark');
-    mark.dataset.geoAnno = String(no);
-    mark.className = 'geo-lake-anno-mark rounded bg-amber-100 px-0.5 text-amber-950';
-    range.surroundContents(mark);
-    mark.insertAdjacentElement('afterend', badge);
-    return;
-  } catch {
-    /* fall through */
+  const segments: Array<{ node: Text; start: number; end: number }> = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode() as Text | null;
+  while (node) {
+    if (!isAnnoChromeNode(node) && node.data.length > 0) {
+      try {
+        if (range.intersectsNode(node)) {
+          let start = 0;
+          let end = node.data.length;
+          if (range.startContainer === node) start = Math.min(range.startOffset, end);
+          if (range.endContainer === node) end = Math.min(range.endOffset, end);
+          if (start < end) segments.push({ node, start, end });
+        }
+      } catch {
+        /* intersectsNode 在部分游离节点上会抛 */
+      }
+    }
+    node = walker.nextNode() as Text | null;
   }
-  try {
-    const contents = range.extractContents();
-    const mark = document.createElement('mark');
-    mark.dataset.geoAnno = String(no);
-    mark.className = 'geo-lake-anno-mark rounded bg-amber-100 px-0.5 text-amber-950';
-    mark.appendChild(contents);
-    range.insertNode(mark);
-    mark.insertAdjacentElement('afterend', badge);
-  } catch {
+
+  if (segments.length === 0) {
     try {
-      range.collapse(false);
-      range.insertNode(badge);
+      const tip = range.cloneRange();
+      tip.collapse(false);
+      tip.insertNode(badge);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  // 从后往前拆分包装，避免前面改 DOM 影响后面节点引用
+  let lastMark: HTMLElement | null = null;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const seg = segments[i];
+    try {
+      const text = seg.node;
+      const after = text.splitText(seg.end);
+      const mid = text.splitText(seg.start);
+      const mark = document.createElement('mark');
+      mark.dataset.geoAnno = String(no);
+      mark.className = 'geo-lake-anno-mark rounded bg-amber-100 px-0.5 text-amber-950';
+      mid.parentNode?.insertBefore(mark, mid);
+      mark.appendChild(mid);
+      if (i === segments.length - 1) lastMark = mark;
+      void after;
+    } catch {
+      /* 单段失败则继续其它段 */
+    }
+  }
+  if (lastMark) {
+    lastMark.insertAdjacentElement('afterend', badge);
+  } else {
+    try {
+      const tip = range.cloneRange();
+      tip.collapse(false);
+      tip.insertNode(badge);
     } catch {
       /* ignore */
     }
@@ -808,7 +915,20 @@ function paintLakeAnnotations(
     .map((m) => ({ m, range: rangeFromTextOffsets(root, m.start, m.end) }))
     .filter((p): p is { m: AnnoMarker; range: Range } => p.range != null)
     .sort((a, b) => b.m.start - a.m.start || b.m.no - a.m.no);
-  planned.forEach(({ m, range }) => applyLakeHighlight(range, m.no, onOpen));
+  planned.forEach(({ m, range }) => applyLakeHighlight(root, range, m.no, onOpen));
+
+  // 未能定位 Range 的批注：仍在文首附近插数字，避免「有批注无角标」
+  const painted = new Set(planned.map((p) => p.m.no));
+  markers
+    .filter((m) => !painted.has(m.no))
+    .forEach((m) => {
+      const badge = makeAnnoBadge(m.no, onOpen);
+      badge.title = `批注 ${m.no}（未能精确高亮）：「${m.annotation.quoteText}」`;
+      badge.className =
+        'geo-lake-anno-badge mx-0.5 inline-flex h-5 min-w-5 cursor-pointer items-center justify-center rounded-full border border-amber-500 bg-amber-200 px-1 align-super text-[11px] font-semibold text-amber-950';
+      const first = root.querySelector('p, div, h1, h2, h3, li, span') || root;
+      first.insertAdjacentElement('afterbegin', badge);
+    });
 }
 
 function resolvePaintRoot(wrap: HTMLElement | null): HTMLElement | null {
@@ -872,8 +992,14 @@ export function SelectableReviewBody({
     const onDocDown = (e: MouseEvent) => {
       const t = e.target as Node;
       const el = t instanceof Element ? t : t.parentElement;
-      // 点「添加批注」/批注浮层/数字角标时不要清 draft，否则按钮尚未 click 就被卸掉
-      if (el?.closest?.('[data-geo-anno-add], [data-geo-anno-tip], [data-geo-anno-badge]')) return;
+      // 点「添加批注」/批注浮层/数字角标/antd 弹层时不要清，否则删除确认点不中
+      if (
+        el?.closest?.(
+          '[data-geo-anno-add], [data-geo-anno-tip], [data-geo-anno-badge], .ant-popover, .ant-popconfirm, .ant-modal-root, .ant-modal-wrap',
+        )
+      ) {
+        return;
+      }
       if (!rootRef.current?.contains(t)) {
         clearDraft();
         closeTip();
@@ -916,7 +1042,11 @@ export function SelectableReviewBody({
   }
 
   const tipAnno = tip != null ? annotations[tip.no - 1] : null;
-  const tipCanEdit = tipAnno != null && editableReviewId != null && tipAnno.reviewId === editableReviewId;
+  // 本轮审核中可改删：reviewId 缺失时也放开（接口偶发不回带 reviewId）
+  const tipCanEdit =
+    tipAnno != null &&
+    editableReviewId != null &&
+    (tipAnno.reviewId == null || Number(tipAnno.reviewId) === Number(editableReviewId));
 
   return (
     <div
@@ -1036,14 +1166,6 @@ export function SelectableReviewBody({
                   }}
                   onClose={closeTip}
                 />
-                <Button
-                  type='link'
-                  size='small'
-                  className='mt-1 h-auto px-0 text-xs text-neutral-400'
-                  onClick={closeTip}
-                >
-                  关闭
-                </Button>
               </div>,
               document.body,
             )
