@@ -765,9 +765,9 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             sourceUserId,
             ownerUserId: values.ownerUserId,
             assigneeUserIds,
-            // 表单展示到分钟，提交统一补齐秒，避免后端 LocalDateTime 反序列化失败
-            planStartTime: toDateTimeParam(values.planStartTime),
-            planEndTime: toDateTimeParam(values.planEndTime),
+            // 表单展示到分钟，提交统一补齐秒；清空时显式传 null，否则字段被省略、库里旧值清不掉
+            planStartTime: toDateTimeParam(values.planStartTime) ?? null,
+            planEndTime: toDateTimeParam(values.planEndTime) ?? null,
             remark: values.remark,
           };
           if (editing) {

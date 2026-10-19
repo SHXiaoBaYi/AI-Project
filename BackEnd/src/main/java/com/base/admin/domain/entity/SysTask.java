@@ -1,6 +1,8 @@
 package com.base.admin.domain.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.base.admin.common.BaseEntity;
@@ -59,10 +61,12 @@ public class SysTask extends BaseEntity {
 
     @Schema(description = "计划开始")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime planStartTime;
 
-    @Schema(description = "计划截止")
+    @Schema(description = "计划截止（允许清空为 null）")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime planEndTime;
 
     @Schema(description = "实际开始")

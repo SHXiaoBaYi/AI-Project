@@ -32,22 +32,49 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class HrBoardService {
 
+    /**
+     * 招聘漏斗：按候选人 {@code current_stage} 统计<strong>当前存量</strong>（互斥，一人只落一层）。
+     * 日期筛选不作用于漏斗人数（存量是当下快照）；环比/同比也不再按历史触发重算。
+     */
     private static final FunnelStage[] FUNNEL = {
-            new FunnelStage("SCREEN", "HR初筛通过", null),
-            new FunnelStage("INVITE", "邀约成功", "邀约成功率"),
-            new FunnelStage("FIRST", "候选人初试", "初试率"),
-            new FunnelStage("RETEST", "候选人复试", "复试率"),
-            new FunnelStage("FINAL_INT", "候选人终试", "终试率"),
-            new FunnelStage("FINAL_PASS", "终试通过", "终试通过率"),
-            new FunnelStage("SALARY", "薪资沟通中", "薪资沟通进入率"),
-            new FunnelStage("BG_COLLECT", "背调资料收集中", "背调资料收集进入率"),
-            new FunnelStage("BG_CHECK", "背调中", "背调进入率"),
-            new FunnelStage("MEDICAL", "体检中", "体检进入率"),
-            new FunnelStage("OFFER_PENDING", "待发offer", "待发Offer进入率"),
-            new FunnelStage("OFFER", "发放Offer", "Offer发放率"),
-            new FunnelStage("ACCEPT", "Offer接受", "Offer接受率"),
-            new FunnelStage("ONBOARD", "候选人入职", "入职率")
+            new FunnelStage("SCREEN", "HR初筛通过", "相对上一层"),
+            new FunnelStage("INVITE", "邀约成功", "相对上一层"),
+            new FunnelStage("FIRST", "候选人初试", "相对上一层"),
+            new FunnelStage("RETEST", "候选人复试", "相对上一层"),
+            new FunnelStage("FINAL_INT", "候选人终试", "相对上一层"),
+            new FunnelStage("FINAL_PASS", "终试通过", "相对上一层"),
+            new FunnelStage("SALARY", "薪资沟通中", "相对上一层"),
+            new FunnelStage("BG_COLLECT", "背调资料收集中", "相对上一层"),
+            new FunnelStage("BG_CHECK", "背调中", "相对上一层"),
+            new FunnelStage("MEDICAL", "体检中", "相对上一层"),
+            new FunnelStage("OFFER_PENDING", "待发offer", "相对上一层"),
+            new FunnelStage("PENDING_ONBOARD", "待入职", "相对上一层"),
+            new FunnelStage("OFFER", "发放Offer", "相对上一层"),
+            new FunnelStage("ACCEPT", "Offer接受", "相对上一层"),
+            new FunnelStage("ONBOARD", "候选人入职", "相对上一层")
     };
+
+    private static final Set<String> STOCK_SCREEN = Set.of("SCREEN_PASS", "PHONE_PASS");
+    private static final Set<String> STOCK_INVITE = Set.of("INVITED");
+    private static final Set<String> STOCK_FIRST = Set.of(
+            "SHOW_UP", "FIRST_ROUND", "FIRST_PENDING", "R1_DISPUTE");
+    private static final Set<String> STOCK_RETEST = Set.of(
+            "SECOND_ROUND", "R2_PENDING", "R2_DISPUTE",
+            "R3_PASS", "R3_PENDING", "R3_DISPUTE",
+            "R4_PASS", "R4_PENDING", "R4_DISPUTE",
+            "R5_PASS", "R5_PENDING", "R5_DISPUTE");
+    /** 终试进行中：尚无单独 PENDING 码时，暂无独立存量（终试通过后进 FINAL） */
+    private static final Set<String> STOCK_FINAL_INT = Set.of();
+    private static final Set<String> STOCK_FINAL_PASS = Set.of("FINAL");
+    private static final Set<String> STOCK_SALARY = Set.of("SALARY");
+    private static final Set<String> STOCK_BG_COLLECT = Set.of("BG_COLLECT");
+    private static final Set<String> STOCK_BG_CHECK = Set.of("BG_CHECK");
+    private static final Set<String> STOCK_MEDICAL = Set.of("MEDICAL");
+    private static final Set<String> STOCK_OFFER_PENDING = Set.of("OFFER_PENDING");
+    private static final Set<String> STOCK_PENDING_ONBOARD = Set.of("PENDING_ONBOARD");
+    private static final Set<String> STOCK_OFFER = Set.of("OFFER_SENT");
+    private static final Set<String> STOCK_ACCEPT = Set.of("OFFER_ACCEPTED", "ACCEPTED");
+    private static final Set<String> STOCK_ONBOARD = Set.of("ONBOARDED");
 
     /** 待面试存量，不进漏斗转化链，单独出图 */
     private static final FunnelStage[] PENDING_INTERVIEW = {
@@ -150,7 +177,7 @@ public class HrBoardService {
         }
         List<HrBoardVO.DrillRow> rows = new ArrayList<>();
         for (Milestone milestone : loadMilestones(q)) {
-            if (!funnelHit(milestone, index, q.getStartDate(), q.getEndDate())) {
+            if (!funnelHit(milestone, index)) {
                 continue;
             }
             rows.add(toDrill(milestone, FUNNEL[index].name(), funnelReachedDate(milestone, index)));
@@ -1153,11 +1180,7 @@ public class HrBoardService {
     }
 
     private List<HrBoardVO.FunnelNode> buildFunnel(List<Milestone> rows, HrBoardQueryDTO q) {
-        Period previous = shift(q.getStartDate(), q.getEndDate(), false);
-        Period year = shift(q.getStartDate(), q.getEndDate(), true);
-        long[] current = countFunnel(rows, q.getStartDate(), q.getEndDate());
-        long[] mom = countFunnel(rows, previous.start(), previous.end());
-        long[] yoy = countFunnel(rows, year.start(), year.end());
+        long[] current = countFunnel(rows);
         List<HrBoardVO.FunnelNode> nodes = new ArrayList<>();
         for (int i = 0; i < FUNNEL.length; i++) {
             HrBoardVO.FunnelNode node = new HrBoardVO.FunnelNode();
@@ -1168,8 +1191,9 @@ public class HrBoardService {
             if (i > 0 && current[i - 1] > 0) {
                 node.setConversion(current[i] * 1.0 / current[i - 1]);
             }
-            node.setMom(rateDelta(current[i], mom[i]));
-            node.setYoy(rateDelta(current[i], yoy[i]));
+            // 存量是当下快照，无法用日期平移还原历史存量，环比/同比留空
+            node.setMom(null);
+            node.setYoy(null);
             nodes.add(node);
         }
         return nodes;
@@ -1268,11 +1292,11 @@ public class HrBoardService {
         return q;
     }
 
-    private static long[] countFunnel(List<Milestone> rows, LocalDate start, LocalDate end) {
+    private static long[] countFunnel(List<Milestone> rows) {
         long[] counts = new long[FUNNEL.length];
         for (Milestone milestone : rows) {
             for (int i = 0; i < FUNNEL.length; i++) {
-                if (funnelHit(milestone, i, start, end)) {
+                if (funnelHit(milestone, i)) {
                     counts[i]++;
                 }
             }
@@ -1281,52 +1305,52 @@ public class HrBoardService {
     }
 
     /**
-     * 漏斗按「日期范围内该阶段触发」独立计数（非简历提交日队列 + 累计到达）。
-     * <ul>
-     *   <li>HR初筛通过：简历录入日（submitted_at）落在范围内</li>
-     *   <li>邀约成功：邀约发起日落在范围内</li>
-     *   <li>初试/复试/终试：对应轮次实际面试日落在范围内</li>
-     *   <li>终试通过及之后各阶段：首次进入该阶段的事件日落在范围内</li>
-     * </ul>
+     * 漏斗按候选人当前阶段 {@code current_stage} 统计存量（互斥）。
+     * 未通过/放弃等终态不入漏斗；日期筛选不参与判断。
      */
-    private static boolean funnelHit(Milestone m, int index, LocalDate start, LocalDate end) {
-        String stage = m.currentStage == null ? "" : m.currentStage;
+    private static boolean funnelHit(Milestone m, int index) {
+        String stage = m.currentStage == null ? "" : m.currentStage.trim().toUpperCase(Locale.ROOT);
+        if (stage.isEmpty()) {
+            return false;
+        }
         return switch (index) {
-            case 0 -> inWindow(m.submittedAt, start, end);
-            case 1 -> inWindow(toDate(m.inviteAt), start, end);
-            case 2 -> inWindow(toDate(firstNonNull(m.firstDoneAt, m.showAt)), start, end);
-            case 3 -> inWindow(toDate(m.secondDoneAt), start, end);
-            case 4 -> inWindow(toDate(m.finalDoneAt), start, end);
-            case 5 -> inWindow(toDate(m.finalEventAt), start, end);
-            case 6 -> inWindow(toDate(m.salaryAt), start, end);
-            case 7 -> inWindow(toDate(m.bgCollectAt), start, end);
-            case 8 -> inWindow(toDate(m.bgCheckAt), start, end);
-            case 9 -> inWindow(toDate(m.medicalAt), start, end);
-            case 10 -> inWindow(toDate(m.offerPendingAt), start, end);
-            case 11 -> inWindow(toDate(m.offerAt), start, end);
-            case 12 -> inWindow(toDate(m.acceptAt), start, end)
-                    || ("OFFER_ACCEPTED".equals(stage) && inWindow(toDate(m.offerAt), start, end));
-            case 13 -> inWindow(m.onboardDate, start, end);
+            case 0 -> STOCK_SCREEN.contains(stage);
+            case 1 -> STOCK_INVITE.contains(stage);
+            case 2 -> STOCK_FIRST.contains(stage);
+            case 3 -> STOCK_RETEST.contains(stage);
+            case 4 -> STOCK_FINAL_INT.contains(stage);
+            case 5 -> STOCK_FINAL_PASS.contains(stage);
+            case 6 -> STOCK_SALARY.contains(stage);
+            case 7 -> STOCK_BG_COLLECT.contains(stage);
+            case 8 -> STOCK_BG_CHECK.contains(stage);
+            case 9 -> STOCK_MEDICAL.contains(stage);
+            case 10 -> STOCK_OFFER_PENDING.contains(stage);
+            case 11 -> STOCK_PENDING_ONBOARD.contains(stage);
+            case 12 -> STOCK_OFFER.contains(stage);
+            case 13 -> STOCK_ACCEPT.contains(stage);
+            case 14 -> STOCK_ONBOARD.contains(stage);
             default -> false;
         };
     }
 
+    /** 下钻展示用：优先该层首次事件日，否则投递日 */
     private static LocalDate funnelReachedDate(Milestone milestone, int index) {
         return switch (index) {
-            case 0 -> milestone.submittedAt;
-            case 1 -> toDate(milestone.inviteAt);
-            case 2 -> toDate(firstNonNull(milestone.firstDoneAt, milestone.showAt));
-            case 3 -> toDate(milestone.secondDoneAt);
-            case 4 -> toDate(milestone.finalDoneAt);
-            case 5 -> toDate(milestone.finalEventAt);
-            case 6 -> toDate(milestone.salaryAt);
-            case 7 -> toDate(milestone.bgCollectAt);
-            case 8 -> toDate(milestone.bgCheckAt);
-            case 9 -> toDate(milestone.medicalAt);
-            case 10 -> toDate(milestone.offerPendingAt);
-            case 11 -> toDate(milestone.offerAt);
-            case 12 -> firstNonNullDate(toDate(milestone.acceptAt), toDate(milestone.offerAt));
-            case 13 -> milestone.onboardDate;
+            case 0 -> firstNonNullDate(toDate(milestone.screenAt), milestone.submittedAt);
+            case 1 -> firstNonNullDate(toDate(milestone.inviteAt), milestone.submittedAt);
+            case 2 -> firstNonNullDate(toDate(firstNonNull(milestone.firstDoneAt, milestone.showAt)), milestone.submittedAt);
+            case 3 -> firstNonNullDate(toDate(milestone.secondDoneAt), milestone.submittedAt);
+            case 4 -> firstNonNullDate(toDate(milestone.finalDoneAt), milestone.submittedAt);
+            case 5 -> firstNonNullDate(toDate(milestone.finalEventAt), milestone.submittedAt);
+            case 6 -> firstNonNullDate(toDate(milestone.salaryAt), milestone.submittedAt);
+            case 7 -> firstNonNullDate(toDate(milestone.bgCollectAt), milestone.submittedAt);
+            case 8 -> firstNonNullDate(toDate(milestone.bgCheckAt), milestone.submittedAt);
+            case 9 -> firstNonNullDate(toDate(milestone.medicalAt), milestone.submittedAt);
+            case 10 -> firstNonNullDate(toDate(milestone.offerPendingAt), milestone.submittedAt);
+            case 11 -> milestone.submittedAt;
+            case 12 -> firstNonNullDate(toDate(milestone.offerAt), milestone.submittedAt);
+            case 13 -> firstNonNullDate(toDate(milestone.acceptAt), toDate(milestone.offerAt), milestone.submittedAt);
+            case 14 -> firstNonNullDate(milestone.onboardDate, milestone.submittedAt);
             default -> milestone.submittedAt;
         };
     }

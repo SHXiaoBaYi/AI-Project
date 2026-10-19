@@ -61,8 +61,9 @@ export type SysTaskDTO = {
   sourceUserId?: number;
   ownerUserId: number;
   assigneeUserIds: number[];
-  planStartTime?: string;
-  planEndTime?: string;
+  /** 清空时传 null，勿省略字段，否则库里旧值清不掉 */
+  planStartTime?: string | null;
+  planEndTime?: string | null;
   bizType?: string;
   bizId?: number;
   bizTitle?: string;

@@ -121,7 +121,7 @@ public class HrBoardController {
     @RequiresPermission("hr:board:view")
     public Result<List<Map<String, String>>> metrics() {
         return Result.ok(List.of(
-                Map.of("name", "招聘漏斗", "formula", "按所选日期范围内各环节触发人数统计（初筛/邀约/面试/Offer/入职等过程节点），不含待面试存量"),
+                Map.of("name", "招聘漏斗", "formula", "按候选人当前阶段统计存量（一人只落一层）；不含待面试存量。日期筛选不作用于漏斗人数"),
                 Map.of("name", "待面试", "formula", "面试记录中结论为待定(PENDING)或未填，且 interviewed_at 落在筛选期内；按候选人去重。待初试=第1轮，待复试=第2轮，待终试=第3轮及以上"),
                 Map.of("name", "环节转化率", "formula", "本环节人数 ÷ 上一环节人数"),
                 Map.of("name", "招聘完成率", "formula", "已到岗人数 ÷ 总需求HC（招聘中+已完成+停止招聘）。冻结HC单独统计"),

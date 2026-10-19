@@ -558,7 +558,7 @@ export default function BoardAnalyticsPanel({ initialOwnerUserId }: BoardAnalyti
       <ChartExportCard
         title='招聘漏斗'
         filename='招聘漏斗'
-        hint='按所选日期范围内各环节触发汇总（非简历队列累计）。点击某一层可下钻明细。转化率 = 本层人数 ÷ 上一层人数。'
+        hint='按候选人当前阶段统计存量（一人只落一层）。点击某一层可下钻明细。相对上一层 = 本层人数 ÷ 上一层人数。日期筛选不作用于漏斗。'
       >
         <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
           {funnelChart.length ? (
@@ -604,7 +604,7 @@ export default function BoardAnalyticsPanel({ initialOwnerUserId }: BoardAnalyti
               { title: '环节', dataIndex: 'stageName' },
               { title: '人数', dataIndex: 'count', width: 72 },
               {
-                title: '转化率',
+                title: '相对上一层',
                 dataIndex: 'conversion',
                 width: 150,
                 render: (value: number | null, record) =>
