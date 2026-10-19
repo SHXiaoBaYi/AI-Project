@@ -14,7 +14,7 @@ const RULES = [
     rule: '必须和招聘需求里的岗位名称完全一致。空岗位、示例岗位、系统里没有的岗位都会导致整次失败',
   },
   { field: '渠道', required: '否', rule: '填渠道名或渠道码，如 BOSS、猎聘、猎头' },
-  { field: '阶段', required: '是', rule: '填阶段名或阶段码，如 已录入、初筛通过' },
+  { field: '阶段', required: '是', rule: '填阶段名或阶段码，如 待初筛、初筛通过（待电话）、二面通过' },
   { field: '提交人', required: '否', rule: '必须是系统用户的姓名或登录账号，不能随便写' },
   { field: '投递日期', required: '是', rule: '格式 yyyy-MM-dd' },
 ];

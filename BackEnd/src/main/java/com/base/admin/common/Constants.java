@@ -104,6 +104,8 @@ public class Constants {
     public static final String TASK_BIZ_GEO_CONTENT_PLACEMENT = "geo_content_placement";
     /** 任务关联业务：GEO文章审核轮次 */
     public static final String TASK_BIZ_GEO_CONTENT_REVIEW = "geo_content_review";
+    /** 任务关联业务：招聘面试提醒（biz_id = hr_application.id） */
+    public static final String TASK_BIZ_HR_INTERVIEW_REMIND = "hr_interview_remind";
     /** 任务类型：文章撰写 */
     public static final String TASK_TYPE_GEO_WRITE = "文章撰写";
     /** 任务类型：审核文章 */
@@ -114,6 +116,8 @@ public class Constants {
     public static final String TASK_TYPE_GEO_ASSIGN_PUBLISHER = "GEO文章待分配发布人";
     /** 任务类型：待分配撰写人 */
     public static final String TASK_TYPE_GEO_ASSIGN_WRITER = "GEO文章待分配撰写人";
+    /** 任务类型：面试提醒（电话约面后催办发起面试邀约） */
+    public static final String TASK_TYPE_HR_INTERVIEW_REMIND = "面试提醒";
     /** 撰写任务：已有正文时的进度 */
     public static final int TASK_PROGRESS_WRITE_DRAFTED = 50;
     /** 撰写任务：一审通过后的进度（二审通过才 100%） */

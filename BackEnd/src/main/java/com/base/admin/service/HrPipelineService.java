@@ -1,5 +1,6 @@
 package com.base.admin.service;
 
+import com.base.admin.common.Constants;
 import com.base.admin.domain.dto.HrPipelineBoardQueryDTO;
 import com.base.admin.domain.dto.HrPipelineOnboardDTO;
 import com.base.admin.domain.dto.HrPipelinePhoneDTO;
@@ -37,16 +38,10 @@ public class HrPipelineService {
             "SALARY", "BG_COLLECT", "BG_CHECK", "MEDICAL", "OFFER_PENDING", "PENDING_ONBOARD",
             "OFFER_SENT", "OFFER_ACCEPTED", "ONBOARDED");
 
-    private static final List<PhaseMeta> PHASES = List.of(
-            new PhaseMeta("SCREEN", "简历筛选"),
-            new PhaseMeta("PHONE", "电话沟通"),
-            new PhaseMeta("INTERVIEW", "面试沟通"),
-            new PhaseMeta("ONBOARD", "待入职")
-    );
-
     private final JdbcTemplate jdbc;
     private final SysTaskService taskService;
     private final HrDataScope dataScope;
+    private final HrStageCatalog stageCatalog;
 
     public HrPipelineBoardVO board(HrPipelineBoardQueryDTO query) {
         if (query == null || query.getRequisitionId() == null) {
@@ -89,10 +84,10 @@ public class HrPipelineService {
 
         List<Map<String, Object>> rows = jdbc.queryForList(boardSql.toString(), boardArgs.toArray());
         Map<String, HrPipelineBoardVO.PhaseColumn> columns = new LinkedHashMap<>();
-        for (PhaseMeta meta : PHASES) {
+        for (HrStageCatalog.PhaseDef meta : stageCatalog.phases()) {
             HrPipelineBoardVO.PhaseColumn col = new HrPipelineBoardVO.PhaseColumn();
             col.setPhase(meta.code());
-            col.setPhaseLabel(meta.label());
+            col.setPhaseLabel(meta.name());
             columns.put(meta.code(), col);
         }
         for (Map<String, Object> row : rows) {
@@ -149,7 +144,7 @@ public class HrPipelineService {
         vo.setStageName(str(row.get("stage_name")));
         String phase = resolvePhase(vo.getCurrentStage(), str(row.get("screen_result")), str(row.get("phone_result")));
         vo.setPhase(phase);
-        vo.setPhaseLabel(phaseLabel(phase));
+        vo.setPhaseLabel(stageCatalog.phaseLabel(phase));
         vo.setScreenResult(str(row.get("screen_result")));
         vo.setScreenRejectReason(str(row.get("screen_reject_reason")));
         vo.setResumeName(str(row.get("file_name")));
@@ -324,9 +319,19 @@ public class HrPipelineService {
         }
         Integer exists = jdbc.queryForObject("""
                 SELECT COUNT(1) FROM sys_task
-                WHERE biz_type = 'hr_interview_remind' AND biz_id = ? AND is_active = 1
-                """, Integer.class, applicationId);
+                WHERE biz_type = ? AND biz_id = ? AND is_active = 1
+                  AND status NOT IN ('已完成', '已取消')
+                """, Integer.class, Constants.TASK_BIZ_HR_INTERVIEW_REMIND, applicationId);
         if (exists != null && exists > 0) {
+            return;
+        }
+        // 已有有效面试邀约则不再建提醒任务
+        Integer invited = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_interview_invite
+                WHERE application_id = ? AND is_active = 1
+                  AND status IN ('SUCCESS', 'NO_CALENDAR')
+                """, Integer.class, applicationId);
+        if (invited != null && invited > 0) {
             return;
         }
         String name = String.valueOf(info.get("display_name"));
@@ -334,7 +339,7 @@ public class HrPipelineService {
         SysTaskDTO task = new SysTaskDTO();
         task.setTitle("【面试提醒】" + name + " - " + job);
         task.setContent("电话沟通已约面，请按时安排面试邀约。约面时间：" + interviewAt);
-        task.setTaskType("面试提醒");
+        task.setTaskType(Constants.TASK_TYPE_HR_INTERVIEW_REMIND);
         task.setPriority(2);
         task.setStatus("未开始");
         task.setProgress(0);
@@ -342,7 +347,7 @@ public class HrPipelineService {
         task.setAssigneeUserIds(owners);
         task.setPlanStartTime(interviewAt.minusHours(1));
         task.setPlanEndTime(interviewAt);
-        task.setBizType("hr_interview_remind");
+        task.setBizType(Constants.TASK_BIZ_HR_INTERVIEW_REMIND);
         task.setBizId(applicationId);
         task.setBizTitle(job);
         task.setRemark("pipelinePhone");
@@ -405,45 +410,20 @@ public class HrPipelineService {
         return card;
     }
 
-    static String resolvePhase(String stage, String screenResult, String phoneResult) {
-        if (stage == null || stage.isBlank() || "ENTERED".equals(stage) || "SCREEN_FAIL".equals(stage)) {
-            return "SCREEN";
+    String resolvePhase(String stage, String screenResult, String phoneResult) {
+        if (StringUtils.hasText(stage)) {
+            return stageCatalog.phaseOf(stage);
         }
-        if ("SCREEN_PASS".equals(stage) || "PHONE_FAIL".equals(stage)) {
-            return "PHONE";
-        }
-        if (ONBOARD_STAGES.contains(stage) || "FINAL".equals(stage)) {
-            // FINAL 已通过但未开任务时也归入待入职入口；若仍在面试轮次则下面
-            if ("FINAL".equals(stage)) {
-                return "ONBOARD";
-            }
-            return "ONBOARD";
-        }
-        if ("PHONE_PASS".equals(stage) || stage.startsWith("FIRST") || stage.startsWith("SECOND")
-                || stage.startsWith("R") || "INVITED".equals(stage) || "SHOW_UP".equals(stage)
-                || "CANDIDATE_REJECT".equals(stage)) {
-            return "INTERVIEW";
-        }
-        // fallback by screen/phone
+        // fallback by screen/phone when current_stage 为空
         if ("FAIL".equalsIgnoreCase(screenResult) || screenResult == null || screenResult.isBlank()) {
             if (!"PASS".equalsIgnoreCase(screenResult)) {
-                return "SCREEN";
+                return HrStageCatalog.PHASE_SCREEN;
             }
         }
         if (!"PASS".equalsIgnoreCase(phoneResult)) {
-            return "PHONE";
+            return HrStageCatalog.PHASE_PHONE;
         }
-        return "INTERVIEW";
-    }
-
-    private static String phaseLabel(String phase) {
-        return switch (phase) {
-            case "SCREEN" -> "简历筛选";
-            case "PHONE" -> "电话沟通";
-            case "INTERVIEW" -> "面试沟通";
-            case "ONBOARD" -> "待入职";
-            default -> phase;
-        };
+        return HrStageCatalog.PHASE_INTERVIEW;
     }
 
     private List<HrPipelineDetailVO.TimelineItem> loadTimeline(Long applicationId) {
@@ -602,5 +582,4 @@ public class HrPipelineService {
         return new BigDecimal(String.valueOf(value));
     }
 
-    private record PhaseMeta(String code, String label) {}
 }

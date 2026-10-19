@@ -678,6 +678,50 @@ public class SysTaskServiceImpl implements SysTaskService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void completeInterviewRemindTasks(Long applicationId) {
+        if (applicationId == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_HR_INTERVIEW_REMIND)
+                .eq(SysTask::getBizId, applicationId)
+                .eq(SysTask::getTaskType, Constants.TASK_TYPE_HR_INTERVIEW_REMIND)
+                .ne(SysTask::getStatus, "已完成")
+                .ne(SysTask::getStatus, "已取消"));
+        if (tasks.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        String by = SecurityUtils.getCurrentUsername();
+        String note = "已创建面试邀约，系统自动完成"
+                + (StringUtils.hasText(by) ? "（操作人：" + by.trim() + "）" : "");
+        for (SysTask task : tasks) {
+            String oldStatus = task.getStatus();
+            if (StringUtils.hasText(task.getRemark())) {
+                task.setRemark(task.getRemark().trim() + "；" + note);
+            } else {
+                task.setRemark(note);
+            }
+            task.setStatus("已完成");
+            task.setProgress(100);
+            task.setActualEndTime(now);
+            applyStatusSideEffects(task, oldStatus);
+            taskMapper.updateById(task);
+            if (task.getOwnerUserId() != null) {
+                assigneeMapper.update(null, new LambdaUpdateWrapper<SysTaskAssignee>()
+                        .eq(SysTaskAssignee::getTaskId, task.getId())
+                        .eq(SysTaskAssignee::getUserId, task.getOwnerUserId())
+                        .set(SysTaskAssignee::getDone, 1));
+            }
+            HrHirePipelineService pipeline = hirePipeline.getIfAvailable();
+            if (pipeline != null) {
+                pipeline.afterTaskCompleted(task);
+            }
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public String batchComplete(SysTaskBatchCompleteDTO dto) {
         if (dto.getTaskIds() == null || dto.getTaskIds().isEmpty()) {
             throw new BusinessException("请选择至少一条任务");

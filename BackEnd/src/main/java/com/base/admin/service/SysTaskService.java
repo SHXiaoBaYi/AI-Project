@@ -66,6 +66,12 @@ public interface SysTaskService {
     /** 整轮审核结束后（如退回），取消其余未完成的「审核文章」任务 */
     void cancelPendingGeoReviewTasks(Long reviewId, String reason);
 
+    /**
+     * 候选人已有面试邀约记录后，自动完成关联的「面试提醒」任务
+     *（biz_type=hr_interview_remind，biz_id=applicationId）。
+     */
+    void completeInterviewRemindTasks(Long applicationId);
+
     /** 批量完成；要求证明附件的类型会跳过 */
     String batchComplete(SysTaskBatchCompleteDTO dto);
 

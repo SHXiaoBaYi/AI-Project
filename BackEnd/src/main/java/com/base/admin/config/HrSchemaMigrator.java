@@ -49,7 +49,64 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureRequisitionPanelColumns();
         backfillWorkAddressFromLocation();
         ensureCandidateProfileColumns();
+        alignStageDisplayNames();
         log.info("招聘表结构、角色、用户和菜单已同步");
+    }
+
+    /** 一期：统一 hr_stage_def 展示名；电话通过进漏斗可见。 */
+    private void alignStageDisplayNames() {
+        Object[][] rows = {
+                {"ENTERED", "待初筛", 10, 0, 0},
+                {"SCREEN_PASS", "初筛通过（待电话）", 20, 1, 0},
+                {"SCREEN_FAIL", "初筛不合适", 21, 0, 1},
+                {"PHONE_PASS", "电话通过（待邀约）", 25, 1, 0},
+                {"PHONE_FAIL", "电话不合适", 26, 0, 1},
+                {"INVITED", "已邀约（待到面）", 30, 1, 0},
+                {"SHOW_UP", "已到面（待出评价）", 40, 1, 0},
+                {"FIRST_PENDING", "一面待定", 50, 0, 0},
+                {"R1_DISPUTE", "一面待商榷", 55, 0, 0},
+                {"FIRST_ROUND", "一面通过", 60, 1, 0},
+                {"FIRST_FAIL", "一面未通过", 70, 0, 1},
+                {"R2_PENDING", "二面待定", 72, 0, 0},
+                {"R2_DISPUTE", "二面待商榷", 73, 0, 0},
+                {"R2_FAIL", "二面未通过", 74, 0, 1},
+                {"SECOND_ROUND", "二面通过", 80, 1, 0},
+                {"R3_PASS", "三面通过", 81, 1, 0},
+                {"R3_PENDING", "三面待定", 82, 0, 0},
+                {"R3_DISPUTE", "三面待商榷", 83, 0, 0},
+                {"R3_FAIL", "三面未通过", 84, 0, 1},
+                {"R4_PASS", "四面通过", 85, 1, 0},
+                {"R4_PENDING", "四面待定", 86, 0, 0},
+                {"R4_DISPUTE", "四面待商榷", 87, 0, 0},
+                {"R4_FAIL", "四面未通过", 88, 0, 1},
+                {"R5_PASS", "五面通过", 89, 1, 0},
+                {"FINAL", "终面通过", 90, 1, 0},
+                {"SALARY", "薪资沟通中", 91, 1, 0},
+                {"BG_COLLECT", "背调资料收集中", 92, 1, 0},
+                {"BG_CHECK", "背调中", 93, 1, 0},
+                {"MEDICAL", "体检中", 94, 1, 0},
+                {"OFFER_PENDING", "待发offer", 95, 1, 0},
+                {"PENDING_ONBOARD", "待入职", 96, 1, 0},
+                {"R5_PENDING", "五面待定", 97, 0, 0},
+                {"R5_DISPUTE", "五面待商榷", 98, 0, 0},
+                {"R5_FAIL", "五面未通过", 99, 0, 1},
+                {"OFFER_SENT", "发放Offer", 100, 0, 0},
+                {"OFFER_ACCEPTED", "Offer接受", 110, 0, 0},
+                {"CANDIDATE_REJECT", "候选人拒绝", 120, 0, 1},
+                {"ONBOARDED", "已入职", 130, 1, 1},
+        };
+        for (Object[] row : rows) {
+            jdbc.update("""
+                    INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active)
+                    VALUES (?, ?, ?, ?, 1, ?, 1)
+                    ON DUPLICATE KEY UPDATE
+                      stage_name = VALUES(stage_name),
+                      sort_no = VALUES(sort_no),
+                      funnel_visible = VALUES(funnel_visible),
+                      terminal = VALUES(terminal),
+                      is_active = 1
+                    """, row[0], row[1], row[2], row[3], row[4]);
+        }
     }
 
     private void ensureKpiGradeColumns() {
@@ -96,10 +153,10 @@ public class HrSchemaMigrator implements ApplicationRunner {
         addColumnIfMissing("hr_application", "screen_reject_reason",
                 "ALTER TABLE hr_application ADD COLUMN screen_reject_reason VARCHAR(255) NULL COMMENT '初筛不合适原因' AFTER screen_result");
         jdbc.update("""
-                INSERT IGNORE INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
+                INSERT INTO hr_stage_def (stage_code, stage_name, sort_no, funnel_visible, data_ready, terminal, is_active) VALUES
                 ('SCREEN_FAIL', '初筛不合适', 21, 0, 1, 1, 1),
-                ('PHONE_PASS', '电话沟通合适', 25, 0, 1, 0, 1),
-                ('PHONE_FAIL', '电话沟通不合适', 26, 0, 1, 1, 1)
+                ('PHONE_PASS', '电话通过（待邀约）', 25, 1, 1, 0, 1),
+                ('PHONE_FAIL', '电话不合适', 26, 0, 1, 1, 1)
                 ON DUPLICATE KEY UPDATE stage_name = VALUES(stage_name), sort_no = VALUES(sort_no),
                   funnel_visible = VALUES(funnel_visible), data_ready = VALUES(data_ready),
                   terminal = VALUES(terminal)
@@ -298,6 +355,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 FROM DUAL
                 WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = '待创建面试日程')
                 """);
+        jdbc.update("""
+                INSERT INTO sys_task_type (type_name, sort_order, remark, is_active)
+                SELECT '面试提醒', 28, '电话约面后提醒发起面试邀约；候选人有邀约记录后自动完成', 1
+                FROM DUAL
+                WHERE NOT EXISTS (SELECT 1 FROM sys_task_type WHERE type_name = '面试提醒')
+                """);
         Integer proof = jdbc.queryForObject("""
                 SELECT COUNT(1) FROM information_schema.columns
                 WHERE table_schema = DATABASE() AND table_name = 'sys_task_type' AND column_name = 'require_proof'
@@ -307,6 +370,11 @@ public class HrSchemaMigrator implements ApplicationRunner {
                     UPDATE sys_task_type
                     SET require_proof = 0, biz_type = '', assign_field = '', spawn_task_type = ''
                     WHERE type_name = '待创建面试日程'
+                    """);
+            jdbc.update("""
+                    UPDATE sys_task_type
+                    SET require_proof = 0, biz_type = 'hr_interview_remind', assign_field = '', spawn_task_type = ''
+                    WHERE type_name = '面试提醒' AND is_active = 1
                     """);
             seedProofTaskType(40, "薪资沟通", "终面通过后下发，完成时必须上传资料，可多份");
             seedProofTaskType(41, "背调资料收集", "终面通过后下发，完成时必须上传资料，可多份");

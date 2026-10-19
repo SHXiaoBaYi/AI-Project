@@ -21,6 +21,7 @@ import com.base.admin.domain.vo.HrJobCardVO;
 import com.base.admin.domain.vo.HrJobCandidateVO;
 import com.base.admin.domain.vo.HrJobCommStatsVO;
 import com.base.admin.domain.vo.HrSchoolVO;
+import com.base.admin.domain.vo.HrStageCatalogVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.security.LoginUser;
 import com.base.admin.util.SecurityUtils;
@@ -67,6 +68,7 @@ public class HrMasterService {
     private final DataScopeFilter dataScopeFilter;
     private final DingTalkCalendarClient dingTalk;
     private final FileStorageService fileStorage;
+    private final HrStageCatalog stageCatalog;
 
     public List<Map<String, Object>> requisitions(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
@@ -1544,9 +1546,22 @@ public class HrMasterService {
     }
 
     public List<Map<String, Object>> stages() {
-        return jdbc.queryForList("""
-                SELECT stage_code, stage_name FROM hr_stage_def WHERE is_active = 1 ORDER BY sort_no
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT stage_code, stage_name, sort_no, terminal
+                FROM hr_stage_def WHERE is_active = 1 ORDER BY sort_no
                 """);
+        for (Map<String, Object> row : rows) {
+            String code = row.get("stage_code") == null ? null : String.valueOf(row.get("stage_code"));
+            row.put("phase", stageCatalog.phaseOf(code));
+            row.put("funnelBucket", stageCatalog.funnelBucketOf(code));
+            row.put("stageName", row.get("stage_name"));
+            row.put("stageCode", code);
+        }
+        return rows;
+    }
+
+    public HrStageCatalogVO stageCatalog() {
+        return stageCatalog.catalog();
     }
 
     private Submitter resolveSubmitter(Long userId, String rawName) {

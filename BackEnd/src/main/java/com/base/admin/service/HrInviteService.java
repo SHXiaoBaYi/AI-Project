@@ -52,6 +52,7 @@ public class HrInviteService {
     private final FileStorageService fileStorage;
     private final ObjectMapper objectMapper;
     private final DingTalkScheduleRuleService dingTalkScheduleRuleService;
+    private final SysTaskService taskService;
 
     @Transactional
     public HrInviteSaveVO create(HrInviteCreateDTO dto) {
@@ -64,16 +65,23 @@ public class HrInviteService {
             inviteIds.add(createOneRecord(one, duration));
         }
         Long last = inviteIds.isEmpty() ? null : inviteIds.get(inviteIds.size() - 1);
+        HrInviteSaveVO result;
         if (!shouldCreateDingTalkCalendar(dto)) {
             finalizeInviteWithoutCalendar(inviteIds, dto);
-            return saveResult(last, null);
+            result = saveResult(last, null);
+        } else {
+            java.util.List<String> unbound = attachSessionCalendars(inviteIds, dto, duration);
+            boolean calendarOk = unbound.size() < ids.size();
+            if (calendarOk && last != null && shouldSendDingTalkWorkNotice(dto)) {
+                notifyRoundCc(last, dto);
+            }
+            result = saveResult(last, unboundMessage(unbound));
         }
-        java.util.List<String> unbound = attachSessionCalendars(inviteIds, dto, duration);
-        boolean calendarOk = unbound.size() < ids.size();
-        if (calendarOk && last != null && shouldSendDingTalkWorkNotice(dto)) {
-            notifyRoundCc(last, dto);
+        // 电话约面产生的「面试提醒」：候选人一旦有邀约记录即自动完成
+        if (!inviteIds.isEmpty() && dto.getApplicationId() != null) {
+            taskService.completeInterviewRemindTasks(dto.getApplicationId());
         }
-        return saveResult(last, unboundMessage(unbound));
+        return result;
     }
 
     /** 只写邀约行，不建钉钉日程（同场多面试官统一由 attachSessionCalendars 建一条）。 */

@@ -20,6 +20,7 @@ import {
   getHrApplicationsApi,
   getHrChannelsApi,
   getHrRequisitionsApi,
+  getHrStageCatalogApi,
   getHrStagesApi,
   getHrUsersApi,
 } from '@/api/hr';
@@ -192,14 +193,32 @@ const ApplicationPage = memo(function ApplicationPage() {
         }),
       ),
     );
-    getHrStagesApi().then((rows) =>
-      setStages(
-        rows.map((item) => ({
-          value: String(item.stageCode ?? item.stage_code),
-          label: String(item.stageName ?? item.stage_name),
-        })),
-      ),
-    );
+    getHrStageCatalogApi()
+      .then((catalog) => {
+        const stages = catalog?.stages ?? [];
+        if (stages.length) {
+          setStages(stages.map((item) => ({ value: String(item.code), label: String(item.name) })));
+          return;
+        }
+        return getHrStagesApi().then((rows) =>
+          setStages(
+            rows.map((item) => ({
+              value: String(item.stageCode ?? item.stage_code),
+              label: String(item.stageName ?? item.stage_name),
+            })),
+          ),
+        );
+      })
+      .catch(() =>
+        getHrStagesApi().then((rows) =>
+          setStages(
+            rows.map((item) => ({
+              value: String(item.stageCode ?? item.stage_code),
+              label: String(item.stageName ?? item.stage_name),
+            })),
+          ),
+        ),
+      );
     getHrUsersApi().then((list) =>
       setUsers(
         list.map((item) => {

@@ -773,9 +773,43 @@ export function deleteHrApplicationBatchApi(ids: number[]) {
 }
 
 export function getHrStagesApi() {
-  return request.get<unknown, { stageCode?: string; stage_code?: string; stageName?: string; stage_name?: string }[]>(
-    '/hr/stage/options',
-  );
+  return request.get<
+    unknown,
+    {
+      stageCode?: string;
+      stage_code?: string;
+      stageName?: string;
+      stage_name?: string;
+      phase?: string;
+      funnelBucket?: string;
+      terminal?: number | boolean;
+    }[]
+  >('/hr/stage/options');
+}
+
+export function getHrStageCatalogApi() {
+  return request.get<
+    unknown,
+    {
+      stages?: {
+        code?: string;
+        name?: string;
+        sortNo?: number;
+        terminal?: boolean;
+        phase?: string;
+        funnelBucket?: string;
+      }[];
+      phases?: { code?: string; name?: string; order?: number }[];
+      funnel?: {
+        code?: string;
+        name?: string;
+        order?: number;
+        conversionLabel?: string;
+        memberStageCodes?: string[];
+      }[];
+      aliases?: Record<string, string>;
+    }
+  >('/hr/stages/catalog');
 }
 
 export function getHrApplicationApi(id: number) {

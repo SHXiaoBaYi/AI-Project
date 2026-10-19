@@ -36,6 +36,7 @@ import com.base.admin.domain.vo.HrBaseDictVO;
 import com.base.admin.domain.vo.HrJobCardVO;
 import com.base.admin.domain.vo.HrJobCandidateVO;
 import com.base.admin.domain.vo.HrJobCommStatsVO;
+import com.base.admin.domain.vo.HrStageCatalogVO;
 import com.base.admin.service.HrInterviewRecordService;
 import com.base.admin.service.HrInviteService;
 import com.base.admin.service.HrMasterService;
@@ -486,6 +487,13 @@ public class HrMasterController {
     @RequiresPermission({"hr:application:list", "hr:board:view"})
     public Result<List<Map<String, Object>>> stages() {
         return Result.ok(masterService.stages());
+    }
+
+    @Operation(summary = "阶段中央目录（展示名 / 流水线大段 / 漏斗 bucket）")
+    @GetMapping("/stages/catalog")
+    @RequiresPermission({"hr:application:list", "hr:board:view", "hr:pipeline:list", "hr:job-board:list", "hr:pipeline:edit"})
+    public Result<HrStageCatalogVO> stageCatalog() {
+        return Result.ok(masterService.stageCatalog());
     }
 
     @Operation(summary = "渠道")
