@@ -3,21 +3,25 @@ package com.base.admin.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.base.admin.common.Constants;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.domain.dto.GeoContentReviewAnnotationSaveDTO;
 import com.base.admin.domain.dto.GeoContentReviewDecideDTO;
 import com.base.admin.domain.dto.GeoContentReviewQueryDTO;
 import com.base.admin.domain.dto.GeoContentSubmitReviewDTO;
 import com.base.admin.domain.dto.GeoContentWritingQueryDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoContentReview;
+import com.base.admin.domain.entity.GeoContentReviewAnnotation;
 import com.base.admin.domain.entity.GeoContentReviewer;
 import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysUser;
+import com.base.admin.domain.vo.GeoContentReviewAnnotationVO;
 import com.base.admin.domain.vo.GeoContentReviewCompareVO;
 import com.base.admin.domain.vo.GeoContentReviewRoundVO;
 import com.base.admin.domain.vo.GeoContentReviewRowVO;
 import com.base.admin.domain.vo.GeoContentReviewerItemVO;
 import com.base.admin.domain.vo.GeoContentWritingRowVO;
 import com.base.admin.mapper.GeoContentPlacementMapper;
+import com.base.admin.mapper.GeoContentReviewAnnotationMapper;
 import com.base.admin.mapper.GeoContentReviewMapper;
 import com.base.admin.mapper.GeoContentReviewerMapper;
 import com.base.admin.mapper.SysTaskMapper;
@@ -50,6 +54,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentReviewMapper reviewMapper;
     private final GeoContentReviewerMapper reviewerMapper;
+    private final GeoContentReviewAnnotationMapper annotationMapper;
     private final SysUserMapper userMapper;
     private final SysTaskMapper taskMapper;
     private final SysTaskService taskService;
@@ -188,6 +193,23 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                         reject.append(nz(r.getUserName())).append('：').append(r.getCommentText().trim());
                     }
                 }
+                List<GeoContentReviewAnnotation> latestAnnos = annotationMapper.selectList(
+                        new LambdaQueryWrapper<GeoContentReviewAnnotation>()
+                                .eq(GeoContentReviewAnnotation::getReviewId, latest.getId())
+                                .orderByAsc(GeoContentReviewAnnotation::getId)
+                                .last("LIMIT 5"));
+                if (!latestAnnos.isEmpty()) {
+                    if (reject.length() > 0) {
+                        reject.append('；');
+                    }
+                    reject.append("划词批注").append(latestAnnos.size()).append("处");
+                    for (GeoContentReviewAnnotation a : latestAnnos) {
+                        reject.append('；').append('「')
+                                .append(shortQuote(a.getQuoteText()))
+                                .append('」')
+                                .append(nz(a.getCommentText()));
+                    }
+                }
                 vo.setReviewers(items);
                 vo.setReviewerSummary(summary.toString());
                 vo.setRejectSummary(reject.toString());
@@ -321,6 +343,8 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
 
         Map<Long, List<GeoContentReviewer>> reviewersByReview = loadReviewersByReviewIds(
                 reviews.stream().map(GeoContentReview::getId).toList());
+        Map<Long, List<GeoContentReviewAnnotation>> annotationsByReview = loadAnnotationsByReviewIds(
+                reviews.stream().map(GeoContentReview::getId).toList());
 
         Long currentReviewId = null;
         List<GeoContentReviewRoundVO> rounds = new ArrayList<>();
@@ -328,7 +352,10 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             if ("pending".equals(review.getStatus())) {
                 currentReviewId = review.getId();
             }
-            rounds.add(toRoundVo(review, reviewersByReview.getOrDefault(review.getId(), List.of())));
+            rounds.add(toRoundVo(
+                    review,
+                    reviewersByReview.getOrDefault(review.getId(), List.of()),
+                    annotationsByReview.getOrDefault(review.getId(), List.of())));
         }
 
         GeoContentReviewCompareVO vo = new GeoContentReviewCompareVO();
@@ -473,8 +500,14 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             throw new BusinessException("你已提交过审核意见");
         }
         String comment = dto.getComment() == null ? "" : dto.getComment().trim();
-        if ("reject".equals(action) && !StringUtils.hasText(comment)) {
-            throw new BusinessException("退回时请填写审核意见");
+        long annotationCount = annotationMapper.selectCount(new LambdaQueryWrapper<GeoContentReviewAnnotation>()
+                .eq(GeoContentReviewAnnotation::getReviewId, review.getId())
+                .eq(GeoContentReviewAnnotation::getAuthorUserId, uid));
+        if ("reject".equals(action) && !StringUtils.hasText(comment) && annotationCount <= 0) {
+            throw new BusinessException("退回时请填写审核意见，或先划词批注");
+        }
+        if ("reject".equals(action) && !StringUtils.hasText(comment) && annotationCount > 0) {
+            comment = "已划词批注 " + annotationCount + " 处，请按批注修改";
         }
 
         mine.setResult("approve".equals(action) ? "approved" : "rejected");
@@ -536,6 +569,92 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                 : displayName(writerId);
         taskService.completeGeoWriteTasksByReview(placement.getId(), writerId, writerName);
         taskService.cancelPendingGeoReviewTasks(review.getId(), "二审已通过");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public GeoContentReviewAnnotationVO addAnnotation(GeoContentReviewAnnotationSaveDTO dto) {
+        Long uid = requireUserId();
+        GeoContentReview review = reviewMapper.selectById(dto.getReviewId());
+        if (review == null) {
+            throw new BusinessException("审核记录不存在");
+        }
+        if (!"pending".equals(review.getStatus())) {
+            throw new BusinessException("该轮审核已结束，不能再批注");
+        }
+        GeoContentReviewer mine = reviewerMapper.selectOne(new LambdaQueryWrapper<GeoContentReviewer>()
+                .eq(GeoContentReviewer::getReviewId, review.getId())
+                .eq(GeoContentReviewer::getUserId, uid)
+                .last("LIMIT 1"));
+        if (mine == null) {
+            throw new BusinessException("你不是本轮审核人");
+        }
+        if (!"pending".equals(mine.getResult())) {
+            throw new BusinessException("你已提交过审核意见，不能再批注");
+        }
+        String quote = dto.getQuoteText() == null ? "" : dto.getQuoteText().trim();
+        String comment = dto.getCommentText() == null ? "" : dto.getCommentText().trim();
+        if (!StringUtils.hasText(quote)) {
+            throw new BusinessException("请先划选正文");
+        }
+        if (!StringUtils.hasText(comment)) {
+            throw new BusinessException("请填写批注内容");
+        }
+        if (quote.length() > 2000) {
+            throw new BusinessException("划选原文不能超过 2000 字");
+        }
+        if (comment.length() > 2000) {
+            throw new BusinessException("批注不能超过 2000 字");
+        }
+        String prefix = truncateCtx(dto.getQuotePrefix());
+        String suffix = truncateCtx(dto.getQuoteSuffix());
+        Integer start = dto.getStartOffset();
+        Integer end = dto.getEndOffset();
+        if (start != null && end != null && (start < 0 || end < start)) {
+            throw new BusinessException("选区偏移无效");
+        }
+
+        GeoContentReviewAnnotation row = new GeoContentReviewAnnotation();
+        row.setReviewId(review.getId());
+        row.setPlacementId(review.getPlacementId());
+        row.setQuoteText(quote);
+        row.setQuotePrefix(prefix);
+        row.setQuoteSuffix(suffix);
+        row.setStartOffset(start);
+        row.setEndOffset(end);
+        row.setCommentText(comment);
+        row.setAuthorUserId(uid);
+        row.setAuthorName(displayName(uid));
+        annotationMapper.insert(row);
+        return toAnnotationVo(row);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteAnnotation(Long annotationId) {
+        Long uid = requireUserId();
+        if (annotationId == null) {
+            throw new BusinessException("批注ID不能为空");
+        }
+        GeoContentReviewAnnotation row = annotationMapper.selectById(annotationId);
+        if (row == null) {
+            throw new BusinessException("批注不存在");
+        }
+        if (!Objects.equals(row.getAuthorUserId(), uid)) {
+            throw new BusinessException("只能删除自己的批注");
+        }
+        GeoContentReview review = reviewMapper.selectById(row.getReviewId());
+        if (review == null || !"pending".equals(review.getStatus())) {
+            throw new BusinessException("该轮审核已结束，不能删除批注");
+        }
+        GeoContentReviewer mine = reviewerMapper.selectOne(new LambdaQueryWrapper<GeoContentReviewer>()
+                .eq(GeoContentReviewer::getReviewId, review.getId())
+                .eq(GeoContentReviewer::getUserId, uid)
+                .last("LIMIT 1"));
+        if (mine == null || !"pending".equals(mine.getResult())) {
+            throw new BusinessException("审核意见已提交，不能删除批注");
+        }
+        annotationMapper.deleteById(annotationId);
     }
 
     /** 把投放主表当前正文写入审核轮次作为文章快照 */
@@ -700,10 +819,14 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                 : placement.getUpdateTime());
         vo.setReviewers(List.of());
         vo.setReviewerSummary("");
+        vo.setAnnotations(List.of());
         return vo;
     }
 
-    private GeoContentReviewRoundVO toRoundVo(GeoContentReview review, List<GeoContentReviewer> reviewers) {
+    private GeoContentReviewRoundVO toRoundVo(
+            GeoContentReview review,
+            List<GeoContentReviewer> reviewers,
+            List<GeoContentReviewAnnotation> annotations) {
         GeoContentReviewRoundVO vo = new GeoContentReviewRoundVO();
         vo.setReviewId(review.getId());
         vo.setEntryType("review");
@@ -738,7 +861,52 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         }
         vo.setReviewers(items);
         vo.setReviewerSummary(summary.toString());
+        vo.setAnnotations(annotations.stream().map(this::toAnnotationVo).toList());
         return vo;
+    }
+
+    private Map<Long, List<GeoContentReviewAnnotation>> loadAnnotationsByReviewIds(List<Long> reviewIds) {
+        if (reviewIds == null || reviewIds.isEmpty()) {
+            return Map.of();
+        }
+        return annotationMapper.selectList(new LambdaQueryWrapper<GeoContentReviewAnnotation>()
+                        .in(GeoContentReviewAnnotation::getReviewId, reviewIds)
+                        .orderByAsc(GeoContentReviewAnnotation::getId))
+                .stream()
+                .collect(Collectors.groupingBy(GeoContentReviewAnnotation::getReviewId));
+    }
+
+    private GeoContentReviewAnnotationVO toAnnotationVo(GeoContentReviewAnnotation row) {
+        GeoContentReviewAnnotationVO vo = new GeoContentReviewAnnotationVO();
+        vo.setId(row.getId());
+        vo.setReviewId(row.getReviewId());
+        vo.setPlacementId(row.getPlacementId());
+        vo.setQuoteText(nz(row.getQuoteText()));
+        vo.setQuotePrefix(nz(row.getQuotePrefix()));
+        vo.setQuoteSuffix(nz(row.getQuoteSuffix()));
+        vo.setStartOffset(row.getStartOffset());
+        vo.setEndOffset(row.getEndOffset());
+        vo.setCommentText(nz(row.getCommentText()));
+        vo.setAuthorUserId(row.getAuthorUserId());
+        vo.setAuthorName(nz(row.getAuthorName()));
+        vo.setCreateTime(row.getCreateTime());
+        return vo;
+    }
+
+    private String truncateCtx(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.length() <= 200) {
+            return text;
+        }
+        return text.substring(0, 200);
+    }
+
+    private String shortQuote(String raw) {
+        String text = raw == null ? "" : raw.trim().replaceAll("\\s+", " ");
+        if (text.length() <= 24) {
+            return text;
+        }
+        return text.substring(0, 24) + "…";
     }
 
     private Map<Long, GeoContentReview> latestPendingByPlacement(List<Long> placementIds) {

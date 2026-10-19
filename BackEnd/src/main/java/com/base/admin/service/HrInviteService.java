@@ -249,6 +249,7 @@ public class HrInviteService {
             sql.append(" AND i.status = ? ");
             args.add(q.getStatus());
         }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         sql.append(" ORDER BY i.interview_at DESC, i.id DESC");
         List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), args.toArray());
         if (Boolean.TRUE.equals(q.getMine())) {

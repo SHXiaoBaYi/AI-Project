@@ -8,11 +8,11 @@ import {
   type ReactNode,
 } from 'react';
 import type { ProColumns } from '@ant-design/pro-components';
-import { App, Button, Space, Typography } from 'antd';
+import { App, Button, Select, Space, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
-import { getHrJobDetailsApi, type HrJobDetailRow } from '@/api/hr';
+import { getHrJobDetailsApi, getHrUsersApi, type HrJobDetailRow } from '@/api/hr';
 
 const DEFAULT_HIDE = new Set(['deptName', 'headcount']);
 const WIDTH_STORAGE_KEY = 'hr-board-job-detail-widths';
@@ -101,12 +101,18 @@ function ResizableTh({
   );
 }
 
-export default function JobDetailPanel() {
+type JobDetailPanelProps = {
+  initialOwnerUserIds?: number[];
+};
+
+export default function JobDetailPanel({ initialOwnerUserIds }: JobDetailPanelProps) {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<HrJobDetailRow[]>([]);
   const [widths, setWidths] = useState<Record<string, number>>(loadStoredWidths);
   const [detailRow, setDetailRow] = useState<HrJobDetailRow | null>(null);
+  const [ownerUserIds, setOwnerUserIds] = useState<number[]>(initialOwnerUserIds ?? []);
+  const [owners, setOwners] = useState<{ value: number; label: string }[]>([]);
 
   const setColumnWidth = useCallback((key: string, width: number) => {
     setWidths((prev) => {
@@ -120,21 +126,45 @@ export default function JobDetailPanel() {
     });
   }, []);
 
-  const load = async () => {
+  useEffect(() => {
+    if (initialOwnerUserIds?.length) {
+      setOwnerUserIds(initialOwnerUserIds);
+    }
+  }, [initialOwnerUserIds]);
+
+  useEffect(() => {
+    void getHrUsersApi('owner')
+      .then((list) =>
+        setOwners(
+          (list || [])
+            .map((row) => {
+              const item = row as { userId?: number; user_id?: number; nickname?: string; username?: string };
+              const value = Number(item.userId ?? item.user_id);
+              return { value, label: String(item.nickname || item.username || value) };
+            })
+            .filter((item) => Number.isFinite(item.value) && item.value > 0),
+        ),
+      )
+      .catch(() => setOwners([]));
+  }, []);
+
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getHrJobDetailsApi({});
+      const data = await getHrJobDetailsApi({
+        ownerUserIds: ownerUserIds.length ? ownerUserIds : undefined,
+      });
       setRows(data ?? []);
     } catch (e) {
       message.error(e instanceof Error ? e.message : '加载岗位明细失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [message, ownerUserIds]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const columns: ProColumns<HrJobDetailRow>[] = useMemo(() => {
     const jobFilters = uniqueOptions(rows, (r) => r.jobName);
@@ -314,13 +344,25 @@ export default function JobDetailPanel() {
 
   return (
     <div className='flex flex-col gap-3'>
-      <div className='flex items-center justify-between gap-3'>
+      <div className='flex flex-wrap items-center justify-between gap-3'>
         <Typography.Text type='secondary'>
           岗位明细 · 共 {rows.length} 个岗位 ·
           日/周进展按触发统计：邀约看发起时间，其他阶段看首次写入时间（不是预约面试日）；入职显示姓名+日期 ·
           表头右侧可拖动调列宽
         </Typography.Text>
-        <Space>
+        <Space wrap>
+          <Select
+            allowClear
+            showSearch
+            mode='multiple'
+            maxTagCount='responsive'
+            optionFilterProp='label'
+            placeholder='招聘负责人'
+            className='min-w-[220px]'
+            options={owners}
+            value={ownerUserIds}
+            onChange={(value) => setOwnerUserIds(value ?? [])}
+          />
           <Button
             icon={<ReloadOutlined />}
             loading={loading}

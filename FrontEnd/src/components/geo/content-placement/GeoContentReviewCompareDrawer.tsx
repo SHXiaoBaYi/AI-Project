@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Checkbox, Drawer, Input, Segmented, Space, Spin, Tag, message } from 'antd';
+import { Button, Checkbox, Drawer, Input, Modal, Segmented, Space, Spin, Tag, message } from 'antd';
 import { LakexEditorHost } from '@/components/lakex/LakexEditorHost';
-import { decideGeoContentReviewApi, getGeoContentReviewCompareApi } from '@/api/geo';
-import type { GeoContentReviewCompare, GeoContentReviewRound } from '@/types/geo';
+import {
+  AnnotatedOriginalWithMarkers,
+  GeoReviewAnnotationReadonly,
+  ReviewAnnotationList,
+} from '@/components/geo/content-placement/GeoReviewAnnotations';
+import {
+  addGeoContentReviewAnnotationApi,
+  decideGeoContentReviewApi,
+  deleteGeoContentReviewAnnotationApi,
+  getGeoContentReviewCompareApi,
+} from '@/api/geo';
+import type { GeoContentReviewAnnotation, GeoContentReviewCompare, GeoContentReviewRound } from '@/types/geo';
 import { diffBlocks, lakeToBlocks, titleDiff, type DiffBlock } from '@/utils/articleDiff';
 
 const STATUS_META: Record<string, { text: string; color: string }> = {
@@ -19,7 +29,7 @@ const RESULT_META: Record<string, { text: string; color: string }> = {
 
 type VersionKey = `review:${number}`;
 
-type ViewMode = 'diff' | 'side';
+type ViewMode = 'diff' | 'side' | 'annotate';
 
 type Props = {
   open: boolean;
@@ -161,7 +171,7 @@ function ReviewHistoryList({
                 <p className='mb-2 text-xs text-neutral-500'>提审说明：{round.submitRemark}</p>
               ) : null}
               {(round.reviewers ?? []).length === 0 ? (
-                <p className='mb-0 text-sm text-neutral-400'>暂无审核意见</p>
+                <p className='mb-0 text-sm text-neutral-400'>暂无整篇审核意见</p>
               ) : (
                 <ul className='m-0 list-none space-y-2 p-0'>
                   {(round.reviewers ?? []).map((item) => {
@@ -187,6 +197,18 @@ function ReviewHistoryList({
                   })}
                 </ul>
               )}
+              {(round.annotations ?? []).length > 0 ? (
+                <div className='mt-2'>
+                  <div className='mb-1 text-xs font-medium text-amber-800'>
+                    划词批注（{(round.annotations ?? []).length}）· 请在左侧原文点数字查看
+                  </div>
+                  <GeoReviewAnnotationReadonly
+                    annotations={round.annotations ?? []}
+                    contentBody={round.contentBody || ''}
+                    showOriginal={false}
+                  />
+                </div>
+              ) : null}
             </li>
           );
         })}
@@ -199,12 +221,17 @@ function SidePreview({
   round,
   side,
   latestRoundNo,
+  showAnnotations = true,
 }: {
   round: GeoContentReviewRound;
   side?: string;
   latestRoundNo?: number | null;
+  /** 有划词批注时在原文区直接标数字，不再放到侧栏 */
+  showAnnotations?: boolean;
 }) {
   const meta = round.status ? STATUS_META[round.status] || { text: round.status, color: 'default' } : null;
+  const annotations = showAnnotations ? (round.annotations ?? []) : [];
+  const useMarkedOriginal = annotations.length > 0 && !!(round.contentBody || '').trim();
   return (
     <div className='flex h-full min-h-0 flex-col'>
       <div className='shrink-0 border-b border-neutral-100 px-3 py-2'>
@@ -220,18 +247,33 @@ function SidePreview({
             </Tag>
           ) : null}
           <span className='text-xs text-neutral-400'>v{round.contentVersion ?? 0}</span>
+          {annotations.length > 0 ? (
+            <Tag
+              color='gold'
+              className='mr-0'
+            >
+              批注 {annotations.length}
+            </Tag>
+          ) : null}
         </div>
         <div className='text-sm font-medium'>{round.contentTitle || '（无标题）'}</div>
       </div>
       <div className='min-h-0 flex-1 overflow-hidden'>
-        {round.hasSnapshot ? (
+        {!round.hasSnapshot && !(round.contentBody || '').trim() ? (
+          <div className='p-4 text-sm text-amber-700'>该轮没有文章快照，无法对照当时正文（重新提审后会保存）</div>
+        ) : useMarkedOriginal ? (
+          <AnnotatedOriginalWithMarkers
+            contentBody={round.contentBody || ''}
+            annotations={annotations}
+            fill
+            hint='高亮处为批注原文，点数字查看具体意见'
+          />
+        ) : (
           <LakexEditorHost
             key={`${versionKeyOf(round)}-${round.contentVersion ?? 0}-preview`}
             value={round.contentBody || ''}
             readOnly
           />
-        ) : (
-          <div className='p-4 text-sm text-amber-700'>该轮没有文章快照，无法对照当时正文（重新提审后会保存）</div>
         )}
       </div>
     </div>
@@ -251,6 +293,15 @@ export function GeoContentReviewCompareDrawer({
   const [view, setView] = useState<ViewMode>('diff');
   const [opinion, setOpinion] = useState('');
   const [acting, setActing] = useState(false);
+  const [annoDraft, setAnnoDraft] = useState<{
+    quoteText: string;
+    quotePrefix: string;
+    quoteSuffix: string;
+    startOffset: number | null;
+    endOffset: number | null;
+  } | null>(null);
+  const [annoComment, setAnnoComment] = useState('');
+  const [annoSaving, setAnnoSaving] = useState(false);
   const reviewing = reviewId != null;
   const highlightReviewId = focusReviewId ?? reviewId;
 
@@ -277,10 +328,14 @@ export function GeoContentReviewCompareDrawer({
       setView('diff');
       setOpinion('');
       setActing(false);
+      setAnnoDraft(null);
+      setAnnoComment('');
       return;
     }
     setLoading(true);
     setOpinion('');
+    setAnnoDraft(null);
+    setAnnoComment('');
     void getGeoContentReviewCompareApi(placementId)
       .then((res) => {
         setData(res);
@@ -311,14 +366,14 @@ export function GeoContentReviewCompareDrawer({
         } else {
           setChecked([]);
         }
-        setView('diff');
+        setView(reviewing ? 'annotate' : 'diff');
       })
       .catch((e) => {
         message.error(e instanceof Error ? e.message : '加载对照数据失败');
         setData(null);
       })
       .finally(() => setLoading(false));
-  }, [open, placementId, highlightReviewId]);
+  }, [open, placementId, highlightReviewId, reviewing]);
 
   const pair = useMemo(() => {
     if (checked.length !== 2) return null;
@@ -358,10 +413,70 @@ export function GeoContentReviewCompareDrawer({
     });
   };
 
+  const focusRound = useMemo(() => {
+    if (reviewId == null) return null;
+    return versions.find((r) => r.reviewId === reviewId) ?? null;
+  }, [versions, reviewId]);
+
+  const focusAnnotations = focusRound?.annotations ?? [];
+
+  const patchRoundAnnotations = (reviewKey: number, next: GeoContentReviewAnnotation[]) => {
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        rounds: (prev.rounds ?? []).map((r) => (r.reviewId === reviewKey ? { ...r, annotations: next } : r)),
+      };
+    });
+  };
+
+  const saveAnnotation = async () => {
+    if (reviewId == null || !annoDraft) return;
+    const text = annoComment.trim();
+    if (!text) {
+      message.warning('请填写批注内容');
+      return;
+    }
+    setAnnoSaving(true);
+    try {
+      const created = await addGeoContentReviewAnnotationApi({
+        reviewId,
+        quoteText: annoDraft.quoteText,
+        commentText: text,
+        quotePrefix: annoDraft.quotePrefix,
+        quoteSuffix: annoDraft.quoteSuffix,
+        startOffset: annoDraft.startOffset,
+        endOffset: annoDraft.endOffset,
+      });
+      patchRoundAnnotations(reviewId, [...focusAnnotations, created]);
+      setAnnoDraft(null);
+      setAnnoComment('');
+      message.success('已添加划词批注');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '添加批注失败');
+    } finally {
+      setAnnoSaving(false);
+    }
+  };
+
+  const removeAnnotation = async (id: number) => {
+    if (reviewId == null) return;
+    try {
+      await deleteGeoContentReviewAnnotationApi(id);
+      patchRoundAnnotations(
+        reviewId,
+        focusAnnotations.filter((a) => a.id !== id),
+      );
+      message.success('已删除');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '删除失败');
+    }
+  };
+
   const decide = async (action: 'approve' | 'reject') => {
     if (reviewId == null) return;
-    if (action === 'reject' && !opinion.trim()) {
-      message.warning('退回修改时请填写意见');
+    if (action === 'reject' && !opinion.trim() && focusAnnotations.length === 0) {
+      message.warning('退回修改时请填写意见，或先划词批注');
       return;
     }
     setActing(true);
@@ -425,6 +540,7 @@ export function GeoContentReviewCompareDrawer({
             value={view}
             onChange={(v) => setView(v as ViewMode)}
             options={[
+              ...(reviewing ? [{ label: '划词审核', value: 'annotate' as const }] : []),
               { label: '差异块', value: 'diff' },
               { label: '左右原文', value: 'side' },
             ]}
@@ -517,7 +633,62 @@ export function GeoContentReviewCompareDrawer({
             </aside>
 
             <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
-              {pair && view === 'diff' ? (
+              {view === 'annotate' && reviewing && focusRound ? (
+                <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]'>
+                  <section className='flex min-h-0 flex-col border-b border-neutral-100 lg:border-r lg:border-b-0'>
+                    <div className='shrink-0 border-b border-neutral-100 px-3 py-2'>
+                      <div className='mb-1 flex flex-wrap items-center gap-2'>
+                        <span className='font-medium'>{labelOf(focusRound, latestRoundNo)}</span>
+                        <Tag
+                          color='processing'
+                          className='mr-0'
+                        >
+                          原文划词
+                        </Tag>
+                        {focusAnnotations.length > 0 ? (
+                          <Tag
+                            color='gold'
+                            className='mr-0'
+                          >
+                            批注 {focusAnnotations.length}
+                          </Tag>
+                        ) : null}
+                      </div>
+                      <div className='text-sm font-medium'>{focusRound.contentTitle || '（无标题）'}</div>
+                    </div>
+                    <div className='min-h-0 flex-1'>
+                      {focusRound.hasSnapshot || focusRound.contentBody || data.currentDraft?.contentBody ? (
+                        <AnnotatedOriginalWithMarkers
+                          contentBody={focusRound.contentBody || data.currentDraft?.contentBody || ''}
+                          annotations={focusAnnotations}
+                          fill
+                          selectable
+                          onAdd={(d) => {
+                            setAnnoDraft(d);
+                            setAnnoComment('');
+                          }}
+                        />
+                      ) : (
+                        <div className='p-4 text-sm text-amber-700'>
+                          该轮没有文章快照，无法在原文上划词（重新提审后会保存）
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                  <aside className='flex min-h-0 flex-col overflow-auto px-3 py-2'>
+                    <div className='mb-2 text-xs text-neutral-500'>
+                      批注列表{focusAnnotations.length > 0 ? `（${focusAnnotations.length}）` : ''}
+                      。原文内高亮与数字可点开；右侧仅作清单，可删除。
+                    </div>
+                    <ReviewAnnotationList
+                      annotations={focusAnnotations}
+                      editableReviewId={reviewId}
+                      onDelete={(id) => void removeAnnotation(id)}
+                      variant='panel'
+                    />
+                  </aside>
+                </div>
+              ) : pair && view === 'diff' ? (
                 <div className='min-h-0 flex-1 overflow-auto px-4 py-3'>
                   <div className='mb-3 flex flex-wrap items-center gap-2 text-sm'>
                     <Tag color='default'>{labelOf(pair.left, latestRoundNo)}</Tag>
@@ -613,17 +784,54 @@ export function GeoContentReviewCompareDrawer({
           </div>
           {reviewing ? (
             <div className='shrink-0 border-t border-neutral-100 bg-white px-4 py-3'>
-              <div className='mb-1 text-xs text-neutral-500'>本轮审核意见{opinion.trim() ? '' : '（退回时必填）'}</div>
+              <div className='mb-1 text-xs text-neutral-500'>
+                本轮总意见
+                {opinion.trim() || focusAnnotations.length > 0 ? '' : '（退回时必填；或先划词批注）'}
+                {focusAnnotations.length > 0 ? ` · 已批注 ${focusAnnotations.length} 处` : ''}
+              </div>
               <Input.TextArea
                 value={opinion}
                 onChange={(e) => setOpinion(e.target.value)}
-                placeholder='填写审核意见，退回修改时必填'
+                placeholder='可写总意见；退回时也可只靠划词批注'
                 autoSize={{ minRows: 2, maxRows: 4 }}
               />
             </div>
           ) : null}
         </>
       )}
+
+      <Modal
+        title='添加划词批注'
+        open={annoDraft != null}
+        confirmLoading={annoSaving}
+        onCancel={() => {
+          setAnnoDraft(null);
+          setAnnoComment('');
+        }}
+        onOk={() => void saveAnnotation()}
+        okText='保存批注'
+        destroyOnHidden
+      >
+        {annoDraft ? (
+          <Space
+            direction='vertical'
+            className='w-full'
+            size={12}
+          >
+            <blockquote className='mb-0 border-l-2 border-amber-300 bg-amber-50/60 px-3 py-2 text-sm text-neutral-700'>
+              「{annoDraft.quoteText}」
+            </blockquote>
+            <Input.TextArea
+              rows={3}
+              value={annoComment}
+              placeholder='说明这里要怎么改'
+              onChange={(e) => setAnnoComment(e.target.value)}
+              maxLength={2000}
+              showCount
+            />
+          </Space>
+        ) : null}
+      </Modal>
     </Drawer>
   );
 }

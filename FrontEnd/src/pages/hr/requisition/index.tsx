@@ -253,12 +253,18 @@ const RequisitionPage = memo(function RequisitionPage() {
         render: (_, record) => record.deptName || '未分配',
       },
       {
-        title: '负责人',
-        dataIndex: 'ownerUserId',
+        title: '招聘负责人',
+        dataIndex: 'ownerUserIds',
         valueType: 'select',
         hideInTable: true,
-        hideInForm: true,
-        fieldProps: { options: users, allowClear: true, showSearch: true, optionFilterProp: 'label' },
+        fieldProps: {
+          mode: 'multiple',
+          maxTagCount: 'responsive',
+          options: users,
+          allowClear: true,
+          showSearch: true,
+          optionFilterProp: 'label',
+        },
       },
       {
         title: '负责人',
@@ -266,14 +272,6 @@ const RequisitionPage = memo(function RequisitionPage() {
         search: false,
         hideInForm: true,
         render: (_, record) => record.ownerNames || '—',
-      },
-      {
-        title: '负责人',
-        dataIndex: 'ownerUserIds',
-        valueType: 'select',
-        search: false,
-        hideInTable: true,
-        fieldProps: { mode: 'multiple', options: users, allowClear: true, optionFilterProp: 'label' },
       },
       {
         title: '工作地址',
@@ -549,7 +547,9 @@ const RequisitionPage = memo(function RequisitionPage() {
           const rows = (await getHrRequisitionsApi({
             jobName: params.jobName,
             deptId: params.deptId,
-            ownerUserId: params.ownerUserId,
+            ownerUserIds: Array.isArray(params.ownerUserIds)
+              ? (params.ownerUserIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0)
+              : undefined,
             workAddressId:
               params.workAddressId != null && params.workAddressId !== '' ? Number(params.workAddressId) : undefined,
             status: params.status,

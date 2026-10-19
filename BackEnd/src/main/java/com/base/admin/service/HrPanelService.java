@@ -447,10 +447,7 @@ public class HrPanelService {
             sql.append(" AND r.job_name LIKE ? ");
             args.add("%" + q.getJobName().trim() + "%");
         }
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         if (StringUtils.hasText(q.getJobPriorityCode())) {
             sql.append(" AND r.job_priority_code = ? ");
             args.add(q.getJobPriorityCode().trim());

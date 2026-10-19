@@ -3,10 +3,12 @@ package com.base.admin.controller;
 import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.GeoContentReviewAnnotationSaveDTO;
 import com.base.admin.domain.dto.GeoContentReviewDecideDTO;
 import com.base.admin.domain.dto.GeoContentReviewQueryDTO;
 import com.base.admin.domain.dto.GeoContentSubmitReviewDTO;
 import com.base.admin.domain.dto.GeoContentWritingQueryDTO;
+import com.base.admin.domain.vo.GeoContentReviewAnnotationVO;
 import com.base.admin.domain.vo.GeoContentReviewCompareVO;
 import com.base.admin.domain.vo.GeoContentReviewRowVO;
 import com.base.admin.domain.vo.GeoContentWritingRowVO;
@@ -15,6 +17,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -74,6 +77,23 @@ public class GeoContentWriteController {
     @Log(title = "GEO文章审核决定", businessType = 2)
     public Result<Void> decide(@Valid @RequestBody GeoContentReviewDecideDTO dto) {
         writeService.decide(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "审核人划词/划句/划段批注")
+    @PostMapping("/annotation")
+    @RequiresPermission("geo:write:review")
+    @Log(title = "GEO文章审核划词批注", businessType = 1)
+    public Result<GeoContentReviewAnnotationVO> addAnnotation(@Valid @RequestBody GeoContentReviewAnnotationSaveDTO dto) {
+        return Result.ok(writeService.addAnnotation(dto));
+    }
+
+    @Operation(summary = "删除本人本轮划词批注")
+    @DeleteMapping("/annotation/{id}")
+    @RequiresPermission("geo:write:review")
+    @Log(title = "GEO文章审核划词批注", businessType = 3)
+    public Result<Void> deleteAnnotation(@PathVariable Long id) {
+        writeService.deleteAnnotation(id);
         return Result.ok();
     }
 }

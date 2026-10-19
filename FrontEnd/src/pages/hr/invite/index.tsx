@@ -356,6 +356,21 @@ const InvitePage = memo(function InvitePage() {
         fieldProps: { options: jobOptions, showSearch: true, optionFilterProp: 'label', allowClear: true },
       },
       {
+        title: '招聘负责人',
+        dataIndex: 'ownerUserIds',
+        valueType: 'select',
+        hideInTable: true,
+        hideInForm: true,
+        fieldProps: {
+          mode: 'multiple',
+          maxTagCount: 'responsive',
+          options: users,
+          allowClear: true,
+          showSearch: true,
+          optionFilterProp: 'label',
+        },
+      },
+      {
         title: '候选人',
         dataIndex: 'applicationId',
         valueType: 'select',
@@ -529,7 +544,12 @@ const InvitePage = memo(function InvitePage() {
         columns={columns}
         headerTitle='面试邀约记录'
         request={async (params) => {
-          const rows = await listHrInvitesApi({});
+          const ownerUserIds = Array.isArray(params.ownerUserIds)
+            ? (params.ownerUserIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0)
+            : undefined;
+          const rows = await listHrInvitesApi({
+            ownerUserIds: ownerUserIds?.length ? ownerUserIds : undefined,
+          });
           let grouped = groupSessions(rows.map(mapRow));
           if (params.jobName) {
             grouped = grouped.filter((row) => row.jobName === String(params.jobName));

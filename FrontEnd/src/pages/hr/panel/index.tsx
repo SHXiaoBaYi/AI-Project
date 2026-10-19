@@ -151,11 +151,18 @@ const HrPanelPage = memo(function HrPanelPage() {
         render: (_, record) => (record.headcount == null ? '—' : record.headcount),
       },
       {
-        title: '负责人',
-        dataIndex: 'ownerUserId',
+        title: '招聘负责人',
+        dataIndex: 'ownerUserIds',
         valueType: 'select',
         hideInTable: true,
-        fieldProps: { options: owners, allowClear: true, showSearch: true, optionFilterProp: 'label' },
+        fieldProps: {
+          mode: 'multiple',
+          maxTagCount: 'responsive',
+          options: owners,
+          allowClear: true,
+          showSearch: true,
+          optionFilterProp: 'label',
+        },
       },
       {
         title: '负责人',
@@ -333,7 +340,9 @@ const HrPanelPage = memo(function HrPanelPage() {
             panelStatus: (params.panelStatus as string) || undefined,
             deptId: numId(params.deptId),
             jobName: (params.jobName as string) || undefined,
-            ownerUserId: numId(params.ownerUserId),
+            ownerUserIds: Array.isArray(params.ownerUserIds)
+              ? (params.ownerUserIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0)
+              : undefined,
             jobPriorityCode: (params.jobPriorityCode as string) || undefined,
             workAddressId: numId(params.workAddressId),
           };

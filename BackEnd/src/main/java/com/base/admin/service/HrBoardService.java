@@ -1281,6 +1281,7 @@ public class HrBoardService {
             q.setRequisitionId(base.getRequisitionId());
             q.setChannelCode(base.getChannelCode());
             q.setOwnerUserId(base.getOwnerUserId());
+            q.setOwnerUserIds(base.getOwnerUserIds());
             q.setDeptId(base.getDeptId());
             q.setJobName(base.getJobName());
             q.setJobCategory(base.getJobCategory());
@@ -1549,10 +1550,7 @@ public class HrBoardService {
             sql.append(" AND ").append(application).append(".channel_code = ? ");
             args.add(q.getChannelCode());
         }
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND ").append(requisition).append(".id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, requisition, q.getOwnerUserId(), q.getOwnerUserIds());
         if (q.getDeptId() != null) {
             sql.append(" AND ").append(requisition).append(".dept_id IN (SELECT id FROM hr_department WHERE is_active = 1 AND (id = ? OR CONCAT(',', ancestors, ',') LIKE CONCAT('%,', ?, ',%'))) ");
             args.add(q.getDeptId());

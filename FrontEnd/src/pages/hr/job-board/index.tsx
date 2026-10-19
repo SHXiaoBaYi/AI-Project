@@ -616,12 +616,16 @@ export default function HrJobBoardPage() {
           <Select
             allowClear
             showSearch
+            mode='multiple'
+            maxTagCount='responsive'
             optionFilterProp='label'
-            placeholder='按负责人筛选'
-            className='min-w-[160px]'
+            placeholder='招聘负责人'
+            className='min-w-[200px]'
             options={owners}
-            value={filters.ownerUserId}
-            onChange={(ownerUserId) => patchFilter({ ownerUserId })}
+            value={filters.ownerUserIds}
+            onChange={(ownerUserIds) =>
+              patchFilter({ ownerUserIds: ownerUserIds?.length ? ownerUserIds : undefined, ownerUserId: undefined })
+            }
           />
           <Select
             allowClear

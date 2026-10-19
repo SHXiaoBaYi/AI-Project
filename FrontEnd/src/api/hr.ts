@@ -11,6 +11,7 @@ export interface HrBoardQuery {
   channelCode?: string;
   requisitionId?: number;
   ownerUserId?: number;
+  ownerUserIds?: number[];
   priority?: number;
   status?: string;
   jobName?: string;
@@ -190,6 +191,7 @@ export interface HrPanelQuery {
   deptId?: number;
   jobName?: string;
   ownerUserId?: number;
+  ownerUserIds?: number[];
   jobPriorityCode?: string;
   workAddressId?: number;
   pageNum?: number;
@@ -301,6 +303,7 @@ export type HrJobCardQuery = {
   deptId?: number;
   jobName?: string;
   ownerUserId?: number;
+  ownerUserIds?: number[];
   cardStatus?: HrJobCardStatus;
   priority?: number;
   jobPriorityCode?: string;
@@ -529,6 +532,7 @@ export type HrKpiQuery = {
   endDate?: string;
   grain?: HrKpiGrain;
   ownerUserId?: number;
+  ownerUserIds?: number[];
   importanceLevel?: number;
   priority?: number;
   difficultyLevel?: number;

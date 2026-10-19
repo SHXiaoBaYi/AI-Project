@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 @Schema(description = "招聘看板筛选")
@@ -33,8 +34,11 @@ public class HrBoardQueryDTO {
     @Schema(description = "需求")
     private Long requisitionId;
 
-    @Schema(description = "招聘负责人")
+    @Schema(description = "招聘负责人（单选，兼容）")
     private Long ownerUserId;
+
+    @Schema(description = "招聘负责人（多选，任一命中）")
+    private List<Long> ownerUserIds;
 
     @Schema(description = "优先级 1/2/3")
     private Integer priority;

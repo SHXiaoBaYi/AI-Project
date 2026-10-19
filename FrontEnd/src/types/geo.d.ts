@@ -591,6 +591,21 @@ export interface GeoContentReviewerItem {
   actedAt?: string;
 }
 
+export interface GeoContentReviewAnnotation {
+  id: number;
+  reviewId?: number;
+  placementId?: number;
+  quoteText: string;
+  quotePrefix?: string;
+  quoteSuffix?: string;
+  startOffset?: number | null;
+  endOffset?: number | null;
+  commentText: string;
+  authorUserId?: number;
+  authorName?: string;
+  createTime?: string;
+}
+
 export interface GeoContentReviewRow {
   reviewId: number;
   placementId: number;
@@ -624,6 +639,7 @@ export interface GeoContentReviewRound {
   hasSnapshot?: boolean;
   reviewers?: GeoContentReviewerItem[];
   reviewerSummary?: string;
+  annotations?: GeoContentReviewAnnotation[];
   createTime?: string;
 }
 

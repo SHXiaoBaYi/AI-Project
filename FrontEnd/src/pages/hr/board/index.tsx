@@ -8,10 +8,12 @@ export default function HrBoardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') === 'analytics' ? 'analytics' : 'jobs';
   const [tab, setTab] = useState(initialTab);
-  const ownerUserId = useMemo(() => {
-    const raw = searchParams.get('ownerUserId');
-    const n = raw ? Number(raw) : NaN;
-    return Number.isFinite(n) && n > 0 ? n : undefined;
+  const initialOwnerUserIds = useMemo(() => {
+    const multi = searchParams.getAll('ownerUserIds').flatMap((raw) => raw.split(','));
+    const single = searchParams.get('ownerUserId');
+    const raws = [...multi, ...(single ? [single] : [])];
+    const ids = raws.map((raw) => Number(raw)).filter((n) => Number.isFinite(n) && n > 0);
+    return [...new Set(ids)];
   }, [searchParams]);
 
   return (
@@ -35,7 +37,11 @@ export default function HrBoardPage() {
           ]}
         />
       </Card>
-      {tab === 'jobs' ? <JobDetailPanel /> : <BoardAnalyticsPanel initialOwnerUserId={ownerUserId} />}
+      {tab === 'jobs' ? (
+        <JobDetailPanel initialOwnerUserIds={initialOwnerUserIds} />
+      ) : (
+        <BoardAnalyticsPanel initialOwnerUserIds={initialOwnerUserIds} />
+      )}
     </div>
   );
 }

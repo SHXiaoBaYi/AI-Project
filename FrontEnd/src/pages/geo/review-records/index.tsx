@@ -54,7 +54,7 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
             },
             {
               key: 'compare',
-              label: '文章对照',
+              label: '对照/批注',
               perm: 'geo:write:review',
               onClick: () => {
                 setComparePlacementId(record.placementId);

@@ -29,6 +29,7 @@ import {
   getHrPipelineBoardApi,
   getHrPipelineDetailApi,
   getHrRequisitionsApi,
+  getHrUsersApi,
   saveHrPipelineOnboardApi,
   saveHrPipelinePhoneApi,
   saveHrPipelineScreenApi,
@@ -183,6 +184,8 @@ function CandidateCard({
 export default function HrPipelinePage() {
   const { message } = App.useApp();
   const [jobs, setJobs] = useState<{ value: number; label: string }[]>([]);
+  const [owners, setOwners] = useState<{ value: number; label: string }[]>([]);
+  const [ownerUserIds, setOwnerUserIds] = useState<number[]>([]);
   const [requisitionId, setRequisitionId] = useState<number>();
   const [board, setBoard] = useState<HrPipelineBoard | null>(null);
   const [loading, setLoading] = useState(false);
@@ -205,9 +208,13 @@ export default function HrPipelinePage() {
   const [unsuitableReasons, setUnsuitableReasons] = useState<{ value: string; label: string }[]>([]);
 
   const loadMeta = useCallback(async () => {
-    const [reqRows, reasonRows] = await Promise.all([
-      getHrRequisitionsApi({ status: 'OPEN' }),
+    const [reqRows, reasonRows, ownerRows] = await Promise.all([
+      getHrRequisitionsApi({
+        status: 'OPEN',
+        ownerUserIds: ownerUserIds.length ? ownerUserIds : undefined,
+      }),
       getHrDictOptionsApi('UNSUITABLE').catch(() => []),
+      getHrUsersApi('owner').catch(() => []),
     ]);
     setJobs(
       (reqRows || []).map((r) => ({
@@ -215,8 +222,17 @@ export default function HrPipelinePage() {
         label: String(r.job_name ?? r.jobName ?? ''),
       })),
     );
+    setOwners(
+      (ownerRows || [])
+        .map((row) => {
+          const item = row as { userId?: number; user_id?: number; nickname?: string; username?: string };
+          const value = Number(item.userId ?? item.user_id);
+          return { value, label: String(item.nickname || item.username || value) };
+        })
+        .filter((item) => Number.isFinite(item.value) && item.value > 0),
+    );
     setUnsuitableReasons((reasonRows || []).map((row) => ({ value: row.name, label: row.name })));
-  }, []);
+  }, [ownerUserIds]);
 
   const loadBoard = useCallback(async () => {
     if (!requisitionId) {
@@ -236,6 +252,13 @@ export default function HrPipelinePage() {
   useEffect(() => {
     void loadMeta();
   }, [loadMeta]);
+
+  useEffect(() => {
+    if (requisitionId != null && jobs.length > 0 && !jobs.some((j) => j.value === requisitionId)) {
+      setRequisitionId(undefined);
+      setBoard(null);
+    }
+  }, [jobs, requisitionId]);
 
   useEffect(() => {
     void loadBoard();
@@ -275,6 +298,18 @@ export default function HrPipelinePage() {
           </Typography.Text>
         </div>
         <Space wrap>
+          <Select
+            allowClear
+            showSearch
+            mode='multiple'
+            maxTagCount='responsive'
+            optionFilterProp='label'
+            placeholder='招聘负责人'
+            className='min-w-[220px]'
+            options={owners}
+            value={ownerUserIds}
+            onChange={(value) => setOwnerUserIds(value ?? [])}
+          />
           <Select
             showSearch
             optionFilterProp='label'

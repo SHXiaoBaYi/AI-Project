@@ -70,6 +70,7 @@ public class HrInterviewRecordService {
             sql.append(" AND rec.interviewer_user_id = ? ");
             args.add(SecurityUtils.getCurrentUserId());
         }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         sql.append(" ORDER BY rec.interviewed_at DESC, rec.id DESC");
         return jdbc.queryForList(sql.toString(), args.toArray());
     }

@@ -306,13 +306,13 @@ const progressColumns = [
 ];
 
 type BoardAnalyticsPanelProps = {
-  initialOwnerUserId?: number;
+  initialOwnerUserIds?: number[];
 };
 
-export default function BoardAnalyticsPanel({ initialOwnerUserId }: BoardAnalyticsPanelProps) {
+export default function BoardAnalyticsPanel({ initialOwnerUserIds }: BoardAnalyticsPanelProps) {
   const [grain, setGrain] = useState<DemoBoardGrain>('week');
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('week'));
-  const [ownerUserId, setOwnerUserId] = useState<number | undefined>(initialOwnerUserId);
+  const [ownerUserIds, setOwnerUserIds] = useState<number[]>(initialOwnerUserIds ?? []);
   const [jobCategory, setJobCategory] = useState<string | undefined>();
   const [channelCode, setChannelCode] = useState<string | undefined>();
   const [priority, setPriority] = useState<number | undefined>();
@@ -333,7 +333,7 @@ export default function BoardAnalyticsPanel({ initialOwnerUserId }: BoardAnalyti
     startDate: range[0].format('YYYY-MM-DD'),
     endDate: range[1].format('YYYY-MM-DD'),
     grain,
-    ownerUserId,
+    ownerUserIds: ownerUserIds.length ? ownerUserIds : undefined,
     jobCategory,
     channelCode,
     priority,
@@ -343,10 +343,10 @@ export default function BoardAnalyticsPanel({ initialOwnerUserId }: BoardAnalyti
   const clearCycle = () => setCycleJob(undefined);
 
   useEffect(() => {
-    if (initialOwnerUserId) {
-      setOwnerUserId(initialOwnerUserId);
+    if (initialOwnerUserIds?.length) {
+      setOwnerUserIds(initialOwnerUserIds);
     }
-  }, [initialOwnerUserId]);
+  }, [initialOwnerUserIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -358,7 +358,7 @@ export default function BoardAnalyticsPanel({ initialOwnerUserId }: BoardAnalyti
     return () => {
       cancelled = true;
     };
-  }, [grain, range[0].valueOf(), range[1].valueOf(), ownerUserId, jobCategory, channelCode, priority, cycleJob]);
+  }, [grain, range[0].valueOf(), range[1].valueOf(), ownerUserIds, jobCategory, channelCode, priority, cycleJob]);
 
   useEffect(() => {
     getHrChannelsApi()
@@ -504,13 +504,15 @@ export default function BoardAnalyticsPanel({ initialOwnerUserId }: BoardAnalyti
           <Select
             allowClear
             showSearch
+            mode='multiple'
+            maxTagCount='responsive'
             optionFilterProp='label'
             placeholder='招聘负责人'
-            className='min-w-[160px]'
+            className='min-w-[220px]'
             options={users}
-            value={ownerUserId}
+            value={ownerUserIds}
             onChange={(value) => {
-              setOwnerUserId(value);
+              setOwnerUserIds(value ?? []);
               clearCycle();
             }}
           />

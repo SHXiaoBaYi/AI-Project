@@ -63,6 +63,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v22_geo_content_review.sql"));
             ensureContentReviewSnapshot(connection);
             ensureContentReviewStage(connection);
+            ensureContentReviewAnnotation(connection);
             cleanupQueueArticlePlaceholders(connection);
             ensureArticleBoardMenu(connection);
             ensureDailyUniqueKeyWithTermType(connection);
@@ -1174,6 +1175,39 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     """);
         }
         log.info("已为 geo_content_review 增加 stage_no");
+    }
+
+    /** 审核划词/划句/划段批注 */
+    private void ensureContentReviewAnnotation(Connection connection) throws Exception {
+        if (tableExists(connection, "geo_content_review_annotation")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE geo_content_review_annotation (
+                      id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                      review_id       BIGINT        NOT NULL                COMMENT '审核轮次ID',
+                      placement_id    BIGINT        NOT NULL                COMMENT '投放主表ID',
+                      quote_text      VARCHAR(2000) NOT NULL                COMMENT '选中原文',
+                      quote_prefix    VARCHAR(200)  NOT NULL DEFAULT ''     COMMENT '选区前上下文',
+                      quote_suffix    VARCHAR(200)  NOT NULL DEFAULT ''     COMMENT '选区后上下文',
+                      start_offset    INT           NULL                    COMMENT '纯文本起点偏移',
+                      end_offset      INT           NULL                    COMMENT '纯文本终点偏移',
+                      comment_text    VARCHAR(2000) NOT NULL                COMMENT '批注内容',
+                      author_user_id  BIGINT        NOT NULL                COMMENT '批注人用户ID',
+                      author_name     VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '批注人展示名',
+                      create_by       VARCHAR(64)   NULL,
+                      create_time     DATETIME      NULL,
+                      update_by       VARCHAR(64)   NULL,
+                      update_time     DATETIME      NULL,
+                      is_active       TINYINT       NOT NULL DEFAULT 1,
+                      PRIMARY KEY (id),
+                      KEY idx_anno_review (review_id),
+                      KEY idx_anno_placement (placement_id)
+                    ) COMMENT 'GEO文章审核划词批注'
+                    """);
+        }
+        log.info("已创建 geo_content_review_annotation");
     }
 
     /**

@@ -344,11 +344,25 @@ const ApplicationPage = memo(function ApplicationPage() {
         },
       },
       {
-        title: '负责人',
+        title: '推荐人',
         dataIndex: 'submitterName',
         search: false,
         width: 110,
         render: (_, record) => record.submitterName || '—',
+      },
+      {
+        title: '招聘负责人',
+        dataIndex: 'ownerUserIds',
+        valueType: 'select',
+        hideInTable: true,
+        fieldProps: {
+          mode: 'multiple',
+          maxTagCount: 'responsive',
+          options: users,
+          allowClear: true,
+          showSearch: true,
+          optionFilterProp: 'label',
+        },
       },
       {
         title: '岗位',
@@ -460,12 +474,16 @@ const ApplicationPage = memo(function ApplicationPage() {
         request={async (params) => {
           const requisitionId =
             params.requisitionId == null || params.requisitionId === '' ? undefined : Number(params.requisitionId);
+          const ownerUserIds = Array.isArray(params.ownerUserIds)
+            ? (params.ownerUserIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0)
+            : undefined;
           const rows = (await getHrApplicationsApi({
             candidateName: params.displayName,
             requisitionId: Number.isFinite(requisitionId) ? requisitionId : undefined,
             channelCode: params.channelCode,
             stageCode: params.currentStage,
             submitterUserId: params.submitterUserId,
+            ownerUserIds: ownerUserIds?.length ? ownerUserIds : undefined,
             startDate: params.startDate,
             endDate: params.endDate,
           })) as unknown as Record<string, unknown>[];

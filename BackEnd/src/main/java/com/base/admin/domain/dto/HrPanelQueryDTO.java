@@ -3,6 +3,8 @@ package com.base.admin.domain.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Schema(description = "招聘面板筛选")
 public class HrPanelQueryDTO {
@@ -16,8 +18,11 @@ public class HrPanelQueryDTO {
     @Schema(description = "岗位名称，模糊匹配", example = "运营")
     private String jobName;
 
-    @Schema(description = "负责人用户ID", example = "1", nullable = true)
+    @Schema(description = "负责人用户ID（单选，兼容）", example = "1", nullable = true)
     private Long ownerUserId;
+
+    @Schema(description = "负责人用户ID（多选，任一命中）")
+    private List<Long> ownerUserIds;
 
     @Schema(description = "岗位优先级编码 P0/P1，独立于紧急/优先/常规", example = "P0")
     private String jobPriorityCode;

@@ -381,6 +381,21 @@ const RecordPage = memo(function RecordPage() {
         fieldProps: { options: jobOptions, showSearch: true, optionFilterProp: 'label', allowClear: true },
       },
       {
+        title: '招聘负责人',
+        dataIndex: 'ownerUserIds',
+        valueType: 'select',
+        hideInTable: true,
+        hideInForm: true,
+        fieldProps: {
+          mode: 'multiple',
+          maxTagCount: 'responsive',
+          options: users,
+          allowClear: true,
+          showSearch: true,
+          optionFilterProp: 'label',
+        },
+      },
+      {
         title: '候选人',
         dataIndex: 'applicationId',
         valueType: 'select',
@@ -583,7 +598,12 @@ const RecordPage = memo(function RecordPage() {
         columns={columns}
         headerTitle='面试记录'
         request={async (params) => {
-          const rows = await listHrInterviewRecordsApi({});
+          const ownerUserIds = Array.isArray(params.ownerUserIds)
+            ? (params.ownerUserIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0)
+            : undefined;
+          const rows = await listHrInterviewRecordsApi({
+            ownerUserIds: ownerUserIds?.length ? ownerUserIds : undefined,
+          });
           const grouped = groupRecords(rows.map(mapRow)).filter((row) => {
             if (params.jobName && row.jobName !== String(params.jobName)) return false;
             if (params.applicationId && row.applicationId !== Number(params.applicationId)) return false;

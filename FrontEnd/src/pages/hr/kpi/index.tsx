@@ -94,7 +94,7 @@ export default function HrKpiPage() {
   const { message } = App.useApp();
   const [grain, setGrain] = useState<HrKpiGrain>('week');
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => rangeByGrain('week'));
-  const [ownerUserId, setOwnerUserId] = useState<number | undefined>();
+  const [ownerUserIds, setOwnerUserIds] = useState<number[]>([]);
   const [importanceLevel, setImportanceLevel] = useState<number | undefined>();
   const [priority, setPriority] = useState<number | undefined>();
   const [difficultyLevel, setDifficultyLevel] = useState<number | undefined>();
@@ -143,12 +143,12 @@ export default function HrKpiPage() {
       grain,
       startDate: start.format('YYYY-MM-DD'),
       endDate: end.format('YYYY-MM-DD'),
-      ownerUserId,
+      ownerUserIds: ownerUserIds.length ? ownerUserIds : undefined,
       importanceLevel,
       priority,
       difficultyLevel,
     };
-  }, [difficultyLevel, grain, importanceLevel, ownerUserId, priority, range]);
+  }, [difficultyLevel, grain, importanceLevel, ownerUserIds, priority, range]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -223,11 +223,13 @@ export default function HrKpiPage() {
             />
             <Select
               allowClear
+              mode='multiple'
+              maxTagCount='responsive'
               placeholder='招聘负责人'
-              className='min-w-[160px]'
+              className='min-w-[220px]'
               options={users}
-              value={ownerUserId}
-              onChange={setOwnerUserId}
+              value={ownerUserIds}
+              onChange={(value) => setOwnerUserIds(value ?? [])}
               showSearch
               optionFilterProp='label'
             />
@@ -554,7 +556,9 @@ export default function HrKpiPage() {
                   type='link'
                   size='small'
                   onClick={() => {
-                    setOwnerUserId(row.ownerUserId);
+                    if (row.ownerUserId != null) {
+                      setOwnerUserIds([row.ownerUserId]);
+                    }
                   }}
                 >
                   筛选

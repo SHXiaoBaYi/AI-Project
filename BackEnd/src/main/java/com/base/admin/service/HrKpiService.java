@@ -93,12 +93,13 @@ public class HrKpiService {
         summary.setConversionRate(screened == 0 ? null : onboardings.size() * 1.0 / screened);
 
         Map<Long, String> nicknameCache = loadNicknames(collectOwnerIds(jobs, onboardings));
+        List<Long> filterOwnerIds = HrOwnerFilters.resolve(q.getOwnerUserId(), q.getOwnerUserIds());
         vo.setOverdueJobs(overdue.stream()
                 .sorted(Comparator.comparing((HrKpiBoardVO.JobRow r) -> r.getOverdueDays() == null ? 0 : r.getOverdueDays()).reversed())
-                .map(row -> sanitizeJobOwners(row, jobs, q.getOwnerUserId(), nicknameCache))
+                .map(row -> sanitizeJobOwners(row, jobs, filterOwnerIds, nicknameCache))
                 .toList());
         vo.setOnboardings(onboardings.stream()
-                .map(o -> sanitizeOnboardOwners(toOnboardRow(o), o, q.getOwnerUserId(), nicknameCache))
+                .map(o -> sanitizeOnboardOwners(toOnboardRow(o), o, filterOwnerIds, nicknameCache))
                 .toList());
         vo.setOwners(buildOwners(jobs, onboardings, q, nicknameCache));
         vo.setOnboardTrend(buildOnboardTrend(onboardings, q));
@@ -206,10 +207,7 @@ public class HrKpiService {
                 WHERE r.is_active = 1
                 """);
         List<Object> args = new ArrayList<>();
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         if (q.getImportanceLevel() != null) {
             sql.append(" AND r.importance_level = ? ");
             args.add(q.getImportanceLevel());
@@ -279,10 +277,7 @@ public class HrKpiService {
         List<Object> args = new ArrayList<>();
         args.add(Date.valueOf(q.getStartDate()));
         args.add(Date.valueOf(q.getEndDate()));
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         dataScope.apply(sql, args, "r", null);
         return jdbc.query(sql.toString(), (rs, i) -> {
             OnboardSnap o = new OnboardSnap();
@@ -315,10 +310,7 @@ public class HrKpiService {
         List<Object> args = new ArrayList<>();
         args.add(Date.valueOf(q.getStartDate()));
         args.add(Date.valueOf(q.getEndDate()));
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         dataScope.apply(sql, args, "r", null);
         Integer count = jdbc.queryForObject(sql.toString(), Integer.class, args.toArray());
         return count == null ? 0 : count;
@@ -326,11 +318,11 @@ public class HrKpiService {
 
     private List<HrKpiBoardVO.OwnerRow> buildOwners(List<JobSnap> jobs, List<OnboardSnap> onboardings,
                                                     HrKpiQueryDTO q, Map<Long, String> nicknameCache) {
-        Long filterOwnerId = q.getOwnerUserId();
+        List<Long> filterOwnerIds = HrOwnerFilters.resolve(q.getOwnerUserId(), q.getOwnerUserIds());
         Map<Long, HrKpiBoardVO.OwnerRow> map = new LinkedHashMap<>();
         for (JobSnap job : jobs) {
             for (Long id : job.ownerIds) {
-                if (filterOwnerId != null && !filterOwnerId.equals(id)) {
+                if (!filterOwnerIds.isEmpty() && !filterOwnerIds.contains(id)) {
                     continue;
                 }
                 HrKpiBoardVO.OwnerRow row = map.computeIfAbsent(id, this::emptyOwner);
@@ -351,7 +343,7 @@ public class HrKpiService {
         Map<Long, Integer> cycleCnt = new HashMap<>();
         for (OnboardSnap o : onboardings) {
             for (Long id : o.ownerIds) {
-                if (filterOwnerId != null && !filterOwnerId.equals(id)) {
+                if (!filterOwnerIds.isEmpty() && !filterOwnerIds.contains(id)) {
                     continue;
                 }
                 onboardCnt.merge(id, 1, Integer::sum);
@@ -407,6 +399,7 @@ public class HrKpiService {
         q.setStartDate(base.getStartDate());
         q.setEndDate(base.getEndDate());
         q.setOwnerUserId(ownerId);
+        q.setOwnerUserIds(null);
         q.setGrain(base.getGrain());
         return countScreened(q);
     }
@@ -482,10 +475,7 @@ public class HrKpiService {
         List<Object> args = new ArrayList<>();
         args.add(Date.valueOf(q.getStartDate()));
         args.add(Date.valueOf(q.getEndDate()));
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         if (q.getImportanceLevel() != null) {
             sql.append(" AND r.importance_level = ? ");
             args.add(q.getImportanceLevel());
@@ -535,10 +525,7 @@ public class HrKpiService {
         List<Object> args = new ArrayList<>();
         args.add(Date.valueOf(q.getStartDate()));
         args.add(Date.valueOf(q.getEndDate()));
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         dataScope.apply(sql, args, "r", null);
         sql.append(" GROUP BY e.stage_code, s.stage_name ORDER BY MIN(s.sort_no)");
         return jdbc.query(sql.toString(), (rs, i) -> {
@@ -739,25 +726,53 @@ public class HrKpiService {
     }
 
     private static HrKpiBoardVO.JobRow sanitizeJobOwners(HrKpiBoardVO.JobRow row, List<JobSnap> jobs,
-                                                         Long filterOwnerId, Map<Long, String> nicknameCache) {
-        if (filterOwnerId == null || row == null) {
+                                                         List<Long> filterOwnerIds, Map<Long, String> nicknameCache) {
+        if (row == null || filterOwnerIds == null || filterOwnerIds.isEmpty()) {
             return row;
         }
         JobSnap snap = jobs.stream().filter(j -> j.id == row.getId()).findFirst().orElse(null);
-        if (snap != null) {
-            row.setOwnerNames(resolveOwnerName(filterOwnerId, snap.ownerNames, snap.ownerIds, nicknameCache));
-        } else {
-            row.setOwnerNames(resolveOwnerName(filterOwnerId, row.getOwnerNames(), List.of(filterOwnerId), nicknameCache));
+        if (filterOwnerIds.size() == 1) {
+            Long filterOwnerId = filterOwnerIds.get(0);
+            if (snap != null) {
+                row.setOwnerNames(resolveOwnerName(filterOwnerId, snap.ownerNames, snap.ownerIds, nicknameCache));
+            } else {
+                row.setOwnerNames(resolveOwnerName(filterOwnerId, row.getOwnerNames(), List.of(filterOwnerId), nicknameCache));
+            }
+            return row;
+        }
+        if (snap == null || snap.ownerIds == null) {
+            return row;
+        }
+        List<String> names = new ArrayList<>();
+        for (Long id : snap.ownerIds) {
+            if (filterOwnerIds.contains(id)) {
+                names.add(resolveOwnerName(id, snap.ownerNames, snap.ownerIds, nicknameCache));
+            }
+        }
+        if (!names.isEmpty()) {
+            row.setOwnerNames(String.join("、", names));
         }
         return row;
     }
 
     private static HrKpiBoardVO.OnboardRow sanitizeOnboardOwners(HrKpiBoardVO.OnboardRow row, OnboardSnap snap,
-                                                                Long filterOwnerId, Map<Long, String> nicknameCache) {
-        if (filterOwnerId == null || row == null || snap == null) {
+                                                                List<Long> filterOwnerIds, Map<Long, String> nicknameCache) {
+        if (row == null || snap == null || filterOwnerIds == null || filterOwnerIds.isEmpty()) {
             return row;
         }
-        row.setOwnerNames(resolveOwnerName(filterOwnerId, snap.ownerNames, snap.ownerIds, nicknameCache));
+        if (filterOwnerIds.size() == 1) {
+            row.setOwnerNames(resolveOwnerName(filterOwnerIds.get(0), snap.ownerNames, snap.ownerIds, nicknameCache));
+            return row;
+        }
+        List<String> names = new ArrayList<>();
+        for (Long id : snap.ownerIds) {
+            if (filterOwnerIds.contains(id)) {
+                names.add(resolveOwnerName(id, snap.ownerNames, snap.ownerIds, nicknameCache));
+            }
+        }
+        if (!names.isEmpty()) {
+            row.setOwnerNames(String.join("、", names));
+        }
         return row;
     }
 

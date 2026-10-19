@@ -136,10 +136,7 @@ public class HrMasterService {
             args.add(q.getDeptId());
             args.add(String.valueOf(q.getDeptId()));
         }
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         if (q.getPriority() != null) {
             sql.append(" AND r.priority = ? ");
             args.add(q.getPriority());
@@ -280,10 +277,7 @@ public class HrMasterService {
             sql.append(" AND r.job_name LIKE ? ");
             args.add("%" + q.getJobName().trim() + "%");
         }
-        if (q.getOwnerUserId() != null) {
-            sql.append(" AND r.id IN (SELECT requisition_id FROM hr_requisition_owner WHERE user_id = ? AND is_active = 1) ");
-            args.add(q.getOwnerUserId());
-        }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         if (q.getPriority() != null) {
             sql.append(" AND r.priority = ? ");
             args.add(q.getPriority());
@@ -929,6 +923,7 @@ public class HrMasterService {
             sql.append(" AND a.requisition_id = ? ");
             args.add(q.getRequisitionId());
         }
+        HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         dataScope.apply(sql, args, "r", "a");
         sql.append(" ORDER BY a.submitted_at DESC, a.id DESC");
         List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), args.toArray());

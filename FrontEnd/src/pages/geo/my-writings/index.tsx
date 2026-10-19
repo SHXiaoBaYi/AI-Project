@@ -8,12 +8,14 @@ import ActionButtons from '@/components/Buttons/ActionButtons';
 import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
 import {
+  getGeoContentReviewCompareApi,
   getGeoOwnerOptionsApi,
   getGeoTopicOptionsApi,
   getMyGeoWritingsApi,
   submitGeoContentMultiReviewApi,
 } from '@/api/geo';
-import type { GeoContentWritingRow, GeoOwnerOption, GeoTopic } from '@/types/geo';
+import { GeoReviewAnnotationReadonly } from '@/components/geo/content-placement/GeoReviewAnnotations';
+import type { GeoContentReviewAnnotation, GeoContentWritingRow, GeoOwnerOption, GeoTopic } from '@/types/geo';
 
 const STATUS_META: Record<string, { text: string; color: string }> = {
   drafting: { text: '草稿', color: 'default' },
@@ -58,6 +60,8 @@ const MyWritingsPage = memo(function MyWritingsPage() {
   const [submitForm] = Form.useForm();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewRow, setReviewRow] = useState<GeoContentWritingRow | null>(null);
+  const [reviewAnnotations, setReviewAnnotations] = useState<GeoContentReviewAnnotation[]>([]);
+  const [reviewAnnoBody, setReviewAnnoBody] = useState('');
   const [compareOpen, setCompareOpen] = useState(false);
   const [comparePlacementId, setComparePlacementId] = useState<number | null>(null);
   const [compareFocusId, setCompareFocusId] = useState<number | null>(null);
@@ -68,6 +72,25 @@ const MyWritingsPage = memo(function MyWritingsPage() {
       setTopics(topicOpts ?? []);
     });
   }, []);
+
+  useEffect(() => {
+    if (!reviewOpen || reviewRow?.placementId == null || reviewRow.latestReviewId == null) {
+      setReviewAnnotations([]);
+      setReviewAnnoBody('');
+      return;
+    }
+    const focusId = reviewRow.latestReviewId;
+    void getGeoContentReviewCompareApi(reviewRow.placementId)
+      .then((res) => {
+        const round = (res.rounds ?? []).find((r) => r.reviewId === focusId);
+        setReviewAnnotations(round?.annotations ?? []);
+        setReviewAnnoBody(round?.contentBody || res.currentDraft?.contentBody || '');
+      })
+      .catch(() => {
+        setReviewAnnotations([]);
+        setReviewAnnoBody('');
+      });
+  }, [reviewOpen, reviewRow]);
 
   const userOptions = useMemo(() => owners.map((u) => ({ label: u.displayName, value: u.userId })), [owners]);
   const topicOptions = useMemo(() => topics.map((t) => ({ label: t.topicName, value: t.id })), [topics]);
@@ -111,6 +134,8 @@ const MyWritingsPage = memo(function MyWritingsPage() {
                 disabled: !record.latestReviewId,
                 onClick: () => {
                   setReviewRow(record);
+                  setReviewAnnotations([]);
+                  setReviewAnnoBody('');
                   setReviewOpen(true);
                 },
               },
@@ -286,7 +311,10 @@ const MyWritingsPage = memo(function MyWritingsPage() {
         onCancel={() => {
           setReviewOpen(false);
           setReviewRow(null);
+          setReviewAnnotations([]);
+          setReviewAnnoBody('');
         }}
+        width={720}
       >
         <p className='mb-3 text-sm text-neutral-500'>
           {reviewRow?.topicName || '话题'} · {reviewRow?.contentTitle || reviewRow?.targetQuestion || ''}
@@ -301,7 +329,7 @@ const MyWritingsPage = memo(function MyWritingsPage() {
           </div>
         ) : null}
         {(reviewRow?.reviewers ?? []).length === 0 ? (
-          <p className='text-sm text-neutral-400'>暂无审核记录</p>
+          <p className='text-sm text-neutral-400'>暂无整篇审核意见</p>
         ) : (
           <ul className='m-0 list-none space-y-3 p-0'>
             {(reviewRow?.reviewers ?? []).map((item) => {
@@ -327,9 +355,34 @@ const MyWritingsPage = memo(function MyWritingsPage() {
             })}
           </ul>
         )}
+        {reviewAnnotations.length > 0 ? (
+          <div className='mt-4'>
+            <div className='mb-2 text-xs font-medium text-amber-800'>
+              划词批注（{reviewAnnotations.length}）· 点原文数字查看具体意见
+            </div>
+            <GeoReviewAnnotationReadonly
+              annotations={reviewAnnotations}
+              contentBody={reviewAnnoBody}
+            />
+          </div>
+        ) : null}
+        {reviewRow?.latestReviewId ? (
+          <div className='mt-3'>
+            <Typography.Link
+              onClick={() => {
+                setComparePlacementId(reviewRow.placementId);
+                setCompareFocusId(reviewRow.latestReviewId ?? null);
+                setCompareOpen(true);
+                setReviewOpen(false);
+              }}
+            >
+              在文章对照中查看完整批注
+            </Typography.Link>
+          </div>
+        ) : null}
         {reviewRow?.latestReviewStatus === 'rejected' || reviewRow?.contentStatus === 'revising' ? (
           <div className='mt-4'>
-            <Typography.Text type='secondary'>请按意见修改后，再交给打回人复审（不可换人）。</Typography.Text>
+            <Typography.Text type='secondary'>请按意见与划词批注修改后，再交给打回人复审（不可换人）。</Typography.Text>
           </div>
         ) : null}
       </Modal>

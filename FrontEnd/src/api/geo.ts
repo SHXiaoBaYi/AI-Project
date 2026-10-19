@@ -35,6 +35,7 @@ import type {
   GeoContentPlacementListItem,
   GeoContentPlacementArticle,
   GeoContentPlacementProofFile,
+  GeoContentReviewAnnotation,
   GeoContentReviewCompare,
   GeoContentReviewRow,
   GeoContentReviewRule,
@@ -468,6 +469,22 @@ export function submitGeoContentMultiReviewApi(data: {
 
 export function decideGeoContentReviewApi(data: { reviewId: number; action: 'approve' | 'reject'; comment?: string }) {
   return request.post('/geo/content-write/decide', data);
+}
+
+export function addGeoContentReviewAnnotationApi(data: {
+  reviewId: number;
+  quoteText: string;
+  commentText: string;
+  quotePrefix?: string;
+  quoteSuffix?: string;
+  startOffset?: number | null;
+  endOffset?: number | null;
+}) {
+  return request.post<unknown, GeoContentReviewAnnotation>('/geo/content-write/annotation', data);
+}
+
+export function deleteGeoContentReviewAnnotationApi(id: number) {
+  return request.delete(`/geo/content-write/annotation/${id}`);
 }
 
 export function getGeoContentReviewCompareApi(placementId: number) {

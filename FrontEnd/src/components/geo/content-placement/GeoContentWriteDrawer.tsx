@@ -7,14 +7,22 @@ import {
   aiGenerateGeoContentArticleApi,
   getGeoAiProvidersApi,
   getGeoContentArticleBundleApi,
+  getGeoContentReviewCompareApi,
   getGeoPlatformOptionsApi,
   decideGeoContentReviewApi,
   saveGeoContentDraftApi,
   saveGeoContentItemDraftApi,
   uploadGeoScreenshotApi,
 } from '@/api/geo';
+import { GeoReviewAnnotationReadonly } from '@/components/geo/content-placement/GeoReviewAnnotations';
 import { GEO_PLATFORM_TYPE_CONTENT } from '@/constants/geo';
-import type { GeoContentArticle, GeoContentArticleBundle, GeoPlatform } from '@/types/geo';
+import type {
+  GeoContentArticle,
+  GeoContentArticleBundle,
+  GeoContentReviewAnnotation,
+  GeoContentReviewRound,
+  GeoPlatform,
+} from '@/types/geo';
 
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
   drafting: { text: '草稿', color: 'default' },
@@ -63,6 +71,12 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     { provider: string; label: string; model: string; available: boolean; hint?: string }[]
   >([]);
   const [editorEpoch, setEditorEpoch] = useState(0);
+  const [reviewHints, setReviewHints] = useState<{
+    roundLabel: string;
+    contentBody: string;
+    annotations: GeoContentReviewAnnotation[];
+    reviewers: GeoContentReviewRound['reviewers'];
+  } | null>(null);
   const versionRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   const bodyRef = useRef('');
@@ -139,14 +153,39 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   useEffect(() => {
     if (!open || placementId == null) return;
     setOpinion('');
+    setReviewHints(null);
     void load(placementId, 'shared');
     if (mode === 'write') {
       void getGeoPlatformOptionsApi(GEO_PLATFORM_TYPE_CONTENT)
         .then(setPlatforms)
         .catch(() => setPlatforms([]));
     }
+    void getGeoContentReviewCompareApi(placementId)
+      .then((res) => {
+        const rounds = res.rounds ?? [];
+        const focus =
+          (reviewId != null && rounds.find((r) => r.reviewId === reviewId)) ||
+          (res.currentReviewId != null && rounds.find((r) => r.reviewId === res.currentReviewId)) ||
+          [...rounds]
+            .reverse()
+            .find((r) => (r.annotations ?? []).length > 0 || (r.reviewers ?? []).some((x) => x.comment)) ||
+          rounds[rounds.length - 1] ||
+          null;
+        if (!focus) {
+          setReviewHints(null);
+          return;
+        }
+        const stage = focus.stageNo === 2 ? '二审' : focus.stageNo === 1 ? '一审' : '';
+        setReviewHints({
+          roundLabel: `${stage ? `${stage}·` : ''}第${focus.roundNo ?? '-'}轮`,
+          contentBody: focus.contentBody || res.currentDraft?.contentBody || '',
+          annotations: focus.annotations ?? [],
+          reviewers: focus.reviewers ?? [],
+        });
+      })
+      .catch(() => setReviewHints(null));
     return () => clearTimer();
-  }, [open, placementId, mode, load]);
+  }, [open, placementId, mode, load, reviewId]);
 
   const persist = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -629,9 +668,41 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 }}
               />
             </div>
+            {reviewHints &&
+            ((reviewHints.annotations?.length ?? 0) > 0 ||
+              (reviewHints.reviewers ?? []).some((r) => r.comment?.trim())) ? (
+              <div className='max-h-56 overflow-auto border-t border-amber-100 bg-amber-50/40 px-4 py-2'>
+                <div className='mb-1 text-xs font-medium text-amber-800'>
+                  {reviewHints.roundLabel} 审核反馈
+                  {mode === 'write' ? '（改稿时请对照）' : ''}
+                </div>
+                {(reviewHints.reviewers ?? [])
+                  .filter((r) => r.comment?.trim())
+                  .map((r) => (
+                    <div
+                      key={`${r.userId}-${r.actedAt || r.comment}`}
+                      className='mb-2 rounded border border-neutral-100 bg-white px-3 py-2 text-sm'
+                    >
+                      <span className='text-xs text-neutral-400'>{r.userName || r.userId} · 总意见</span>
+                      <div className='text-neutral-800'>{r.comment}</div>
+                    </div>
+                  ))}
+                {(reviewHints.annotations?.length ?? 0) > 0 ? (
+                  <>
+                    <div className='mb-1 text-xs font-medium text-amber-800'>划词批注 · 点原文数字查看</div>
+                    <GeoReviewAnnotationReadonly
+                      annotations={reviewHints.annotations}
+                      contentBody={reviewHints.contentBody}
+                    />
+                  </>
+                ) : null}
+              </div>
+            ) : null}
             {mode === 'review' && reviewId != null ? (
               <div className='border-t border-neutral-100 px-4 py-2'>
-                <div className='mb-1 text-xs font-medium text-neutral-500'>审核意见（退回时必填）</div>
+                <div className='mb-1 text-xs font-medium text-neutral-500'>
+                  总意见（退回时必填；划词批注请到「文章对照 / 划词审核」）
+                </div>
                 <Input.TextArea
                   rows={2}
                   placeholder='填写审核意见'

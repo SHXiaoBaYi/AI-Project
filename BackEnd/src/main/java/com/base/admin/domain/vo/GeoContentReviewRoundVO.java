@@ -53,6 +53,9 @@ public class GeoContentReviewRoundVO {
     @Schema(description = "审核人摘要")
     private String reviewerSummary;
 
+    @Schema(description = "划词/划句/划段批注")
+    private List<GeoContentReviewAnnotationVO> annotations;
+
     @Schema(description = "提审时间")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;

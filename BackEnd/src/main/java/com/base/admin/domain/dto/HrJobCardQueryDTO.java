@@ -3,6 +3,8 @@ package com.base.admin.domain.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Schema(description = "岗位信息卡片筛选")
 public class HrJobCardQueryDTO {
@@ -19,8 +21,11 @@ public class HrJobCardQueryDTO {
     @Schema(description = "岗位名称")
     private String jobName;
 
-    @Schema(description = "负责人用户ID", example = "3", nullable = true)
+    @Schema(description = "负责人用户ID（单选，兼容）", example = "3", nullable = true)
     private Long ownerUserId;
+
+    @Schema(description = "负责人用户ID（多选，任一命中）")
+    private List<Long> ownerUserIds;
 
     @Schema(description = "岗位状态：PENDING待招 / ACTIVE进行中 / CLOSED已关闭")
     private String cardStatus;
