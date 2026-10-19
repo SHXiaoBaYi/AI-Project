@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, App, Button, DatePicker, Form, Input, InputNumber, Select, Space, Upload } from 'antd';
 import { InboxOutlined, PaperClipOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
@@ -77,14 +77,31 @@ export default function ApplicationFormModal({
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const resumeFileRef = useRef<File | null>(null);
   const [resumeFileList, setResumeFileList] = useState<UploadFile[]>([]);
   const [parseTip, setParseTip] = useState<string>();
   const [parsing, setParsing] = useState(false);
   const [portfolioList, setPortfolioList] = useState<HrCandidatePortfolio[]>([]);
   const [pendingPortfolios, setPendingPortfolios] = useState<File[]>([]);
+  const pendingPortfoliosRef = useRef<File[]>([]);
   const [pendingPortfolioUi, setPendingPortfolioUi] = useState<UploadFile[]>([]);
 
+  const setResumeFileKeep = (file: File | null) => {
+    resumeFileRef.current = file;
+    setResumeFile(file);
+  };
+
+  const setPendingPortfoliosKeep = (files: File[] | ((prev: File[]) => File[])) => {
+    setPendingPortfolios((prev) => {
+      const next = typeof files === 'function' ? files(prev) : files;
+      pendingPortfoliosRef.current = next;
+      return next;
+    });
+  };
+
   const resetLocalFiles = () => {
+    resumeFileRef.current = null;
+    pendingPortfoliosRef.current = [];
     setResumeFile(null);
     setResumeFileList([]);
     setParseTip(undefined);
@@ -109,11 +126,13 @@ export default function ApplicationFormModal({
         ? {
             ...editing,
             submittedAt: editing.submittedAt ? dayjs(editing.submittedAt) : undefined,
+            resumeGate: editing.resumeName || undefined,
           }
         : {
             requisitionId: presetRequisitionId,
             currentStage: 'ENTERED',
             submittedAt: dayjs(),
+            resumeGate: undefined,
           },
     );
     if (editing?.id) {
@@ -124,7 +143,8 @@ export default function ApplicationFormModal({
   }, [editing, form, open, presetRequisitionId]);
 
   const applyResumeFile = async (file: File) => {
-    setResumeFile(file);
+    // 先落本地文件：识别只预填表单，保存时必须再上传到候选人
+    setResumeFileKeep(file);
     setResumeFileList([
       {
         uid: String(Date.now()),
@@ -133,6 +153,7 @@ export default function ApplicationFormModal({
         size: file.size,
       },
     ]);
+    form.setFieldsValue({ resumeGate: file.name });
     setParsing(true);
     setParseTip(undefined);
     try {
@@ -180,6 +201,12 @@ export default function ApplicationFormModal({
       modalProps={{ destroyOnHidden: true, styles: { body: { padding: '20px 24px' } }, centered: true }}
       onFinish={async (values) => {
         const formValues = values as ApplicationFormValues;
+        const fileToUpload = resumeFileRef.current ?? resumeFile;
+        const isCreate = !editing?.id;
+        if (isCreate && !fileToUpload) {
+          message.error('请先上传简历');
+          return false;
+        }
         const applicationId = await saveHrApplicationApi({
           id: editing?.id,
           displayName: formValues.displayName,
@@ -198,10 +225,24 @@ export default function ApplicationFormModal({
           submittedAt: dateOf(formValues.submittedAt),
         });
         const id = Number(applicationId);
-        if (resumeFile) {
-          await uploadHrResumeApi(id, resumeFile);
+        if (!Number.isFinite(id) || id <= 0) {
+          message.error('保存候选人失败：未返回有效 ID');
+          return false;
         }
-        for (const file of pendingPortfolios) {
+        if (fileToUpload) {
+          try {
+            await uploadHrResumeApi(id, fileToUpload);
+          } catch (e) {
+            message.error(
+              e instanceof Error
+                ? `候选人已保存，但简历上传失败：${e.message}`
+                : '候选人已保存，但简历上传失败，请编辑后重新上传',
+            );
+            onSuccess();
+            return false;
+          }
+        }
+        for (const file of pendingPortfoliosRef.current.length ? pendingPortfoliosRef.current : pendingPortfolios) {
           await uploadHrPortfolioApi(id, file);
         }
         message.success(editing ? '已保存' : '已新增');
@@ -213,9 +254,9 @@ export default function ApplicationFormModal({
       <div className='grid grid-cols-4 gap-x-4 gap-y-1'>
         <Form.Item
           label='简历'
-          className='col-span-4'
-          required={!editing}
-          extra='先上传简历，系统优先用 AI 识别姓名/性别/年龄/学历/职位/公司/电话/邮箱/渠道，请核对后再保存'
+          className='col-span-4 mb-0'
+          required={!editing?.id}
+          extra='先上传简历：系统 AI 识别预填字段；保存时会把同一份简历上传到候选人（新增必填）'
         >
           {editing?.resumeName ? (
             <p className='mb-2 text-sm text-black/45'>当前：{editing.resumeName}，重新上传将覆盖</p>
@@ -234,9 +275,10 @@ export default function ApplicationFormModal({
               return false;
             }}
             onRemove={() => {
-              setResumeFile(null);
+              setResumeFileKeep(null);
               setResumeFileList([]);
               setParseTip(undefined);
+              form.setFieldsValue({ resumeGate: undefined });
             }}
           >
             <p className='ant-upload-drag-icon'>
@@ -253,6 +295,26 @@ export default function ApplicationFormModal({
               message={parseTip}
             />
           ) : null}
+        </Form.Item>
+        <Form.Item
+          name='resumeGate'
+          className='col-span-4'
+          rules={
+            editing?.id
+              ? undefined
+              : [
+                  {
+                    validator: async () => {
+                      if (!resumeFileRef.current && !resumeFile) {
+                        throw new Error('请上传简历（识别后仍会保存该文件）');
+                      }
+                    },
+                  },
+                ]
+          }
+          hidden
+        >
+          <Input />
         </Form.Item>
 
         <Form.Item
@@ -453,7 +515,7 @@ export default function ApplicationFormModal({
             accept={PORTFOLIO_ACCEPT}
             fileList={pendingPortfolioUi}
             beforeUpload={(file) => {
-              setPendingPortfolios((prev) => [...prev, file]);
+              setPendingPortfoliosKeep((prev) => [...prev, file]);
               setPendingPortfolioUi((prev) => [
                 ...prev,
                 {
@@ -467,7 +529,7 @@ export default function ApplicationFormModal({
             }}
             onRemove={(file) => {
               setPendingPortfolioUi((prev) => prev.filter((f) => f.uid !== file.uid));
-              setPendingPortfolios((prev) => prev.filter((f) => f.name !== file.name || f.size !== file.size));
+              setPendingPortfoliosKeep((prev) => prev.filter((f) => f.name !== file.name || f.size !== file.size));
             }}
           >
             <Button icon={<PaperClipOutlined />}>添加作品集附件</Button>

@@ -683,6 +683,7 @@ export function uploadHrResumeApi(applicationId: number, file: File) {
   formData.append('file', file);
   return request.post<unknown, void>(`/hr/application/${applicationId}/resume`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
   });
 }
 
