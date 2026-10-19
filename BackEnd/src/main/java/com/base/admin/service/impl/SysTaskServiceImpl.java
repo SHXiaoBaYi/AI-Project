@@ -130,6 +130,12 @@ public class SysTaskServiceImpl implements SysTaskService {
                 .eq(query.getOwnerUserId() != null, SysTask::getOwnerUserId, query.getOwnerUserId())
                 .eq(query.getCreatorUserId() != null, SysTask::getCreatorUserId, query.getCreatorUserId());
         com.base.admin.util.QueryWrappers.applyCreateTimeRange(wrapper, query, SysTask::getCreateTime);
+        if (query.getActualEndTimeStart() != null) {
+            wrapper.ge(SysTask::getActualEndTime, query.getActualEndTimeStart().atStartOfDay());
+        }
+        if (query.getActualEndTimeEnd() != null) {
+            wrapper.lt(SysTask::getActualEndTime, query.getActualEndTimeEnd().plusDays(1).atStartOfDay());
+        }
 
         List<String> statusFilters = query.getStatuses() == null ? List.of() : query.getStatuses().stream()
                 .filter(StringUtils::hasText)
@@ -562,7 +568,8 @@ public class SysTaskServiceImpl implements SysTaskService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void createGeoReviewTasks(Long reviewId, Long placementId, String bizTitle, List<Long> reviewerUserIds, int stageNo) {
+    public void createGeoReviewTasks(Long reviewId, Long placementId, String bizTitle, List<Long> reviewerUserIds,
+                                     int stageNo, Long sourceUserId) {
         if (reviewId == null || reviewerUserIds == null || reviewerUserIds.isEmpty()) {
             return;
         }
@@ -596,6 +603,10 @@ public class SysTaskServiceImpl implements SysTaskService {
             dto.setBizId(reviewId);
             dto.setBizTitle(titleBase);
             dto.setRemark("由撰写人发起" + stageName + "后自动生成");
+            // 来源人=文章撰写人（与任务创建人/审核人区分）
+            if (sourceUserId != null) {
+                dto.setSourceUserId(sourceUserId);
+            }
             create(dto);
         }
     }

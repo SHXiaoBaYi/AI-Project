@@ -486,6 +486,19 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       hideInTable: true,
     },
     {
+      title: '完成时间',
+      dataIndex: 'actualEndTimeRange',
+      valueType: 'dateRange',
+      hideInTable: true,
+      hideInForm: true,
+      search: {
+        transform: (value) => ({
+          actualEndTimeStart: value?.[0],
+          actualEndTimeEnd: value?.[1],
+        }),
+      },
+    },
+    {
       title: '创建时间',
       dataIndex: 'createTime',
       valueType: 'dateRange',
@@ -638,6 +651,8 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             mineOnly,
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
+            actualEndTimeStart: params.actualEndTimeStart,
+            actualEndTimeEnd: params.actualEndTimeEnd,
           });
           return { data: res.rows, success: true, total: res.total };
         }}

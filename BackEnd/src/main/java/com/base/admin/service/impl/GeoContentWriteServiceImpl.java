@@ -470,7 +470,8 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         String bizTitle = StringUtils.hasText(placement.getContentTitle())
                 ? placement.getContentTitle().trim()
                 : nz(placement.getTargetQuestion());
-        taskService.createGeoReviewTasks(review.getId(), placement.getId(), bizTitle, List.of(reviewerId), stageNo);
+        taskService.createGeoReviewTasks(review.getId(), placement.getId(), bizTitle, List.of(reviewerId), stageNo,
+                placement.getOwnerUserId());
         return review.getId();
     }
 

@@ -39,6 +39,7 @@ import type {
   GeoContentReviewCompare,
   GeoContentReviewRow,
   GeoContentReviewRule,
+  GeoContentPublisherRule,
   GeoContentWritingRow,
   GeoContentAiGenerateResult,
   GeoSellDomain,
@@ -89,6 +90,26 @@ export function deleteGeoReviewRuleApi(id: number) {
 
 export function deleteGeoReviewRuleBatchApi(ids: number[]) {
   return request.delete('/geo/review-rule/batch', { data: ids });
+}
+
+export function getGeoPublisherRuleListApi(data: PageQuery & { publisherUserId?: number; isDefault?: number }) {
+  return request.post<unknown, PageResult<GeoContentPublisherRule>>('/geo/publisher-rule/list', data);
+}
+
+export function createGeoPublisherRuleApi(data: Partial<GeoContentPublisherRule>) {
+  return request.post('/geo/publisher-rule', data);
+}
+
+export function updateGeoPublisherRuleApi(data: Partial<GeoContentPublisherRule>) {
+  return request.put('/geo/publisher-rule', data);
+}
+
+export function deleteGeoPublisherRuleApi(id: number) {
+  return request.delete(`/geo/publisher-rule/${id}`);
+}
+
+export function deleteGeoPublisherRuleBatchApi(ids: number[]) {
+  return request.delete('/geo/publisher-rule/batch', { data: ids });
 }
 
 export function getGeoPlatformListApi(data: PageQuery & { platformName?: string; platformType?: string }) {

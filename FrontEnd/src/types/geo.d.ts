@@ -14,6 +14,15 @@ export interface GeoContentReviewRule {
   createTime?: string;
 }
 
+export interface GeoContentPublisherRule {
+  id: number;
+  publisherUserId: number;
+  publisherName?: string;
+  isDefault: number;
+  remark?: string;
+  createTime?: string;
+}
+
 export interface GeoPlatform {
   id: number;
   platformName: string;

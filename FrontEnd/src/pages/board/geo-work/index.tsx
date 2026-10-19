@@ -13,7 +13,7 @@ function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs
   return [start.startOf('day'), end.endOf('day')];
 }
 
-/** 数据看板 · GEO 任务：按话题 / 撰写人 / 任务类型看完成情况 */
+/** 数据看板 · GEO 任务：按话题 / 人员 / 任务类型看完成情况 */
 export default function GeoWorkBoardPage() {
   const [grain, setGrain] = useState<DemoBoardGrain>('week');
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => demoRangeByGrain('week'));
@@ -94,8 +94,8 @@ export default function GeoWorkBoardPage() {
             showSearch
             optionFilterProp='label'
             maxTagCount='responsive'
-            placeholder='撰写人'
-            className='min-w-[180px]'
+            placeholder='人员（撰写/发布/审核）'
+            className='min-w-[200px]'
             options={userOptions}
             value={filterUserIds}
             onChange={(v) => setFilterUserIds(v ?? [])}

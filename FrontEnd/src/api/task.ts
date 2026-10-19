@@ -81,6 +81,10 @@ export type SysTaskQuery = PageQuery & {
   creatorUserId?: number;
   mineOnly?: boolean;
   overdueOnly?: boolean;
+  /** 完成时间起 YYYY-MM-DD */
+  actualEndTimeStart?: string;
+  /** 完成时间止 YYYY-MM-DD */
+  actualEndTimeEnd?: string;
 };
 
 export type SysTaskType = {

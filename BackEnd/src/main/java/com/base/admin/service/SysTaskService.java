@@ -55,9 +55,10 @@ public interface SysTaskService {
 
     /**
      * 发起审核后，为该阶段审核人生成「审核文章」任务（biz=审核轮次）。
+     * @param sourceUserId 任务来源人=文章撰写人
      */
     void createGeoReviewTasks(Long reviewId, Long placementId, String bizTitle,
-                              java.util.List<Long> reviewerUserIds, int stageNo);
+                              java.util.List<Long> reviewerUserIds, int stageNo, Long sourceUserId);
 
     /** 审核人提交通过/退回后，完成其对应「审核文章」任务 */
     void completeGeoReviewTask(Long reviewId, Long reviewerUserId, String reviewerName);

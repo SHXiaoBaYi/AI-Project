@@ -4,7 +4,9 @@ import com.base.admin.common.PageQuery;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.springframework.format.annotation.DateTimeFormat;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Data
@@ -41,4 +43,12 @@ public class SysTaskQueryDTO extends PageQuery {
 
     @Schema(description = "是否逾期（计划截止已过且未完成/取消）")
     private Boolean overdueOnly;
+
+    @Schema(description = "完成时间起（含当日）", example = "2026-01-01")
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    private LocalDate actualEndTimeStart;
+
+    @Schema(description = "完成时间止（含当日）", example = "2026-12-31")
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    private LocalDate actualEndTimeEnd;
 }

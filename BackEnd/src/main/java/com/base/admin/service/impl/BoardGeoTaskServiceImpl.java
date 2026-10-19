@@ -7,6 +7,7 @@ import com.base.admin.domain.dto.BoardGeoTaskAggQueryDTO;
 import com.base.admin.domain.dto.BoardGeoTaskDrillQueryDTO;
 import com.base.admin.domain.dto.BoardGeoTaskQueryDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
+import com.base.admin.domain.entity.GeoContentReview;
 import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysTaskAssignee;
 import com.base.admin.domain.entity.SysTaskType;
@@ -14,6 +15,7 @@ import com.base.admin.domain.vo.BoardGeoTaskAggRowVO;
 import com.base.admin.domain.vo.BoardGeoTaskRowVO;
 import com.base.admin.domain.vo.BoardGeoTaskSummaryVO;
 import com.base.admin.mapper.GeoContentPlacementMapper;
+import com.base.admin.mapper.GeoContentReviewMapper;
 import com.base.admin.mapper.SysTaskAssigneeMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysTaskTypeMapper;
@@ -58,6 +60,7 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
     private final SysTaskAssigneeMapper assigneeMapper;
     private final SysTaskTypeMapper taskTypeMapper;
     private final GeoContentPlacementMapper placementMapper;
+    private final GeoContentReviewMapper reviewMapper;
     private final DataScopeFilter dataScopeFilter;
 
     @Override
@@ -204,33 +207,43 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
             return List.of();
         }
 
-        Set<Long> placementIds = tasks.stream()
-                .filter(t -> Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT.equals(t.getBizType()) && t.getBizId() != null)
-                .map(SysTask::getBizId)
-                .collect(Collectors.toCollection(HashSet::new));
+        Set<Long> placementIds = new HashSet<>();
+        Set<Long> reviewIds = new HashSet<>();
+        for (SysTask t : tasks) {
+            if (t.getBizId() == null) {
+                continue;
+            }
+            if (Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT.equals(t.getBizType())) {
+                placementIds.add(t.getBizId());
+            } else if (Constants.TASK_BIZ_GEO_CONTENT_REVIEW.equals(t.getBizType())) {
+                reviewIds.add(t.getBizId());
+            }
+        }
+        Map<Long, Long> reviewToPlacement = loadReviewPlacementIds(reviewIds);
+        placementIds.addAll(reviewToPlacement.values());
         Map<Long, GeoContentPlacement> placements = loadPlacements(placementIds);
 
         List<TaskView> views = new ArrayList<>();
         for (SysTask t : tasks) {
-            GeoContentPlacement p = null;
-            if (Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT.equals(t.getBizType()) && t.getBizId() != null) {
-                p = placements.get(t.getBizId());
-            }
+            GeoContentPlacement p = resolvePlacement(t, placements, reviewToPlacement);
             Long topicId = p != null && p.getTopicId() != null ? p.getTopicId() : 0L;
             String topicName = p != null && StringUtils.hasText(p.getTopicName()) ? p.getTopicName().trim() : "未关联话题";
             if (topicId == 0L && (p == null || !StringUtils.hasText(p.getTopicName()))) {
                 topicName = "未关联话题";
             }
-            Long writerId = p != null && p.getOwnerUserId() != null ? p.getOwnerUserId() : 0L;
-            String writerName = p != null && StringUtils.hasText(p.getOwnerName())
+            // 文章撰写人（投放表 owner），用于明细展示
+            Long articleWriterId = p != null && p.getOwnerUserId() != null ? p.getOwnerUserId() : 0L;
+            String articleWriterName = p != null && StringUtils.hasText(p.getOwnerName())
                     ? p.getOwnerName().trim()
-                    : (writerId == 0L ? "未分配撰写人" : ("用户" + writerId));
+                    : (articleWriterId == 0L ? "未分配撰写人" : ("用户" + articleWriterId));
+            // 人员维度：按任务类型归到真正责任人（发布→发布人，撰写→撰写人，审核→审核人）
+            PersonKey person = resolvePerson(t, p, articleWriterId, articleWriterName);
             String targetQuestion = p != null ? p.getTargetQuestion() : null;
 
             if (ctx.topicIds != null && !ctx.topicIds.isEmpty() && !ctx.topicIds.contains(topicId)) {
                 continue;
             }
-            if (ctx.filterUserIds != null && !ctx.filterUserIds.isEmpty() && !ctx.filterUserIds.contains(writerId)) {
+            if (ctx.filterUserIds != null && !ctx.filterUserIds.isEmpty() && !ctx.filterUserIds.contains(person.userId)) {
                 continue;
             }
 
@@ -245,8 +258,9 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
             v.task = t;
             v.topicId = topicId;
             v.topicName = topicName;
-            v.writerUserId = writerId;
-            v.writerName = writerName;
+            v.writerUserId = person.userId;
+            v.writerName = person.name;
+            v.articleWriterName = articleWriterName;
             v.targetQuestion = targetQuestion;
             v.open = open;
             v.done = done;
@@ -256,6 +270,73 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
             views.add(v);
         }
         return views;
+    }
+
+    private Map<Long, Long> loadReviewPlacementIds(Set<Long> reviewIds) {
+        if (reviewIds == null || reviewIds.isEmpty()) {
+            return Map.of();
+        }
+        List<GeoContentReview> reviews = reviewMapper.selectBatchIds(reviewIds);
+        Map<Long, Long> map = new LinkedHashMap<>();
+        for (GeoContentReview r : reviews) {
+            if (r.getId() != null && r.getPlacementId() != null) {
+                map.put(r.getId(), r.getPlacementId());
+            }
+        }
+        return map;
+    }
+
+    private static GeoContentPlacement resolvePlacement(
+            SysTask t, Map<Long, GeoContentPlacement> placements, Map<Long, Long> reviewToPlacement) {
+        if (t.getBizId() == null) {
+            return null;
+        }
+        if (Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT.equals(t.getBizType())) {
+            return placements.get(t.getBizId());
+        }
+        if (Constants.TASK_BIZ_GEO_CONTENT_REVIEW.equals(t.getBizType())) {
+            Long placementId = reviewToPlacement.get(t.getBizId());
+            return placementId == null ? null : placements.get(placementId);
+        }
+        return null;
+    }
+
+    /**
+     * 人员归口：发布类→发布人；撰写类→撰写人；审核→任务负责人（审核人）；其余→任务负责人。
+     */
+    private static PersonKey resolvePerson(SysTask t, GeoContentPlacement p, Long articleWriterId, String articleWriterName) {
+        String type = StringUtils.hasText(t.getTaskType()) ? t.getTaskType().trim() : "";
+        if (Constants.TASK_TYPE_GEO_PUBLISH.equals(type) || Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER.equals(type)) {
+            Long pubId = p != null && p.getPublisherUserId() != null ? p.getPublisherUserId() : 0L;
+            if (pubId == 0L && t.getOwnerUserId() != null) {
+                pubId = t.getOwnerUserId();
+            }
+            String pubName;
+            if (p != null && StringUtils.hasText(p.getPublisherName())
+                    && !Constants.CONTENT_UNASSIGNED.equals(p.getPublisherName().trim())) {
+                pubName = p.getPublisherName().trim();
+            } else if (StringUtils.hasText(t.getOwnerName())) {
+                pubName = t.getOwnerName().trim();
+            } else {
+                pubName = pubId == 0L ? "未分配发布人" : ("用户" + pubId);
+            }
+            return new PersonKey(pubId, pubName);
+        }
+        if (Constants.TASK_TYPE_GEO_WRITE.equals(type) || Constants.TASK_TYPE_GEO_ASSIGN_WRITER.equals(type)) {
+            return new PersonKey(articleWriterId, articleWriterName);
+        }
+        if (Constants.TASK_TYPE_GEO_REVIEW.equals(type)) {
+            Long rid = t.getOwnerUserId() != null ? t.getOwnerUserId() : 0L;
+            String rname = StringUtils.hasText(t.getOwnerName())
+                    ? t.getOwnerName().trim()
+                    : (rid == 0L ? "未分配审核人" : ("用户" + rid));
+            return new PersonKey(rid, rname);
+        }
+        Long oid = t.getOwnerUserId() != null ? t.getOwnerUserId() : articleWriterId;
+        String oname = StringUtils.hasText(t.getOwnerName())
+                ? t.getOwnerName().trim()
+                : (oid == null || oid == 0L ? "未分配" : ("用户" + oid));
+        return new PersonKey(oid == null ? 0L : oid, oname);
     }
 
     private Set<String> loadGeoTaskTypes() {
@@ -377,7 +458,7 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
         row.setPriority(t.getPriority());
         row.setProgress(t.getProgress());
         row.setTopicName(v.topicName);
-        row.setWriterName(v.writerName);
+        row.setWriterName(v.articleWriterName != null ? v.articleWriterName : v.writerName);
         row.setOwnerName(t.getOwnerName());
         row.setAssigneeNames(assigneeNames);
         row.setTargetQuestion(v.targetQuestion);
@@ -506,6 +587,9 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
     private record DimKey(String dimKey, String name, Long topicId, Long writerUserId, String taskType) {
     }
 
+    private record PersonKey(Long userId, String name) {
+    }
+
     private static final class Agg {
         final String dimKey;
         final String name;
@@ -547,8 +631,11 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
         SysTask task;
         Long topicId;
         String topicName;
+        /** 人员维度归口人（发布人/撰写人/审核人） */
         Long writerUserId;
         String writerName;
+        /** 文章撰写人（明细列展示） */
+        String articleWriterName;
         String targetQuestion;
         boolean open;
         boolean done;

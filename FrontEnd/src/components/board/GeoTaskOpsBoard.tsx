@@ -217,7 +217,7 @@ export function GeoTaskOpsBoard({
   );
 
   const openDrill = (dim: BoardGeoTaskDim, row: BoardGeoTaskAggRow) => {
-    const label = dim === 'topic' ? '话题' : dim === 'writer' ? '撰写人' : '任务类型';
+    const label = dim === 'topic' ? '话题' : dim === 'writer' ? '人员' : '任务类型';
     setSubFilter('all');
     setPageNum(1);
     setPageSize(10);
@@ -329,11 +329,11 @@ export function GeoTaskOpsBoard({
           xl={8}
         >
           <DimTableCard
-            title='按撰写人'
-            hint='点击行或「详情」查看该撰写人任务明细'
+            title='按人员'
+            hint='发布任务归发布人、撰写归撰写人、审核归审核人；点击查看明细'
             loading={loading}
             rows={writerRows}
-            nameTitle='撰写人'
+            nameTitle='人员'
             onRowClick={(r) => openDrill('writer', r)}
           />
         </Col>

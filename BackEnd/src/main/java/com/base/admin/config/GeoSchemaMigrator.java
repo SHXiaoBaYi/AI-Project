@@ -75,6 +75,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureGeoStaffRoles(connection);
             retireLegacyGeoRoles(connection);
             ensureContentReviewRule(connection);
+            ensureContentPublisherRule(connection);
             ensureSellPointLibrary(connection);
             if (cleanupEmptyDaily) {
                 cleanupEmptyUninspectedDailyBeforeToday(connection);
@@ -1322,6 +1323,93 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             }
         }
         log.info("已同步文章审核规则菜单 menu_id=178 path=geo/review-rule");
+    }
+
+    /** 默认发布人规则：未指定发布人时自动套用（种子：小穆） */
+    private void ensureContentPublisherRule(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_publisher_rule")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_content_publisher_rule (
+                          id                 BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          publisher_user_id  BIGINT        NOT NULL                COMMENT '发布人用户ID',
+                          publisher_name     VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '发布人展示名',
+                          is_default         TINYINT       NOT NULL DEFAULT 1      COMMENT '是否默认发布人 1=是 0=否',
+                          remark             VARCHAR(500)  NOT NULL DEFAULT ''     COMMENT '备注',
+                          create_by          VARCHAR(64)   DEFAULT ''              COMMENT '创建者',
+                          create_time        DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                          update_by          VARCHAR(64)   DEFAULT ''              COMMENT '更新者',
+                          update_time        DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                          is_active          TINYINT       NOT NULL DEFAULT 1      COMMENT '是否有效',
+                          PRIMARY KEY (id),
+                          KEY idx_publisher_rule_user (publisher_user_id, is_active),
+                          KEY idx_publisher_rule_default (is_default, is_active)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO文章发布人规则'
+                        """);
+            }
+            log.info("已创建 geo_content_publisher_rule");
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO geo_content_publisher_rule (publisher_user_id, publisher_name, is_default, remark, is_active)
+                    SELECT u.user_id,
+                           COALESCE(NULLIF(TRIM(u.nickname), ''), NULLIF(TRIM(u.username), ''), CONCAT('用户', u.user_id)),
+                           1,
+                           '系统默认：未指定发布人的文章自动套用',
+                           1
+                    FROM sys_user u
+                    WHERE u.is_active = 1
+                      AND u.status = 0
+                      AND (TRIM(u.nickname) = '小穆' OR TRIM(u.username) = '小穆')
+                      AND NOT EXISTS (
+                          SELECT 1 FROM geo_content_publisher_rule r WHERE r.is_active = 1 AND r.is_default = 1
+                      )
+                    ORDER BY u.user_id
+                    LIMIT 1
+                    """);
+            // 182-186 已被卖点库占用，发布人规则用 187-190，挂在基础配置(130)下
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (187, '发布人规则', 130, 5, 'geo/publisher-rule', '', 'C', 'geo:publisherRule:list', 'UserOutlined', 0, 0,
+                     '配置默认发布人；未指定时自动套用', 1),
+                    (188, '发布人规则新增', 187, 1, '', '', 'F', 'geo:publisherRule:add', '#', 0, 0, '', 1),
+                    (189, '发布人规则修改', 187, 2, '', '', 'F', 'geo:publisherRule:edit', '#', 0, 0, '', 1),
+                    (190, '发布人规则删除', 187, 3, '', '', 'F', 'geo:publisherRule:delete', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      parent_id = VALUES(parent_id),
+                      sort_order = VALUES(sort_order),
+                      path = VALUES(path),
+                      component = VALUES(component),
+                      menu_type = VALUES(menu_type),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      is_active = 1,
+                      visible = VALUES(visible)
+                    """);
+            statement.execute("""
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (187, 188, 189, 190)
+                    """);
+            statement.execute("""
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT rm.role_id, m.menu_id, 1
+                    FROM sys_role_menu rm
+                    CROSS JOIN sys_menu m
+                    WHERE rm.menu_id IN (101, 178) AND rm.is_active = 1
+                      AND m.menu_id IN (187, 188, 189, 190)
+                    """);
+            Long mgmtId = roleIdByKey(connection, "geo_mgmt_review");
+            if (mgmtId != null) {
+                statement.execute("""
+                        INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                        SELECT %d, menu_id, 1 FROM sys_menu WHERE menu_id IN (187, 188, 189, 190)
+                        """.formatted(mgmtId));
+            }
+        }
+        log.info("已同步发布人规则菜单 menu_id=187 path=geo/publisher-rule");
     }
 
     /** 卖点域树 + 卖点条目；菜单挂在内容投放下 */

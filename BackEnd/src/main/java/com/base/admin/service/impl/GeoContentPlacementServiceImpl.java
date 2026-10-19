@@ -72,6 +72,7 @@ import com.base.admin.service.AiChatService;
 import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.FileStorageService;
 import com.base.admin.service.GeoContentPlacementService;
+import com.base.admin.service.GeoContentPublisherRuleService;
 import com.base.admin.service.GeoTopicService;
 import com.base.admin.service.PlacementTaskSyncService;
 import com.base.admin.service.SellPointContextService;
@@ -139,6 +140,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final SysAiProviderService sysAiProviderService;
     private final SellPointContextService sellPointContextService;
     private final PlacementTaskSyncService placementTaskSyncService;
+    private final GeoContentPublisherRuleService publisherRuleService;
     private final ObjectMapper objectMapper;
     private final SysTaskMapper taskMapper;
     private final SysTaskFileMapper taskFileMapper;
@@ -1144,8 +1146,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             return null;
         }
         GeoContentPlacement row = new GeoContentPlacement();
-        row.setPublisherUserId(null);
-        row.setPublisherName(Constants.CONTENT_UNASSIGNED);
+        applyDefaultPublisherOrUnassigned(row);
         row.setOwnerUserId(null);
         row.setOwnerName(Constants.CONTENT_UNASSIGNED);
         if (source.getTopicId() != null || StringUtils.hasText(source.getTopicName())) {
@@ -1942,8 +1943,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             placement.setPublisherUserId(null);
             placement.setPublisherName(publisher.trim());
         } else {
-            placement.setPublisherUserId(null);
-            placement.setPublisherName(Constants.CONTENT_UNASSIGNED);
+            applyDefaultPublisherOrUnassigned(placement);
         }
 
         SysUser ownerUser = findUserByName(owner);
@@ -1964,8 +1964,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private void applyUser(GeoContentPlacement placement, boolean publisher, Long userId) {
         if (userId == null) {
             if (publisher) {
-                placement.setPublisherUserId(null);
-                placement.setPublisherName(Constants.CONTENT_UNASSIGNED);
+                applyDefaultPublisherOrUnassigned(placement);
             } else {
                 placement.setOwnerUserId(null);
                 placement.setOwnerName(Constants.CONTENT_UNASSIGNED);
@@ -1983,6 +1982,20 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             placement.setOwnerUserId(user.getUserId());
             placement.setOwnerName(userDisplayName(user));
         }
+    }
+
+    /** 未指定发布人时套用「发布人规则」中的默认发布人，否则记为待分配 */
+    private void applyDefaultPublisherOrUnassigned(GeoContentPlacement placement) {
+        var def = publisherRuleService.resolveDefault();
+        if (def.isPresent() && def.get().getPublisherUserId() != null) {
+            placement.setPublisherUserId(def.get().getPublisherUserId());
+            placement.setPublisherName(StringUtils.hasText(def.get().getPublisherName())
+                    ? def.get().getPublisherName().trim()
+                    : ("用户" + def.get().getPublisherUserId()));
+            return;
+        }
+        placement.setPublisherUserId(null);
+        placement.setPublisherName(Constants.CONTENT_UNASSIGNED);
     }
 
     private void applyTopic(GeoContentPlacement placement, Long topicId, String topicName) {
