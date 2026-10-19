@@ -30,7 +30,7 @@ RDS 地址约定（阿里云）：
 | 方向 | 内容 | 做法 |
 |------|------|------|
 | 生产 → 测试 | **数据**（含表结构快照） | `deploy/sync-prod-db-to-test.sh` 全量覆盖 |
-| 测试 → 生产 | **表结构** | 改代码里的 SchemaMigrator → 发版到生产，启动自动补齐 |
+| 测试 → 生产 | **表结构 / 初始化数据 / 新列默认值** | 改 `*SchemaMigrator`（及它执行的 `db/v*.sql`）→ `./deploy/publish-ecs.sh prod`。脚本会对比上次生产 SHA，有变更则等启动 Migrator 跑完（`PROD_RELEASE_READY`） |
 | 本地 | 只连测试库 | `application.yml` 默认已是测试 RDS |
 
 **不要**用测试库 dump DDL 直接打生产；结构以 Git 中 Migrator 为准。
@@ -91,6 +91,15 @@ ssh -i "$ECS_IDENTITY" root@121.40.170.82 'systemctl restart xby-admin && system
 # 生产（验收通过后）
 ./deploy/publish-ecs.sh prod
 ```
+
+生产发布会：
+
+1. 读生产机 `/opt/xby-admin/.prod-release` 的上次 SHA（或本机 `deploy/.last-prod-commit`）
+2. 跑 `deploy/detect-prod-delta.sh`，从代码判断本次是否有建表/加列、菜单等初始化数据、新列默认值/回填
+3. 有则重启后必须等 SchemaMigrator 执行完毕（工作目录 `.schema-migrate-ok` / 日志 `PROD_RELEASE_READY`）；未挂接的 SQL 会直接失败
+4. 成功后把当前 git SHA 写成新基线
+
+样例灌数开关（`geo.seed` / `hr.seed` / `demo.seed` 等）生产保持关闭。
 
 本机无密钥时导出 `SSHPASS` 再用脚本（依赖 `sshpass`）。有密钥则 `ECS_IDENTITY=/path/to.pem`。
 
