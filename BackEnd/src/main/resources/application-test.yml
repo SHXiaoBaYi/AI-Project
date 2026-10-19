@@ -22,6 +22,12 @@ xby:
       username: ${RDS_USERNAME:xiaobayi0099}
       password: ${RDS_PASSWORD:Xby@123456}
 
+# 与生产共用同一机器人凭证时，测试默认不占 Stream，避免「线上邀约」卡片落到 170.82
+dingtalk:
+  h5-base-url: ${DINGTALK_H5_BASE_URL:http://121.40.170.82/shxby}
+  robot:
+    stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:false}
+
 # 测试环境保留 Swagger，便于联调
 springdoc:
   api-docs:

@@ -6,6 +6,11 @@
 #     username: your_test_user
 #     password: your_test_password
 #   upload-public-base: http://121.40.170.82/shxby/api
+# dingtalk:
+#   h5-base-url: http://121.40.170.82/shxby
+#   # 调试机器人时再开；默认 false，避免抢走生产 Stream
+#   robot:
+#     stream-enabled: false
 #
 # 生产机示例：
 # xby:
@@ -13,3 +18,7 @@
 #     username: your_prod_user
 #     password: your_prod_password
 #   upload-public-base: http://121.40.119.134/shxby/api
+# dingtalk:
+#   h5-base-url: http://121.40.119.134/shxby
+#   robot:
+#     stream-enabled: true

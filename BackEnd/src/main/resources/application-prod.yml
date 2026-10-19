@@ -14,6 +14,12 @@ xby:
   env-sync:
     enabled: false
 
+# ActionCard / bridge 必须指向生产公网，避免落到测试机 170.82
+dingtalk:
+  h5-base-url: ${DINGTALK_H5_BASE_URL:http://121.40.119.134/shxby}
+  robot:
+    stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:true}
+
 spring:
   datasource:
     url: jdbc:mysql://${xby.rds.internal-host}:${xby.rds.port}/${xby.rds.database}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
