@@ -220,7 +220,7 @@ public class HrMasterController {
         return Result.ok(masterService.saveApplication(dto));
     }
 
-    @Operation(summary = "解析简历（姓名/电话/邮箱，供新增时预填核对）")
+    @Operation(summary = "解析简历（AI 优先识别姓名/性别/年龄/学历/职位/公司/电话/邮箱/渠道，供新增预填）")
     @PostMapping(value = "/application/resume/parse", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RequiresPermission({"hr:application:add", "hr:application:edit"})
     public Result<com.base.admin.domain.vo.HrResumeParsePreviewVO> parseResume(@RequestParam("file") MultipartFile file) {

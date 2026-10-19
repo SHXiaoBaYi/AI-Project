@@ -2,6 +2,10 @@ package com.base.admin.service;
 
 import com.base.admin.domain.vo.HrResumeParsePreviewVO;
 import com.base.admin.exception.BusinessException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -16,6 +20,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -25,15 +30,28 @@ import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** 从常见简历文件中抽取姓名 / 电话 / 邮箱，供新增候选人时预填核对 */
+/**
+ * 简历预填：先抽正文，再优先用系统已配置的大模型识别字段；
+ * AI 不可用或失败时回退规则（姓名/电话/邮箱 + Boss/猎聘文件名提示）。
+ */
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class HrResumeParseService {
+
+    private static final int MAX_BODY_CHARS = 12_000;
+
+    private final AiChatService aiChatService;
+    private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbc;
 
     /** 允许邮箱中间被 PDF 抽成空格 */
     private static final Pattern EMAIL = Pattern.compile(
@@ -266,53 +284,337 @@ public class HrResumeParseService {
 
     private HrResumeParsePreviewVO buildPreview(String fileName, String text) {
         String normalized = normalizeText(text);
-        String email = extractEmail(normalized);
-        String phone = extractPhone(normalized);
         FileNameHints fileHints = parseBossLiepinFileName(fileName);
-
-        // Boss/猎聘文件名命中时，姓名以文件名为准（正文常是图片名/栏目名）
-        String name = null;
-        if (fileHints != null && StringUtils.hasText(fileHints.name)) {
-            name = fileHints.name;
-        } else {
-            name = extractNameFromBody(normalized);
-            if (!StringUtils.hasText(name)) {
-                name = nameFromFileNameFallback(fileName);
-            }
-        }
+        Map<String, String> channels = loadChannels();
 
         HrResumeParsePreviewVO vo = new HrResumeParsePreviewVO();
         vo.setFileName(fileName);
-        vo.setDisplayName(name);
-        vo.setPhone(phone);
-        vo.setEmail(email);
-        if (fileHints != null) {
+        boolean usedAi = false;
+        boolean usedRule = false;
+
+        if (aiChatService.isEnabled()) {
+            try {
+                applyAiFields(vo, fileName, normalized, channels);
+                usedAi = true;
+            } catch (Exception e) {
+                log.warn("简历 AI 识别失败，回退规则：{}", e.getMessage());
+            }
+        }
+
+        // 规则兜底：补空字段；Boss/猎聘文件名提示始终附加
+        usedRule = fillRuleFallback(vo, fileName, normalized, fileHints) || usedRule;
+        applyFileHints(vo, fileHints);
+        resolveChannel(vo, channels);
+
+        if (usedAi && usedRule) {
+            vo.setParseMode("MIXED");
+        } else if (usedAi) {
+            vo.setParseMode("AI");
+        } else {
+            vo.setParseMode("RULE");
+        }
+
+        vo.setNameFound(StringUtils.hasText(vo.getDisplayName()));
+        vo.setPhoneFound(StringUtils.hasText(vo.getPhone()));
+        vo.setEmailFound(StringUtils.hasText(vo.getEmail()));
+        vo.setTip(buildTip(vo, fileHints));
+        return vo;
+    }
+
+    private void applyAiFields(HrResumeParsePreviewVO vo, String fileName, String body,
+                               Map<String, String> channels) {
+        String channelHint = channels.entrySet().stream()
+                .map(e -> e.getKey() + "=" + e.getValue())
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("BOSS=BOSS, LIEPIN=猎聘, HEADHUNTER=猎头");
+        String system = """
+                你是招聘简历信息抽取助手。根据「文件名」和「简历正文」抽取候选人字段。
+                只输出一个 JSON 对象，不要 markdown，不要解释。字段：
+                {
+                  "displayName":"姓名",
+                  "gender":"男或女",
+                  "age":25,
+                  "education":"最高学历如本科/硕士/大专",
+                  "currentTitle":"目前职位或最近一份工作职位",
+                  "currentCompany":"目前公司或最近一份工作公司",
+                  "phone":"11位手机号",
+                  "email":"邮箱",
+                  "channelCode":"渠道码",
+                  "channelName":"渠道名"
+                }
+                规则：
+                1. 不确定的字段填 null，禁止编造电话、邮箱、公司。
+                2. 文件名常含 Boss/猎聘导出信息（序号-姓名-岗位），请优先参考文件名中的姓名。
+                3. gender 只能是「男」「女」或 null；age 为整数或 null。
+                4. channelCode 尽量从下列字典选：%s；若正文/文件名能判断来自 Boss直聘 用 BOSS，猎聘用 LIEPIN，猎头推荐用 HEADHUNTER；无法判断则 null。
+                5. 能识别多少填多少。
+                """.formatted(channelHint);
+        String clipped = body == null ? "" : body;
+        if (clipped.length() > MAX_BODY_CHARS) {
+            clipped = clipped.substring(0, MAX_BODY_CHARS);
+        }
+        String user = "文件名：\n" + fileName + "\n\n简历正文：\n" + clipped;
+        String content = aiChatService.chat(system, user, null, 0.1);
+        JsonNode node = readJsonObject(content);
+        vo.setDisplayName(textOrNull(node, "displayName"));
+        vo.setGender(normalizeGender(textOrNull(node, "gender")));
+        vo.setAge(intOrNull(node, "age"));
+        vo.setEducation(textOrNull(node, "education"));
+        vo.setCurrentTitle(textOrNull(node, "currentTitle"));
+        vo.setCurrentCompany(textOrNull(node, "currentCompany"));
+        vo.setPhone(normalizePhoneResult(textOrNull(node, "phone")));
+        vo.setEmail(normalizeEmailResult(textOrNull(node, "email")));
+        vo.setChannelCode(textOrNull(node, "channelCode"));
+        vo.setChannelName(textOrNull(node, "channelName"));
+    }
+
+    /** @return 是否实际用规则补过字段 */
+    private boolean fillRuleFallback(HrResumeParsePreviewVO vo, String fileName, String normalized,
+                                     FileNameHints fileHints) {
+        boolean filled = false;
+        if (!StringUtils.hasText(vo.getDisplayName())) {
+            String name = null;
+            if (fileHints != null && StringUtils.hasText(fileHints.name)) {
+                name = fileHints.name;
+            } else {
+                name = extractNameFromBody(normalized);
+                if (!StringUtils.hasText(name)) {
+                    name = nameFromFileNameFallback(fileName);
+                }
+            }
+            if (StringUtils.hasText(name)) {
+                vo.setDisplayName(name);
+                filled = true;
+            }
+        }
+        if (!StringUtils.hasText(vo.getPhone())) {
+            String phone = extractPhone(normalized);
+            if (StringUtils.hasText(phone)) {
+                vo.setPhone(phone);
+                filled = true;
+            }
+        }
+        if (!StringUtils.hasText(vo.getEmail())) {
+            String email = extractEmail(normalized);
+            if (StringUtils.hasText(email)) {
+                vo.setEmail(email);
+                filled = true;
+            }
+        }
+        if (!StringUtils.hasText(vo.getCurrentTitle()) && fileHints != null && StringUtils.hasText(fileHints.job)) {
+            vo.setCurrentTitle(fileHints.job);
+            filled = true;
+        }
+        return filled;
+    }
+
+    private static void applyFileHints(HrResumeParsePreviewVO vo, FileNameHints fileHints) {
+        if (fileHints == null) {
+            return;
+        }
+        if (StringUtils.hasText(fileHints.job)) {
             vo.setJobHint(fileHints.job);
+        }
+        if (StringUtils.hasText(fileHints.city)) {
             vo.setCityHint(fileHints.city);
+        }
+        if (StringUtils.hasText(fileHints.salary)) {
             vo.setSalaryHint(fileHints.salary);
+        }
+        if (StringUtils.hasText(fileHints.years)) {
             vo.setYearsHint(fileHints.years);
         }
-        vo.setNameFound(StringUtils.hasText(name));
-        vo.setPhoneFound(StringUtils.hasText(phone));
-        vo.setEmailFound(StringUtils.hasText(email));
+    }
 
+    private void resolveChannel(HrResumeParsePreviewVO vo, Map<String, String> channels) {
+        if (channels.isEmpty()) {
+            return;
+        }
+        String code = vo.getChannelCode() == null ? "" : vo.getChannelCode().trim().toUpperCase(Locale.ROOT);
+        String name = vo.getChannelName() == null ? "" : vo.getChannelName().trim();
+        if (StringUtils.hasText(code) && channels.containsKey(code)) {
+            vo.setChannelCode(code);
+            vo.setChannelName(channels.get(code));
+            return;
+        }
+        if (StringUtils.hasText(name)) {
+            for (Map.Entry<String, String> e : channels.entrySet()) {
+                if (e.getValue().equalsIgnoreCase(name) || name.contains(e.getValue()) || e.getValue().contains(name)) {
+                    vo.setChannelCode(e.getKey());
+                    vo.setChannelName(e.getValue());
+                    return;
+                }
+            }
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.contains("boss") || name.contains("直聘")) {
+                if (channels.containsKey("BOSS")) {
+                    vo.setChannelCode("BOSS");
+                    vo.setChannelName(channels.get("BOSS"));
+                    return;
+                }
+            }
+            if (name.contains("猎聘") || lower.contains("liepin")) {
+                if (channels.containsKey("LIEPIN")) {
+                    vo.setChannelCode("LIEPIN");
+                    vo.setChannelName(channels.get("LIEPIN"));
+                    return;
+                }
+            }
+            if (name.contains("猎头")) {
+                if (channels.containsKey("HEADHUNTER")) {
+                    vo.setChannelCode("HEADHUNTER");
+                    vo.setChannelName(channels.get("HEADHUNTER"));
+                    return;
+                }
+            }
+        }
+        // 文件名启发
+        String fn = vo.getFileName() == null ? "" : vo.getFileName().toLowerCase(Locale.ROOT);
+        if (!StringUtils.hasText(vo.getChannelCode())) {
+            if (fn.contains("boss") || vo.getFileName() != null && BOSS_SERIAL_NAME.matcher(
+                    vo.getFileName().replaceAll("\\.[^.]+$", "")).matches()) {
+                if (channels.containsKey("BOSS")) {
+                    vo.setChannelCode("BOSS");
+                    vo.setChannelName(channels.get("BOSS"));
+                }
+            } else if (fn.contains("liepin") || (vo.getFileName() != null && vo.getFileName().contains("猎聘"))) {
+                if (channels.containsKey("LIEPIN")) {
+                    vo.setChannelCode("LIEPIN");
+                    vo.setChannelName(channels.get("LIEPIN"));
+                }
+            }
+        }
+        if (StringUtils.hasText(vo.getChannelCode()) && !channels.containsKey(vo.getChannelCode())) {
+            vo.setChannelCode(null);
+            vo.setChannelName(null);
+        }
+    }
+
+    private Map<String, String> loadChannels() {
+        Map<String, String> map = new LinkedHashMap<>();
+        try {
+            jdbc.query("""
+                    SELECT channel_code, channel_name FROM hr_channel WHERE is_active = 1 ORDER BY channel_code
+                    """, rs -> {
+                while (rs.next()) {
+                    map.put(rs.getString("channel_code"), rs.getString("channel_name"));
+                }
+                return null;
+            });
+        } catch (Exception e) {
+            log.warn("加载招聘渠道失败：{}", e.getMessage());
+        }
+        return map;
+    }
+
+    private JsonNode readJsonObject(String content) {
+        String text = content == null ? "" : content.trim();
+        if (text.startsWith("```")) {
+            text = text.replaceFirst("^```json", "").replaceFirst("^```", "");
+            int fence = text.lastIndexOf("```");
+            if (fence >= 0) {
+                text = text.substring(0, fence);
+            }
+            text = text.trim();
+        }
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new BusinessException("AI 未返回有效 JSON");
+        }
+        try {
+            return objectMapper.readTree(text.substring(start, end + 1));
+        } catch (Exception e) {
+            throw new BusinessException("AI 返回内容无法解析");
+        }
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        if (node == null || !node.has(field) || node.get(field).isNull()) {
+            return null;
+        }
+        String v = node.get(field).asText("").trim();
+        return v.isEmpty() || "null".equalsIgnoreCase(v) ? null : v;
+    }
+
+    private static Integer intOrNull(JsonNode node, String field) {
+        if (node == null || !node.has(field) || node.get(field).isNull()) {
+            return null;
+        }
+        JsonNode n = node.get(field);
+        if (n.isNumber()) {
+            int v = n.asInt();
+            return v >= 16 && v <= 70 ? v : null;
+        }
+        String raw = n.asText("").replaceAll("\\D", "");
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        try {
+            int v = Integer.parseInt(raw);
+            return v >= 16 && v <= 70 ? v : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String normalizeGender(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        String v = raw.trim();
+        if (v.startsWith("男") || "male".equalsIgnoreCase(v) || "m".equalsIgnoreCase(v)) {
+            return "男";
+        }
+        if (v.startsWith("女") || "female".equalsIgnoreCase(v) || "f".equalsIgnoreCase(v)) {
+            return "女";
+        }
+        return null;
+    }
+
+    private static String normalizePhoneResult(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        String digits = normalizePhoneDigits(raw);
+        if (isMobile(digits)) {
+            return digits.length() > 11 ? digits.substring(digits.length() - 11) : digits;
+        }
+        return null;
+    }
+
+    private static String normalizeEmailResult(String raw) {
+        return cleanEmail(raw);
+    }
+
+    private static String buildTip(HrResumeParsePreviewVO vo, FileNameHints fileHints) {
+        List<String> found = new ArrayList<>();
         List<String> missing = new ArrayList<>();
-        if (!Boolean.TRUE.equals(vo.getNameFound())) {
-            missing.add("姓名");
-        }
-        if (!Boolean.TRUE.equals(vo.getPhoneFound())) {
-            missing.add("电话");
-        }
-        if (!Boolean.TRUE.equals(vo.getEmailFound())) {
-            missing.add("邮箱");
-        }
+        checkField(found, missing, "姓名", vo.getDisplayName());
+        checkField(found, missing, "性别", vo.getGender());
+        checkField(found, missing, "年龄", vo.getAge() == null ? null : String.valueOf(vo.getAge()));
+        checkField(found, missing, "学历", vo.getEducation());
+        checkField(found, missing, "目前职位", vo.getCurrentTitle());
+        checkField(found, missing, "目前公司", vo.getCurrentCompany());
+        checkField(found, missing, "电话", vo.getPhone());
+        checkField(found, missing, "邮箱", vo.getEmail());
+        checkField(found, missing, "渠道", vo.getChannelName() != null ? vo.getChannelName() : vo.getChannelCode());
+
         StringBuilder tip = new StringBuilder();
-        if (missing.isEmpty()) {
-            tip.append("已识别姓名、电话、邮箱，请核对后保存");
-        } else if (missing.size() == 3) {
-            tip.append("未识别到姓名、电话、邮箱，请手动填写");
+        String mode = vo.getParseMode();
+        if ("AI".equals(mode)) {
+            tip.append("已用 AI 识别");
+        } else if ("MIXED".equals(mode)) {
+            tip.append("已用 AI 识别（部分字段规则补充）");
         } else {
-            tip.append("未识别到").append(String.join("、", missing)).append("，请手动填写");
+            tip.append("AI 未启用或失败，已用规则识别");
+        }
+        if (!found.isEmpty()) {
+            tip.append("：").append(String.join("、", found));
+        }
+        tip.append("，请核对后保存");
+        if (!missing.isEmpty()) {
+            tip.append("；未识别到").append(String.join("、", missing));
         }
         if (fileHints != null && (StringUtils.hasText(fileHints.job)
                 || StringUtils.hasText(fileHints.city)
@@ -332,8 +634,15 @@ public class HrResumeParseService {
                 tip.append(" 年限「").append(fileHints.years).append("」");
             }
         }
-        vo.setTip(tip.toString());
-        return vo;
+        return tip.toString();
+    }
+
+    private static void checkField(List<String> found, List<String> missing, String label, String value) {
+        if (StringUtils.hasText(value)) {
+            found.add(label);
+        } else {
+            missing.add(label);
+        }
     }
 
     /** 统一空白、全角数字/符号，并合并 PDF 常见的「逐字空格」 */

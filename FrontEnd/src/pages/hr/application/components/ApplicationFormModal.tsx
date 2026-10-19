@@ -137,32 +137,31 @@ export default function ApplicationFormModal({
     setParseTip(undefined);
     try {
       const preview = await parseHrResumeApi(file);
-      const patch: Record<string, string> = {};
+      const patch: Record<string, string | number> = {};
       if (preview.displayName) patch.displayName = preview.displayName;
+      if (preview.gender) patch.gender = preview.gender;
+      if (preview.age != null) patch.age = preview.age;
+      if (preview.education) patch.education = preview.education;
+      if (preview.currentTitle) patch.currentTitle = preview.currentTitle;
+      if (preview.currentCompany) patch.currentCompany = preview.currentCompany;
       if (preview.phone) patch.phone = preview.phone;
       if (preview.email) patch.email = preview.email;
+      if (preview.channelCode) patch.channelCode = preview.channelCode;
       if (Object.keys(patch).length) {
         form.setFieldsValue(patch);
       }
       setParseTip(preview.tip || undefined);
-      const bits = [
-        preview.jobHint && `岗位 ${preview.jobHint}`,
-        preview.cityHint,
-        preview.salaryHint,
-        preview.yearsHint,
-      ]
-        .filter(Boolean)
-        .join(' · ');
-      if (preview.nameFound && preview.phoneFound && preview.emailFound) {
-        message.success(
-          bits ? `已识别姓名/电话/邮箱（文件名：${bits}），请核对` : '已从简历识别姓名、电话、邮箱，请核对',
-        );
+      const filled = Object.keys(patch).length;
+      if (filled >= 3) {
+        message.success(preview.tip || `已识别 ${filled} 项，请核对后保存`);
+      } else if (filled > 0) {
+        message.warning(preview.tip || '仅识别到部分字段，请手动补全');
       } else {
-        message.warning(preview.tip || '部分信息未识别到，请手动填写');
+        message.warning(preview.tip || '未能自动识别，请手动填写');
       }
     } catch (e) {
       setParseTip(e instanceof Error ? e.message : '简历解析失败，请手动填写');
-      message.warning('简历已选中，但未能自动识别，请手动填写姓名/电话/邮箱');
+      message.warning('简历已选中，但未能自动识别，请手动填写');
     } finally {
       setParsing(false);
     }
@@ -173,12 +172,12 @@ export default function ApplicationFormModal({
       title={editing ? '编辑候选人' : '新增候选人'}
       open={open}
       form={form}
-      width={760}
+      width={1120}
       onOpenChange={(next) => {
         if (!next) resetLocalFiles();
         onOpenChange(next);
       }}
-      modalProps={{ destroyOnHidden: true, styles: { body: { padding: '24px' } } }}
+      modalProps={{ destroyOnHidden: true, styles: { body: { padding: '20px 24px' } }, centered: true }}
       onFinish={async (values) => {
         const formValues = values as ApplicationFormValues;
         const applicationId = await saveHrApplicationApi({
@@ -211,12 +210,12 @@ export default function ApplicationFormModal({
         return true;
       }}
     >
-      <div className='grid grid-cols-2 gap-x-8 gap-y-1'>
+      <div className='grid grid-cols-4 gap-x-4 gap-y-1'>
         <Form.Item
           label='简历'
-          className='col-span-2'
+          className='col-span-4'
           required={!editing}
-          extra='先上传简历，系统会尝试识别姓名、电话、邮箱，请核对后再保存'
+          extra='先上传简历，系统优先用 AI 识别姓名/性别/年龄/学历/职位/公司/电话/邮箱/渠道，请核对后再保存'
         >
           {editing?.resumeName ? (
             <p className='mb-2 text-sm text-black/45'>当前：{editing.resumeName}，重新上传将覆盖</p>
@@ -260,7 +259,7 @@ export default function ApplicationFormModal({
           name='displayName'
           label='姓名'
           rules={[{ required: true, message: '请填写姓名' }]}
-          extra='可从简历自动识别，请核对'
+          extra='可从简历 AI 识别，请核对'
         >
           <Input
             allowClear
@@ -321,7 +320,6 @@ export default function ApplicationFormModal({
         <Form.Item
           name='currentCompany'
           label='目前公司'
-          className='col-span-2'
         >
           <Input
             allowClear
@@ -331,7 +329,7 @@ export default function ApplicationFormModal({
         <Form.Item
           name='phone'
           label='电话'
-          extra='可从简历自动识别，请核对'
+          extra='可从简历 AI 识别，请核对'
         >
           <Input
             allowClear
@@ -341,8 +339,7 @@ export default function ApplicationFormModal({
         <Form.Item
           name='email'
           label='邮箱'
-          className='col-span-2'
-          extra='可从简历自动识别，请核对'
+          extra='可从简历 AI 识别，请核对'
         >
           <Input
             allowClear
@@ -402,14 +399,13 @@ export default function ApplicationFormModal({
           name='submittedAt'
           label='投递日期'
           rules={[{ required: true, message: '请选择投递日期' }]}
-          className='col-span-2'
         >
           <DatePicker className='w-full' />
         </Form.Item>
 
         <Form.Item
           label='作品集'
-          className='col-span-2'
+          className='col-span-4'
           extra='可选。支持作品集 PDF/文档/图片/压缩包等，保存时一并上传'
         >
           {portfolioList.length > 0 ? (

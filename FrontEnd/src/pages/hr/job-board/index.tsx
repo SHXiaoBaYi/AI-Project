@@ -268,7 +268,7 @@ const candidateColumns: ColumnsType<HrJobCandidate> = [
     render: (v) => v || '—',
   },
   {
-    title: '推荐时间',
+    title: '提交时间',
     dataIndex: 'recommendedAt',
     width: 120,
     render: (v) => (v ? String(v).slice(0, 10) : '—'),
@@ -280,7 +280,7 @@ const candidateColumns: ColumnsType<HrJobCandidate> = [
     render: (v) => remainingLabel(typeof v === 'number' ? v : null),
   },
   {
-    title: '负责人',
+    title: '提交人',
     dataIndex: 'referrerName',
     width: 120,
     ellipsis: true,

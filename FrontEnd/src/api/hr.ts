@@ -688,8 +688,15 @@ export function uploadHrResumeApi(applicationId: number, file: File) {
 
 export type HrResumeParsePreview = {
   displayName?: string;
+  gender?: string;
+  age?: number;
+  education?: string;
+  currentTitle?: string;
+  currentCompany?: string;
   phone?: string;
   email?: string;
+  channelCode?: string;
+  channelName?: string;
   jobHint?: string;
   cityHint?: string;
   salaryHint?: string;
@@ -697,11 +704,12 @@ export type HrResumeParsePreview = {
   nameFound?: boolean;
   phoneFound?: boolean;
   emailFound?: boolean;
+  parseMode?: string;
   tip?: string;
   fileName?: string;
 };
 
-/** 上传前解析简历中的姓名/电话/邮箱 */
+/** 上传前解析简历（AI 优先识别可回填字段） */
 export function parseHrResumeApi(file: File) {
   const formData = new FormData();
   formData.append('file', file);

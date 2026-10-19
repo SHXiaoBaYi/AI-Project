@@ -345,7 +345,7 @@ const ApplicationPage = memo(function ApplicationPage() {
         render: (_, record) => record.currentCompany || '—',
       },
       {
-        title: '推荐时间',
+        title: '提交时间',
         dataIndex: 'submittedAt',
         valueType: 'date',
         width: 120,
@@ -363,7 +363,7 @@ const ApplicationPage = memo(function ApplicationPage() {
         },
       },
       {
-        title: '推荐人',
+        title: '提交人',
         dataIndex: 'submitterName',
         search: false,
         width: 110,
@@ -463,14 +463,14 @@ const ApplicationPage = memo(function ApplicationPage() {
         ),
       },
       {
-        title: '推荐猎头',
+        title: '提交人',
         dataIndex: 'submitterUserId',
         valueType: 'select',
         hideInTable: true,
         fieldProps: { options: users, allowClear: true, showSearch: true, optionFilterProp: 'label' },
       },
       {
-        title: '推荐时间',
+        title: '提交时间',
         dataIndex: 'submittedRange',
         valueType: 'dateRange',
         hideInTable: true,

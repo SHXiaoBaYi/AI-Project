@@ -40,13 +40,13 @@ public class HrJobCandidateVO {
     @Schema(description = "目前公司")
     private String currentCompany;
 
-    @Schema(description = "推荐时间 yyyy-MM-dd")
+    @Schema(description = "提交时间 yyyy-MM-dd")
     private String recommendedAt;
 
     @Schema(description = "剩余处理小时，超时为负", example = "47.49", nullable = true)
     private Double remainingHours;
 
-    @Schema(description = "推荐猎头/提交人")
+    @Schema(description = "提交人")
     private String referrerName;
 
     @Schema(description = "当前阶段码")
