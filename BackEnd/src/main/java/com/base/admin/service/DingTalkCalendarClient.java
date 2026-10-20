@@ -225,36 +225,48 @@ public class DingTalkCalendarClient {
         }
     }
 
-    /** 企业盘 org 空间列表（供配置页选择 / 自动绑定）。 */
+    /** 企业盘 org 空间列表（供配置页选择 / 自动绑定）。maxResults 为钉钉必填参数。 */
     public List<com.base.admin.domain.vo.DingTalkDriveSpaceVO> listOrgDriveSpaces(String unionId) {
         if (!StringUtils.hasText(unionId)) {
             return List.of();
         }
         try {
             String token = accessToken();
-            JsonNode json = apiGet(token, "https://api.dingtalk.com/v1.0/drive/spaces?spaceType=org&unionId="
-                    + encode(unionId.trim()));
-            JsonNode spaces = json.path("spaces");
-            if (!spaces.isArray() || spaces.isEmpty()) {
-                spaces = json.path("value");
-            }
-            if (!spaces.isArray()) {
-                return List.of();
-            }
+            String encodedUnionId = encode(unionId.trim());
             List<com.base.admin.domain.vo.DingTalkDriveSpaceVO> list = new ArrayList<>();
-            for (JsonNode space : spaces) {
-                String id = firstText(space, "spaceId", "id");
-                if (!StringUtils.hasText(id)) {
-                    continue;
+            String nextToken = null;
+            for (int page = 0; page < 20; page++) {
+                StringBuilder url = new StringBuilder("https://api.dingtalk.com/v1.0/drive/spaces?spaceType=org&unionId=")
+                        .append(encodedUnionId)
+                        .append("&maxResults=50");
+                if (StringUtils.hasText(nextToken)) {
+                    url.append("&nextToken=").append(encode(nextToken));
                 }
-                String spaceName = firstText(space, "spaceName", "name");
-                com.base.admin.domain.vo.DingTalkDriveSpaceVO vo = new com.base.admin.domain.vo.DingTalkDriveSpaceVO();
-                vo.setSpaceId(id);
-                vo.setSpaceName(StringUtils.hasText(spaceName) ? spaceName : id);
-                boolean preferred = spaceName.contains("简历") || spaceName.toLowerCase(Locale.ROOT).contains("hr")
-                        || spaceName.contains("招聘");
-                vo.setPreferred(preferred);
-                list.add(vo);
+                JsonNode json = apiGet(token, url.toString());
+                JsonNode spaces = json.path("spaces");
+                if (!spaces.isArray() || spaces.isEmpty()) {
+                    spaces = json.path("value");
+                }
+                if (spaces.isArray()) {
+                    for (JsonNode space : spaces) {
+                        String id = firstText(space, "spaceId", "id");
+                        if (!StringUtils.hasText(id)) {
+                            continue;
+                        }
+                        String spaceName = firstText(space, "spaceName", "name");
+                        com.base.admin.domain.vo.DingTalkDriveSpaceVO vo = new com.base.admin.domain.vo.DingTalkDriveSpaceVO();
+                        vo.setSpaceId(id);
+                        vo.setSpaceName(StringUtils.hasText(spaceName) ? spaceName : id);
+                        boolean preferred = spaceName.contains("简历") || spaceName.toLowerCase(Locale.ROOT).contains("hr")
+                                || spaceName.contains("招聘");
+                        vo.setPreferred(preferred);
+                        list.add(vo);
+                    }
+                }
+                nextToken = firstText(json, "nextToken");
+                if (!StringUtils.hasText(nextToken)) {
+                    break;
+                }
             }
             return list;
         } catch (Exception ex) {
