@@ -354,19 +354,24 @@ public class LinkMonitorService {
     private String resolveDingUserId(String staffId, Long userId) {
         if (StringUtils.hasText(staffId)) {
             String byStaff = jdbc.query("""
-                    SELECT dingtalk_userid FROM sys_user
-                    WHERE dingtalk_userid = ? AND is_active = 1 LIMIT 1
+                    SELECT d.dingtalk_user_id
+                    FROM hr_user_dingtalk d
+                    INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
+                    WHERE d.is_active = 1 AND d.dingtalk_user_id = ?
+                    LIMIT 1
                     """, rs -> rs.next() ? rs.getString(1) : null, staffId.trim());
             if (StringUtils.hasText(byStaff)) {
                 return byStaff.trim();
             }
-            // staffId 可能就是钉钉 userid，直接用
+            // staffId 本身就是钉钉 userid，可直接用于工作通知
             return staffId.trim();
         }
         if (userId != null) {
             return jdbc.query("""
-                    SELECT dingtalk_userid FROM sys_user
-                    WHERE user_id = ? AND is_active = 1 AND dingtalk_userid IS NOT NULL AND dingtalk_userid <> ''
+                    SELECT d.dingtalk_user_id
+                    FROM hr_user_dingtalk d
+                    INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
+                    WHERE d.is_active = 1 AND d.user_id = ?
                     LIMIT 1
                     """, rs -> rs.next() ? rs.getString(1) : null, userId);
         }
@@ -376,15 +381,17 @@ public class LinkMonitorService {
     private void notifyByUsername(long monitorId, String content, String username) {
         try {
             List<Map<String, Object>> users = jdbc.queryForList("""
-                    SELECT dingtalk_userid FROM sys_user
-                    WHERE username = ? AND is_active = 1 AND dingtalk_userid IS NOT NULL AND dingtalk_userid <> ''
+                    SELECT d.dingtalk_user_id AS dingtalk_user_id
+                    FROM hr_user_dingtalk d
+                    INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
+                    WHERE d.is_active = 1 AND u.username = ?
                     LIMIT 1
                     """, username);
             if (users.isEmpty()) {
                 writeAlert(monitorId, "USER", username, content, false, "用户未绑定钉钉");
                 return;
             }
-            String dingUserId = String.valueOf(users.getFirst().get("dingtalk_userid"));
+            String dingUserId = String.valueOf(users.getFirst().get("dingtalk_user_id"));
             DingTalkCalendarClient.NoticeCall call = dingTalkCalendarClient.notifyMarkdown(
                     dingUserId, "链接监控告警", content);
             writeAlert(monitorId, "USER", username, content, call.success(),

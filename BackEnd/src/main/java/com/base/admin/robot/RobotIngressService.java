@@ -147,9 +147,12 @@ public class RobotIngressService {
             return null;
         }
         return jdbc.query("""
-                SELECT user_id FROM sys_user
-                WHERE dingtalk_userid = ? AND is_active = 1 LIMIT 1
-                """, rs -> rs.next() ? rs.getLong(1) : null, staffId);
+                SELECT u.user_id
+                FROM hr_user_dingtalk d
+                INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
+                WHERE d.is_active = 1 AND d.dingtalk_user_id = ?
+                LIMIT 1
+                """, rs -> rs.next() ? rs.getLong(1) : null, staffId.trim());
     }
 
     private void upsertGroupProfile(String conversationId) {
