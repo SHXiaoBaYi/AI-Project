@@ -23,8 +23,8 @@ public class DingTalkProperties {
     private Robot robot = new Robot();
 
     /**
-     * 面试邀约简历上传的钉盘 spaceId（可选覆盖，走 Drive 上传）。
-     * 留空则 POST /v1.0/storage/spaces（ownerType=APP）取应用存储空间。
+     * 面试邀约简历上传的企业钉盘 spaceId（强烈建议配置）。
+     * 留空则尝试自动选用企业盘 org space；不再回退 APP 空间（APP 授权仅约 1 小时）。
      */
     private String resumeSpaceId = "";
 

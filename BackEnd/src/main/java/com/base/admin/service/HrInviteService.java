@@ -987,27 +987,50 @@ public class HrInviteService {
                 viewerStaffIds.add(staffId);
             }
         }
-        String grantWarning = null;
+        if (driveFile.appSpace()) {
+            String msg = "简历落到 APP 临时空间（授权仅约 1 小时），已中止创建日程。请配置企业钉盘 dingtalk.resume-space-id 后重试";
+            for (Long inviteId : boundInviteIds) {
+                jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
+                        cut(msg), inviteId);
+            }
+            writeLog(logInviteId, "GRANT_DRIVE", DingTalkCalendarClient.CalendarCall.fail(msg),
+                    organizerUserId, driveFile.fileId(),
+                    Map.of("spaceId", blank(driveFile.spaceId()), "fileId", blank(driveFile.fileId()),
+                            "appSpace", "true", "granted", "false"));
+            throw new BusinessException(msg);
+        }
         if (viewerStaffIds.isEmpty()) {
-            grantWarning = "未解析到面试官/抄送人的钉钉 userid，日程简历可能无法打开";
+            String msg = "未解析到面试官/抄送人的钉钉 userid，无法授权日程简历，已中止创建日程";
+            for (Long inviteId : boundInviteIds) {
+                jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
+                        cut(msg), inviteId);
+            }
+            writeLog(logInviteId, "GRANT_DRIVE", DingTalkCalendarClient.CalendarCall.fail(msg),
+                    organizerUserId, driveFile.fileId(),
+                    Map.of("spaceId", blank(driveFile.spaceId()), "fileId", blank(driveFile.fileId()),
+                            "appSpace", "false", "viewers", "0", "granted", "false"));
+            throw new BusinessException(msg);
         }
         boolean granted = dingTalk.grantDriveFileViewer(ownerUnionId, driveFile, viewerStaffIds);
-        if (!granted) {
-            grantWarning = driveFile.appSpace()
-                    ? "钉盘简历授权失败或仅为 APP 临时空间（最长 1 小时）；面试官打开日程简历可能无权限，请配置企业盘或重新发起邀约"
-                    : "钉盘简历授权失败，面试官打开日程简历可能提示无权限";
-        }
         writeLog(logInviteId, "GRANT_DRIVE",
                 granted
                         ? DingTalkCalendarClient.CalendarCall.ok(driveFile.fileId(),
-                        "{\"granted\":true,\"appSpace\":" + driveFile.appSpace()
-                                + ",\"viewers\":" + viewerStaffIds.size() + "}")
-                        : DingTalkCalendarClient.CalendarCall.fail(grantWarning),
+                        "{\"granted\":true,\"appSpace\":false,\"viewers\":" + viewerStaffIds.size() + "}")
+                        : DingTalkCalendarClient.CalendarCall.fail("钉盘简历永久授权失败"),
                 organizerUserId, driveFile.fileId(),
                 Map.of("spaceId", blank(driveFile.spaceId()), "fileId", blank(driveFile.fileId()),
-                        "appSpace", String.valueOf(driveFile.appSpace()),
+                        "appSpace", "false",
                         "viewers", String.valueOf(viewerStaffIds.size()),
                         "granted", String.valueOf(granted)));
+        if (!granted) {
+            String msg = "钉盘简历授权失败，面试官将无法打开日程中的简历，已中止创建日程。请检查企业盘权限后重试";
+            for (Long inviteId : boundInviteIds) {
+                jdbc.update("UPDATE hr_interview_invite SET status = 'FAILED', fail_reason = ? WHERE id = ?",
+                        cut(msg), inviteId);
+            }
+            throw new BusinessException(msg);
+        }
+        String grantWarning = null;
 
         String cardTitle = StringUtils.hasText(driveFile.fileName()) ? driveFile.fileName() : resume.fileName();
         if (!StringUtils.hasText(cardTitle)) {

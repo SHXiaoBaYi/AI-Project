@@ -172,10 +172,9 @@ public class DingTalkCalendarClient {
     }
 
     /**
-     * 将本地简历上传到钉盘，供日程描述挂载。
-     * <p>优先 {@code dingtalk.resume-space-id}（企业盘，可永久授权面试官）；
-     * 其次自动选用企业盘 org space（同样可永久授权）；
-     * 最后才回退 APP 存储空间（官方临时授权最长 3600 秒，跨天面试会失效）。
+     * 将本地简历上传到<strong>企业钉盘</strong>，供日程描述挂载并永久授权面试官。
+     * <p>优先 {@code dingtalk.resume-space-id}；否则自动选用企业盘 org space。
+     * <p><b>禁止</b>回退 APP 存储空间：官方临时授权最长 3600 秒，约 1 小时后面试官会「无权限」打开简历。
      */
     public DriveFile uploadResumeToDrive(String ownerUnionId, Path file, String fileName) {
         if (!ready()) {
@@ -205,19 +204,19 @@ public class DingTalkCalendarClient {
                 return viaConfig.withAppSpace(false);
             }
             String orgSpaceId = resolveOrgDriveSpaceId(token, unionId);
-            if (StringUtils.hasText(orgSpaceId)) {
-                try {
-                    DriveFile viaOrg = uploadResumeViaDriveApi(token, orgSpaceId, unionId, name, size, md5, file);
-                    return viaOrg.withAppSpace(false);
-                } catch (Exception ex) {
-                    log.warn("upload resume via org drive space failed, fallback APP space: {}", ex.getMessage());
-                }
+            if (!StringUtils.hasText(orgSpaceId)) {
+                throw new BusinessException(
+                        "未找到企业钉盘空间，无法挂载面试简历。请在配置中设置 dingtalk.resume-space-id，"
+                                + "或为应用开通企业盘并确保组织下存在可用空间（禁止使用 APP 临时空间，授权仅 1 小时）");
             }
-            String spaceId = resolveOrCreateAppStorageSpace(token, unionId);
-            // APP 空间：应用权限开通后仍需给操作人临时授权，否则 uploadInfos 会 403 no privilege
-            grantAppSpaceOperatorAccess(token, spaceId, unionId);
-            DriveFile viaApp = uploadResumeViaStorageApi(token, spaceId, unionId, name, size, md5, file);
-            return viaApp.withAppSpace(true);
+            try {
+                DriveFile viaOrg = uploadResumeViaDriveApi(token, orgSpaceId, unionId, name, size, md5, file);
+                return viaOrg.withAppSpace(false);
+            } catch (BusinessException ex) {
+                throw new BusinessException(
+                        "企业钉盘上传简历失败：" + ex.getMessage()
+                                + "。请检查 Drive 权限 / resume-space-id（禁止回退 APP 空间，否则约 1 小时后无权限）");
+            }
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -498,14 +497,19 @@ public class DingTalkCalendarClient {
     }
 
     /**
-     * 给面试官/抄送人授予钉盘文件「可查看/下载」权限。
+     * 给面试官/抄送人授予钉盘文件「可查看/下载」权限（仅企业盘，永久 viewer）。
      * memberId 为钉钉员工 userid（staffId）+ corpId。
-     * <p>企业盘：永久 viewer；APP 空间：官方临时授权最长 3600 秒（跨天面试应走企业盘）。
+     * <p>拒绝 APP 空间：其授权最长 3600 秒，约 1 小时后必现「无权限」。
      *
      * @return true 表示至少一种授权接口成功
      */
     public boolean grantDriveFileViewer(String ownerUnionId, DriveFile driveFile, List<String> staffIds) {
         if (driveFile == null || !StringUtils.hasText(ownerUnionId) || staffIds == null || staffIds.isEmpty()) {
+            return false;
+        }
+        if (driveFile.appSpace()) {
+            log.warn("grantDriveFileViewer refused: APP space grant expires in 3600s spaceId={} fileId={}",
+                    driveFile.spaceId(), driveFile.fileId());
             return false;
         }
         String corpId = dingTalkAppService.corpId();
@@ -529,17 +533,12 @@ public class DingTalkCalendarClient {
             log.warn("grantDriveFileViewer token failed: {}", ex.getMessage());
             return false;
         }
-        boolean appSpace = driveFile.appSpace();
         List<String> errors = new ArrayList<>();
-        // 1) Storage v2（需 dentryUuid）；APP 空间 duration 官方上限 3600
+        // 1) Storage v2（需 dentryUuid）— 企业盘永久授权，不传 duration
         if (StringUtils.hasText(driveFile.uuid())) {
             try {
                 ObjectNode body = objectMapper.createObjectNode();
                 body.put("roleId", "DOWNLOADER");
-                if (appSpace) {
-                    ObjectNode option = body.putObject("option");
-                    option.put("duration", 3600);
-                }
                 ArrayNode members = body.putArray("members");
                 for (String staffId : ids) {
                     ObjectNode m = members.addObject();
@@ -559,10 +558,6 @@ public class DingTalkCalendarClient {
             try {
                 ObjectNode body = objectMapper.createObjectNode();
                 body.put("roleId", "DOWNLOADER");
-                if (appSpace) {
-                    ObjectNode option = body.putObject("option");
-                    option.put("duration", 3600);
-                }
                 ArrayNode members = body.putArray("members");
                 for (String staffId : ids) {
                     ObjectNode m = members.addObject();
@@ -579,7 +574,7 @@ public class DingTalkCalendarClient {
             }
         }
         // 3) 企业盘 Drive 权限（永久 viewer）
-        if (!appSpace && StringUtils.hasText(driveFile.spaceId()) && StringUtils.hasText(driveFile.fileId())) {
+        if (StringUtils.hasText(driveFile.spaceId()) && StringUtils.hasText(driveFile.fileId())) {
             try {
                 ObjectNode body = objectMapper.createObjectNode();
                 body.put("role", "viewer");
@@ -598,8 +593,8 @@ public class DingTalkCalendarClient {
                 errors.add("drive:" + ex.getMessage());
             }
         }
-        log.warn("grantDriveFileViewer failed spaceId={} fileId={} uuid={} appSpace={} staffs={} errors={}",
-                driveFile.spaceId(), driveFile.fileId(), driveFile.uuid(), appSpace, ids, errors);
+        log.warn("grantDriveFileViewer failed spaceId={} fileId={} uuid={} staffs={} errors={}",
+                driveFile.spaceId(), driveFile.fileId(), driveFile.uuid(), ids, errors);
         return false;
     }
 
