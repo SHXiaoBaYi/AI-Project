@@ -11,6 +11,10 @@ export type DingTalkAppVO = {
   /** local=本机 online=线上；wangfangyang/thh/tbb 可改 */
   robotRoute?: 'local' | 'online' | string;
   canEditRobotRoute?: boolean;
+  /** 面试简历企业钉盘 spaceId */
+  resumeSpaceId?: string;
+  /** 打开配置页时是否刚自动绑定了 spaceId */
+  resumeSpaceIdAutoBound?: boolean;
 };
 
 export type DingTalkAppDTO = {
@@ -21,6 +25,13 @@ export type DingTalkAppDTO = {
   clientSecret?: string;
   enabled: number;
   robotRoute?: 'local' | 'online' | string;
+  resumeSpaceId?: string;
+};
+
+export type DingTalkDriveSpace = {
+  spaceId: string;
+  spaceName: string;
+  preferred?: boolean;
 };
 
 export function getDingTalkAppApi() {
@@ -33,6 +44,16 @@ export function saveDingTalkAppApi(data: DingTalkAppDTO) {
 
 export function testDingTalkAppApi(data: DingTalkAppDTO) {
   return request.post('/system/dingtalk/test', data);
+}
+
+export function listDingTalkDriveSpacesApi(unionId?: string) {
+  return request.get<unknown, DingTalkDriveSpace[]>('/system/dingtalk/drive-spaces', {
+    params: unionId ? { unionId } : undefined,
+  });
+}
+
+export function bindPreferredDingTalkDriveSpaceApi() {
+  return request.post<unknown, DingTalkAppVO>('/system/dingtalk/drive-spaces/bind-preferred');
 }
 
 export type DingTalkBusyUserOption = {

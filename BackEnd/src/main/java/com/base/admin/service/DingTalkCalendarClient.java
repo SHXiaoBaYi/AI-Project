@@ -36,6 +36,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -198,7 +199,7 @@ public class DingTalkCalendarClient {
             String name = sanitizeDriveFileName(fileName, file);
             String md5 = md5Hex(file);
             String unionId = ownerUnionId.trim();
-            String configured = properties.getResumeSpaceId();
+            String configured = dingTalkAppService.resumeSpaceId();
             if (StringUtils.hasText(configured)) {
                 DriveFile viaConfig = uploadResumeViaDriveApi(token, configured.trim(), unionId, name, size, md5, file);
                 return viaConfig.withAppSpace(false);
@@ -224,34 +225,49 @@ public class DingTalkCalendarClient {
         }
     }
 
-    /** 企业盘 org 空间：可给面试官永久「可查看/下载」，避免 APP 空间 1 小时临时授权过期。 */
-    private String resolveOrgDriveSpaceId(String token, String unionId) {
+    /** 企业盘 org 空间列表（供配置页选择 / 自动绑定）。 */
+    public List<com.base.admin.domain.vo.DingTalkDriveSpaceVO> listOrgDriveSpaces(String unionId) {
+        if (!StringUtils.hasText(unionId)) {
+            return List.of();
+        }
         try {
+            String token = accessToken();
             JsonNode json = apiGet(token, "https://api.dingtalk.com/v1.0/drive/spaces?spaceType=org&unionId="
-                    + encode(unionId));
+                    + encode(unionId.trim()));
             JsonNode spaces = json.path("spaces");
             if (!spaces.isArray() || spaces.isEmpty()) {
                 spaces = json.path("value");
             }
             if (!spaces.isArray()) {
-                return "";
+                return List.of();
             }
-            String preferred = "";
+            List<com.base.admin.domain.vo.DingTalkDriveSpaceVO> list = new ArrayList<>();
             for (JsonNode space : spaces) {
                 String id = firstText(space, "spaceId", "id");
                 if (!StringUtils.hasText(id)) {
                     continue;
                 }
                 String spaceName = firstText(space, "spaceName", "name");
-                if (spaceName.contains("简历") || spaceName.toLowerCase().contains("hr")
-                        || spaceName.contains("招聘")) {
-                    return id;
-                }
-                if (!StringUtils.hasText(preferred)) {
-                    preferred = id;
-                }
+                com.base.admin.domain.vo.DingTalkDriveSpaceVO vo = new com.base.admin.domain.vo.DingTalkDriveSpaceVO();
+                vo.setSpaceId(id);
+                vo.setSpaceName(StringUtils.hasText(spaceName) ? spaceName : id);
+                boolean preferred = spaceName.contains("简历") || spaceName.toLowerCase(Locale.ROOT).contains("hr")
+                        || spaceName.contains("招聘");
+                vo.setPreferred(preferred);
+                list.add(vo);
             }
-            return preferred;
+            return list;
+        } catch (Exception ex) {
+            log.warn("list org drive spaces failed: {}", ex.getMessage());
+            throw new BusinessException("拉取企业钉盘空间失败：" + ex.getMessage());
+        }
+    }
+
+    /** 企业盘 org 空间：可给面试官永久「可查看/下载」，避免 APP 空间 1 小时临时授权过期。 */
+    private String resolveOrgDriveSpaceId(String token, String unionId) {
+        try {
+            List<com.base.admin.domain.vo.DingTalkDriveSpaceVO> spaces = listOrgDriveSpaces(unionId);
+            return DingTalkAppService.pickPreferredSpaceId(spaces);
         } catch (Exception ex) {
             log.warn("list org drive spaces failed: {}", ex.getMessage());
             return "";

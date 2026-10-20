@@ -33,4 +33,7 @@ public class DingTalkAppDTO {
 
     @Schema(description = "联调账号机器人路由 local/online；仅 wangfangyang/thh/tbb 提交时生效")
     private String robotRoute;
+
+    @Schema(description = "面试简历企业钉盘 spaceId；留空则保存时空字符串（上传时再回退 yml）")
+    private String resumeSpaceId;
 }

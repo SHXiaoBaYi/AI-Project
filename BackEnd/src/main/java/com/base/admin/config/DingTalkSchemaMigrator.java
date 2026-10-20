@@ -38,6 +38,7 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                 """);
         ensureCorpIdColumn();
         ensureRobotRouteColumn();
+        ensureResumeSpaceIdColumn();
         Integer count = jdbc.queryForObject("SELECT COUNT(1) FROM sys_dingtalk_app WHERE id = 1", Integer.class);
         if (count == null || count == 0) {
             jdbc.update("""
@@ -172,6 +173,22 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                     COMMENT '王方扬机器人联调：local=本机 H5，online=线上 H5；其他人固定 online' AFTER enabled
                 """);
         log.info("已为 sys_dingtalk_app 增加 robot_route 字段");
+    }
+
+    private void ensureResumeSpaceIdColumn() {
+        Integer exists = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_dingtalk_app' AND COLUMN_NAME = 'resume_space_id'
+                """, Integer.class);
+        if (exists != null && exists > 0) {
+            return;
+        }
+        jdbc.execute("""
+                ALTER TABLE sys_dingtalk_app
+                  ADD COLUMN resume_space_id VARCHAR(64) NOT NULL DEFAULT ''
+                    COMMENT '面试简历企业钉盘 spaceId（永久授权，勿用 APP 临时空间）' AFTER robot_route
+                """);
+        log.info("已为 sys_dingtalk_app 增加 resume_space_id 字段");
     }
 
     private void ensureScheduleRuleSecretaryColumns() {

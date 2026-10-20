@@ -33,4 +33,10 @@ public class DingTalkAppVO {
 
     @Schema(description = "当前登录人是否可改 robotRoute（wangfangyang / thh / tbb）")
     private Boolean canEditRobotRoute;
+
+    @Schema(description = "面试简历企业钉盘 spaceId（永久授权面试官查看）")
+    private String resumeSpaceId;
+
+    @Schema(description = "本次是否刚自动绑定了企业盘 spaceId")
+    private Boolean resumeSpaceIdAutoBound;
 }

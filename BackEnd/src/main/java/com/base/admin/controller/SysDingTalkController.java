@@ -11,6 +11,7 @@ import com.base.admin.domain.dto.DingTalkAssistantSuggestDTO;
 import com.base.admin.domain.dto.DingTalkBusyQueryDTO;
 import com.base.admin.domain.dto.DingTalkIntentExecuteDTO;
 import com.base.admin.domain.vo.DingTalkAppVO;
+import com.base.admin.domain.vo.DingTalkDriveSpaceVO;
 import com.base.admin.domain.vo.DingTalkAssistantActionResultVO;
 import com.base.admin.domain.vo.DingTalkAssistantScheduleVO;
 import com.base.admin.domain.vo.DingTalkAssistantSuggestVO;
@@ -73,6 +74,26 @@ public class SysDingTalkController {
         DingTalkAppService.Credential credential = dingTalkAppService.resolveForTest(dto);
         dingTalkCalendarClient.testConnection(credential.clientId(), credential.clientSecret());
         return Result.ok();
+    }
+
+    @Operation(summary = "列出企业钉盘 org 空间（用于选择面试简历 resume-space-id）")
+    @GetMapping("/drive-spaces")
+    @RequiresPermission({"system:dingtalk:list", "system:dingtalk:edit"})
+    public Result<List<DingTalkDriveSpaceVO>> driveSpaces(
+            @RequestParam(value = "unionId", required = false) String unionId) {
+        return Result.ok(dingTalkAppService.listOrgDriveSpaces(unionId));
+    }
+
+    @Operation(summary = "自动绑定推荐的企业钉盘 spaceId 到配置")
+    @PostMapping("/drive-spaces/bind-preferred")
+    @RequiresPermission("system:dingtalk:edit")
+    @Log(title = "钉钉简历空间", businessType = 2)
+    public Result<DingTalkAppVO> bindPreferredDriveSpace() {
+        String bound = dingTalkAppService.tryAutoBindResumeSpaceId();
+        if (bound == null || bound.isBlank()) {
+            return Result.fail("未能自动绑定：请确认应用已开通企业盘权限，且至少有一名用户已绑定钉钉");
+        }
+        return Result.ok(dingTalkAppService.get());
     }
 
     @Operation(summary = "已绑定钉钉、可查询闲忙的用户")

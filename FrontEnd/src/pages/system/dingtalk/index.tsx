@@ -1,8 +1,16 @@
 import { memo, useEffect, useState } from 'react';
-import { App, Button, Card, Form, Input, Switch, Tag } from 'antd';
+import { App, AutoComplete, Button, Card, Form, Input, Space, Switch, Tag } from 'antd';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import { usePermission } from '@/hooks/usePermission';
-import { getDingTalkAppApi, saveDingTalkAppApi, testDingTalkAppApi, type DingTalkAppVO } from '@/api/dingtalk';
+import {
+  bindPreferredDingTalkDriveSpaceApi,
+  getDingTalkAppApi,
+  listDingTalkDriveSpacesApi,
+  saveDingTalkAppApi,
+  testDingTalkAppApi,
+  type DingTalkAppVO,
+  type DingTalkDriveSpace,
+} from '@/api/dingtalk';
 
 const DingTalkConfigPage = memo(function DingTalkConfigPage() {
   const { message } = App.useApp();
@@ -12,24 +20,52 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [loadingSpaces, setLoadingSpaces] = useState(false);
+  const [bindingSpace, setBindingSpace] = useState(false);
   const [saved, setSaved] = useState<DingTalkAppVO | null>(null);
   const [canEditRobotRoute, setCanEditRobotRoute] = useState(false);
+  const [driveSpaces, setDriveSpaces] = useState<DingTalkDriveSpace[]>([]);
+
+  const applyVo = (data: DingTalkAppVO | null | undefined) => {
+    setSaved(data ?? null);
+    setCanEditRobotRoute(!!data?.canEditRobotRoute);
+    form.setFieldsValue({
+      appId: data?.appId || '',
+      agentId: data?.agentId || '',
+      clientId: data?.clientId || '',
+      corpId: data?.corpId || '',
+      clientSecret: '',
+      enabled: data?.enabled === 1,
+      robotRouteLocal: (data?.robotRoute || 'local') === 'local',
+      resumeSpaceId: data?.resumeSpaceId || undefined,
+    });
+  };
+
+  const loadSpaces = async () => {
+    setLoadingSpaces(true);
+    try {
+      const spaces = await listDingTalkDriveSpacesApi();
+      setDriveSpaces(spaces ?? []);
+      return spaces ?? [];
+    } catch {
+      setDriveSpaces([]);
+      return [] as DingTalkDriveSpace[];
+    } finally {
+      setLoadingSpaces(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
     try {
       const data = await getDingTalkAppApi();
-      setSaved(data);
-      setCanEditRobotRoute(!!data?.canEditRobotRoute);
-      form.setFieldsValue({
-        appId: data?.appId || '',
-        agentId: data?.agentId || '',
-        clientId: data?.clientId || '',
-        corpId: data?.corpId || '',
-        clientSecret: '',
-        enabled: data?.enabled === 1,
-        robotRouteLocal: (data?.robotRoute || 'local') === 'local',
-      });
+      applyVo(data);
+      if (data?.resumeSpaceIdAutoBound && data.resumeSpaceId) {
+        message.success(`已自动绑定企业钉盘空间：${data.resumeSpaceId}`);
+      }
+      if (data?.enabled === 1) {
+        await loadSpaces();
+      }
     } finally {
       setLoading(false);
     }
@@ -50,6 +86,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
       clientSecret: values.clientSecret ? String(values.clientSecret).trim() : undefined,
       enabled: values.enabled ? 1 : 0,
       robotRoute: values.robotRouteLocal ? 'local' : 'online',
+      resumeSpaceId: values.resumeSpaceId ? String(values.resumeSpaceId).trim() : '',
     };
   };
 
@@ -76,6 +113,45 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
     }
   };
 
+  const handleRefreshSpaces = async () => {
+    try {
+      const spaces = await loadSpaces();
+      if (!spaces.length) {
+        message.warning('未拉到企业盘空间。请确认应用已开通 Drive 权限，且当前/任意用户已绑定钉钉');
+        return;
+      }
+      message.success(`已拉取 ${spaces.length} 个企业盘空间`);
+      const current = form.getFieldValue('resumeSpaceId');
+      if (!current) {
+        const preferred = spaces.find((s) => s.preferred)?.spaceId || spaces[0]?.spaceId;
+        if (preferred) {
+          form.setFieldsValue({ resumeSpaceId: preferred });
+        }
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '拉取企业盘失败');
+    }
+  };
+
+  const handleBindPreferred = async () => {
+    setBindingSpace(true);
+    try {
+      const data = await bindPreferredDingTalkDriveSpaceApi();
+      applyVo(data);
+      await loadSpaces();
+      message.success(data?.resumeSpaceId ? `已绑定：${data.resumeSpaceId}` : '已绑定推荐空间');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '自动绑定失败');
+    } finally {
+      setBindingSpace(false);
+    }
+  };
+
+  const spaceOptions = driveSpaces.map((s) => ({
+    value: s.spaceId,
+    label: `${s.preferred ? '★ ' : ''}${s.spaceName}（${s.spaceId}）`,
+  }));
+
   return (
     <div className='flex flex-col gap-4'>
       <Card
@@ -84,9 +160,10 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
         className='max-w-3xl'
       >
         <p className='mb-4 text-sm text-neutral-500'>
-          用于钉钉扫码登录、按手机号绑定钉钉身份，以及创建/取消日程、简历上传钉盘。Client Secret
+          用于钉钉扫码登录、按手机号绑定钉钉身份，以及创建/取消日程、简历上传企业钉盘。Client Secret
           只保存到数据库，页面只显示脱敏结果。扫码登录需在钉钉开放平台配置回调域名，并与本系统登录页同源。机器人
-          ActionCard 会打开 H5（/dingtalk/bridge）并走企业免登；CorpId 必填。简历默认上传应用存储空间。
+          ActionCard 会打开 H5（/dingtalk/bridge）并走企业免登；CorpId 必填。面试简历必须使用企业盘
+          spaceId（永久授权），勿用 APP 临时空间。
         </p>
         {saved?.hasClientSecret ? (
           <div className='mb-4 text-sm text-neutral-600'>
@@ -146,6 +223,42 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
           >
             <Switch />
           </Form.Item>
+
+          <Form.Item
+            name='resumeSpaceId'
+            label='面试简历企业钉盘 spaceId'
+            extra='日程挂简历用。优先选名称含「简历/招聘/hr」的空间；也可点「自动绑定推荐」。需应用开通企业盘 Drive 权限。可下拉选择或直接粘贴 spaceId。'
+          >
+            <AutoComplete
+              allowClear
+              options={spaceOptions}
+              placeholder={loadingSpaces ? '正在拉取企业盘…' : '选择或粘贴企业盘 spaceId'}
+              filterOption={(input, option) =>
+                String(option?.label ?? '')
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
+              }
+            />
+          </Form.Item>
+          <Space
+            wrap
+            className='mb-4'
+          >
+            <Button
+              loading={loadingSpaces}
+              disabled={!canEdit}
+              onClick={() => void handleRefreshSpaces()}
+            >
+              拉取企业盘空间
+            </Button>
+            <PermissionButton
+              perm='system:dingtalk:edit'
+              loading={bindingSpace}
+              onClick={() => void handleBindPreferred()}
+            >
+              自动绑定推荐空间
+            </PermissionButton>
+          </Space>
 
           <div className='mb-4 rounded border border-neutral-200 bg-neutral-50 px-4 py-3'>
             <div className='mb-2 flex flex-wrap items-center gap-2'>
