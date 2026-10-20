@@ -152,10 +152,14 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
   const handleCreateAndBind = async () => {
     setCreatingSpace(true);
     try {
-      const data = await createAndBindDingTalkDriveSpaceApi('小巴依-面试简历');
+      const data = await createAndBindDingTalkDriveSpaceApi('HR-简历');
       applyVo(data);
       await loadSpaces();
-      message.success(data?.resumeSpaceId ? `已创建/复用并绑定企业盘：${data.resumeSpaceId}` : '已创建并绑定企业盘');
+      message.success(
+        data?.resumeSpaceId
+          ? `已创建/复用「HR-简历」并绑定（已尝试开通全员上传）：${data.resumeSpaceId}`
+          : '已创建并绑定「HR-简历」企业盘',
+      );
     } catch (e) {
       message.error(e instanceof Error ? e.message : '创建企业盘失败');
     } finally {
@@ -243,7 +247,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
           <Form.Item
             name='resumeSpaceId'
             label='面试简历企业钉盘 spaceId'
-            extra='日程挂简历用。可下拉选择、粘贴 spaceId，或一键创建「小巴依-面试简历」企业共享盘并绑定。需 Drive.Space.Write；至少一名用户已绑定钉钉。'
+            extra='日程挂简历用。一键会新建专用「HR-简历」企业盘（不会绑「全员文件夹」），并给企业全员开通上传权。需 Drive.Space.Write、Storage.Permission.Write；至少一名用户已绑定钉钉。'
           >
             <AutoComplete
               allowClear
@@ -280,7 +284,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
               loading={creatingSpace}
               onClick={() => void handleCreateAndBind()}
             >
-              一键创建并绑定
+              创建 HR-简历并绑定
             </PermissionButton>
           </Space>
 

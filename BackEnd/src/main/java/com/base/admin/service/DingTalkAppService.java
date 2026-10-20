@@ -240,9 +240,12 @@ public class DingTalkAppService {
         }
     }
 
+    /** 默认新建的面试简历企业共享盘名称（勿绑「全员文件夹」等公共盘）。 */
+    public static final String DEFAULT_RESUME_SPACE_NAME = "HR-简历";
+
     /**
-     * 一键：若已有推荐/任意企业盘则绑定；否则 POST 新建「小巴依-面试简历」企业共享盘并写入配置。
-     * 需 Drive.Space.Write；创建人需已绑定钉钉 unionId。
+     * 一键：仅复用<strong>同名</strong>「HR-简历」企业盘；否则新建，并给企业全员开通上传（EDITOR）权限。
+     * 不会绑定「全员文件夹」等无关空间。需 Drive.Space.Write + Storage.Permission.Write。
      */
     public DingTalkDriveSpaceVO createAndBindResumeOrgSpace(String spaceName) {
         if (credential() == null) {
@@ -252,38 +255,45 @@ public class DingTalkAppService {
         if (!StringUtils.hasText(unionId)) {
             throw new BusinessException("没有可用的钉钉 unionId。请先在用户管理绑定钉钉后再创建企业盘");
         }
-        String name = StringUtils.hasText(spaceName) ? spaceName.trim() : "小巴依-面试简历";
-        // 已有同名或推荐空间则复用，避免重复创建
+        String name = StringUtils.hasText(spaceName) ? spaceName.trim() : DEFAULT_RESUME_SPACE_NAME;
+        String corpId = corpId();
+        if (!StringUtils.hasText(corpId)) {
+            throw new BusinessException("请先配置企业 CorpId，才能给全员开通企业盘上传权限");
+        }
         List<DingTalkDriveSpaceVO> existing = dingTalkCalendarClient.listOrgDriveSpaces(unionId);
         for (DingTalkDriveSpaceVO space : existing) {
             if (space == null || !StringUtils.hasText(space.getSpaceId())) {
                 continue;
             }
             String sn = space.getSpaceName() == null ? "" : space.getSpaceName().trim();
-            if (name.equals(sn) || Boolean.TRUE.equals(space.getPreferred())) {
+            if (isResumeSpaceName(sn, name)) {
+                dingTalkCalendarClient.grantOrgSpaceEditorToEntireOrg(space.getSpaceId().trim(), unionId, corpId);
                 persistResumeSpaceId(space.getSpaceId().trim());
                 space.setPreferred(true);
-                log.info("复用已有企业盘并绑定 resume_space_id={} name={}", space.getSpaceId(), sn);
+                log.info("复用同名企业盘并绑定全员上传权 resume_space_id={} name={}", space.getSpaceId(), sn);
                 return space;
             }
         }
-        if (!existing.isEmpty()) {
-            String preferred = pickPreferredSpaceId(existing);
-            if (StringUtils.hasText(preferred)) {
-                DingTalkDriveSpaceVO hit = existing.stream()
-                        .filter(s -> s != null && preferred.equals(s.getSpaceId()))
-                        .findFirst()
-                        .orElse(null);
-                if (hit != null) {
-                    persistResumeSpaceId(preferred);
-                    hit.setPreferred(true);
-                    return hit;
-                }
-            }
-        }
         DingTalkDriveSpaceVO created = dingTalkCalendarClient.createOrgDriveSpace(unionId, name);
+        dingTalkCalendarClient.grantOrgSpaceEditorToEntireOrg(created.getSpaceId(), unionId, corpId);
         persistResumeSpaceId(created.getSpaceId());
+        log.info("已新建企业盘并绑定全员上传权 resume_space_id={} name={}", created.getSpaceId(), created.getSpaceName());
         return created;
+    }
+
+    /** 是否简历专用盘名（精确匹配目标名，或历史别名）。 */
+    static boolean isResumeSpaceName(String actual, String target) {
+        if (!StringUtils.hasText(actual)) {
+            return false;
+        }
+        String a = actual.trim();
+        if (StringUtils.hasText(target) && a.equals(target.trim())) {
+            return true;
+        }
+        return a.equals(DEFAULT_RESUME_SPACE_NAME)
+                || a.equals("HR简历")
+                || a.equals("小巴依-面试简历")
+                || a.equals("小巴依-面试简历盘");
     }
 
     private void persistResumeSpaceId(String spaceId) {
@@ -291,17 +301,15 @@ public class DingTalkAppService {
                 spaceId, blankToEmpty(SecurityUtils.getCurrentUsername()));
     }
 
+    /**
+     * 只选名称含「简历 / hr / 招聘」的推荐空间；<strong>绝不</strong>回退到「全员文件夹」等任意首项。
+     */
     static String pickPreferredSpaceId(List<DingTalkDriveSpaceVO> spaces) {
         if (spaces == null || spaces.isEmpty()) {
             return "";
         }
         for (DingTalkDriveSpaceVO space : spaces) {
             if (space != null && Boolean.TRUE.equals(space.getPreferred()) && StringUtils.hasText(space.getSpaceId())) {
-                return space.getSpaceId().trim();
-            }
-        }
-        for (DingTalkDriveSpaceVO space : spaces) {
-            if (space != null && StringUtils.hasText(space.getSpaceId())) {
                 return space.getSpaceId().trim();
             }
         }

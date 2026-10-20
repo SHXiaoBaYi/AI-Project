@@ -96,7 +96,7 @@ public class SysDingTalkController {
         return Result.ok(dingTalkAppService.get());
     }
 
-    @Operation(summary = "一键创建企业共享盘并绑定为面试简历 spaceId（已有推荐空间则复用）")
+    @Operation(summary = "一键创建「HR-简历」企业共享盘并绑定；仅同名复用，并给全员开通上传权（不绑定全员文件夹）")
     @PostMapping("/drive-spaces/create-and-bind")
     @RequiresPermission("system:dingtalk:edit")
     @Log(title = "钉钉简历空间", businessType = 1)

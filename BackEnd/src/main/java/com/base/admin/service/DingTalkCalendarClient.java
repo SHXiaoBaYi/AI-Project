@@ -260,8 +260,12 @@ public class DingTalkCalendarClient {
                         com.base.admin.domain.vo.DingTalkDriveSpaceVO vo = new com.base.admin.domain.vo.DingTalkDriveSpaceVO();
                         vo.setSpaceId(id);
                         vo.setSpaceName(StringUtils.hasText(spaceName) ? spaceName : id);
-                        boolean preferred = spaceName.contains("简历") || spaceName.toLowerCase(Locale.ROOT).contains("hr")
-                                || spaceName.contains("招聘");
+                        String lower = spaceName.toLowerCase(Locale.ROOT);
+                        boolean preferred = !spaceName.contains("全员")
+                                && (DingTalkAppService.isResumeSpaceName(spaceName, DingTalkAppService.DEFAULT_RESUME_SPACE_NAME)
+                                        || spaceName.contains("简历")
+                                        || lower.contains("hr")
+                                        || spaceName.contains("招聘"));
                         vo.setPreferred(preferred);
                         list.add(vo);
                     }
@@ -298,7 +302,7 @@ public class DingTalkCalendarClient {
         if (!StringUtils.hasText(unionId)) {
             throw new BusinessException("创建企业盘需要操作人的钉钉 unionId");
         }
-        String name = StringUtils.hasText(spaceName) ? spaceName.trim() : "小巴依-面试简历";
+        String name = StringUtils.hasText(spaceName) ? spaceName.trim() : DingTalkAppService.DEFAULT_RESUME_SPACE_NAME;
         try {
             String token = accessToken();
             ObjectNode body = objectMapper.createObjectNode();
@@ -332,6 +336,56 @@ public class DingTalkCalendarClient {
         } catch (Exception ex) {
             throw new BusinessException("创建企业钉盘失败：" + ex.getMessage());
         }
+    }
+
+    /**
+     * 给企业<strong>全员</strong>开通该企业盘根目录的上传/编辑权（EDITOR）。
+     * Storage：members.type=ORG；失败再试旧 Drive 权限接口。需 Storage.Permission.Write。
+     */
+    public void grantOrgSpaceEditorToEntireOrg(String spaceId, String operatorUnionId, String corpId) {
+        if (!StringUtils.hasText(spaceId) || !StringUtils.hasText(operatorUnionId) || !StringUtils.hasText(corpId)) {
+            throw new BusinessException("给全员开通企业盘权限失败：缺少 spaceId / unionId / corpId");
+        }
+        String token;
+        try {
+            token = accessToken();
+        } catch (Exception ex) {
+            throw new BusinessException("给全员开通企业盘权限失败：" + ex.getMessage());
+        }
+        List<String> errors = new ArrayList<>();
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("roleId", "EDITOR");
+            ArrayNode members = body.putArray("members");
+            ObjectNode m = members.addObject();
+            m.put("type", "ORG");
+            m.put("id", corpId.trim());
+            m.put("corpId", corpId.trim());
+            apiPost(token, "https://api.dingtalk.com/v1.0/storage/spaces/" + encode(spaceId.trim())
+                    + "/dentries/0/permissions?unionId=" + encode(operatorUnionId.trim()), body);
+            log.info("granted ORG EDITOR on spaceId={} corpId={}", spaceId, corpId);
+            return;
+        } catch (Exception ex) {
+            errors.add("storage:" + ex.getMessage());
+        }
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("role", "editor");
+            body.put("unionId", operatorUnionId.trim());
+            ArrayNode members = body.putArray("members");
+            ObjectNode m = members.addObject();
+            m.put("corpId", corpId.trim());
+            m.put("memberType", "org");
+            m.put("memberId", corpId.trim());
+            apiPost(token, "https://api.dingtalk.com/v1.0/drive/spaces/" + encode(spaceId.trim())
+                    + "/files/0/permissions", body);
+            log.info("granted Drive org editor on spaceId={} corpId={}", spaceId, corpId);
+            return;
+        } catch (Exception ex) {
+            errors.add("drive:" + ex.getMessage());
+        }
+        throw new BusinessException("企业盘已创建/找到，但给全员开通上传权失败：" + String.join("；", errors)
+                + "。请确认已开通 Storage.Permission.Write，或在钉钉里手动给「HR-简历」盘加全员可编辑");
     }
 
     /**
