@@ -61,7 +61,8 @@ public class RobotIngressService {
             if (!mentioned && multiTurn) {
                 log.info("robot accept group message without @ due to active multi-turn staffId={}", staffId);
             }
-            upsertGroupProfile(conversationId);
+            String groupTitle = blank(readString(message, "getConversationTitle", "getTitle"));
+            upsertGroupProfile(conversationId, groupTitle);
         }
 
         DingTalkRobotAssistantService assistant = dingTalkRobotAssistantService.getObject();
@@ -145,8 +146,8 @@ public class RobotIngressService {
         for (String line : lines) {
             sb.append(line).append("\n");
         }
-        sb.append("\n群里新开话题请 @ 我；进入多轮后（例如等你发链接）可免 @ 续聊。")
-                .append("链接监控每天 09:30 探测。");
+        sb.append("\n群里请 @ 我发起；添加链接监控后请点卡片填写（群未 @ 消息钉钉不推送）。")
+                .append("群内添加的监控，告警会推回该群。每天 09:30 探测。");
         return RobotReply.text(sb.toString());
     }
 
@@ -171,15 +172,21 @@ public class RobotIngressService {
                 """, rs -> rs.next() ? rs.getLong(1) : null, staffId.trim());
     }
 
-    private void upsertGroupProfile(String conversationId) {
+    private void upsertGroupProfile(String conversationId, String title) {
         if (!StringUtils.hasText(conversationId)) {
             return;
         }
+        String t = title == null ? "" : title.trim();
+        if (t.length() > 200) {
+            t = t.substring(0, 200);
+        }
         jdbc.update("""
                 INSERT INTO robot_group_profile (open_conversation_id, title, enabled, is_active)
-                VALUES (?, '', 1, 1)
-                ON DUPLICATE KEY UPDATE update_time = NOW(), is_active = 1
-                """, conversationId);
+                VALUES (?, ?, 1, 1)
+                ON DUPLICATE KEY UPDATE
+                  title = IF(VALUES(title) <> '', VALUES(title), title),
+                  update_time = NOW(), is_active = 1
+                """, conversationId, t);
     }
 
     private static boolean isMentioned(ChatbotMessage message, String text) {

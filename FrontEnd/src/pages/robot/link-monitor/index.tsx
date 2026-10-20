@@ -23,6 +23,9 @@ function mapRow(r: Record<string, unknown>): LinkMonitor {
     remark: r.remark == null ? undefined : String(r.remark),
     scopeType: r.scope_type == null ? undefined : String(r.scope_type),
     source: r.source == null ? undefined : String(r.source),
+    openConversationId: r.open_conversation_id == null ? undefined : String(r.open_conversation_id),
+    conversationType: r.conversation_type == null ? undefined : String(r.conversation_type),
+    groupTitle: r.group_title == null ? undefined : String(r.group_title),
     status: String(r.status ?? ''),
     intervalSec: r.interval_sec == null ? undefined : Number(r.interval_sec),
     lastCheckAt: r.last_check_at == null ? undefined : String(r.last_check_at),
@@ -33,6 +36,16 @@ function mapRow(r: Record<string, unknown>): LinkMonitor {
     createBy: r.create_by == null ? undefined : String(r.create_by),
     createTime: r.create_time == null ? undefined : String(r.create_time),
   };
+}
+
+function alertGroupLabel(r: LinkMonitor) {
+  if (r.conversationType === '2' && r.openConversationId) {
+    return r.groupTitle || r.openConversationId;
+  }
+  if (r.source === 'admin' || r.conversationType === '1') {
+    return '单聊/后台（通知添加人）';
+  }
+  return '-';
 }
 
 export default function LinkMonitorPage() {
@@ -142,6 +155,14 @@ export default function LinkMonitorPage() {
       search: false,
       render: (_, r) => (r.lastCheckAt ? `${r.lastOk === 1 ? 'OK' : 'FAIL'} ${r.lastCheckAt}` : '-'),
     },
+    {
+      title: '告警推送群',
+      dataIndex: 'groupTitle',
+      width: 160,
+      search: false,
+      ellipsis: true,
+      render: (_, r) => alertGroupLabel(r),
+    },
     { title: '来源', dataIndex: 'source', width: 80, search: false },
     { title: '创建', dataIndex: 'createBy', width: 100, search: false },
   ];
@@ -152,7 +173,7 @@ export default function LinkMonitorPage() {
         actionRef={actionRef}
         rowKey='id'
         columns={columns}
-        headerTitle='链接监控（全局可见；每天 09:30 探测；正文含 404/无权限/已删除等也告警）'
+        headerTitle='链接监控（全局可见；群内添加的告警推回该群；每天 09:30 探测）'
         toolBarRender={() => [
           <PermissionButton
             key='add'

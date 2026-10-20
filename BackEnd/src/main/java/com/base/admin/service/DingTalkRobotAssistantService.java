@@ -677,7 +677,27 @@ public class DingTalkRobotAssistantService {
                 + "&pc_slide=true";
     }
 
-    private String resolveH5BaseUrl(Long senderUserId) {
+    /**
+     * 链接监控群填链 ActionCard：打开 H5，避免群内二次 @ 才能续聊。
+     */
+    public String buildLinkMonitorFillActionUrl(Long senderUserId, String ticket) {
+        String base = resolveH5BaseUrl(senderUserId);
+        if (!StringUtils.hasText(base) || !StringUtils.hasText(ticket)) {
+            return "";
+        }
+        StringBuilder page = new StringBuilder();
+        page.append(base.replaceAll("/+$", "")).append("/robot/link-monitor/fill?ticket=")
+                .append(URLEncoder.encode(ticket, StandardCharsets.UTF_8));
+        String corpId = dingTalkAppService.corpId();
+        if (StringUtils.hasText(corpId)) {
+            page.append("&corpId=").append(URLEncoder.encode(corpId, StandardCharsets.UTF_8));
+        }
+        return "dingtalk://dingtalkclient/page/link?url="
+                + URLEncoder.encode(page.toString(), StandardCharsets.UTF_8)
+                + "&pc_slide=true";
+    }
+
+    public String resolveH5BaseUrl(Long senderUserId) {
         String route = dingTalkAppService.resolveRobotRoute(senderUserId);
         if (DingTalkAppService.ROUTE_LOCAL.equals(route)) {
             if (StringUtils.hasText(dingTalkProperties.getLocalH5BaseUrl())) {

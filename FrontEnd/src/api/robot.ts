@@ -21,6 +21,9 @@ export type LinkMonitor = {
   remark?: string;
   scopeType?: string;
   source?: string;
+  openConversationId?: string;
+  conversationType?: string;
+  groupTitle?: string;
   status: string;
   intervalSec?: number;
   lastCheckAt?: string;
@@ -30,6 +33,23 @@ export type LinkMonitor = {
   lastAlertAt?: string;
   createBy?: string;
   createTime?: string;
+};
+
+export type LinkMonitorFillContext = {
+  sessionKey: string;
+  state: string;
+  draftUrls: string[];
+  draftCount: number;
+};
+
+export type LinkMonitorFillSubmitResult = {
+  message?: string;
+  committed?: number;
+  draftCount?: number;
+  draftUrls?: string[];
+  okUrls?: string[];
+  fail?: string[];
+  alertGroupHint?: string;
 };
 
 export function listRobotIntentsApi() {
@@ -96,4 +116,18 @@ export function listLinkMonitorChecksApi(id: number) {
 
 export function listLinkMonitorAlertsApi(id: number) {
   return request.get<unknown, Record<string, unknown>[]>(`/robot/link-monitors/${id}/alerts`);
+}
+
+export function getLinkMonitorFillContextApi(ticket: string) {
+  return request.get<unknown, LinkMonitorFillContext>('/robot/link-monitor/fill/context', {
+    params: { ticket },
+  });
+}
+
+export function submitLinkMonitorFillApi(data: {
+  ticket: string;
+  urlsText?: string;
+  action: 'append' | 'commit' | 'cancel';
+}) {
+  return request.post<unknown, LinkMonitorFillSubmitResult>('/robot/link-monitor/fill/submit', data);
 }

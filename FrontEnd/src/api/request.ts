@@ -27,7 +27,11 @@ function isDingTalkBridgePath() {
   try {
     const path = window.location.pathname || '';
     // 钉钉 H5 落地页：免登失败时不要踢去扫码登录
-    return path.includes('/dingtalk/bridge') || path.includes('/train/cashier-assistant');
+    return (
+      path.includes('/dingtalk/bridge') ||
+      path.includes('/train/cashier-assistant') ||
+      path.includes('/robot/link-monitor/fill')
+    );
   } catch {
     return false;
   }

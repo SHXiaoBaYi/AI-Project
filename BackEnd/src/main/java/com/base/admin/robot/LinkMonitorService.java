@@ -313,13 +313,28 @@ public class LinkMonitorService {
         String conversationType = row.get("conversation_type") == null ? "1" : String.valueOf(row.get("conversation_type"));
         String creatorStaffId = row.get("creator_staff_id") == null ? "" : String.valueOf(row.get("creator_staff_id"));
         Long creatorUserId = row.get("creator_user_id") == null ? null : ((Number) row.get("creator_user_id")).longValue();
+        String groupTitle = resolveGroupTitle(conversationId);
 
-        String content = "【链接监控告警】链接不可用\nURL：" + url + "\n原因：" + err + "\n时间：" + LocalDateTime.now();
+        StringBuilder contentSb = new StringBuilder();
+        contentSb.append("【链接监控告警】链接不可用\n");
+        contentSb.append("URL：").append(url).append("\n");
+        contentSb.append("原因：").append(err).append("\n");
+        contentSb.append("时间：").append(LocalDateTime.now()).append("\n");
         boolean isGroup = "2".equals(conversationType) && StringUtils.hasText(conversationId);
         if (isGroup) {
+            contentSb.append("来源群：").append(StringUtils.hasText(groupTitle) ? groupTitle : conversationId);
+        } else {
+            contentSb.append("来源：").append("1".equals(conversationType) ? "单聊/后台" : "未知");
+        }
+        String content = contentSb.toString();
+        if (isGroup) {
+            // 告警推回「当初添加监控的那个群」
             DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
                     conversationId, "链接监控告警", content.replace("\n", "  \n"));
-            writeAlert(monitorId, "GROUP", conversationId, content, groupCall.success(),
+            String targetLabel = StringUtils.hasText(groupTitle)
+                    ? (groupTitle + "|" + conversationId)
+                    : conversationId;
+            writeAlert(monitorId, "GROUP", targetLabel, content, groupCall.success(),
                     groupCall.success() ? "" : groupCall.message());
             // 同时通知添加人，避免群推送失败时无人知晓
             notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
@@ -328,6 +343,18 @@ public class LinkMonitorService {
             notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
         }
         jdbc.update("UPDATE ops_link_monitor SET last_alert_at = NOW() WHERE id = ?", monitorId);
+    }
+
+    /** 解析监控绑定的群名称（robot_group_profile）。 */
+    public String resolveGroupTitle(String openConversationId) {
+        if (!StringUtils.hasText(openConversationId)) {
+            return "";
+        }
+        String title = jdbc.query("""
+                SELECT title FROM robot_group_profile
+                WHERE open_conversation_id = ? AND is_active = 1 LIMIT 1
+                """, rs -> rs.next() ? rs.getString(1) : null, openConversationId.trim());
+        return title == null ? "" : title.trim();
     }
 
     private void notifyCreatorOrFallback(long monitorId, String content, String creatorStaffId, Long creatorUserId) {

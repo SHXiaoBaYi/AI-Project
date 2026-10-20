@@ -146,25 +146,28 @@ public class RobotAdminController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword) {
         List<Object> args = new ArrayList<>();
-        String where = " WHERE is_active = 1 ";
+        String where = " WHERE m.is_active = 1 ";
         if (StringUtils.hasText(status)) {
-            where += " AND status = ? ";
+            where += " AND m.status = ? ";
             args.add(status.trim());
         }
         if (StringUtils.hasText(keyword)) {
-            where += " AND url LIKE ? ";
+            where += " AND m.url LIKE ? ";
             args.add("%" + keyword.trim() + "%");
         }
-        Integer total = jdbc.queryForObject("SELECT COUNT(1) FROM ops_link_monitor" + where, Integer.class, args.toArray());
+        Integer total = jdbc.queryForObject(
+                "SELECT COUNT(1) FROM ops_link_monitor m" + where, Integer.class, args.toArray());
         int offset = Math.max(0, (pageNum - 1) * pageSize);
         args.add(pageSize);
         args.add(offset);
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT id, url, name, remark, scope_type, source, open_conversation_id, conversation_type,
-                       status, interval_sec, last_check_at, last_ok, last_status_code, last_error,
-                       last_alert_at, create_by, create_time
-                FROM ops_link_monitor
-                """ + where + " ORDER BY id DESC LIMIT ? OFFSET ?", args.toArray());
+                SELECT m.id, m.url, m.name, m.remark, m.scope_type, m.source, m.open_conversation_id, m.conversation_type,
+                       m.status, m.interval_sec, m.last_check_at, m.last_ok, m.last_status_code, m.last_error,
+                       m.last_alert_at, m.create_by, m.create_time,
+                       g.title AS group_title
+                FROM ops_link_monitor m
+                LEFT JOIN robot_group_profile g ON g.open_conversation_id = m.open_conversation_id AND g.is_active = 1
+                """ + where + " ORDER BY m.id DESC LIMIT ? OFFSET ?", args.toArray());
         return Result.ok(new PageResult<>(total == null ? 0 : total, rows));
     }
 
