@@ -5,11 +5,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * 轻量 Router：会话态优先，再规则分类。后续可替换为 LLM 分类。
+ * 轻量 Router：会话态优先，再结合近期对话记忆做续聊，再规则分类。
  */
 @Component
 @RequiredArgsConstructor
@@ -18,6 +19,7 @@ public class RobotIntentRouter {
     private static final Pattern URL = Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE);
 
     private final JdbcTemplate jdbc;
+    private final RobotSessionService sessionService;
 
     public record RouteResult(String intentCode, double confidence, String utteranceType) {
     }
@@ -56,10 +58,58 @@ public class RobotIntentRouter {
         if (isAddMonitor(lower) || (URL.matcher(t).find() && lower.contains("监控"))) {
             return enabledOrFallback(RobotProductRules.INTENT_LINK_ADD, 0.92, "start");
         }
+
+        // 完整对话记忆：短续聊句沿用上一意图（如闲忙「改成下午」）
+        String lastIntent = lastUserIntent(session);
+        if (StringUtils.hasText(lastIntent) && isFollowUpUtterance(t)) {
+            if (RobotProductRules.INTENT_CALENDAR_FREEBUSY.equals(lastIntent)
+                    && isIntentEnabled(RobotProductRules.INTENT_CALENDAR_FREEBUSY)) {
+                return new RouteResult(RobotProductRules.INTENT_CALENDAR_FREEBUSY, 0.75, "follow_up");
+            }
+            if (RobotProductRules.INTENT_LINK_ADD.equals(lastIntent)
+                    && isIntentEnabled(RobotProductRules.INTENT_LINK_ADD)
+                    && URL.matcher(t).find()) {
+                return new RouteResult(RobotProductRules.INTENT_LINK_ADD, 0.7, "start");
+            }
+        }
+
         if (isIntentEnabled(RobotProductRules.INTENT_CALENDAR_FREEBUSY)) {
             return new RouteResult(RobotProductRules.INTENT_CALENDAR_FREEBUSY, 0.8, "start");
         }
         return new RouteResult(RobotProductRules.INTENT_HELP, 0.4, "start");
+    }
+
+    private String lastUserIntent(RobotSessionService.Session session) {
+        if (session == null) {
+            return "";
+        }
+        if (StringUtils.hasText(session.intentCode())) {
+            return session.intentCode().trim();
+        }
+        List<RobotSessionService.HistoryTurn> hist = sessionService.historyOf(session);
+        for (int i = hist.size() - 1; i >= 0; i--) {
+            RobotSessionService.HistoryTurn turn = hist.get(i);
+            if ("user".equals(turn.role()) && StringUtils.hasText(turn.intent())) {
+                return turn.intent().trim();
+            }
+            if ("assistant".equals(turn.role()) && StringUtils.hasText(turn.intent())) {
+                return turn.intent().trim();
+            }
+        }
+        return "";
+    }
+
+    /** 短句 / 时间修正类，视为对上一轮的续聊而非新开帮助。 */
+    private static boolean isFollowUpUtterance(String t) {
+        if (!StringUtils.hasText(t) || t.length() > 40) {
+            return false;
+        }
+        String s = t.trim();
+        return s.contains("改成") || s.contains("换成") || s.contains("那")
+                || s.contains("明天") || s.contains("后天") || s.contains("下午")
+                || s.contains("上午") || s.contains("下周") || s.contains("再查")
+                || s.equals("继续") || s.equals("好的") || s.equals("嗯")
+                || s.startsWith("还有") || s.startsWith("再");
     }
 
     private RouteResult enabledOrFallback(String code, double conf, String type) {

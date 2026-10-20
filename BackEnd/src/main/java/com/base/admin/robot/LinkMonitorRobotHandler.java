@@ -41,7 +41,8 @@ public class LinkMonitorRobotHandler {
                 return RobotReply.text("已记下 " + draft.size() + " 条链接。还需要追加吗？回复「需要」或「不需要」。");
             }
             sessionService.save(key, RobotProductRules.STATE_WAIT_URL, RobotProductRules.INTENT_LINK_ADD, slots);
-            return RobotReply.text("请发送要监控的完整链接（http/https）。也可一次发多条。回复「取消」可退出。");
+            return RobotReply.text("请发送要监控的完整链接（http/https）。也可一次发多条。"
+                    + "群里多轮可直接发（若未送达请再 @ 我）。回复「取消」可退出。");
         }
         if ("provide_url".equals(utteranceType) || RobotProductRules.STATE_WAIT_URL.equals(session.state())) {
             List<String> urls = linkMonitorService.extractUrls(text);
@@ -55,14 +56,14 @@ public class LinkMonitorRobotHandler {
             }
             slots.put("urls", draft);
             sessionService.save(key, RobotProductRules.STATE_WAIT_MORE, RobotProductRules.INTENT_LINK_ADD, slots);
-            return RobotReply.text("已记下 " + draft.size() + " 条。还需要追加吗？回复「需要」或「不需要」。");
+            return RobotReply.text("已记下 " + draft.size() + " 条。还需要追加吗？直接回复「需要」或「不需要」即可（群多轮可免 @）。");
         }
         if ("confirm_more_yes".equals(utteranceType)) {
             sessionService.save(key, RobotProductRules.STATE_WAIT_URL, RobotProductRules.INTENT_LINK_ADD, slots);
-            return RobotReply.text("请继续发送要追加的链接。");
+            return RobotReply.text("请继续发送要追加的链接（群多轮可免 @）。");
         }
         if ("confirm_more_unclear".equals(utteranceType)) {
-            return RobotReply.text("请回复「需要」继续追加，或「不需要」完成提交。");
+            return RobotReply.text("请回复「需要」继续追加，或「不需要」完成提交（群多轮可免 @）。");
         }
         if ("confirm_more_no".equals(utteranceType)) {
             if (draft.isEmpty()) {

@@ -25,8 +25,19 @@ public final class RobotProductRules {
     /** 群内任何人可删监控 */
     public static final boolean GROUP_ANYONE_CAN_DELETE = true;
 
-    /** 闲忙允许在群里用（需 @ 机器人） */
+    /** 闲忙允许在群里用（首次需 @；多轮进行中可免 @） */
     public static final boolean CALENDAR_ALLOWED_IN_GROUP = true;
+
+    /**
+     * 群里多轮免 @：用户已有非 IDLE 会话时，未 @ 也处理（前提是钉钉把消息推到 Stream）。
+     * 新开意图仍需 @，避免刷屏误触。
+     */
+    public static final boolean GROUP_MULTI_TURN_SKIP_AT = true;
+
+    /** 会话保留的近期对话轮数（user+assistant 各算一条） */
+    public static final int HISTORY_MAX_TURNS = 20;
+
+    public static final String SLOT_HISTORY = "_history";
 
     public static final String STATE_IDLE = "IDLE";
     public static final String STATE_WAIT_URL = "WAIT_URL";

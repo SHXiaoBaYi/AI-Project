@@ -15,7 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 机器人统一入站：群 @ / 单聊 → 会话 → Router → Handler。
+ * 机器人统一入站：单聊直达；群首次需 @，多轮进行中可免 @；带近期对话记忆。
  */
 @Slf4j
 @Service
@@ -49,10 +49,17 @@ public class RobotIngressService {
         String text = extractText(message);
         text = stripAtMentions(text);
 
+        boolean mentioned = isMentioned(message, text);
         if ("2".equals(conversationType)) {
-            if (!isMentioned(message, text)) {
-                log.info("robot ignore group message without @ bot conversationId={}", conversationId);
+            boolean multiTurn = RobotProductRules.GROUP_MULTI_TURN_SKIP_AT
+                    && sessionService.hasActiveMultiTurn(conversationType, conversationId, staffId);
+            if (!mentioned && !multiTurn) {
+                log.info("robot ignore group message without @ (no active multi-turn) conversationId={}",
+                        conversationId);
                 return;
+            }
+            if (!mentioned && multiTurn) {
+                log.info("robot accept group message without @ due to active multi-turn staffId={}", staffId);
             }
             upsertGroupProfile(conversationId);
         }
@@ -98,26 +105,34 @@ public class RobotIngressService {
         String intent = route.intentCode();
         Long userId = findUserIdByStaff(staffId);
 
+        sessionService.appendTurn(session.sessionKey(), "user", text, intent);
+        // appendTurn 后重新读会话（含历史）
+        session = sessionService.get(session.sessionKey());
+
+        RobotReply reply;
         if (RobotProductRules.INTENT_HELP.equals(intent)) {
             if ("cancel".equals(route.utteranceType())) {
                 sessionService.clear(session.sessionKey());
-                return RobotReply.text("已退出当前多轮对话。");
+                reply = RobotReply.text("已退出当前多轮对话。");
+            } else {
+                reply = helpReply();
             }
-            return helpReply();
-        }
-        if (RobotProductRules.INTENT_LINK_ADD.equals(intent)) {
-            return linkMonitorRobotHandler.handleAdd(session, text, route.utteranceType(), staffId, userId);
-        }
-        if (RobotProductRules.INTENT_LINK_DELETE.equals(intent)) {
-            return linkMonitorRobotHandler.handleDelete(staffId);
-        }
-        if (RobotProductRules.INTENT_CALENDAR_FREEBUSY.equals(intent)) {
+        } else if (RobotProductRules.INTENT_LINK_ADD.equals(intent)) {
+            reply = linkMonitorRobotHandler.handleAdd(session, text, route.utteranceType(), staffId, userId);
+        } else if (RobotProductRules.INTENT_LINK_DELETE.equals(intent)) {
+            reply = linkMonitorRobotHandler.handleDelete(staffId);
+        } else if (RobotProductRules.INTENT_CALENDAR_FREEBUSY.equals(intent)) {
             if ("2".equals(conversationType) && !RobotProductRules.CALENDAR_ALLOWED_IN_GROUP) {
-                return RobotReply.text("群聊暂未开放闲忙查询。");
+                reply = RobotReply.text("群聊暂未开放闲忙查询。");
+            } else {
+                reply = assistant.processAskAsRobotReply(staffId, text);
             }
-            return assistant.processAskAsRobotReply(staffId, text);
+        } else {
+            reply = helpReply();
         }
-        return helpReply();
+        sessionService.appendTurn(session.sessionKey(), "assistant",
+                reply.markdown() == null ? "" : reply.markdown(), intent);
+        return reply;
     }
 
     private RobotReply helpReply() {
@@ -130,7 +145,8 @@ public class RobotIngressService {
         for (String line : lines) {
             sb.append(line).append("\n");
         }
-        sb.append("\n群里请先 @ 我再说话。链接监控为全局列表，每天 09:30 探测能否打开。");
+        sb.append("\n群里新开话题请 @ 我；进入多轮后（例如等你发链接）可免 @ 续聊。")
+                .append("链接监控每天 09:30 探测。");
         return RobotReply.text(sb.toString());
     }
 
