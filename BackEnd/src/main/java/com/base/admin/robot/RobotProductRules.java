@@ -11,13 +11,18 @@ public final class RobotProductRules {
     /** 监控列表默认全局可见 */
     public static final String SCOPE_GLOBAL = "GLOBAL";
 
-    /** 「24 小时监控」= 每隔 24 小时探测一次 */
+    /**
+     * 链接探测：按自然日，每天 09:30（Asia/Shanghai）跑一轮。
+     * interval_sec 仅作兼容字段，调度不再按它滚动。
+     */
+    public static final String PROBE_CRON = "0 30 9 * * ?";
+    public static final String PROBE_ZONE = "Asia/Shanghai";
     public static final int DEFAULT_INTERVAL_SEC = 24 * 60 * 60;
 
-    /** 单聊添加的监控：仅后台告警，并通知该系统用户 */
+    /** 单聊告警兜底通知人（添加人无钉钉 userid 时） */
     public static final String DM_ALERT_USERNAME = "wangfangyang";
 
-    /** 群内任何人可删监控（全局列表场景下：绑定群内成员可删） */
+    /** 群内任何人可删监控 */
     public static final boolean GROUP_ANYONE_CAN_DELETE = true;
 
     /** 闲忙允许在群里用（需 @ 机器人） */

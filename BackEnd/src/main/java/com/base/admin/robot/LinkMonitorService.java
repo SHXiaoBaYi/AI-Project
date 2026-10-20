@@ -14,6 +14,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.PreparedStatement;
@@ -164,20 +165,23 @@ public class LinkMonitorService {
         jdbc.update("UPDATE ops_link_monitor SET status = 'ACTIVE', update_time = NOW() WHERE id = ? AND is_active = 1", id);
     }
 
-    /** 到期应探测的 ACTIVE 目标 */
-    public List<Long> dueMonitorIds() {
+    /**
+     * 自然日尚未探测的 ACTIVE 目标（按库日期 CURDATE，连接时区应为 Asia/Shanghai）。
+     */
+    public List<Long> dueMonitorIdsForNaturalDay() {
         return jdbc.query("""
                 SELECT id FROM ops_link_monitor
                 WHERE status = 'ACTIVE' AND is_active = 1
-                  AND (last_check_at IS NULL OR last_check_at <= DATE_SUB(NOW(), INTERVAL interval_sec SECOND))
-                ORDER BY IFNULL(last_check_at, '1970-01-01') ASC
-                LIMIT 50
+                  AND (last_check_at IS NULL OR DATE(last_check_at) < CURDATE())
+                ORDER BY id ASC
+                LIMIT 200
                 """, (rs, i) -> rs.getLong(1));
     }
 
     public void probeOne(long monitorId) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT id, url, timeout_ms, open_conversation_id, conversation_type
+                SELECT id, url, timeout_ms, open_conversation_id, conversation_type,
+                       creator_staff_id, creator_user_id
                 FROM ops_link_monitor WHERE id = ? AND is_active = 1 LIMIT 1
                 """, monitorId);
         if (rows.isEmpty()) {
@@ -185,7 +189,7 @@ public class LinkMonitorService {
         }
         Map<String, Object> row = rows.getFirst();
         String url = String.valueOf(row.get("url"));
-        int timeout = row.get("timeout_ms") == null ? 10000 : ((Number) row.get("timeout_ms")).intValue();
+        int timeout = row.get("timeout_ms") == null ? 15000 : ((Number) row.get("timeout_ms")).intValue();
         long start = System.currentTimeMillis();
         boolean ok = false;
         Integer status = null;
@@ -193,15 +197,25 @@ public class LinkMonitorService {
         try {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .timeout(Duration.ofMillis(Math.max(1000, timeout)))
+                    .timeout(Duration.ofMillis(Math.max(3000, timeout)))
                     .GET()
-                    .header("User-Agent", "XBY-LinkMonitor/1.0")
+                    .header("User-Agent", "Mozilla/5.0 (compatible; XBY-LinkMonitor/1.0)")
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                     .build();
-            HttpResponse<Void> resp = http.send(req, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
             status = resp.statusCode();
-            ok = status >= 200 && status < 400;
-            if (!ok) {
+            if (status == 404 || status == 403 || status == 410 || status == 451 || status >= 500) {
                 err = "HTTP " + status;
+            } else if (status < 200 || status >= 400) {
+                err = "HTTP " + status;
+            } else {
+                String body = decodeBody(resp.body(), resp.headers().firstValue("Content-Type").orElse(""));
+                String unavailable = detectUnavailableHint(body);
+                if (StringUtils.hasText(unavailable)) {
+                    err = "页面提示不可用：" + unavailable;
+                } else {
+                    ok = true;
+                }
             }
         } catch (Exception ex) {
             err = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
@@ -220,50 +234,163 @@ public class LinkMonitorService {
                 WHERE id = ?
                 """, ok ? 1 : 0, status, err, monitorId);
         if (!ok) {
-            alertFailure(monitorId, url, err, String.valueOf(row.get("open_conversation_id")),
-                    String.valueOf(row.get("conversation_type")));
+            alertFailure(monitorId, url, err, row);
         }
     }
 
-    private void alertFailure(long monitorId, String url, String err, String conversationId, String conversationType) {
+    /**
+     * 识别页面正文中的「不可用」提示：404 / 无权限 / 已删除 / 文章不存在 等。
+     * HTTP 200 但正文含这些文案也判失败。
+     */
+    static String detectUnavailableHint(String body) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        String text = body.replaceAll("(?is)<script[^>]*>.*?</script>", " ")
+                .replaceAll("(?is)<style[^>]*>.*?</style>", " ")
+                .replaceAll("(?is)<[^>]+>", " ")
+                .replaceAll("&nbsp;", " ")
+                .replaceAll("\\s+", " ");
+        String lower = text.toLowerCase(Locale.ROOT);
+        String[][] patterns = {
+                {"文章不存在", "文章不存在"},
+                {"笔记不存在", "笔记不存在"},
+                {"内容不存在", "内容不存在"},
+                {"页面不存在", "页面不存在"},
+                {"不存在或已被删除", "不存在或已被删除"},
+                {"已被删除", "已被删除"},
+                {"文章被删", "文章被删"},
+                {"笔记被删", "笔记被删"},
+                {"该内容无法查看", "该内容无法查看"},
+                {"内容无法查看", "内容无法查看"},
+                {"无法查看", "无法查看"},
+                {"无权限", "无权限"},
+                {"没有权限", "没有权限"},
+                {"权限不足", "权限不足"},
+                {"无权访问", "无权访问"},
+                {"无访问权限", "无访问权限"},
+                {"access denied", "access denied"},
+                {"page not found", "page not found"},
+                {"404 not found", "404 not found"},
+                {"错误码：404", "404"},
+                {"错误码:404", "404"},
+                {"status code 404", "404"},
+        };
+        for (String[] p : patterns) {
+            if (text.contains(p[0]) || lower.contains(p[0].toLowerCase(Locale.ROOT))) {
+                return p[1];
+            }
+        }
+        return "";
+    }
+
+    private static String decodeBody(byte[] bytes, String contentType) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+        int max = Math.min(bytes.length, 256 * 1024);
+        byte[] slice = max == bytes.length ? bytes : java.util.Arrays.copyOf(bytes, max);
+        Charset charset = StandardCharsets.UTF_8;
+        if (StringUtils.hasText(contentType)) {
+            String ct = contentType.toLowerCase(Locale.ROOT);
+            if (ct.contains("charset=gbk") || ct.contains("charset=gb2312")) {
+                charset = Charset.forName("GBK");
+            }
+        }
+        return new String(slice, charset);
+    }
+
+    /** 告警：群添加 → 推群；单聊/后台添加 → 推添加人（无钉钉则兜底 wangfangyang）。 */
+    private void alertFailure(long monitorId, String url, String err, Map<String, Object> row) {
         LocalDateTime lastAlert = jdbc.query("""
                 SELECT last_alert_at FROM ops_link_monitor WHERE id = ?
                 """, rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null, monitorId);
-        if (lastAlert != null && lastAlert.isAfter(LocalDateTime.now().minusHours(6))) {
+        // 同一自然日只告警一次
+        if (lastAlert != null && lastAlert.toLocalDate().equals(LocalDateTime.now().toLocalDate())) {
             return;
         }
-        String content = "【链接监控告警】无法打开\nURL：" + url + "\n错误：" + err + "\n时间：" + LocalDateTime.now();
+        String conversationId = row.get("open_conversation_id") == null ? "" : String.valueOf(row.get("open_conversation_id"));
+        String conversationType = row.get("conversation_type") == null ? "1" : String.valueOf(row.get("conversation_type"));
+        String creatorStaffId = row.get("creator_staff_id") == null ? "" : String.valueOf(row.get("creator_staff_id"));
+        Long creatorUserId = row.get("creator_user_id") == null ? null : ((Number) row.get("creator_user_id")).longValue();
+
+        String content = "【链接监控告警】链接不可用\nURL：" + url + "\n原因：" + err + "\n时间：" + LocalDateTime.now();
         boolean isGroup = "2".equals(conversationType) && StringUtils.hasText(conversationId);
         if (isGroup) {
-            // 群告警：当前 OpenAPI 主动推群能力受限时，先记告警日志；同时通知 wangfangyang 兜底
-            writeAlert(monitorId, "GROUP", conversationId, content, false, "群主动推送待接 OpenAPI，已改通知指定人");
-            notifyWangfangyang(monitorId, content);
+            DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
+                    conversationId, "链接监控告警", content.replace("\n", "  \n"));
+            writeAlert(monitorId, "GROUP", conversationId, content, groupCall.success(),
+                    groupCall.success() ? "" : groupCall.message());
+            // 同时通知添加人，避免群推送失败时无人知晓
+            notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
         } else {
-            // 单聊添加：只后台告警 + 发给 wangfangyang
             writeAlert(monitorId, "ADMIN", "backend", content, true, "");
-            notifyWangfangyang(monitorId, content);
+            notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
         }
         jdbc.update("UPDATE ops_link_monitor SET last_alert_at = NOW() WHERE id = ?", monitorId);
     }
 
-    private void notifyWangfangyang(long monitorId, String content) {
+    private void notifyCreatorOrFallback(long monitorId, String content, String creatorStaffId, Long creatorUserId) {
+        String dingUserId = resolveDingUserId(creatorStaffId, creatorUserId);
+        String targetLabel = StringUtils.hasText(creatorStaffId) ? creatorStaffId : ("uid:" + creatorUserId);
+        if (!StringUtils.hasText(dingUserId)) {
+            notifyByUsername(monitorId, content, RobotProductRules.DM_ALERT_USERNAME);
+            return;
+        }
+        try {
+            DingTalkCalendarClient.NoticeCall call = dingTalkCalendarClient.notifyMarkdown(
+                    dingUserId, "链接监控告警", content);
+            writeAlert(monitorId, "USER", targetLabel, content, call.success(),
+                    call.success() ? "" : call.message());
+            if (!call.success()) {
+                notifyByUsername(monitorId, content, RobotProductRules.DM_ALERT_USERNAME);
+            }
+        } catch (Exception ex) {
+            writeAlert(monitorId, "USER", targetLabel, content, false, ex.getMessage());
+            notifyByUsername(monitorId, content, RobotProductRules.DM_ALERT_USERNAME);
+        }
+    }
+
+    private String resolveDingUserId(String staffId, Long userId) {
+        if (StringUtils.hasText(staffId)) {
+            String byStaff = jdbc.query("""
+                    SELECT dingtalk_userid FROM sys_user
+                    WHERE dingtalk_userid = ? AND is_active = 1 LIMIT 1
+                    """, rs -> rs.next() ? rs.getString(1) : null, staffId.trim());
+            if (StringUtils.hasText(byStaff)) {
+                return byStaff.trim();
+            }
+            // staffId 可能就是钉钉 userid，直接用
+            return staffId.trim();
+        }
+        if (userId != null) {
+            return jdbc.query("""
+                    SELECT dingtalk_userid FROM sys_user
+                    WHERE user_id = ? AND is_active = 1 AND dingtalk_userid IS NOT NULL AND dingtalk_userid <> ''
+                    LIMIT 1
+                    """, rs -> rs.next() ? rs.getString(1) : null, userId);
+        }
+        return "";
+    }
+
+    private void notifyByUsername(long monitorId, String content, String username) {
         try {
             List<Map<String, Object>> users = jdbc.queryForList("""
                     SELECT dingtalk_userid FROM sys_user
                     WHERE username = ? AND is_active = 1 AND dingtalk_userid IS NOT NULL AND dingtalk_userid <> ''
                     LIMIT 1
-                    """, RobotProductRules.DM_ALERT_USERNAME);
+                    """, username);
             if (users.isEmpty()) {
-                writeAlert(monitorId, "USER", RobotProductRules.DM_ALERT_USERNAME, content, false, "用户未绑定钉钉");
+                writeAlert(monitorId, "USER", username, content, false, "用户未绑定钉钉");
                 return;
             }
             String dingUserId = String.valueOf(users.getFirst().get("dingtalk_userid"));
             DingTalkCalendarClient.NoticeCall call = dingTalkCalendarClient.notifyMarkdown(
                     dingUserId, "链接监控告警", content);
-            writeAlert(monitorId, "USER", RobotProductRules.DM_ALERT_USERNAME, content, call.success(),
+            writeAlert(monitorId, "USER", username, content, call.success(),
                     call.success() ? "" : call.message());
         } catch (Exception ex) {
-            writeAlert(monitorId, "USER", RobotProductRules.DM_ALERT_USERNAME, content, false, ex.getMessage());
+            writeAlert(monitorId, "USER", username, content, false, ex.getMessage());
         }
     }
 

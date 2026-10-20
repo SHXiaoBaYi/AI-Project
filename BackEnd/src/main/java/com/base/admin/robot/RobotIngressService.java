@@ -130,7 +130,7 @@ public class RobotIngressService {
         for (String line : lines) {
             sb.append(line).append("\n");
         }
-        sb.append("\n群里请先 @ 我再说话。链接监控为全局列表，每 24 小时探测一次。");
+        sb.append("\n群里请先 @ 我再说话。链接监控为全局列表，每天 09:30 探测能否打开。");
         return RobotReply.text(sb.toString());
     }
 

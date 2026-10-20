@@ -83,14 +83,15 @@ public class LinkMonitorRobotHandler {
             sessionService.clear(key);
             StringBuilder sb = new StringBuilder();
             if (!ok.isEmpty()) {
-                sb.append("已加入监控（共 ").append(ok.size()).append(" 条），每 24 小时探测一次能否打开。\n");
+                sb.append("已加入监控（共 ").append(ok.size()).append(" 条）。")
+                        .append("按自然日每天 09:30 探测；若无法打开或页面出现 404/无权限/已删除等提示，将告警。\n");
                 for (String u : ok) {
                     sb.append("- ").append(u).append("\n");
                 }
-                if ("1".equals(session.conversationType())) {
-                    sb.append("单聊添加的监控仅后台告警，并通知 ").append(RobotProductRules.DM_ALERT_USERNAME).append("。");
+                if ("2".equals(session.conversationType())) {
+                    sb.append("告警会发到本群，并通知添加人。");
                 } else {
-                    sb.append("异常时会告警（群推送能力完善前同步通知指定管理员）。");
+                    sb.append("告警会通知添加人。");
                 }
             }
             if (!fail.isEmpty()) {

@@ -152,7 +152,7 @@ export default function LinkMonitorPage() {
         actionRef={actionRef}
         rowKey='id'
         columns={columns}
-        headerTitle='链接监控（全局可见，默认每 24 小时探测）'
+        headerTitle='链接监控（全局可见；每天 09:30 探测；正文含 404/无权限/已删除等也告警）'
         toolBarRender={() => [
           <PermissionButton
             key='add'
@@ -245,7 +245,7 @@ export default function LinkMonitorPage() {
           </Form.Item>
           <Form.Item
             name='intervalSec'
-            label='间隔秒（86400=24小时）'
+            label='间隔秒（调度已改为每天 09:30，此字段仅兼容保留）'
           >
             <InputNumber
               min={60}

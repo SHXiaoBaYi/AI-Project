@@ -173,6 +173,40 @@ public class DingTalkCalendarClient {
     }
 
     /**
+     * 企业机器人主动发群消息（需开放平台权限「企业内机器人发送消息」）。
+     * robotCode 默认用 ClientId；msgKey=sampleMarkdown。
+     */
+    public NoticeCall sendRobotGroupMarkdown(String openConversationId, String title, String text) {
+        if (!ready()) {
+            return NoticeCall.fail("钉钉未配置");
+        }
+        if (!StringUtils.hasText(openConversationId)) {
+            return NoticeCall.fail("缺少群 openConversationId");
+        }
+        try {
+            DingTalkAppService.Credential cred = credential();
+            if (cred == null || !StringUtils.hasText(cred.clientId())) {
+                return NoticeCall.fail("钉钉 ClientId 未配置，无法发群消息");
+            }
+            String token = accessToken(cred);
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("robotCode", cred.clientId().trim());
+            body.put("openConversationId", openConversationId.trim());
+            body.put("msgKey", "sampleMarkdown");
+            ObjectNode param = objectMapper.createObjectNode();
+            param.put("title", StringUtils.hasText(title) ? title : "告警");
+            param.put("text", text == null ? "" : text);
+            body.put("msgParam", objectMapper.writeValueAsString(param));
+            apiPost(token, "https://api.dingtalk.com/v1.0/robot/groupMessages/send", body);
+            return NoticeCall.ok(false);
+        } catch (BusinessException ex) {
+            return NoticeCall.fail(ex.getMessage());
+        } catch (Exception ex) {
+            return NoticeCall.fail("机器人发群消息失败：" + ex.getMessage());
+        }
+    }
+
+    /**
      * 将本地简历上传到<strong>企业钉盘</strong>，供日程描述挂载并永久授权面试官。
      * <p>优先 {@code dingtalk.resume-space-id}；否则自动选用企业盘 org space。
      * <p>上传走 Storage 接口（{@code Storage.UploadInfo.Read} / {@code Storage.File.Write}），
