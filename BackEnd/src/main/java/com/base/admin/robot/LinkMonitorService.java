@@ -1,0 +1,286 @@
+package com.base.admin.robot;
+
+import com.base.admin.exception.BusinessException;
+import com.base.admin.service.DingTalkCalendarClient;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class LinkMonitorService {
+
+    private static final Pattern URL_PAT = Pattern.compile("https?://[^\\s<>\"']+", Pattern.CASE_INSENSITIVE);
+    private final JdbcTemplate jdbc;
+    private final DingTalkCalendarClient dingTalkCalendarClient;
+    private final HttpClient http = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
+
+    public List<String> extractUrls(String text) {
+        List<String> out = new ArrayList<>();
+        if (!StringUtils.hasText(text)) {
+            return out;
+        }
+        Matcher m = URL_PAT.matcher(text);
+        while (m.find()) {
+            String u = normalizeUrl(m.group());
+            if (StringUtils.hasText(u) && !out.contains(u)) {
+                out.add(u);
+            }
+        }
+        return out;
+    }
+
+    public String normalizeUrl(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        String u = raw.trim();
+        while (u.endsWith(")") || u.endsWith("。") || u.endsWith(",") || u.endsWith("，") || u.endsWith("；")) {
+            u = u.substring(0, u.length() - 1);
+        }
+        if (!(u.startsWith("http://") || u.startsWith("https://"))) {
+            return "";
+        }
+        if (u.length() > 900) {
+            throw new BusinessException("链接过长");
+        }
+        String lower = u.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://127.") || lower.startsWith("https://127.")
+                || lower.contains("://localhost") || lower.contains("://0.0.0.0")
+                || lower.contains("://169.254.") || lower.contains("://metadata")) {
+            throw new BusinessException("不允许监控内网/本机地址");
+        }
+        return u;
+    }
+
+    public long addMonitor(String url, String openConversationId, String conversationType,
+                           String creatorStaffId, Long creatorUserId, String source, String createBy) {
+        String normalized = normalizeUrl(url);
+        if (!StringUtils.hasText(normalized)) {
+            throw new BusinessException("无效链接，请提供 http/https 完整地址");
+        }
+        String hash = sha256(normalized);
+        Integer exists = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM ops_link_monitor
+                WHERE url_hash = ? AND status = 'ACTIVE' AND is_active = 1
+                """, Integer.class, hash);
+        if (exists != null && exists > 0) {
+            throw new BusinessException("该链接已在监控列表中：" + normalized);
+        }
+        KeyHolder kh = new GeneratedKeyHolder();
+        jdbc.update(con -> {
+            PreparedStatement ps = con.prepareStatement("""
+                    INSERT INTO ops_link_monitor (url, url_hash, scope_type, source, open_conversation_id,
+                      conversation_type, creator_staff_id, creator_user_id, status, interval_sec, create_by, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, 1)
+                    """, Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, normalized);
+            ps.setString(2, hash);
+            ps.setString(3, RobotProductRules.SCOPE_GLOBAL);
+            ps.setString(4, source == null ? "robot" : source);
+            ps.setString(5, openConversationId == null ? "" : openConversationId);
+            ps.setString(6, conversationType == null ? "1" : conversationType);
+            ps.setString(7, creatorStaffId == null ? "" : creatorStaffId);
+            if (creatorUserId == null) {
+                ps.setObject(8, null);
+            } else {
+                ps.setLong(8, creatorUserId);
+            }
+            ps.setInt(9, RobotProductRules.DEFAULT_INTERVAL_SEC);
+            ps.setString(10, createBy == null ? "" : createBy);
+            return ps;
+        }, kh);
+        Number key = kh.getKey();
+        return key == null ? 0L : key.longValue();
+    }
+
+    public List<Map<String, Object>> listActive(int limit) {
+        return jdbc.queryForList("""
+                SELECT id, url, name, status, open_conversation_id, conversation_type, interval_sec,
+                       last_check_at, last_ok, last_status_code, last_error, create_by, create_time, source
+                FROM ops_link_monitor
+                WHERE status = 'ACTIVE' AND is_active = 1
+                ORDER BY id DESC
+                LIMIT ?
+                """, Math.max(1, Math.min(limit, 100)));
+    }
+
+    public void softDelete(long id, String operatorStaffId, boolean fromGroup) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT id, open_conversation_id, conversation_type, creator_staff_id, status
+                FROM ops_link_monitor WHERE id = ? AND is_active = 1 LIMIT 1
+                """, id);
+        if (rows.isEmpty()) {
+            throw new BusinessException("监控不存在");
+        }
+        Map<String, Object> row = rows.getFirst();
+        if (!"ACTIVE".equals(String.valueOf(row.get("status")))) {
+            throw new BusinessException("该监控已停用");
+        }
+        // 群内任何人可删：群场景来源不校验创建人；后台走权限注解
+        if (fromGroup && !RobotProductRules.GROUP_ANYONE_CAN_DELETE) {
+            String creator = String.valueOf(row.get("creator_staff_id"));
+            if (StringUtils.hasText(operatorStaffId) && !operatorStaffId.equals(creator)) {
+                throw new BusinessException("仅创建人可删除");
+            }
+        }
+        jdbc.update("""
+                UPDATE ops_link_monitor SET status = 'DELETED', is_active = 0, update_time = NOW()
+                WHERE id = ?
+                """, id);
+    }
+
+    public void pause(long id) {
+        jdbc.update("UPDATE ops_link_monitor SET status = 'PAUSED', update_time = NOW() WHERE id = ? AND is_active = 1", id);
+    }
+
+    public void resume(long id) {
+        jdbc.update("UPDATE ops_link_monitor SET status = 'ACTIVE', update_time = NOW() WHERE id = ? AND is_active = 1", id);
+    }
+
+    /** 到期应探测的 ACTIVE 目标 */
+    public List<Long> dueMonitorIds() {
+        return jdbc.query("""
+                SELECT id FROM ops_link_monitor
+                WHERE status = 'ACTIVE' AND is_active = 1
+                  AND (last_check_at IS NULL OR last_check_at <= DATE_SUB(NOW(), INTERVAL interval_sec SECOND))
+                ORDER BY IFNULL(last_check_at, '1970-01-01') ASC
+                LIMIT 50
+                """, (rs, i) -> rs.getLong(1));
+    }
+
+    public void probeOne(long monitorId) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT id, url, timeout_ms, open_conversation_id, conversation_type
+                FROM ops_link_monitor WHERE id = ? AND is_active = 1 LIMIT 1
+                """, monitorId);
+        if (rows.isEmpty()) {
+            return;
+        }
+        Map<String, Object> row = rows.getFirst();
+        String url = String.valueOf(row.get("url"));
+        int timeout = row.get("timeout_ms") == null ? 10000 : ((Number) row.get("timeout_ms")).intValue();
+        long start = System.currentTimeMillis();
+        boolean ok = false;
+        Integer status = null;
+        String err = "";
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofMillis(Math.max(1000, timeout)))
+                    .GET()
+                    .header("User-Agent", "XBY-LinkMonitor/1.0")
+                    .build();
+            HttpResponse<Void> resp = http.send(req, HttpResponse.BodyHandlers.discarding());
+            status = resp.statusCode();
+            ok = status >= 200 && status < 400;
+            if (!ok) {
+                err = "HTTP " + status;
+            }
+        } catch (Exception ex) {
+            err = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+            if (err.length() > 480) {
+                err = err.substring(0, 480);
+            }
+        }
+        int latency = (int) (System.currentTimeMillis() - start);
+        jdbc.update("""
+                INSERT INTO ops_link_monitor_check_log (monitor_id, checked_at, ok, http_status, latency_ms, error_msg)
+                VALUES (?, NOW(), ?, ?, ?, ?)
+                """, monitorId, ok ? 1 : 0, status, latency, err);
+        jdbc.update("""
+                UPDATE ops_link_monitor SET last_check_at = NOW(), last_ok = ?, last_status_code = ?,
+                  last_error = ?, update_time = NOW()
+                WHERE id = ?
+                """, ok ? 1 : 0, status, err, monitorId);
+        if (!ok) {
+            alertFailure(monitorId, url, err, String.valueOf(row.get("open_conversation_id")),
+                    String.valueOf(row.get("conversation_type")));
+        }
+    }
+
+    private void alertFailure(long monitorId, String url, String err, String conversationId, String conversationType) {
+        LocalDateTime lastAlert = jdbc.query("""
+                SELECT last_alert_at FROM ops_link_monitor WHERE id = ?
+                """, rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null, monitorId);
+        if (lastAlert != null && lastAlert.isAfter(LocalDateTime.now().minusHours(6))) {
+            return;
+        }
+        String content = "【链接监控告警】无法打开\nURL：" + url + "\n错误：" + err + "\n时间：" + LocalDateTime.now();
+        boolean isGroup = "2".equals(conversationType) && StringUtils.hasText(conversationId);
+        if (isGroup) {
+            // 群告警：当前 OpenAPI 主动推群能力受限时，先记告警日志；同时通知 wangfangyang 兜底
+            writeAlert(monitorId, "GROUP", conversationId, content, false, "群主动推送待接 OpenAPI，已改通知指定人");
+            notifyWangfangyang(monitorId, content);
+        } else {
+            // 单聊添加：只后台告警 + 发给 wangfangyang
+            writeAlert(monitorId, "ADMIN", "backend", content, true, "");
+            notifyWangfangyang(monitorId, content);
+        }
+        jdbc.update("UPDATE ops_link_monitor SET last_alert_at = NOW() WHERE id = ?", monitorId);
+    }
+
+    private void notifyWangfangyang(long monitorId, String content) {
+        try {
+            List<Map<String, Object>> users = jdbc.queryForList("""
+                    SELECT dingtalk_userid FROM sys_user
+                    WHERE username = ? AND is_active = 1 AND dingtalk_userid IS NOT NULL AND dingtalk_userid <> ''
+                    LIMIT 1
+                    """, RobotProductRules.DM_ALERT_USERNAME);
+            if (users.isEmpty()) {
+                writeAlert(monitorId, "USER", RobotProductRules.DM_ALERT_USERNAME, content, false, "用户未绑定钉钉");
+                return;
+            }
+            String dingUserId = String.valueOf(users.getFirst().get("dingtalk_userid"));
+            DingTalkCalendarClient.NoticeCall call = dingTalkCalendarClient.notifyMarkdown(
+                    dingUserId, "链接监控告警", content);
+            writeAlert(monitorId, "USER", RobotProductRules.DM_ALERT_USERNAME, content, call.success(),
+                    call.success() ? "" : call.message());
+        } catch (Exception ex) {
+            writeAlert(monitorId, "USER", RobotProductRules.DM_ALERT_USERNAME, content, false, ex.getMessage());
+        }
+    }
+
+    private void writeAlert(long monitorId, String channel, String target, String content, boolean success, String error) {
+        jdbc.update("""
+                INSERT INTO ops_link_monitor_alert_log (monitor_id, channel, target, content, success, error_msg)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, monitorId, channel, target == null ? "" : target, content, success ? 1 : 0,
+                error == null ? "" : error);
+    }
+
+    private static String sha256(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(s.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            return Integer.toHexString(s.hashCode());
+        }
+    }
+}

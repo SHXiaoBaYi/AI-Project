@@ -11,6 +11,8 @@ import com.base.admin.domain.vo.DingTalkBusyUserOptionVO;
 import com.base.admin.domain.vo.DingTalkIntentExecuteVO;
 import com.base.admin.domain.vo.HrInviteSaveVO;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.robot.RobotIngressService;
+import com.base.admin.robot.RobotReply;
 import com.base.admin.util.RobotSecurity;
 import com.base.admin.util.SecurityUtils;
 import com.dingtalk.open.app.api.models.bot.ChatbotMessage;
@@ -20,6 +22,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -48,9 +51,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 钉钉机器人单聊：结论 + 动作卡片。
- * <p>卡片按钮打开系统 H5（钉钉内免登），按意图创建钉钉日程。
- * 面试邀约会先选候选人，再走 HR 邀约：上传简历到钉盘并把打开链接写入日程描述。
+ * 钉钉机器人：多意图入站后的日程闲忙 Handler + 回复通道。
+ * <p>入站统一走 {@link RobotIngressService}；本类保留闲忙/邀约与 ActionCard 发送。
  */
 @Slf4j
 @Service
@@ -81,6 +83,7 @@ public class DingTalkRobotAssistantService {
     private final DingTalkAppService dingTalkAppService;
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final ObjectProvider<RobotIngressService> robotIngressService;
 
     @Value("${xby.upload-public-base:http://121.40.170.82/shxby/api}")
     private String uploadPublicBase;
@@ -97,73 +100,71 @@ public class DingTalkRobotAssistantService {
     private final java.util.concurrent.ConcurrentHashMap<Long, BookCommand> lastPrepByUser =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** Stream 入站入口：交给多意图 Ingress（支持群 @ + 单聊）。 */
     public void handleBotMessage(ChatbotMessage message) {
-        if (message == null) {
+        robotIngressService.getObject().handle(message);
+    }
+
+    public void replyPlain(String sessionWebhook, String body) {
+        replyText(sessionWebhook, body);
+    }
+
+    public void replyRobot(String sessionWebhook, RobotReply reply) {
+        if (reply == null) {
             return;
         }
-        String conversationType = message.getConversationType();
-        if (StringUtils.hasText(conversationType) && !"1".equals(conversationType.trim())) {
-            log.info("dingtalk robot ignore non-DM conversationType={}", conversationType);
-            replyText(message.getSessionWebhook(), "日程助手目前只支持单聊。");
+        if (reply.buttons() == null || reply.buttons().isEmpty()) {
+            replyText(sessionWebhook, reply.markdown());
             return;
         }
-        String text = extractText(message);
+        List<CardButton> buttons = reply.buttons().stream()
+                .map(b -> new CardButton(b.title(), b.url()))
+                .toList();
+        replyActionCard(sessionWebhook, "机器人", reply.markdown(), buttons);
+    }
+
+    public boolean isLegacyCommand(String text) {
         if (!StringUtils.hasText(text)) {
-            replyText(message.getSessionWebhook(), "请发文字，例如：查 Bella 最近有没有空安排面试品牌总监");
-            return;
+            return false;
         }
-        String webhook = message.getSessionWebhook();
-        String senderStaffId = message.getSenderStaffId();
         String trimmed = text.trim();
-        log.info("dingtalk robot inbound senderStaffId={} nick={} text={}",
-                senderStaffId, message.getSenderNick(), abbreviate(trimmed, 120));
+        return isPrepCommand(trimmed) || isInviteCommand(trimmed) || isSyncCommand(trimmed) || isSyncPhrase(trimmed);
+    }
 
-        if (isPrepCommand(trimmed)) {
-            worker.execute(() -> {
-                try {
-                    SuggestReply reply = handlePrepCommand(senderStaffId, trimmed);
-                    if (reply.buttons().isEmpty()) {
-                        replyText(webhook, reply.markdown());
-                    } else {
-                        replyActionCard(webhook, "选择候选人", reply.markdown(), reply.buttons());
-                    }
-                } catch (Exception ex) {
-                    log.warn("dingtalk robot prep failed: {}", ex.getMessage(), ex);
-                    replyText(webhook, "创建失败：" + (ex.getMessage() == null ? "请稍后重试" : ex.getMessage()));
-                }
-            });
-            return;
-        }
-        if (isInviteCommand(trimmed)) {
-            worker.execute(() -> {
-                try {
-                    replyText(webhook, createInterviewInvite(senderStaffId, trimmed));
-                } catch (Exception ex) {
-                    log.warn("dingtalk robot invite failed: {}", ex.getMessage(), ex);
-                    replyText(webhook, "发起面试邀约失败：" + (ex.getMessage() == null ? "请稍后重试" : ex.getMessage()));
-                }
-            });
-            return;
-        }
-        if (isSyncCommand(trimmed) || isSyncPhrase(trimmed)) {
-            replyText(webhook, "日程助手已改为自动创建钉钉日程。请重新查询后点「发起面试邀约 / 邀请开会」，无需再手动建日程。");
-            return;
-        }
-
-        replyText(webhook, "收到，正在查询…");
-        worker.execute(() -> {
-            try {
-                SuggestReply reply = processAsk(senderStaffId, trimmed);
-                if (reply.buttons().isEmpty()) {
-                    replyText(webhook, reply.markdown());
-                } else {
-                    replyActionCard(webhook, "下一步", reply.markdown(), reply.buttons());
-                }
-            } catch (Exception ex) {
-                log.warn("dingtalk robot process failed: {}", ex.getMessage(), ex);
-                replyText(webhook, "查询失败：" + (ex.getMessage() == null ? "请稍后重试" : ex.getMessage()));
+    public RobotReply handleLegacyCommandAsReply(String senderStaffId, String text) {
+        String trimmed = text.trim();
+        try {
+            if (isPrepCommand(trimmed)) {
+                SuggestReply reply = handlePrepCommand(senderStaffId, trimmed);
+                return toRobotReply(reply);
             }
-        });
+            if (isInviteCommand(trimmed)) {
+                return RobotReply.text(createInterviewInvite(senderStaffId, trimmed));
+            }
+            if (isSyncCommand(trimmed) || isSyncPhrase(trimmed)) {
+                return RobotReply.text("日程助手已改为自动创建钉钉日程。请重新查询后点「发起面试邀约 / 邀请开会」，无需再手动建日程。");
+            }
+        } catch (Exception ex) {
+            return RobotReply.text("执行失败：" + (ex.getMessage() == null ? "请稍后重试" : ex.getMessage()));
+        }
+        return RobotReply.text("未识别的指令。");
+    }
+
+    public RobotReply processAskAsRobotReply(String senderStaffId, String text) {
+        return toRobotReply(processAsk(senderStaffId, text));
+    }
+
+    private static RobotReply toRobotReply(SuggestReply reply) {
+        if (reply == null) {
+            return RobotReply.text("");
+        }
+        if (reply.buttons() == null || reply.buttons().isEmpty()) {
+            return RobotReply.text(reply.markdown());
+        }
+        List<RobotReply.CardButton> buttons = reply.buttons().stream()
+                .map(b -> new RobotReply.CardButton(b.title(), b.actionUrl()))
+                .toList();
+        return RobotReply.card(reply.markdown(), buttons);
     }
 
     SuggestReply processAsk(String senderStaffId, String text) {
