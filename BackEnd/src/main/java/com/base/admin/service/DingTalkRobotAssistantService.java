@@ -73,7 +73,7 @@ public class DingTalkRobotAssistantService {
     private static final String KIND_PREP = "prep";
     private static final String KIND_INVITE = "invite";
     private static final Set<String> INVITEABLE_STAGES = Set.of(
-            "SCREEN_PASS", "FIRST_ROUND", "SECOND_ROUND", "R3_PASS", "R4_PASS");
+            "PHONE_PASS", "FIRST_ROUND", "SECOND_ROUND", "R3_PASS", "R4_PASS", "R5_PASS");
 
     private final DingTalkAssistantService dingTalkAssistantService;
     private final DingTalkBusyService dingTalkBusyService;
@@ -411,7 +411,7 @@ public class DingTalkRobotAssistantService {
                 JOIN hr_candidate c ON c.id = a.candidate_id AND c.is_active = 1
                 LEFT JOIN hr_requisition r ON r.id = a.requisition_id
                 WHERE a.is_active = 1
-                  AND a.current_stage IN ('SCREEN_PASS','FIRST_ROUND','SECOND_ROUND','R3_PASS','R4_PASS')
+                  AND a.current_stage IN ('PHONE_PASS','FIRST_ROUND','SECOND_ROUND','R3_PASS','R4_PASS','R5_PASS')
                   AND EXISTS (
                       SELECT 1 FROM hr_resume_file f
                       WHERE f.application_id = a.id AND f.is_active = 1
@@ -442,11 +442,12 @@ public class DingTalkRobotAssistantService {
             return null;
         }
         return switch (stage.trim()) {
-            case "SCREEN_PASS" -> 1;
+            case "PHONE_PASS" -> 1;
             case "FIRST_ROUND" -> 2;
             case "SECOND_ROUND" -> 3;
             case "R3_PASS" -> 4;
             case "R4_PASS" -> 5;
+            case "R5_PASS" -> 6;
             default -> null;
         };
     }

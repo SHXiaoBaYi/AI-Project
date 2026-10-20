@@ -3,7 +3,7 @@ import { Form, Select } from 'antd';
 /** 根据候选人当前阶段，推导下一场可创建的面试轮次；不适合邀约时返回 null */
 export function nextInviteRound(stage?: string | null): number | null {
   switch (stage) {
-    case 'SCREEN_PASS':
+    case 'PHONE_PASS':
       return 1;
     case 'FIRST_ROUND':
       return 2;
@@ -13,6 +13,8 @@ export function nextInviteRound(stage?: string | null): number | null {
       return 4;
     case 'R4_PASS':
       return 5;
+    case 'R5_PASS':
+      return 6;
     default:
       return null;
   }
