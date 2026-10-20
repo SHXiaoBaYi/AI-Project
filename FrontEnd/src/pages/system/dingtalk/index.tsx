@@ -4,6 +4,7 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import { usePermission } from '@/hooks/usePermission';
 import {
   bindPreferredDingTalkDriveSpaceApi,
+  createAndBindDingTalkDriveSpaceApi,
   getDingTalkAppApi,
   listDingTalkDriveSpacesApi,
   saveDingTalkAppApi,
@@ -22,6 +23,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
   const [testing, setTesting] = useState(false);
   const [loadingSpaces, setLoadingSpaces] = useState(false);
   const [bindingSpace, setBindingSpace] = useState(false);
+  const [creatingSpace, setCreatingSpace] = useState(false);
   const [saved, setSaved] = useState<DingTalkAppVO | null>(null);
   const [canEditRobotRoute, setCanEditRobotRoute] = useState(false);
   const [driveSpaces, setDriveSpaces] = useState<DingTalkDriveSpace[]>([]);
@@ -147,6 +149,20 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
     }
   };
 
+  const handleCreateAndBind = async () => {
+    setCreatingSpace(true);
+    try {
+      const data = await createAndBindDingTalkDriveSpaceApi('小巴依-面试简历');
+      applyVo(data);
+      await loadSpaces();
+      message.success(data?.resumeSpaceId ? `已创建/复用并绑定企业盘：${data.resumeSpaceId}` : '已创建并绑定企业盘');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '创建企业盘失败');
+    } finally {
+      setCreatingSpace(false);
+    }
+  };
+
   const spaceOptions = driveSpaces.map((s) => ({
     value: s.spaceId,
     label: `${s.preferred ? '★ ' : ''}${s.spaceName}（${s.spaceId}）`,
@@ -227,7 +243,7 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
           <Form.Item
             name='resumeSpaceId'
             label='面试简历企业钉盘 spaceId'
-            extra='日程挂简历用。优先选名称含「简历/招聘/hr」的空间；也可点「自动绑定推荐」。需应用开通企业盘 Drive 权限。可下拉选择或直接粘贴 spaceId。'
+            extra='日程挂简历用。可下拉选择、粘贴 spaceId，或一键创建「小巴依-面试简历」企业共享盘并绑定。需 Drive.Space.Write；至少一名用户已绑定钉钉。'
           >
             <AutoComplete
               allowClear
@@ -257,6 +273,14 @@ const DingTalkConfigPage = memo(function DingTalkConfigPage() {
               onClick={() => void handleBindPreferred()}
             >
               自动绑定推荐空间
+            </PermissionButton>
+            <PermissionButton
+              perm='system:dingtalk:edit'
+              type='primary'
+              loading={creatingSpace}
+              onClick={() => void handleCreateAndBind()}
+            >
+              一键创建并绑定
             </PermissionButton>
           </Space>
 

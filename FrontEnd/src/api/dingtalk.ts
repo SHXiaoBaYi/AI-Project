@@ -56,6 +56,13 @@ export function bindPreferredDingTalkDriveSpaceApi() {
   return request.post<unknown, DingTalkAppVO>('/system/dingtalk/drive-spaces/bind-preferred');
 }
 
+/** 一键创建企业共享盘（无则建「小巴依-面试简历」）并写入 resumeSpaceId */
+export function createAndBindDingTalkDriveSpaceApi(name?: string) {
+  return request.post<unknown, DingTalkAppVO>('/system/dingtalk/drive-spaces/create-and-bind', null, {
+    params: name ? { name } : undefined,
+  });
+}
+
 export type DingTalkBusyUserOption = {
   userId: number;
   username: string;

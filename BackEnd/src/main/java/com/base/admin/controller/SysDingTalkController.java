@@ -96,6 +96,16 @@ public class SysDingTalkController {
         return Result.ok(dingTalkAppService.get());
     }
 
+    @Operation(summary = "一键创建企业共享盘并绑定为面试简历 spaceId（已有推荐空间则复用）")
+    @PostMapping("/drive-spaces/create-and-bind")
+    @RequiresPermission("system:dingtalk:edit")
+    @Log(title = "钉钉简历空间", businessType = 1)
+    public Result<DingTalkAppVO> createAndBindDriveSpace(
+            @RequestParam(value = "name", required = false) String name) {
+        dingTalkAppService.createAndBindResumeOrgSpace(name);
+        return Result.ok(dingTalkAppService.get());
+    }
+
     @Operation(summary = "已绑定钉钉、可查询闲忙的用户")
     @GetMapping("/busy/users")
     @RequiresPermission({"system:dingtalk:busy", "hr:invite:list", "system:dingtalk:list"})

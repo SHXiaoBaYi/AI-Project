@@ -231,14 +231,64 @@ public class DingTalkAppService {
             if (!StringUtils.hasText(preferred)) {
                 return "";
             }
-            jdbc.update("UPDATE sys_dingtalk_app SET resume_space_id = ?, update_by = ? WHERE id = 1 AND is_active = 1",
-                    preferred, blankToEmpty(SecurityUtils.getCurrentUsername()));
+            persistResumeSpaceId(preferred);
             log.info("已自动绑定面试简历企业钉盘 resume_space_id={}", preferred);
             return preferred;
         } catch (Exception ex) {
             log.warn("自动绑定企业钉盘 spaceId 失败: {}", ex.getMessage());
             return "";
         }
+    }
+
+    /**
+     * 一键：若已有推荐/任意企业盘则绑定；否则 POST 新建「小巴依-面试简历」企业共享盘并写入配置。
+     * 需 Drive.Space.Write；创建人需已绑定钉钉 unionId。
+     */
+    public DingTalkDriveSpaceVO createAndBindResumeOrgSpace(String spaceName) {
+        if (credential() == null) {
+            throw new BusinessException("请先启用并保存钉钉应用凭证");
+        }
+        String unionId = resolveAnyBoundUnionId();
+        if (!StringUtils.hasText(unionId)) {
+            throw new BusinessException("没有可用的钉钉 unionId。请先在用户管理绑定钉钉后再创建企业盘");
+        }
+        String name = StringUtils.hasText(spaceName) ? spaceName.trim() : "小巴依-面试简历";
+        // 已有同名或推荐空间则复用，避免重复创建
+        List<DingTalkDriveSpaceVO> existing = dingTalkCalendarClient.listOrgDriveSpaces(unionId);
+        for (DingTalkDriveSpaceVO space : existing) {
+            if (space == null || !StringUtils.hasText(space.getSpaceId())) {
+                continue;
+            }
+            String sn = space.getSpaceName() == null ? "" : space.getSpaceName().trim();
+            if (name.equals(sn) || Boolean.TRUE.equals(space.getPreferred())) {
+                persistResumeSpaceId(space.getSpaceId().trim());
+                space.setPreferred(true);
+                log.info("复用已有企业盘并绑定 resume_space_id={} name={}", space.getSpaceId(), sn);
+                return space;
+            }
+        }
+        if (!existing.isEmpty()) {
+            String preferred = pickPreferredSpaceId(existing);
+            if (StringUtils.hasText(preferred)) {
+                DingTalkDriveSpaceVO hit = existing.stream()
+                        .filter(s -> s != null && preferred.equals(s.getSpaceId()))
+                        .findFirst()
+                        .orElse(null);
+                if (hit != null) {
+                    persistResumeSpaceId(preferred);
+                    hit.setPreferred(true);
+                    return hit;
+                }
+            }
+        }
+        DingTalkDriveSpaceVO created = dingTalkCalendarClient.createOrgDriveSpace(unionId, name);
+        persistResumeSpaceId(created.getSpaceId());
+        return created;
+    }
+
+    private void persistResumeSpaceId(String spaceId) {
+        jdbc.update("UPDATE sys_dingtalk_app SET resume_space_id = ?, update_by = ? WHERE id = 1 AND is_active = 1",
+                spaceId, blankToEmpty(SecurityUtils.getCurrentUsername()));
     }
 
     static String pickPreferredSpaceId(List<DingTalkDriveSpaceVO> spaces) {

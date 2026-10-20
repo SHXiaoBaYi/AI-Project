@@ -275,6 +275,51 @@ public class DingTalkCalendarClient {
     }
 
     /**
+     * 新建企业共享盘（org）。需 Drive.Space.Write；若企业禁止新建会返回 addSpace.forbiden。
+     *
+     * @see <a href="https://open.dingtalk.com/document/orgapp/new-space">新建空间</a>
+     */
+    public com.base.admin.domain.vo.DingTalkDriveSpaceVO createOrgDriveSpace(String unionId, String spaceName) {
+        if (!StringUtils.hasText(unionId)) {
+            throw new BusinessException("创建企业盘需要操作人的钉钉 unionId");
+        }
+        String name = StringUtils.hasText(spaceName) ? spaceName.trim() : "小巴依-面试简历";
+        try {
+            String token = accessToken();
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("name", name);
+            body.put("unionId", unionId.trim());
+            JsonNode json = apiPost(token, "https://api.dingtalk.com/v1.0/drive/spaces", body);
+            String spaceId = firstText(json, "spaceId", "id");
+            if (!StringUtils.hasText(spaceId)) {
+                JsonNode space = json.path("space");
+                spaceId = firstText(space, "spaceId", "id");
+            }
+            if (!StringUtils.hasText(spaceId)) {
+                throw new BusinessException("创建企业盘未返回 spaceId：" + cut(json.toString(), 180));
+            }
+            String returnedName = firstText(json, "spaceName", "name");
+            com.base.admin.domain.vo.DingTalkDriveSpaceVO vo = new com.base.admin.domain.vo.DingTalkDriveSpaceVO();
+            vo.setSpaceId(spaceId);
+            vo.setSpaceName(StringUtils.hasText(returnedName) ? returnedName : name);
+            vo.setPreferred(true);
+            log.info("created org drive space id={} name={} unionId={}", spaceId, vo.getSpaceName(), unionId);
+            return vo;
+        } catch (BusinessException ex) {
+            String msg = ex.getMessage() == null ? "" : ex.getMessage();
+            if (msg.contains("addSpace.forbiden") || msg.contains("forbiden") || msg.contains("forbidden")) {
+                throw new BusinessException("企业已禁止新建共享盘，请让管理员在钉钉里手动建空间，或关闭「禁止新建共享空间」后重试");
+            }
+            if (msg.contains("no.priviledge") || msg.contains("no privilege") || msg.contains("403")) {
+                throw new BusinessException(msg + "；请确认应用已开通并授权 Drive.Space.Write");
+            }
+            throw ex;
+        } catch (Exception ex) {
+            throw new BusinessException("创建企业钉盘失败：" + ex.getMessage());
+        }
+    }
+
+    /**
      * 获取/创建应用存储空间：POST /v1.0/storage/spaces?unionId=…（ownerType=APP）。
      * 相同 scene+sceneId 已存在时钉钉直接返回原空间。
      */
