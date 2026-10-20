@@ -175,6 +175,8 @@ public class DingTalkCalendarClient {
     /**
      * 将本地简历上传到<strong>企业钉盘</strong>，供日程描述挂载并永久授权面试官。
      * <p>优先 {@code dingtalk.resume-space-id}；否则自动选用企业盘 org space。
+     * <p>上传走 Storage 接口（{@code Storage.UploadInfo.Read} / {@code Storage.File.Write}），
+     * 不再使用已下线的 Drive.UploadInfo.Read。
      * <p><b>禁止</b>回退 APP 存储空间：官方临时授权最长 3600 秒，约 1 小时后面试官会「无权限」打开简历。
      */
     public DriveFile uploadResumeToDrive(String ownerUnionId, Path file, String fileName) {
@@ -201,7 +203,7 @@ public class DingTalkCalendarClient {
             String unionId = ownerUnionId.trim();
             String configured = dingTalkAppService.resumeSpaceId();
             if (StringUtils.hasText(configured)) {
-                DriveFile viaConfig = uploadResumeViaDriveApi(token, configured.trim(), unionId, name, size, md5, file);
+                DriveFile viaConfig = uploadResumeViaStorageApi(token, configured.trim(), unionId, name, size, md5, file);
                 return viaConfig.withAppSpace(false);
             }
             String orgSpaceId = resolveOrgDriveSpaceId(token, unionId);
@@ -211,12 +213,13 @@ public class DingTalkCalendarClient {
                                 + "或为应用开通企业盘并确保组织下存在可用空间（禁止使用 APP 临时空间，授权仅 1 小时）");
             }
             try {
-                DriveFile viaOrg = uploadResumeViaDriveApi(token, orgSpaceId, unionId, name, size, md5, file);
+                DriveFile viaOrg = uploadResumeViaStorageApi(token, orgSpaceId, unionId, name, size, md5, file);
                 return viaOrg.withAppSpace(false);
             } catch (BusinessException ex) {
                 throw new BusinessException(
                         "企业钉盘上传简历失败：" + ex.getMessage()
-                                + "。请检查 Drive 权限 / resume-space-id（禁止回退 APP 空间，否则约 1 小时后无权限）");
+                                + "。请确认已开通 Storage.UploadInfo.Read、Storage.File.Write，"
+                                + "且操作人对该企业盘有上传权（禁止回退 APP 空间）");
             }
         } catch (BusinessException ex) {
             throw ex;
@@ -389,29 +392,10 @@ public class DingTalkCalendarClient {
         }
     }
 
-    /** 钉盘 Drive 上传（配置覆盖 spaceId 时使用） */
-    private DriveFile uploadResumeViaDriveApi(String token, String spaceId, String unionId, String name,
-                                              long size, String md5, Path file) throws Exception {
-        JsonNode uploadInfo = getDriveUploadInfo(token, spaceId, unionId, name, size, md5);
-        String mediaId = putDriveFileBytes(file, uploadInfo);
-        if (!StringUtils.hasText(mediaId)) {
-            throw new BusinessException("钉盘上传未返回 mediaId：" + cut(uploadInfo.toString(), 180));
-        }
-        JsonNode added = addDriveFile(token, spaceId, unionId, name, mediaId);
-        String fileId = firstText(added, "fileId", "id");
-        String savedName = firstText(added, "fileName", "name");
-        if (!StringUtils.hasText(savedName)) {
-            savedName = name;
-        }
-        if (!StringUtils.hasText(fileId)) {
-            throw new BusinessException("钉盘未返回 fileId：" + cut(added.toString(), 180));
-        }
-        String previewUrl = resolveDentryPreviewUrl(token, spaceId, fileId, unionId);
-        String openUrl = StringUtils.hasText(previewUrl) ? previewUrl : buildDriveOpenUrl(spaceId, fileId, savedName);
-        return new DriveFile(spaceId, fileId, savedName, openUrl, null, previewUrl);
-    }
-
-    /** 应用存储空间：Storage 上传信息 → OSS → commit */
+    /**
+     * 企业盘 / 已配置 spaceId：走 Storage 上传（uploadInfos/query → OSS → commit）。
+     * 需 Storage.UploadInfo.Read + Storage.File.Write；旧 Drive.UploadInfo.Read 已下线。
+     */
     private DriveFile uploadResumeViaStorageApi(String token, String spaceId, String unionId, String name,
                                                 long size, String md5, Path file) throws Exception {
         JsonNode uploadInfo = getStorageUploadInfo(token, spaceId, unionId, name, size, md5);
@@ -1248,102 +1232,6 @@ public class DingTalkCalendarClient {
         assertDingOk(json, "发送钉钉工作通知失败");
     }
 
-    /** Drive：获取文件上传信息（应用盘 / 企业盘） */
-    private JsonNode getDriveUploadInfo(String token, String spaceId, String unionId, String fileName,
-                                        long fileSize, String md5) throws Exception {
-        String url = "https://api.dingtalk.com/v1.0/drive/spaces/" + encode(spaceId)
-                + "/files/0/uploadInfos?unionId=" + encode(unionId)
-                + "&fileName=" + encode(fileName)
-                + "&fileSize=" + fileSize
-                + "&md5=" + encode(md5)
-                + "&addConflictPolicy=autoRename";
-        return apiGet(token, url);
-    }
-
-    private String putDriveFileBytes(Path file, JsonNode uploadInfo) throws Exception {
-        JsonNode headerInfo = uploadInfo.path("headerSignatureUploadInfo");
-        if (headerInfo.isObject() && !headerInfo.isMissingNode()) {
-            String resourceUrl = headerInfo.path("resourceUrl").asText("");
-            String mediaId = headerInfo.path("mediaId").asText("");
-            if (!StringUtils.hasText(resourceUrl)) {
-                throw new BusinessException("钉盘上传信息缺少 resourceUrl");
-            }
-            HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(resourceUrl))
-                    .timeout(Duration.ofSeconds(60))
-                    .PUT(HttpRequest.BodyPublishers.ofFile(file));
-            JsonNode headers = headerInfo.path("headers");
-            if (headers.isObject()) {
-                Iterator<String> names = headers.fieldNames();
-                while (names.hasNext()) {
-                    String key = names.next();
-                    String value = headers.path(key).asText("");
-                    if (StringUtils.hasText(key) && StringUtils.hasText(value)) {
-                        builder.header(key, value);
-                    }
-                }
-            }
-            HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 300) {
-                throw new BusinessException("钉盘 OSS 上传失败 HTTP " + response.statusCode()
-                        + "：" + cut(response.body(), 160));
-            }
-            return mediaId;
-        }
-        JsonNode sts = uploadInfo.path("stsUploadInfo");
-        if (sts.isObject() && !sts.isMissingNode()) {
-            String bucket = sts.path("bucket").asText("");
-            String endPoint = sts.path("endPoint").asText("");
-            String mediaId = sts.path("mediaId").asText("");
-            String accessKeyId = sts.path("accessKeyId").asText("");
-            String accessKeySecret = sts.path("accessKeySecret").asText("");
-            String securityToken = sts.path("accessToken").asText("");
-            if (!StringUtils.hasText(bucket) || !StringUtils.hasText(endPoint) || !StringUtils.hasText(mediaId)
-                    || !StringUtils.hasText(accessKeyId) || !StringUtils.hasText(accessKeySecret)
-                    || !StringUtils.hasText(securityToken)) {
-                throw new BusinessException("钉盘 STS 上传信息不完整");
-            }
-            String host = endPoint.startsWith("http") ? endPoint.replaceFirst("^https?://", "") : endPoint;
-            String objectKey = mediaId.startsWith("/") ? mediaId.substring(1) : mediaId;
-            String putUrl = "https://" + bucket + "." + host + "/" + objectKey;
-            String contentType = "application/octet-stream";
-            String date = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
-                    .format(java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC));
-            String canonicalizedOssHeaders = "x-oss-security-token:" + securityToken + "\n";
-            String stringToSign = "PUT\n\n" + contentType + "\n" + date + "\n" + canonicalizedOssHeaders
-                    + "/" + bucket + "/" + objectKey;
-            String signature = hmacSha1Base64(accessKeySecret, stringToSign);
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(putUrl))
-                    .timeout(Duration.ofSeconds(60))
-                    .header("Content-Type", contentType)
-                    .header("Date", date)
-                    .header("x-oss-security-token", securityToken)
-                    .header("Authorization", "OSS " + accessKeyId + ":" + signature)
-                    .PUT(HttpRequest.BodyPublishers.ofFile(file))
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 300) {
-                throw new BusinessException("钉盘 STS 上传失败 HTTP " + response.statusCode()
-                        + "：" + cut(response.body(), 160));
-            }
-            return mediaId;
-        }
-        throw new BusinessException("钉盘未返回可用上传协议：" + cut(uploadInfo.toString(), 180));
-    }
-
-    private JsonNode addDriveFile(String token, String spaceId, String unionId, String fileName, String mediaId)
-            throws Exception {
-        ObjectNode body = objectMapper.createObjectNode();
-        body.put("parentId", "0");
-        body.put("fileType", "file");
-        body.put("fileName", fileName);
-        body.put("mediaId", mediaId);
-        body.put("addConflictPolicy", "autoRename");
-        body.put("unionId", unionId);
-        return apiPost(token, "https://api.dingtalk.com/v1.0/drive/spaces/" + encode(spaceId) + "/files", body);
-    }
-
     private JsonNode getStorageUploadInfo(String token, String spaceId, String unionId, String fileName,
                                           long fileSize, String md5) throws Exception {
         ObjectNode body = objectMapper.createObjectNode();
@@ -1462,12 +1350,6 @@ public class DingTalkCalendarClient {
         return sb.toString();
     }
 
-    private static String hmacSha1Base64(String secret, String data) throws Exception {
-        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA1");
-        mac.init(new javax.crypto.spec.SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA1"));
-        return java.util.Base64.getEncoder().encodeToString(mac.doFinal(data.getBytes(StandardCharsets.UTF_8)));
-    }
-
     private JsonNode apiGet(String token, String url) throws Exception {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -1536,20 +1418,20 @@ public class DingTalkCalendarClient {
             return "；请开通 Storage.File.Read（获取简历 HTTPS 预览链接，PC 端可点开）";
         }
         if (url.contains("uploadInfos") && url.contains("/storage/")) {
-            return "；APP 空间需先给操作人临时授权（代码会自动授权）；请确认已开通 Storage.UploadInfo.Read"
-                    + " 与 Storage.Permission.Write，且权限已审批生效";
+            return "；请确认已开通 Storage.UploadInfo.Read，且操作人对该企业盘有上传权"
+                    + "（勿再申请已下线的 Drive.UploadInfo.Read）";
         }
         if (url.contains("/files/commit")) {
             return "；请开通 Storage.File.Write";
         }
         if (url.contains("/permissions")) {
-            return "；请开通 Storage.Permission.Write（APP 空间上传前给操作人临时授权）";
+            return "；请开通 Storage.Permission.Write（给面试官永久查看/下载权）";
         }
         if (url.contains("/drive/spaces") && url.contains("uploadInfos")) {
-            return "；请确认应用具备钉盘上传权限，且操作人对该空间有上传权";
+            return "；旧 Drive 上传接口已下线，请改用 Storage 上传（代码已切换）；开通 Storage.UploadInfo.Read 即可";
         }
         if (url.contains("/drive/spaces")) {
-            return "；GET /drive/spaces 的 spaceType 仅支持 org，应用空间请用 Storage 添加空间接口";
+            return "；GET /drive/spaces 的 spaceType 仅支持 org；上传请用 Storage 接口（Storage.UploadInfo.Read）";
         }
         return "；请检查钉钉应用权限是否已审批生效";
     }
