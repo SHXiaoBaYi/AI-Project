@@ -27,4 +27,9 @@ xby:
     enabled: false
 
 dingtalk:
+  # 本机默认不占 Stream：与生产共用机器人时，谁连 Stream 谁拼 ActionCard 的 H5。
+  # 本机 upload-public-base 指向 170.82，占 Stream 会把线上卡片写成测试桥。
+  # 仅本机联调机器人时再设 DINGTALK_ROBOT_STREAM_ENABLED=true。
   local-h5-base-url: ${DINGTALK_LOCAL_H5_BASE_URL:http://127.0.0.1:3000}
+  robot:
+    stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:false}
