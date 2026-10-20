@@ -30,6 +30,15 @@ public class HrPanelQueryDTO {
     @Schema(description = "工作地址字典ID", example = "1", nullable = true)
     private Long workAddressId;
 
+    @Schema(description = "统计开始日（含）yyyy-MM-dd，作用于背调/待入职/筛选/电话/约面/面试等指标", example = "2026-10-01")
+    private String startDate;
+
+    @Schema(description = "统计结束日（含）yyyy-MM-dd", example = "2026-10-20")
+    private String endDate;
+
+    @Schema(description = "日期粒度 day/week/month/year", example = "day")
+    private String grain;
+
     @Schema(description = "页码，从 1 开始", example = "1")
     private Integer pageNum;
 

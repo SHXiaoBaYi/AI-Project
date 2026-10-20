@@ -16,18 +16,18 @@ public class HrPanelStatsVO {
     @Schema(description = "待入职人数", example = "2")
     private Integer pendingOnboardCount;
 
-    @Schema(description = "今日筛选简历=今日新增候选人数", example = "8")
+    @Schema(description = "区间内筛选简历=新增候选人数", example = "8")
     private Integer todayScreenCount;
 
-    @Schema(description = "今日电话沟通人数（岗位看板电话沟通记录）", example = "4")
+    @Schema(description = "区间内电话沟通人数", example = "4")
     private Integer todayPhoneCount;
 
-    @Schema(description = "今日约面人数", example = "3")
+    @Schema(description = "区间内约面人数", example = "3")
     private Integer todayInviteCount;
 
-    @Schema(description = "今日实际面试人数", example = "2")
+    @Schema(description = "区间内实际面试人数", example = "2")
     private Integer todayInterviewCount;
 
-    @Schema(description = "今日通过面试人数", example = "1")
+    @Schema(description = "区间内通过面试人数", example = "1")
     private Integer todayInterviewPassCount;
 }

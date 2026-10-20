@@ -9,6 +9,7 @@ import com.base.admin.domain.vo.HrPanelStatsVO;
 import com.base.admin.domain.vo.HrPanelVO;
 import com.base.admin.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -18,6 +19,7 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class HrPanelService {
@@ -32,6 +35,7 @@ public class HrPanelService {
     private static final List<String> PROGRESS_ORDER = List.of(
             "筛选简历", "电话沟通", "约面", "面试", "背调中", "待入职", "已入职");
     private static final DateTimeFormatter OCCURRED_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final DateTimeFormatter DAY_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final String OWNER_SQL = """
             (SELECT GROUP_CONCAT(DISTINCT COALESCE(u.nickname, ro.alias) ORDER BY ro.sort_no SEPARATOR '、')
                FROM hr_requisition_owner ro
@@ -47,12 +51,16 @@ public class HrPanelService {
         int pageNum = q.getPageNum() == null || q.getPageNum() < 1 ? 1 : q.getPageNum();
         int pageSize = q.getPageSize() == null || q.getPageSize() < 1 ? 10 : Math.min(q.getPageSize(), 100);
 
-        FilterSql filter = buildFilter(q);
+        DateWindow window = resolveWindow(q);
+        log.info("hr panel stats window {} ~ {} grain={}", window.start(), window.end(), q.getGrain());
+        // 7 个活动指标只按时间窗统计；岗位列表另按区间活动/接收日过滤
+        FilterSql baseFilter = buildFilter(q, null);
+        FilterSql jobFilter = buildFilter(q, window);
         LocalDate today = LocalDate.now();
-        long total = countLong("SELECT COUNT(1) " + filter.fromWhere, filter.args);
-        List<HrPanelJobVO> rows = queryJobs(filter, today, pageNum, pageSize, true);
+        long total = countLong("SELECT COUNT(1) " + jobFilter.fromWhere, jobFilter.args);
+        List<HrPanelJobVO> rows = queryJobs(jobFilter, today, pageNum, pageSize, true, window);
         HrPanelVO vo = new HrPanelVO();
-        vo.setStats(loadStats(filter, today));
+        vo.setStats(loadStats(baseFilter, jobFilter, window));
         vo.setTotal(total);
         vo.setRows(rows);
         return vo;
@@ -63,17 +71,20 @@ public class HrPanelService {
         String metric = q.getMetric() == null ? "" : q.getMetric().trim().toUpperCase();
         int pageNum = q.getPageNum() == null || q.getPageNum() < 1 ? 1 : q.getPageNum();
         int pageSize = q.getPageSize() == null || q.getPageSize() < 1 ? 10 : Math.min(q.getPageSize(), 100);
-        FilterSql filter = buildFilter(q);
+        DateWindow window = resolveWindow(q);
+        FilterSql baseFilter = buildFilter(q, null);
+        FilterSql jobFilter = buildFilter(q, window);
         LocalDate today = LocalDate.now();
-        LocalDateTime from = today.atStartOfDay();
-        LocalDateTime to = today.plusDays(1).atStartOfDay();
-        String reqIds = "SELECT r.id " + filter.fromWhere;
+        LocalDateTime from = window.from();
+        LocalDateTime to = window.toExclusive();
+        String baseReqIds = "SELECT r.id " + baseFilter.fromWhere;
         return switch (metric) {
             case "OPEN_JOB" -> jobDetail("目前在招岗位", metric,
-                    new FilterSql(filter.fromWhere() + " AND r.status = 'OPEN' ", filter.args()), pageNum, pageSize, today);
-            case "BG_CHECK" -> stagePeopleDetail("背调中", metric, filter, reqIds, "BG_CHECK", pageNum, pageSize);
-            case "PENDING_ONBOARD" -> stagePeopleDetail("待入职", metric, filter, reqIds, "PENDING_ONBOARD", pageNum, pageSize);
-            case "TODAY_SCREEN" -> todayPeopleDetail("今日筛选简历", metric, filter, reqIds, from, to, pageNum, pageSize, """
+                    new FilterSql(jobFilter.fromWhere() + " AND r.status = 'OPEN' ", jobFilter.args()),
+                    pageNum, pageSize, today, window);
+            case "BG_CHECK" -> stageReachedDetail("背调中", metric, baseFilter, baseReqIds, "BG_CHECK", from, to, pageNum, pageSize);
+            case "PENDING_ONBOARD" -> stageReachedDetail("待入职", metric, baseFilter, baseReqIds, "PENDING_ONBOARD", from, to, pageNum, pageSize);
+            case "TODAY_SCREEN" -> todayPeopleDetail("筛选简历", metric, baseFilter, baseReqIds, from, to, pageNum, pageSize, """
                     SELECT ax.id application_id,
                            MAX(ax.create_time) occurred_at,
                            '新增' last_code
@@ -82,7 +93,7 @@ public class HrPanelService {
                       AND ax.create_time >= ? AND ax.create_time < ?
                     GROUP BY ax.id
                     """, "'新增'");
-            case "TODAY_PHONE" -> todayPeopleDetail("今日电话沟通", metric, filter, reqIds, from, to, pageNum, pageSize, """
+            case "TODAY_PHONE" -> todayPeopleDetail("电话沟通", metric, baseFilter, baseReqIds, from, to, pageNum, pageSize, """
                     SELECT p.application_id,
                            MAX(p.called_at) occurred_at,
                            SUBSTRING_INDEX(GROUP_CONCAT(IFNULL(p.result,'') ORDER BY p.called_at DESC, p.id DESC), ',', 1) last_code
@@ -92,17 +103,18 @@ public class HrPanelService {
                       AND p.called_at >= ? AND p.called_at < ?
                     GROUP BY p.application_id
                     """, "CASE x.last_code WHEN 'PASS' THEN '通过' WHEN 'FAIL' THEN '不通过' ELSE IFNULL(NULLIF(x.last_code,''),'已沟通') END");
-            case "TODAY_INVITE" -> todayPeopleDetail("今日约面", metric, filter, reqIds, from, to, pageNum, pageSize, """
+            case "TODAY_INVITE" -> todayPeopleDetail("约面", metric, baseFilter, baseReqIds, from, to, pageNum, pageSize, """
                     SELECT i.application_id,
-                           MAX(i.interview_at) occurred_at,
+                           MAX(COALESCE(i.create_time, i.interview_at)) occurred_at,
                            '已约面' last_code
                     FROM hr_interview_invite i
                     JOIN hr_application ax ON ax.id = i.application_id AND ax.is_active = 1
                     WHERE i.is_active = 1 AND i.status <> 'CANCELLED' AND ax.requisition_id IN (%s)
-                      AND i.interview_at >= ? AND i.interview_at < ?
+                      AND COALESCE(i.create_time, i.interview_at) >= ?
+                      AND COALESCE(i.create_time, i.interview_at) < ?
                     GROUP BY i.application_id
                     """, "'已约面'");
-            case "TODAY_INTERVIEW" -> todayPeopleDetail("今日实际面试", metric, filter, reqIds, from, to, pageNum, pageSize, """
+            case "TODAY_INTERVIEW" -> todayPeopleDetail("实际面试", metric, baseFilter, baseReqIds, from, to, pageNum, pageSize, """
                     SELECT rec.application_id,
                            MAX(COALESCE(rec.interviewed_at, rec.create_time)) occurred_at,
                            SUBSTRING_INDEX(GROUP_CONCAT(IFNULL(rec.conclusion,'') ORDER BY COALESCE(rec.interviewed_at, rec.create_time) DESC, rec.id DESC), ',', 1) last_code
@@ -113,7 +125,7 @@ public class HrPanelService {
                       AND COALESCE(rec.interviewed_at, rec.create_time) < ?
                     GROUP BY rec.application_id
                     """, "CASE x.last_code WHEN 'PASS' THEN '通过' WHEN 'FAIL' THEN '不通过' ELSE IFNULL(NULLIF(x.last_code,''),'已面试') END");
-            case "TODAY_INTERVIEW_PASS" -> todayPeopleDetail("今日通过面试", metric, filter, reqIds, from, to, pageNum, pageSize, """
+            case "TODAY_INTERVIEW_PASS" -> todayPeopleDetail("通过面试", metric, baseFilter, baseReqIds, from, to, pageNum, pageSize, """
                     SELECT rec.application_id,
                            MAX(COALESCE(rec.interviewed_at, rec.create_time)) occurred_at,
                            '通过' last_code
@@ -128,9 +140,10 @@ public class HrPanelService {
         };
     }
 
-    private HrPanelDetailVO jobDetail(String title, String metric, FilterSql filter, int pageNum, int pageSize, LocalDate today) {
+    private HrPanelDetailVO jobDetail(String title, String metric, FilterSql filter, int pageNum, int pageSize,
+                                      LocalDate today, DateWindow window) {
         long total = countLong("SELECT COUNT(1) " + filter.fromWhere(), filter.args());
-        List<HrPanelJobVO> jobs = queryJobs(filter, today, pageNum, pageSize, true);
+        List<HrPanelJobVO> jobs = queryJobs(filter, today, pageNum, pageSize, true, window);
         HrPanelDetailVO vo = new HrPanelDetailVO();
         vo.setMetric(metric);
         vo.setTitle(title);
@@ -140,26 +153,50 @@ public class HrPanelService {
         return vo;
     }
 
-    private HrPanelDetailVO stagePeopleDetail(String title, String metric, FilterSql filter, String reqIds,
-                                              String stage, int pageNum, int pageSize) {
-        String from = """
-                FROM hr_application a
+    /** 区间内到达某阶段的人（阶段事件 ∪ 当前阶段且更新时间在区间）。 */
+    private HrPanelDetailVO stageReachedDetail(String title, String metric, FilterSql filter, String reqIds,
+                                               String stage, LocalDateTime from, LocalDateTime to,
+                                               int pageNum, int pageSize) {
+        String fromSql = """
+                FROM (
+                  SELECT u.application_id, MAX(u.occurred_at) occurred_at
+                  FROM (
+                    SELECT e.application_id, COALESCE(e.event_at, e.create_time) occurred_at
+                    FROM hr_stage_event e
+                    JOIN hr_application ax ON ax.id = e.application_id AND ax.is_active = 1
+                    WHERE e.is_active = 1 AND e.stage_code = ? AND ax.requisition_id IN (%s)
+                      AND COALESCE(e.event_at, e.create_time) >= ? AND COALESCE(e.event_at, e.create_time) < ?
+                    UNION ALL
+                    SELECT a2.id application_id, a2.update_time occurred_at
+                    FROM hr_application a2
+                    WHERE a2.is_active = 1 AND a2.current_stage = ? AND a2.requisition_id IN (%s)
+                      AND a2.update_time >= ? AND a2.update_time < ?
+                  ) u
+                  GROUP BY u.application_id
+                ) x
+                JOIN hr_application a ON a.id = x.application_id AND a.is_active = 1
                 JOIN hr_candidate c ON c.id = a.candidate_id AND c.is_active = 1
                 JOIN hr_requisition r ON r.id = a.requisition_id
                 LEFT JOIN hr_department d ON d.id = r.dept_id AND d.is_active = 1
                 LEFT JOIN hr_stage_def s ON s.stage_code = a.current_stage AND s.is_active = 1
-                WHERE a.is_active = 1 AND a.requisition_id IN (%s) AND a.current_stage = ?
-                """.formatted(reqIds);
-        List<Object> args = new ArrayList<>(filter.args());
+                """.formatted(reqIds, reqIds);
+        List<Object> args = new ArrayList<>();
         args.add(stage);
+        args.addAll(filter.args());
+        args.add(from);
+        args.add(to);
+        args.add(stage);
+        args.addAll(filter.args());
+        args.add(from);
+        args.add(to);
         String select = """
                 SELECT a.id application_id, c.display_name candidate_name, r.job_name, d.name dept_name,
                        COALESCE(s.stage_name, a.current_stage) stage_name,
                        %s owner_name,
-                       a.update_time occurred_at,
-                       COALESCE(s.stage_name, a.current_stage) result_label
-                """.formatted(OWNER_SQL);
-        return peopleDetail(title, metric, select, from, args, pageNum, pageSize);
+                       x.occurred_at,
+                       '%s' result_label
+                """.formatted(OWNER_SQL, title);
+        return peopleDetail(title, metric, select, fromSql, args, pageNum, pageSize);
     }
 
     private HrPanelDetailVO todayPeopleDetail(String title, String metric, FilterSql filter, String reqIds,
@@ -215,7 +252,8 @@ public class HrPanelService {
         return vo;
     }
 
-    private List<HrPanelJobVO> queryJobs(FilterSql filter, LocalDate today, int pageNum, int pageSize, boolean withProgress) {
+    private List<HrPanelJobVO> queryJobs(FilterSql filter, LocalDate today, int pageNum, int pageSize,
+                                         boolean withProgress, DateWindow window) {
         String listSql = """
                 SELECT r.id, r.job_name, r.headcount, r.status, r.received_date, r.onboard_date, r.location_code,
                        r.job_priority_code, d.name dept_name,
@@ -280,43 +318,44 @@ public class HrPanelService {
             return row;
         }, listArgs.toArray());
         if (withProgress) {
-            fillProgress(rows);
+            fillProgress(rows, window);
         }
         return rows;
     }
 
-    private HrPanelStatsVO loadStats(FilterSql filter, LocalDate today) {
-        LocalDateTime from = today.atStartOfDay();
-        LocalDateTime to = today.plusDays(1).atStartOfDay();
-        String reqIds = "SELECT r.id " + filter.fromWhere;
+    private HrPanelStatsVO loadStats(FilterSql baseFilter, FilterSql jobFilter, DateWindow window) {
+        LocalDateTime from = window.from();
+        LocalDateTime to = window.toExclusive();
+        String reqIds = "SELECT r.id " + baseFilter.fromWhere;
         HrPanelStatsVO stats = new HrPanelStatsVO();
         stats.setOpenJobCount(countInt(
-                "SELECT COUNT(1) " + filter.fromWhere + " AND r.status = 'OPEN'", filter.args));
-        stats.setBgCheckCount(countPeople(reqIds, filter.args, "a.current_stage = 'BG_CHECK'"));
-        stats.setPendingOnboardCount(countPeople(reqIds, filter.args, "a.current_stage = 'PENDING_ONBOARD'"));
-        // 今日筛选简历 = 今日新增候选人（投递记录）
-        stats.setTodayScreenCount(countDistinctApp(filter.args, """
+                "SELECT COUNT(1) " + jobFilter.fromWhere + " AND r.status = 'OPEN'", jobFilter.args));
+        stats.setBgCheckCount(countStageReached(baseFilter.args, reqIds, "BG_CHECK", from, to));
+        stats.setPendingOnboardCount(countStageReached(baseFilter.args, reqIds, "PENDING_ONBOARD", from, to));
+        // 区间内筛选简历 = 区间内新增候选人（投递记录）
+        stats.setTodayScreenCount(countDistinctApp(baseFilter.args, """
                 SELECT COUNT(DISTINCT a.id)
                 FROM hr_application a
                 WHERE a.is_active = 1 AND a.requisition_id IN (%s)
                   AND a.create_time >= ? AND a.create_time < ?
                 """.formatted(reqIds), from, to));
-        stats.setTodayPhoneCount(countDistinctApp(filter.args, """
+        stats.setTodayPhoneCount(countDistinctApp(baseFilter.args, """
                 SELECT COUNT(DISTINCT a.id)
                 FROM hr_application a
                 JOIN hr_phone_screen p ON p.application_id = a.id AND p.is_active = 1
                 WHERE a.is_active = 1 AND a.requisition_id IN (%s)
                   AND p.called_at >= ? AND p.called_at < ?
                 """.formatted(reqIds), from, to));
-        stats.setTodayInviteCount(countDistinctApp(filter.args, """
+        stats.setTodayInviteCount(countDistinctApp(baseFilter.args, """
                 SELECT COUNT(DISTINCT a.id)
                 FROM hr_application a
                 JOIN hr_interview_invite i ON i.application_id = a.id AND i.is_active = 1
                 WHERE a.is_active = 1 AND a.requisition_id IN (%s)
                   AND i.status <> 'CANCELLED'
-                  AND i.interview_at >= ? AND i.interview_at < ?
+                  AND COALESCE(i.create_time, i.interview_at) >= ?
+                  AND COALESCE(i.create_time, i.interview_at) < ?
                 """.formatted(reqIds), from, to));
-        stats.setTodayInterviewCount(countDistinctApp(filter.args, """
+        stats.setTodayInterviewCount(countDistinctApp(baseFilter.args, """
                 SELECT COUNT(DISTINCT a.id)
                 FROM hr_application a
                 JOIN hr_interview_record rec ON rec.application_id = a.id AND rec.is_active = 1
@@ -324,7 +363,7 @@ public class HrPanelService {
                   AND COALESCE(rec.interviewed_at, rec.create_time) >= ?
                   AND COALESCE(rec.interviewed_at, rec.create_time) < ?
                 """.formatted(reqIds), from, to));
-        stats.setTodayInterviewPassCount(countDistinctApp(filter.args, """
+        stats.setTodayInterviewPassCount(countDistinctApp(baseFilter.args, """
                 SELECT COUNT(DISTINCT a.id)
                 FROM hr_application a
                 JOIN hr_interview_record rec ON rec.application_id = a.id AND rec.is_active = 1
@@ -336,19 +375,56 @@ public class HrPanelService {
         return stats;
     }
 
-    private void fillProgress(List<HrPanelJobVO> rows) {
+    /**
+     * 区间内进入某阶段人数：优先阶段事件；若无事件则回退「当前阶段=该阶段且更新时间在区间」。
+     */
+    private int countStageReached(List<Object> reqArgs, String reqIdsSql, String stage,
+                                  LocalDateTime from, LocalDateTime to) {
+        List<Object> args = new ArrayList<>();
+        args.add(stage);
+        args.addAll(reqArgs);
+        args.add(from);
+        args.add(to);
+        args.add(stage);
+        args.addAll(reqArgs);
+        args.add(from);
+        args.add(to);
+        return countInt("""
+                SELECT COUNT(DISTINCT application_id) FROM (
+                  SELECT e.application_id
+                  FROM hr_stage_event e
+                  JOIN hr_application a ON a.id = e.application_id AND a.is_active = 1
+                  WHERE e.is_active = 1 AND e.stage_code = ?
+                    AND a.requisition_id IN (%s)
+                    AND COALESCE(e.event_at, e.create_time) >= ?
+                    AND COALESCE(e.event_at, e.create_time) < ?
+                  UNION
+                  SELECT a.id application_id
+                  FROM hr_application a
+                  WHERE a.is_active = 1 AND a.current_stage = ?
+                    AND a.requisition_id IN (%s)
+                    AND a.update_time >= ? AND a.update_time < ?
+                ) t
+                """.formatted(reqIdsSql, reqIdsSql), args);
+    }
+
+    private void fillProgress(List<HrPanelJobVO> rows, DateWindow window) {
         if (rows.isEmpty()) {
             return;
         }
         String placeholders = rows.stream().map(r -> "?").collect(Collectors.joining(","));
         List<Object> ids = rows.stream().map(HrPanelJobVO::getId).collect(Collectors.toList());
         Map<Long, LinkedHashMap<String, Integer>> byReq = new LinkedHashMap<>();
+        List<Object> eventArgs = new ArrayList<>(ids);
+        eventArgs.add(window.from());
+        eventArgs.add(window.toExclusive());
         jdbc.query("""
                 SELECT a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code) stage_name, COUNT(DISTINCT a.id) cnt
                 FROM hr_stage_event e
                 JOIN hr_application a ON a.id = e.application_id AND a.is_active = 1
                 LEFT JOIN hr_stage_def s ON s.stage_code = e.stage_code AND s.is_active = 1
                 WHERE e.is_active = 1 AND a.requisition_id IN (%s)
+                  AND COALESCE(e.event_at, e.create_time) >= ? AND COALESCE(e.event_at, e.create_time) < ?
                 GROUP BY a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code), COALESCE(s.sort_no, 999)
                 ORDER BY a.requisition_id, COALESCE(s.sort_no, 999)
                 """.formatted(placeholders), rs -> {
@@ -358,12 +434,17 @@ public class HrPanelService {
             if (cnt > 0 && StringUtils.hasText(name)) {
                 byReq.computeIfAbsent(reqId, k -> new LinkedHashMap<>()).merge(name, cnt, Integer::sum);
             }
-        }, ids.toArray());
+        }, eventArgs.toArray());
+        List<Object> inviteArgs = new ArrayList<>(ids);
+        inviteArgs.add(window.from());
+        inviteArgs.add(window.toExclusive());
         jdbc.query("""
                 SELECT a.requisition_id, COUNT(DISTINCT a.id) cnt
                 FROM hr_interview_invite i
                 JOIN hr_application a ON a.id = i.application_id AND a.is_active = 1
                 WHERE i.is_active = 1 AND i.status <> 'CANCELLED' AND a.requisition_id IN (%s)
+                  AND COALESCE(i.create_time, i.interview_at) >= ?
+                  AND COALESCE(i.create_time, i.interview_at) < ?
                 GROUP BY a.requisition_id
                 """.formatted(placeholders), rs -> {
             long reqId = rs.getLong("requisition_id");
@@ -371,7 +452,7 @@ public class HrPanelService {
             if (cnt > 0) {
                 byReq.computeIfAbsent(reqId, k -> new LinkedHashMap<>()).put("约面", cnt);
             }
-        }, ids.toArray());
+        }, inviteArgs.toArray());
         for (HrPanelJobVO row : rows) {
             row.setProgressSummary(formatProgress(byReq.get(row.getId())));
         }
@@ -421,7 +502,10 @@ public class HrPanelService {
         return name;
     }
 
-    private FilterSql buildFilter(HrPanelQueryDTO q) {
+    /**
+     * @param window 非空时按岗位接收日（无则创建日）限制在区间内，用于岗位列表/在招岗位
+     */
+    private FilterSql buildFilter(HrPanelQueryDTO q, DateWindow window) {
         StringBuilder sql = new StringBuilder("""
                 FROM hr_requisition r
                 LEFT JOIN hr_department d ON d.id = r.dept_id AND d.is_active = 1
@@ -473,16 +557,105 @@ public class HrPanelService {
             args.add(q.getWorkAddressId());
             args.add(q.getWorkAddressId());
         }
+        if (window != null) {
+            // 岗位列表：区间内有招聘活动，或岗位接收日落在区间（无接收日看创建日）
+            appendJobDateWindow(sql, args, window);
+        }
         dataScope.apply(sql, args, "r", null);
         return new FilterSql(sql.toString(), args);
     }
 
-    private int countPeople(String reqIdsSql, List<Object> reqArgs, String extra) {
-        return countInt("""
-                SELECT COUNT(DISTINCT a.id)
-                FROM hr_application a
-                WHERE a.is_active = 1 AND a.requisition_id IN (%s) AND %s
-                """.formatted(reqIdsSql, extra), reqArgs);
+    private static void appendJobDateWindow(StringBuilder sql, List<Object> args, DateWindow window) {
+        LocalDateTime from = window.from();
+        LocalDateTime to = window.toExclusive();
+        sql.append("""
+                 AND (
+                   (r.received_date IS NOT NULL AND r.received_date >= ? AND r.received_date <= ?)
+                   OR (r.received_date IS NULL AND DATE(r.create_time) >= ? AND DATE(r.create_time) <= ?)
+                   OR EXISTS (
+                     SELECT 1 FROM hr_application a
+                     WHERE a.is_active = 1 AND a.requisition_id = r.id
+                       AND a.create_time >= ? AND a.create_time < ?
+                   )
+                   OR EXISTS (
+                     SELECT 1 FROM hr_phone_screen p
+                     JOIN hr_application a ON a.id = p.application_id AND a.is_active = 1
+                     WHERE p.is_active = 1 AND a.requisition_id = r.id
+                       AND p.called_at >= ? AND p.called_at < ?
+                   )
+                   OR EXISTS (
+                     SELECT 1 FROM hr_interview_invite i
+                     JOIN hr_application a ON a.id = i.application_id AND a.is_active = 1
+                     WHERE i.is_active = 1 AND i.status <> 'CANCELLED' AND a.requisition_id = r.id
+                       AND COALESCE(i.create_time, i.interview_at) >= ?
+                       AND COALESCE(i.create_time, i.interview_at) < ?
+                   )
+                   OR EXISTS (
+                     SELECT 1 FROM hr_interview_record rec
+                     JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
+                     WHERE rec.is_active = 1 AND a.requisition_id = r.id
+                       AND COALESCE(rec.interviewed_at, rec.create_time) >= ?
+                       AND COALESCE(rec.interviewed_at, rec.create_time) < ?
+                   )
+                   OR EXISTS (
+                     SELECT 1 FROM hr_stage_event e
+                     JOIN hr_application a ON a.id = e.application_id AND a.is_active = 1
+                     WHERE e.is_active = 1 AND a.requisition_id = r.id
+                       AND COALESCE(e.event_at, e.create_time) >= ?
+                       AND COALESCE(e.event_at, e.create_time) < ?
+                   )
+                 )
+                """);
+        args.add(window.start());
+        args.add(window.end());
+        args.add(window.start());
+        args.add(window.end());
+        for (int i = 0; i < 5; i++) {
+            args.add(from);
+            args.add(to);
+        }
+    }
+
+    /** 未传/解析失败时默认当天。 */
+    private static DateWindow resolveWindow(HrPanelQueryDTO q) {
+        LocalDate today = LocalDate.now();
+        LocalDate start = parseDay(q.getStartDate(), today);
+        LocalDate end = parseDay(q.getEndDate(), start);
+        if (end.isBefore(start)) {
+            LocalDate tmp = start;
+            start = end;
+            end = tmp;
+        }
+        return new DateWindow(start, end);
+    }
+
+    private static LocalDate parseDay(String raw, LocalDate fallback) {
+        if (!StringUtils.hasText(raw)) {
+            return fallback;
+        }
+        String text = raw.trim();
+        if (text.length() >= 10) {
+            text = text.substring(0, 10);
+        }
+        try {
+            return LocalDate.parse(text, DAY_FMT);
+        } catch (DateTimeParseException ex) {
+            try {
+                return LocalDate.parse(text);
+            } catch (DateTimeParseException ignored) {
+                return fallback;
+            }
+        }
+    }
+
+    private record DateWindow(LocalDate start, LocalDate end) {
+        LocalDateTime from() {
+            return start.atStartOfDay();
+        }
+
+        LocalDateTime toExclusive() {
+            return end.plusDays(1).atStartOfDay();
+        }
     }
 
     private int countDistinctApp(List<Object> reqArgs, String sql, Object from, Object to) {

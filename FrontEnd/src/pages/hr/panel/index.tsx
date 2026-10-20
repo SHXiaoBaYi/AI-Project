@@ -1,9 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { Button, Card, Drawer, Statistic, Table, Tag } from 'antd';
+import { Button, Card, DatePicker, Drawer, Radio, Space, Statistic, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
+import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
 import {
   getHrDepartmentsApi,
   getHrDictOptionsApi,
@@ -41,15 +44,22 @@ function numId(value: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
+  if (grain === 'week') return [start.startOf('week'), end.endOf('week')];
+  if (grain === 'month') return [start.startOf('month'), end.endOf('month')];
+  if (grain === 'year') return [start.startOf('year'), end.endOf('year')];
+  return [start.startOf('day'), end.endOf('day')];
+}
+
 const STATS: { key: keyof HrPanelStats; metric: HrPanelMetric; title: string; suffix: string }[] = [
   { key: 'openJobCount', metric: 'OPEN_JOB', title: '目前在招岗位', suffix: '个' },
-  { key: 'bgCheckCount', metric: 'BG_CHECK', title: '背调中', suffix: '人' },
-  { key: 'pendingOnboardCount', metric: 'PENDING_ONBOARD', title: '待入职', suffix: '人' },
-  { key: 'todayScreenCount', metric: 'TODAY_SCREEN', title: '今日筛选简历', suffix: '人' },
-  { key: 'todayPhoneCount', metric: 'TODAY_PHONE', title: '今日电话沟通', suffix: '人' },
-  { key: 'todayInviteCount', metric: 'TODAY_INVITE', title: '今日约面', suffix: '人' },
-  { key: 'todayInterviewCount', metric: 'TODAY_INTERVIEW', title: '今日实际面试', suffix: '人' },
-  { key: 'todayInterviewPassCount', metric: 'TODAY_INTERVIEW_PASS', title: '今日通过面试', suffix: '人' },
+  { key: 'bgCheckCount', metric: 'BG_CHECK', title: '进入背调', suffix: '人' },
+  { key: 'pendingOnboardCount', metric: 'PENDING_ONBOARD', title: '进入待入职', suffix: '人' },
+  { key: 'todayScreenCount', metric: 'TODAY_SCREEN', title: '筛选简历', suffix: '人' },
+  { key: 'todayPhoneCount', metric: 'TODAY_PHONE', title: '电话沟通', suffix: '人' },
+  { key: 'todayInviteCount', metric: 'TODAY_INVITE', title: '约面', suffix: '人' },
+  { key: 'todayInterviewCount', metric: 'TODAY_INTERVIEW', title: '实际面试', suffix: '人' },
+  { key: 'todayInterviewPassCount', metric: 'TODAY_INTERVIEW_PASS', title: '通过面试', suffix: '人' },
 ];
 
 const HrPanelPage = memo(function HrPanelPage() {
@@ -59,6 +69,8 @@ const HrPanelPage = memo(function HrPanelPage() {
   const [owners, setOwners] = useState<{ value: number; label: string }[]>([]);
   const [priorities, setPriorities] = useState<{ value: string; label: string }[]>([]);
   const [addresses, setAddresses] = useState<{ value: number; label: string }[]>([]);
+  const [grain, setGrain] = useState<DemoBoardGrain>('day');
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().startOf('day'), dayjs().endOf('day')]);
   const lastQueryRef = useRef<HrPanelQuery>({});
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTitle, setDrawerTitle] = useState('');
@@ -100,6 +112,29 @@ const HrPanelPage = memo(function HrPanelPage() {
       ),
     );
   }, []);
+
+  const onGrainChange = (g: DemoBoardGrain) => {
+    setGrain(g);
+    setRange(g === 'day' ? [dayjs().startOf('day'), dayjs().endOf('day')] : demoRangeByGrain(g));
+  };
+
+  const pickerProps =
+    grain === 'week'
+      ? { picker: 'week' as const }
+      : grain === 'month'
+        ? { picker: 'month' as const }
+        : grain === 'year'
+          ? { picker: 'year' as const }
+          : { picker: 'date' as const };
+
+  const dateQuery = useMemo(() => {
+    const [start, end] = normalizeRange(grain, range[0], range[1]);
+    return {
+      grain,
+      startDate: start.format('YYYY-MM-DD'),
+      endDate: end.format('YYYY-MM-DD'),
+    };
+  }, [grain, range]);
 
   const columns: ProColumnType<HrPanelJobRow>[] = useMemo(
     () => [
@@ -218,7 +253,7 @@ const HrPanelPage = memo(function HrPanelPage() {
         render: (_, record) => (record.recruitingDays == null ? '—' : record.recruitingDays),
       },
       {
-        title: '累计进展',
+        title: '区间进展',
         dataIndex: 'progressSummary',
         search: false,
         ellipsis: true,
@@ -262,7 +297,7 @@ const HrPanelPage = memo(function HrPanelPage() {
       { title: '接收日', dataIndex: 'receivedDate', width: 120, render: (v) => v || '—' },
       { title: '任务截止日期', dataIndex: 'deadlineDate', width: 130, render: (v) => v || '—' },
       { title: '招聘天数', dataIndex: 'recruitingDays', width: 90, render: (v) => (v == null ? '—' : v) },
-      { title: '累计进展', dataIndex: 'progressSummary', ellipsis: true, render: (v) => v || '无' },
+      { title: '区间进展', dataIndex: 'progressSummary', ellipsis: true, render: (v) => v || '无' },
     ],
     [],
   );
@@ -308,12 +343,46 @@ const HrPanelPage = memo(function HrPanelPage() {
   };
 
   return (
-    <>
+    <div className='flex flex-col gap-4'>
+      <Card
+        size='small'
+        title='招聘面板筛选'
+      >
+        <Space wrap>
+          <Radio.Group
+            value={grain}
+            optionType='button'
+            options={[
+              { label: '日', value: 'day' },
+              { label: '周', value: 'week' },
+              { label: '月', value: 'month' },
+              { label: '年', value: 'year' },
+            ]}
+            onChange={(e) => onGrainChange(e.target.value)}
+          />
+          <DatePicker.RangePicker
+            {...pickerProps}
+            value={range}
+            allowClear={false}
+            onChange={(value) => {
+              if (value?.[0] && value?.[1]) {
+                setRange(normalizeRange(grain, value[0], value[1]));
+              }
+            }}
+          />
+          <span className='text-xs text-neutral-500'>
+            当前统计：{dateQuery.startDate} ~ {dateQuery.endDate}
+            （进入背调/待入职、筛选简历、电话、约面、面试均按该区间）
+          </span>
+        </Space>
+      </Card>
+
       <BaseProTable<HrPanelJobRow>
         rowKey='id'
         actionRef={actionRef}
         headerTitle='招聘面板'
         columns={columns}
+        params={dateQuery}
         pagination={{ defaultPageSize: 10 }}
         scroll={{ x: 1480 }}
         tableExtraRender={() => (
@@ -336,7 +405,13 @@ const HrPanelPage = memo(function HrPanelPage() {
           </div>
         )}
         request={async (params) => {
+          const startDate = String(params.startDate || dateQuery.startDate || '');
+          const endDate = String(params.endDate || dateQuery.endDate || '');
+          const grain = (params.grain as HrPanelQuery['grain']) || dateQuery.grain;
           const query: HrPanelQuery = {
+            grain,
+            startDate: startDate || undefined,
+            endDate: endDate || undefined,
             panelStatus: (params.panelStatus as string) || undefined,
             deptId: numId(params.deptId),
             jobName: (params.jobName as string) || undefined,
@@ -415,7 +490,7 @@ const HrPanelPage = memo(function HrPanelPage() {
         }}
         onClose={() => setJobDetail(null)}
       />
-    </>
+    </div>
   );
 });
 

@@ -194,6 +194,11 @@ export interface HrPanelQuery {
   ownerUserIds?: number[];
   jobPriorityCode?: string;
   workAddressId?: number;
+  /** YYYY-MM-DD */
+  startDate?: string;
+  /** YYYY-MM-DD */
+  endDate?: string;
+  grain?: 'day' | 'week' | 'month' | 'year';
   pageNum?: number;
   pageSize?: number;
 }
