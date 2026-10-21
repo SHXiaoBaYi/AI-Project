@@ -3,6 +3,8 @@ package com.base.admin.domain.vo;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Schema(description = "AI 生成文章结果")
 public class GeoContentAiGenerateVO {
@@ -24,4 +26,19 @@ public class GeoContentAiGenerateVO {
 
     @Schema(description = "保存后的正文版本（若已 apply）")
     private Long contentVersion;
+
+    @Schema(description = "插入图片数")
+    private Integer usedImageCount;
+
+    @Schema(description = "质检轮次")
+    private Integer qaRounds;
+
+    @Schema(description = "风格包编码")
+    private String styleCode;
+
+    @Schema(description = "骨架编码")
+    private String skeletonCode;
+
+    @Schema(description = "流水线阶段（供前端动画展示）")
+    private List<GeoPipelineStageVO> stages;
 }

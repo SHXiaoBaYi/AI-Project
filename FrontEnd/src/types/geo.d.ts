@@ -968,11 +968,75 @@ export interface GeoSellPointContext {
   forbiddenHints?: string[];
 }
 
+export interface GeoPipelineStage {
+  code: string;
+  name: string;
+  status: 'pending' | 'running' | 'done' | 'skipped' | 'failed' | string;
+  message?: string;
+}
+
 export interface GeoContentAiGenerateResult {
   contentTitle?: string;
   contentBody?: string;
   sourceAiModel?: string;
   usedPointCount?: number;
+  usedImageCount?: number;
+  qaRounds?: number;
+  styleCode?: string;
+  skeletonCode?: string;
+  stages?: GeoPipelineStage[];
   applied?: boolean;
   contentVersion?: number;
+}
+
+export interface GeoMediaAsset {
+  id: number;
+  title: string;
+  fileUrl: string;
+  publicUrl?: string;
+  thumbUrl?: string;
+  sourceType?: 'own' | 'stock_licensed' | string;
+  licenseNote?: string;
+  brandVisible?: number;
+  caption?: string;
+  altText?: string;
+  tags?: string[];
+  /** 可用于哪里 / 适用段落场景 */
+  usageHint?: string;
+  sceneTags?: string[];
+  widthPx?: number;
+  heightPx?: number;
+  status?: string;
+  remark?: string;
+  /** 可选软优先 */
+  topicIds?: number[];
+  topicNames?: string[];
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface GeoArticleStylePack {
+  id: number;
+  code: string;
+  name: string;
+  platformHint?: string;
+  toneGuide?: string;
+  structureGuide?: string;
+  samplePhrases?: string;
+  brandGuide?: string;
+  enabled?: number;
+  sortOrder?: number;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface GeoArticleSkeleton {
+  id: number;
+  code: string;
+  name: string;
+  sectionSchema?: string;
+  enabled?: number;
+  sortOrder?: number;
+  createTime?: string;
+  updateTime?: string;
 }

@@ -42,6 +42,9 @@ import type {
   GeoContentPublisherRule,
   GeoContentWritingRow,
   GeoContentAiGenerateResult,
+  GeoArticleSkeleton,
+  GeoArticleStylePack,
+  GeoMediaAsset,
   GeoSellDomain,
   GeoSellPoint,
   GeoSellPointContext,
@@ -645,8 +648,129 @@ export function aiGenerateGeoContentArticleApi(data: {
   userPrompt?: string;
 }) {
   return request.post<unknown, GeoContentAiGenerateResult>('/geo/content-placement/articles/ai-generate', data, {
+    // 深度思考成文：大纲/扩写/质检均可能较慢，不求快
+    timeout: 600000,
+  });
+}
+
+export function getGeoMediaListApi(
+  data: PageQuery & {
+    title?: string;
+    topicId?: number;
+    status?: string;
+    sourceType?: string;
+    brandVisible?: number;
+    keyword?: string;
+  },
+) {
+  return request.post<unknown, PageResult<GeoMediaAsset>>('/geo/media/list', data);
+}
+
+export function getGeoMediaApi(id: number) {
+  return request.get<unknown, GeoMediaAsset>(`/geo/media/${id}`);
+}
+
+export function createGeoMediaApi(data: Partial<GeoMediaAsset> & { topicIds?: number[] }) {
+  return request.post<unknown, { id: number }>('/geo/media', data);
+}
+
+export function updateGeoMediaApi(data: Partial<GeoMediaAsset> & { id: number; topicIds?: number[] }) {
+  return request.put('/geo/media', data);
+}
+
+export function deleteGeoMediaApi(id: number) {
+  return request.delete(`/geo/media/${id}`);
+}
+
+export function deleteGeoMediaBatchApi(ids: number[]) {
+  return request.delete('/geo/media/batch', { data: ids });
+}
+
+export function uploadGeoMediaApi(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post<unknown, { fileUrl: string }>('/geo/media/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+}
+
+export function batchUploadGeoMediaApi(
+  files: File[],
+  meta?: {
+    usageHint?: string;
+    tags?: string;
+    sceneTags?: string;
+    sourceType?: string;
+    licenseNote?: string;
+  },
+) {
+  const formData = new FormData();
+  files.forEach((f) => formData.append('files', f));
+  if (meta?.usageHint) formData.append('usageHint', meta.usageHint);
+  if (meta?.tags) formData.append('tags', meta.tags);
+  if (meta?.sceneTags) formData.append('sceneTags', meta.sceneTags);
+  if (meta?.sourceType) formData.append('sourceType', meta.sourceType);
+  if (meta?.licenseNote) formData.append('licenseNote', meta.licenseNote);
+  return request.post<unknown, { ids: number[]; count: number }>('/geo/media/batch-upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 180000,
   });
+}
+
+export function batchUpdateGeoMediaMetaApi(data: {
+  ids: number[];
+  usageHint?: string;
+  tags?: string[];
+  sceneTags?: string[];
+  topicIds?: number[];
+  brandVisible?: number;
+  status?: string;
+  sourceType?: string;
+  licenseNote?: string;
+}) {
+  return request.put<unknown, { updated: number }>('/geo/media/batch-meta', data);
+}
+
+export function getGeoStylePackListApi(
+  data: PageQuery & { keyword?: string; platformHint?: string; enabled?: number },
+) {
+  return request.post<unknown, PageResult<GeoArticleStylePack>>('/geo/style-pack/list', data);
+}
+
+export function createGeoStylePackApi(data: Partial<GeoArticleStylePack>) {
+  return request.post<unknown, { id: number }>('/geo/style-pack', data);
+}
+
+export function updateGeoStylePackApi(data: Partial<GeoArticleStylePack> & { id: number }) {
+  return request.put('/geo/style-pack', data);
+}
+
+export function deleteGeoStylePackApi(id: number) {
+  return request.delete(`/geo/style-pack/${id}`);
+}
+
+export function deleteGeoStylePackBatchApi(ids: number[]) {
+  return request.delete('/geo/style-pack/batch', { data: ids });
+}
+
+export function getGeoSkeletonListApi(data: PageQuery & { keyword?: string; enabled?: number }) {
+  return request.post<unknown, PageResult<GeoArticleSkeleton>>('/geo/skeleton/list', data);
+}
+
+export function createGeoSkeletonApi(data: Partial<GeoArticleSkeleton>) {
+  return request.post<unknown, { id: number }>('/geo/skeleton', data);
+}
+
+export function updateGeoSkeletonApi(data: Partial<GeoArticleSkeleton> & { id: number }) {
+  return request.put('/geo/skeleton', data);
+}
+
+export function deleteGeoSkeletonApi(id: number) {
+  return request.delete(`/geo/skeleton/${id}`);
+}
+
+export function deleteGeoSkeletonBatchApi(ids: number[]) {
+  return request.delete('/geo/skeleton/batch', { data: ids });
 }
 
 export function getGeoSellDomainTreeApi() {

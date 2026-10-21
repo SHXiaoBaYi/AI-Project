@@ -32,6 +32,7 @@ import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysTaskFile;
 import com.base.admin.domain.entity.SysUser;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
+import com.base.admin.domain.vo.GeoArticlePipelineResultVO;
 import com.base.admin.domain.vo.GeoContentAiGenerateVO;
 import com.base.admin.domain.vo.GeoChartPointVO;
 import com.base.admin.domain.vo.GeoSellPointContextVO;
@@ -71,6 +72,7 @@ import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.AiChatService;
 import com.base.admin.service.DataScopeFilter;
 import com.base.admin.service.FileStorageService;
+import com.base.admin.service.GeoArticlePipelineService;
 import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoContentPublisherRuleService;
 import com.base.admin.service.GeoTopicService;
@@ -139,6 +141,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     private final AiChatService aiChatService;
     private final SysAiProviderService sysAiProviderService;
     private final SellPointContextService sellPointContextService;
+    private final GeoArticlePipelineService articlePipelineService;
     private final PlacementTaskSyncService placementTaskSyncService;
     private final GeoContentPublisherRuleService publisherRuleService;
     private final ObjectMapper objectMapper;
@@ -1209,60 +1212,19 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             throw new BusinessException("未配置可用 AI 模型，请到「系统管理 → AI模型配置」中填写");
         }
 
-        GeoSellPointContextVO ctx = sellPointContextService.build(
-                placement.getTopicName(), placement.getTargetQuestion(), 12);
-        String pointsJson;
+        // 后台两阶段流水线（大纲→扩写→插图→质检重写）；前端仍一键调用
+        GeoArticlePipelineResultVO pipeline;
         try {
-            pointsJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(ctx);
-        } catch (Exception e) {
-            throw new BusinessException("组装卖点上下文失败");
-        }
-
-        String system = """
-                你是小巴依品牌 GEO 内容撰写助手。请综合「用户提示词 + 话题 + 目标问题」和给定卖点库上下文，撰写一篇可直接粘贴到微信公众号、知乎、小红书、头条等图文平台的正式中文文章。
-
-                【事实硬约束】
-                1. 只能使用卖点库 points / hard_facts 中的事实，不得编造认证编号、检测数据、门店、捐赠金额、时间节点；
-                2. 必须紧扣目标问题作答；用户提示词有额外要求（风格、角度、篇幅、必提点等）时，在不违反事实约束的前提下优先满足。
-
-                【排版硬约束——必须像能直接发布的正刊文章，禁止流水账堆砌】
-                1. 标题（title）：独立成字段，口语可检索，20 字内为宜，不要与正文首段重复一整句；
-                2. 正文（html）结构固定为：
-                   - 开篇导语 1～2 段：先直接回应目标问题，再引出下文；
-                   - 2～4 个小节：每个小节必须有 <h2> 小标题，小节内 2～4 个短段落；
-                   - 关键论据/数据用 <strong> 加粗，必要时用 <ul><li> 列出要点；
-                   - 收束段：总结立场 + 一句自然行动建议（关注/了解/对比等），不要硬广口号堆砌；
-                3. 段落要短：单段一般不超过 80 字；段与段之间靠独立 <p> 分隔，不要一整坨长文；
-                4. 默认全文 800～1500 字（用户提示词另有字数要求时从其要求）；
-                5. 禁止：Markdown（#、-、**）、代码块、表格、图片、脚本、外链、<h1>、内联 style/class；
-                6. html 仅允许标签：h2、h3、p、strong、em、ul、ol、li、blockquote、br。
-
-                【输出格式】
-                只输出 JSON，不要 markdown 围栏，不要解释：
-                {"title":"标题","html":"<p>导语…</p><h2>小节一</h2><p>…</p><ul><li>…</li></ul><h2>小节二</h2><p>…</p><p>收束…</p>"}
-                """;
-        StringBuilder userSb = new StringBuilder();
-        userSb.append("话题：").append(nz(placement.getTopicName()));
-        userSb.append("\n目标问题：").append(nz(placement.getTargetQuestion()));
-        if (StringUtils.hasText(dto.getUserPrompt())) {
-            userSb.append("\n用户提示词：\n").append(dto.getUserPrompt().trim());
-        }
-        userSb.append("\n卖点上下文：\n").append(pointsJson);
-        String user = userSb.toString();
-
-        String content;
-        try {
-            content = aiChatService.chat(system, user, provider, 0.6);
+            pipeline = articlePipelineService.run(placement, dto, provider);
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             throw new BusinessException("AI 生成失败: " + e.getMessage());
         }
 
-        ParsedArticle parsed = parseGeneratedArticle(content);
-        String title = parsed.title();
-        String lake = toLakeDocument(parsed.html());
-        String modelLabel = resolveAiSourceLabel(provider);
+        String title = pipeline.getTitle();
+        String lake = toLakeDocument(pipeline.getHtml());
+        String modelLabel = pipeline.getSourceAiModel();
 
         Long itemId = dto.getItemId();
         Long version;
@@ -1298,7 +1260,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         vo.setContentTitle(title);
         vo.setContentBody(lake);
         vo.setSourceAiModel(modelLabel);
-        vo.setUsedPointCount(ctx.getPoints() == null ? 0 : ctx.getPoints().size());
+        vo.setUsedPointCount(pipeline.getUsedPointCount());
+        vo.setUsedImageCount(pipeline.getUsedImageCount());
+        vo.setQaRounds(pipeline.getQaRounds());
+        vo.setStyleCode(pipeline.getStyleCode());
+        vo.setSkeletonCode(pipeline.getSkeletonCode());
+        vo.setStages(pipeline.getStages());
         vo.setApplied(true);
         vo.setContentVersion(version);
         return vo;

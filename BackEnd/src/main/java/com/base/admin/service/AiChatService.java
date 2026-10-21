@@ -92,6 +92,13 @@ public class AiChatService {
      * 通义在单模型 429 时会自动换同 Key 下的其他千问模型（限流按模型独立）。
      */
     public String chat(String systemPrompt, String userPrompt, String provider, Double temperature) {
+        return chat(systemPrompt, userPrompt, provider, temperature, false);
+    }
+
+    /**
+     * @param deepThink 成文等重任务开启深度思考（通义 enable_thinking；超时加长；不求快求稳）
+     */
+    public String chat(String systemPrompt, String userPrompt, String provider, Double temperature, boolean deepThink) {
         boolean explicit = StringUtils.hasText(provider);
         List<String> candidates = explicit
                 ? List.of(aiProperties.normalizeProvider(provider))
@@ -112,7 +119,7 @@ public class AiChatService {
                 continue;
             }
             try {
-                return chatOnce(systemPrompt, userPrompt, p, temperature);
+                return chatOnce(systemPrompt, userPrompt, p, temperature, deepThink);
             } catch (BusinessException e) {
                 lastBiz = e;
                 if (!explicit && isRateLimitedMessage(e.getMessage()) && i < candidates.size() - 1) {
@@ -223,23 +230,34 @@ public class AiChatService {
     }
 
     private String chatOnce(String systemPrompt, String userPrompt, String p, Double temperature) {
+        return chatOnce(systemPrompt, userPrompt, p, temperature, false);
+    }
+
+    private String chatOnce(String systemPrompt, String userPrompt, String p, Double temperature, boolean deepThink) {
         ResolvedEndpoint ep = resolveEndpoint(p);
         List<String> models = modelCandidates(p, ep.model());
         CallFailedException lastRate = null;
         for (String model : models) {
             try {
-                log.info("调用 AI [{}] model={} baseUrl={}", ep.displayName(), model, ep.baseUrl());
-                String raw = invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature);
+                log.info("调用 AI [{}] model={} deepThink={} baseUrl={}",
+                        ep.displayName(), model, deepThink, ep.baseUrl());
+                String raw = invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature, deepThink);
                 JsonNode root = objectMapper.readTree(raw);
-                JsonNode content = root.path("choices").path(0).path("message").path("content");
-                if (content.isMissingNode() || !StringUtils.hasText(content.asText())) {
+                JsonNode message = root.path("choices").path(0).path("message");
+                JsonNode content = message.path("content");
+                String text = content.isMissingNode() ? "" : content.asText("");
+                // 部分思考模型把正文放 reasoning 旁；content 为空时兜底
+                if (!StringUtils.hasText(text) && message.has("reasoning_content")) {
+                    text = message.path("reasoning_content").asText("");
+                }
+                if (!StringUtils.hasText(text)) {
                     throw new BusinessException("AI 返回内容为空（" + ep.displayName() + "）");
                 }
                 clearRateLimit(p);
                 if (!model.equals(ep.model())) {
                     log.warn("厂商 [{}] 配置模型 {} 不可用/限流，已改用 {}", ep.displayName(), ep.model(), model);
                 }
-                return content.asText().trim();
+                return text.trim();
             } catch (BusinessException e) {
                 throw e;
             } catch (CallFailedException e) {
@@ -248,6 +266,25 @@ public class AiChatService {
                             ep.displayName(), model, e.httpStatus(), truncate(e.body(), 240));
                     lastRate = e;
                     continue;
+                }
+                // 深度思考参数不被旧模型接受时，自动降级再试一次
+                if (deepThink && e.httpStatus() >= 400 && e.httpStatus() < 500) {
+                    log.warn("深度思考调用失败，降级普通模式重试 [{}] model={} HTTP {}",
+                            ep.displayName(), model, e.httpStatus());
+                    try {
+                        String raw = invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature, false);
+                        JsonNode root = objectMapper.readTree(raw);
+                        JsonNode content = root.path("choices").path(0).path("message").path("content");
+                        if (content.isMissingNode() || !StringUtils.hasText(content.asText())) {
+                            throw new BusinessException("AI 返回内容为空（" + ep.displayName() + "）");
+                        }
+                        clearRateLimit(p);
+                        return content.asText().trim();
+                    } catch (BusinessException be) {
+                        throw be;
+                    } catch (Exception ignored) {
+                        // fall through to original error handling
+                    }
                 }
                 log.error("调用 AI 失败 [{}] model={} HTTP {} body={}",
                         ep.displayName(), model, e.httpStatus(), truncate(e.body(), 500));
@@ -270,9 +307,17 @@ public class AiChatService {
 
     private String invokeChatCompletions(ResolvedEndpoint ep, String model,
                                          String systemPrompt, String userPrompt, Double temperature) {
+        return invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature, false);
+    }
+
+    private String invokeChatCompletions(ResolvedEndpoint ep, String model,
+                                         String systemPrompt, String userPrompt, Double temperature,
+                                         boolean deepThink) {
         int timeoutSec = Math.max(10, aiProperties.getTimeoutSeconds());
         if (AiProperties.PROVIDER_TONGYI.equals(ep.provider())) {
-            timeoutSec = Math.max(timeoutSec, 90);
+            timeoutSec = Math.max(timeoutSec, deepThink ? 300 : 90);
+        } else if (deepThink) {
+            timeoutSec = Math.max(timeoutSec, 240);
         }
         Duration timeout = Duration.ofSeconds(timeoutSec);
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
@@ -284,7 +329,8 @@ public class AiChatService {
                 .requestFactory(requestFactory)
                 .defaultHeader("Authorization", "Bearer " + ep.apiKey());
         if (AiProperties.PROVIDER_TONGYI.equals(ep.provider())) {
-            clientBuilder.defaultHeader("X-DashScope-Wait-Timeout", DASHSCOPE_WAIT_TIMEOUT);
+            // 深度思考可能排队更久
+            clientBuilder.defaultHeader("X-DashScope-Wait-Timeout", deepThink ? "120" : DASHSCOPE_WAIT_TIMEOUT);
         }
         RestClient client = clientBuilder.build();
 
@@ -297,6 +343,9 @@ public class AiChatService {
         }
         messages.add(Map.of("role", "user", "content", userPrompt));
         body.put("messages", messages);
+        if (deepThink && AiProperties.PROVIDER_TONGYI.equals(ep.provider())) {
+            body.put("enable_thinking", true);
+        }
 
         try {
             String raw = client.post()

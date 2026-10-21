@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Drawer, Input, Modal, Select, Space, Spin, Tag, Typography, message } from 'antd';
+import { Button, Drawer, Input, Modal, Select, Space, Spin, Steps, Tag, Typography, message } from 'antd';
 import { LakexEditorHost, type LakexEditorHostHandle } from '@/components/lakex/LakexEditorHost';
 import { prefetchLakexAssets } from '@/components/lakex/loadLakexAssets';
 import {
@@ -28,8 +28,21 @@ import type {
   GeoContentArticleBundle,
   GeoContentReviewAnnotation,
   GeoContentReviewRound,
+  GeoPipelineStage,
   GeoPlatform,
 } from '@/types/geo';
+
+/** 前端一键生成时的阶段动画（与后台两阶段流水线对齐） */
+const AI_PIPELINE_STEPS = [
+  { key: 'style', title: '加载风格与骨架' },
+  { key: 'sell', title: '召回卖点' },
+  { key: 'outline', title: '生成大纲' },
+  { key: 'media', title: '语义召回素材' },
+  { key: 'expand', title: '扩写正文' },
+  { key: 'illustrate', title: '智能插图' },
+  { key: 'qa', title: '质检与重写' },
+  { key: 'save', title: '写入草稿' },
+] as const;
 
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
   drafting: { text: '草稿', color: 'default' },
@@ -72,11 +85,14 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const [platforms, setPlatforms] = useState<GeoPlatform[]>([]);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiStepIndex, setAiStepIndex] = useState(0);
+  const [aiStages, setAiStages] = useState<GeoPipelineStage[]>([]);
   const [aiProvider, setAiProvider] = useState<string>();
   const [aiUserPrompt, setAiUserPrompt] = useState('');
   const [aiProviders, setAiProviders] = useState<
     { provider: string; label: string; model: string; available: boolean; hint?: string }[]
   >([]);
+  const aiStepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [editorEpoch, setEditorEpoch] = useState(0);
   const [reviewHints, setReviewHints] = useState<{
     roundLabel: string;
@@ -363,6 +379,22 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     }
   };
 
+  const stopAiStepAnim = () => {
+    if (aiStepTimerRef.current) {
+      clearInterval(aiStepTimerRef.current);
+      aiStepTimerRef.current = null;
+    }
+  };
+
+  const startAiStepAnim = () => {
+    stopAiStepAnim();
+    setAiStepIndex(0);
+    setAiStages([]);
+    aiStepTimerRef.current = setInterval(() => {
+      setAiStepIndex((i) => Math.min(i + 1, AI_PIPELINE_STEPS.length - 2));
+    }, 2800);
+  };
+
   const openAiGenerate = () => {
     if (mode !== 'write' || placementId == null) return;
     if (readOnly && !sharedEditable) {
@@ -374,6 +406,8 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         const ready = (list ?? []).filter((p) => p.available && p.provider !== 'local');
         setAiProviders(ready);
         setAiProvider(ready.find((p) => p.provider === 'tongyi')?.provider || ready[0]?.provider);
+        setAiStepIndex(0);
+        setAiStages([]);
         setAiOpen(true);
       })
       .catch((e) => message.error(e instanceof Error ? e.message : '加载 AI 模型失败'));
@@ -400,6 +434,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     }
     clearTimer();
     setAiGenerating(true);
+    startAiStepAnim();
     try {
       const itemId = active !== 'shared' && article?.contentMode === 'custom' ? article.itemId : undefined;
       const res = await aiGenerateGeoContentArticleApi({
@@ -408,6 +443,11 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         provider: aiProvider,
         userPrompt: aiUserPrompt.trim() || undefined,
       });
+      stopAiStepAnim();
+      setAiStepIndex(AI_PIPELINE_STEPS.length - 1);
+      if (res.stages?.length) {
+        setAiStages(res.stages);
+      }
       setContentTitle(res.contentTitle || '');
       titleRef.current = res.contentTitle || '';
       setBody(res.contentBody || '');
@@ -416,16 +456,25 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       setEditorEpoch((n) => n + 1);
       setEditorReady(false);
       setSaveState('saved');
-      setAiOpen(false);
+      const extra = [
+        res.usedImageCount != null ? `插图 ${res.usedImageCount}` : null,
+        res.qaRounds != null ? `质检 ${res.qaRounds} 轮` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
       message.success(
-        `已生成并写入${itemId ? '独立稿' : '统一稿'}${res.sourceAiModel ? `（${res.sourceAiModel}）` : ''}`,
+        `已生成并写入${itemId ? '独立稿' : '统一稿'}${res.sourceAiModel ? `（${res.sourceAiModel}）` : ''}${extra ? ` · ${extra}` : ''}`,
       );
+      // 短暂展示完成态再关弹窗
+      await new Promise((r) => setTimeout(r, 600));
+      setAiOpen(false);
       if (placementId != null) {
         void load(placementId, active);
       }
     } catch (e) {
       message.error(e instanceof Error ? e.message : 'AI 生成失败');
     } finally {
+      stopAiStepAnim();
       setAiGenerating(false);
     }
   };
@@ -934,18 +983,24 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         ) : null}
       </Modal>
       <Modal
-        title='AI 生成文章'
+        title='AI 一键生成'
         open={aiOpen}
-        onCancel={() => !aiGenerating && setAiOpen(false)}
+        onCancel={() => {
+          if (aiGenerating) return;
+          stopAiStepAnim();
+          setAiOpen(false);
+        }}
         onOk={() => void runAiGenerate()}
-        okText='开始生成'
+        okText={aiGenerating ? '生成中…' : '开始生成'}
         confirmLoading={aiGenerating}
+        okButtonProps={{ disabled: aiGenerating }}
+        cancelButtonProps={{ disabled: aiGenerating }}
         destroyOnHidden
-        width={560}
+        width={640}
       >
         <p className='mb-3 text-sm text-neutral-500'>
-          按「提示词 + 话题 +
-          目标问题」召回卖点，生成可直接粘贴到公众号/知乎等平台的正式排版（导语、小标题、短段落、要点），并写入
+          后台深度思考成文（不求快）：大纲 → 扩写插图 →
+          质检重写直至合格；品牌「小巴依」须自然露出；按素材语义挂图，每节可为 0 张。写入
           {active !== 'shared' && article?.contentMode === 'custom' ? '当前独立稿' : '统一稿'}。
         </p>
         <div className='mb-3 rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600'>
@@ -958,11 +1013,29 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
             {bundle?.targetQuestion || '-'}
           </div>
         </div>
+        {(aiGenerating || aiStages.length > 0) && (
+          <div className='mb-4 rounded-lg border border-neutral-100 bg-gradient-to-b from-sky-50/80 to-white px-3 py-3'>
+            <Steps
+              direction='vertical'
+              size='small'
+              current={aiStepIndex}
+              status={aiGenerating ? 'process' : 'finish'}
+              items={AI_PIPELINE_STEPS.map((s, idx) => {
+                const real = aiStages.find((x) => x.code === s.key);
+                return {
+                  title: s.title,
+                  description: real?.message || (aiGenerating && idx === aiStepIndex ? '进行中…' : undefined),
+                };
+              })}
+            />
+          </div>
+        )}
         <div className='mb-1 text-xs text-neutral-500'>选择模型</div>
         <Select
           className='mb-3 w-full'
           placeholder='请选择已配置的 AI 模型'
           value={aiProvider}
+          disabled={aiGenerating}
           options={aiProviders.map((p) => ({
             value: p.provider,
             label: p.model ? `${p.label}（${p.model}）` : p.label,

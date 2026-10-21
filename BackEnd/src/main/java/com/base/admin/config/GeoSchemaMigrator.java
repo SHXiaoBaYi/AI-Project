@@ -77,6 +77,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureContentReviewRule(connection);
             ensureContentPublisherRule(connection);
             ensureSellPointLibrary(connection);
+            ensureArticleAiPipeline(connection);
             if (cleanupEmptyDaily) {
                 cleanupEmptyUninspectedDailyBeforeToday(connection);
             }
@@ -1576,6 +1577,301 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             }
         }
         log.info("已同步卖点库菜单 menu_id=182 path=geo/sell-point");
+    }
+
+    /**
+     * AI 成文流水线基建：素材库（须关联话题才能召回）、风格包、文章骨架、使用溯源 + 菜单。
+     */
+    private void ensureArticleAiPipeline(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_media_asset")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_media_asset (
+                          id              BIGINT         NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          title           VARCHAR(200)   NOT NULL DEFAULT '' COMMENT '素材标题',
+                          file_url        VARCHAR(500)   NOT NULL COMMENT '图片相对/绝对路径',
+                          thumb_url       VARCHAR(500)   NOT NULL DEFAULT '' COMMENT '缩略图',
+                          source_type     VARCHAR(32)    NOT NULL DEFAULT 'own' COMMENT 'own|stock_licensed',
+                          license_note    VARCHAR(500)   NOT NULL DEFAULT '' COMMENT '授权说明',
+                          brand_visible   TINYINT        NOT NULL DEFAULT 0 COMMENT '图中是否已有品牌露出',
+                          caption         VARCHAR(500)   NOT NULL DEFAULT '' COMMENT '默认图注',
+                          alt_text        VARCHAR(300)   NOT NULL DEFAULT '' COMMENT '无障碍描述',
+                          tags_json       VARCHAR(1000)  NOT NULL DEFAULT '[]' COMMENT '标签JSON',
+                          width_px        INT            NULL COMMENT '宽',
+                          height_px       INT            NULL COMMENT '高',
+                          status          VARCHAR(16)    NOT NULL DEFAULT 'active' COMMENT 'active|draft|disabled',
+                          remark          VARCHAR(500)   NOT NULL DEFAULT '' COMMENT '备注',
+                          create_by       VARCHAR(64)    DEFAULT '' COMMENT '创建者',
+                          create_time     DATETIME       DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                          update_by       VARCHAR(64)    DEFAULT '' COMMENT '更新者',
+                          update_time     DATETIME       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                          is_active       TINYINT        NOT NULL DEFAULT 1 COMMENT '是否有效',
+                          PRIMARY KEY (id),
+                          KEY idx_media_status (status, is_active),
+                          KEY idx_media_brand (brand_visible, is_active)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO文章素材库'
+                        """);
+            }
+            log.info("已创建 geo_media_asset");
+        }
+        // 语义用途字段（召回主依据）；话题关联改为可选软优先
+        if (!columnExists(connection, "geo_media_asset", "usage_hint")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_media_asset
+                          ADD COLUMN usage_hint VARCHAR(500) NOT NULL DEFAULT ''
+                          COMMENT '可用于哪里/适用段落场景' AFTER tags_json
+                        """);
+            }
+            log.info("已为 geo_media_asset 增加 usage_hint");
+        }
+        if (!columnExists(connection, "geo_media_asset", "scene_tags_json")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_media_asset
+                          ADD COLUMN scene_tags_json VARCHAR(1000) NOT NULL DEFAULT '[]'
+                          COMMENT '场景标签JSON' AFTER usage_hint
+                        """);
+            }
+            log.info("已为 geo_media_asset 增加 scene_tags_json");
+        }
+        if (!tableExists(connection, "geo_media_asset_topic")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_media_asset_topic (
+                          id         BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          asset_id   BIGINT   NOT NULL COMMENT '素材ID',
+                          topic_id   BIGINT   NOT NULL COMMENT '话题ID',
+                          create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                          PRIMARY KEY (id),
+                          UNIQUE KEY uk_asset_topic (asset_id, topic_id),
+                          KEY idx_topic_asset (topic_id, asset_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='素材-话题关联（可选软优先）'
+                        """);
+            }
+            log.info("已创建 geo_media_asset_topic");
+        }
+        if (!tableExists(connection, "geo_article_style_pack")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_article_style_pack (
+                          id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          code            VARCHAR(64)   NOT NULL COMMENT '编码',
+                          name            VARCHAR(128)  NOT NULL COMMENT '名称',
+                          platform_hint   VARCHAR(64)   NOT NULL DEFAULT '' COMMENT '适用平台提示 zhihu/toutiao/...',
+                          tone_guide      MEDIUMTEXT    NULL COMMENT '语气与节奏说明',
+                          structure_guide MEDIUMTEXT    NULL COMMENT '结构说明',
+                          sample_phrases  MEDIUMTEXT    NULL COMMENT '可摘用句式(JSON数组，最多摘1～2句)',
+                          brand_guide     VARCHAR(1000) NOT NULL DEFAULT '' COMMENT '品牌露出软约束',
+                          enabled         TINYINT       NOT NULL DEFAULT 1 COMMENT '启用',
+                          sort_order      INT           NOT NULL DEFAULT 0 COMMENT '排序',
+                          create_by       VARCHAR(64)   DEFAULT '',
+                          create_time     DATETIME      DEFAULT CURRENT_TIMESTAMP,
+                          update_by       VARCHAR(64)   DEFAULT '',
+                          update_time     DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                          is_active       TINYINT       NOT NULL DEFAULT 1,
+                          PRIMARY KEY (id),
+                          UNIQUE KEY uk_style_code (code)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO文章风格包'
+                        """);
+            }
+            log.info("已创建 geo_article_style_pack");
+        }
+        if (!tableExists(connection, "geo_article_skeleton")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_article_skeleton (
+                          id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          code            VARCHAR(64)   NOT NULL COMMENT '编码',
+                          name            VARCHAR(128)  NOT NULL COMMENT '名称',
+                          section_schema  MEDIUMTEXT    NULL COMMENT '章节骨架JSON',
+                          enabled         TINYINT       NOT NULL DEFAULT 1,
+                          sort_order      INT           NOT NULL DEFAULT 0,
+                          create_by       VARCHAR(64)   DEFAULT '',
+                          create_time     DATETIME      DEFAULT CURRENT_TIMESTAMP,
+                          update_by       VARCHAR(64)   DEFAULT '',
+                          update_time     DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                          is_active       TINYINT       NOT NULL DEFAULT 1,
+                          PRIMARY KEY (id),
+                          UNIQUE KEY uk_skeleton_code (code)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO文章骨架'
+                        """);
+            }
+            log.info("已创建 geo_article_skeleton");
+        }
+        if (!tableExists(connection, "geo_media_usage")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_media_usage (
+                          id            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          asset_id      BIGINT       NOT NULL COMMENT '素材ID',
+                          placement_id  BIGINT       NOT NULL COMMENT '投放ID',
+                          item_id       BIGINT       NULL COMMENT '平台稿ID',
+                          section_key   VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '章节标识',
+                          create_time   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+                          PRIMARY KEY (id),
+                          KEY idx_usage_placement (placement_id),
+                          KEY idx_usage_asset (asset_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='素材使用溯源'
+                        """);
+            }
+            log.info("已创建 geo_media_usage");
+        }
+        if (!tableExists(connection, "geo_article_gen_trace")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_article_gen_trace (
+                          id             BIGINT       NOT NULL AUTO_INCREMENT,
+                          placement_id   BIGINT       NOT NULL,
+                          item_id        BIGINT       NULL,
+                          style_code     VARCHAR(64)  NOT NULL DEFAULT '',
+                          skeleton_code  VARCHAR(64)  NOT NULL DEFAULT '',
+                          qa_rounds      INT          NOT NULL DEFAULT 0,
+                          used_image_cnt INT          NOT NULL DEFAULT 0,
+                          stages_json    MEDIUMTEXT   NULL,
+                          create_time    DATETIME     DEFAULT CURRENT_TIMESTAMP,
+                          PRIMARY KEY (id),
+                          KEY idx_gen_trace_placement (placement_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI成文流水线溯源'
+                        """);
+            }
+            log.info("已创建 geo_article_gen_trace");
+        }
+        seedStylePacksAndSkeletons(connection);
+        // 188-190 属发布人规则按钮；素材/风格/骨架改用 192+，并修复曾覆盖的发布人规则菜单
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (188, '发布人规则新增', 187, 1, '', '', 'F', 'geo:publisherRule:add', '#', 0, 0, '', 1),
+                    (189, '发布人规则修改', 187, 2, '', '', 'F', 'geo:publisherRule:edit', '#', 0, 0, '', 1),
+                    (190, '发布人规则删除', 187, 3, '', '', 'F', 'geo:publisherRule:delete', '#', 0, 0, '', 1),
+                    (192, '素材库', 132, 6, 'geo/media', '', 'C', 'geo:media:list', 'PictureOutlined', 0, 0,
+                     '文章插图素材；按用途/标签语义召回，话题可选', 1),
+                    (193, '素材新增', 192, 1, '', '', 'F', 'geo:media:add', '#', 0, 0, '', 1),
+                    (194, '素材修改', 192, 2, '', '', 'F', 'geo:media:edit', '#', 0, 0, '', 1),
+                    (195, '素材删除', 192, 3, '', '', 'F', 'geo:media:delete', '#', 0, 0, '', 1),
+                    (196, '风格包', 132, 7, 'geo/style-pack', '', 'C', 'geo:stylePack:list', 'SkinOutlined', 0, 0,
+                     'AI成文语气/结构/可摘句式维护', 1),
+                    (197, '风格包新增', 196, 1, '', '', 'F', 'geo:stylePack:add', '#', 0, 0, '', 1),
+                    (198, '风格包修改', 196, 2, '', '', 'F', 'geo:stylePack:edit', '#', 0, 0, '', 1),
+                    (199, '风格包删除', 196, 3, '', '', 'F', 'geo:stylePack:delete', '#', 0, 0, '', 1),
+                    (200, '文章骨架', 132, 8, 'geo/skeleton', '', 'C', 'geo:skeleton:list', 'PartitionOutlined', 0, 0,
+                     'AI成文章节骨架维护', 1),
+                    (201, '骨架新增', 200, 1, '', '', 'F', 'geo:skeleton:add', '#', 0, 0, '', 1),
+                    (202, '骨架修改', 200, 2, '', '', 'F', 'geo:skeleton:edit', '#', 0, 0, '', 1),
+                    (203, '骨架删除', 200, 3, '', '', 'F', 'geo:skeleton:delete', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      parent_id = VALUES(parent_id),
+                      sort_order = VALUES(sort_order),
+                      path = VALUES(path),
+                      component = VALUES(component),
+                      menu_type = VALUES(menu_type),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      is_active = 1,
+                      visible = VALUES(visible)
+                    """);
+            // 若曾把 191 建成「素材删除」且挂在错误父级，停用以免脏菜单
+            statement.execute("""
+                    UPDATE sys_menu SET is_active = 0
+                    WHERE menu_id = 191 AND perms = 'geo:media:delete' AND parent_id = 188
+                    """);
+            String menuIds = "188,189,190,192,193,194,195,196,197,198,199,200,201,202,203";
+            statement.execute("""
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (%s)
+                    """.formatted(menuIds));
+            statement.execute("""
+                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                    SELECT rm.role_id, m.menu_id, 1
+                    FROM sys_role_menu rm
+                    CROSS JOIN sys_menu m
+                    WHERE rm.menu_id = 101 AND rm.is_active = 1
+                      AND m.menu_id IN (%s)
+                    """.formatted(menuIds));
+            Long mgmtId = roleIdByKey(connection, "geo_mgmt_review");
+            if (mgmtId != null) {
+                statement.execute("""
+                        INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                        SELECT %d, menu_id, 1 FROM sys_menu WHERE menu_id IN (%s)
+                        """.formatted(mgmtId, menuIds));
+            }
+            Long opsId = roleIdByKey(connection, "geo_ops_entry");
+            if (opsId != null) {
+                statement.execute("""
+                        INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                        SELECT %d, menu_id, 1 FROM sys_menu WHERE menu_id IN (%s)
+                        """.formatted(opsId, menuIds));
+            }
+        }
+        log.info("已同步素材库/风格包/骨架菜单 menu_id=192,196,200");
+    }
+
+    private void seedStylePacksAndSkeletons(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO geo_article_style_pack
+                      (code, name, platform_hint, tone_guide, structure_guide, sample_phrases, brand_guide, enabled, sort_order, is_active)
+                    SELECT * FROM (
+                      SELECT
+                        'zhihu_explain' AS code,
+                        '知乎阐释体' AS name,
+                        'zhihu' AS platform_hint,
+                        '先答结论再拆论据；口语但克制，少口号；段短、信息密度高。' AS tone_guide,
+                        '导语直答目标问题 → 2～4个h2分论点 → 收束立场。学结构不抄全文。' AS structure_guide,
+                        '["先说结论：","很多人会纠结的一点是","落到选择上，可以看这几条"]' AS sample_phrases,
+                        '全文品牌名软约束：建议不超过3次；尽量不在第1段硬推品牌名。图中已有品牌时该节少写文字品牌。' AS brand_guide,
+                        1 AS enabled, 1 AS sort_order, 1 AS is_active
+                    ) t
+                    WHERE NOT EXISTS (SELECT 1 FROM geo_article_style_pack x WHERE x.code = 'zhihu_explain' AND x.is_active = 1)
+                    """);
+            statement.execute("""
+                    INSERT INTO geo_article_style_pack
+                      (code, name, platform_hint, tone_guide, structure_guide, sample_phrases, brand_guide, enabled, sort_order, is_active)
+                    SELECT * FROM (
+                      SELECT
+                        'toutiao_story' AS code,
+                        '头条叙事体' AS name,
+                        'toutiao' AS platform_hint,
+                        '场景开场，对比/转折推进，数据点穿插；可读性强。' AS tone_guide,
+                        '场景导语 → 问题拆解小标题 → 证据段 → 行动建议收束。' AS structure_guide,
+                        '["如果你也在纠结","换个角度看","真正拉开差距的，往往是"]' AS sample_phrases,
+                        '全文品牌名软约束：建议不超过3次；图中已有品牌时该节减少文字品牌露出。' AS brand_guide,
+                        1 AS enabled, 2 AS sort_order, 1 AS is_active
+                    ) t
+                    WHERE NOT EXISTS (SELECT 1 FROM geo_article_style_pack x WHERE x.code = 'toutiao_story' AND x.is_active = 1)
+                    """);
+            statement.execute("""
+                    INSERT INTO geo_article_skeleton
+                      (code, name, section_schema, enabled, sort_order, is_active)
+                    SELECT * FROM (
+                      SELECT
+                        'qa_sections_v1' AS code,
+                        '问答分节骨架' AS name,
+                        '{"lead":"导语1-2段直答","sections":[{"role":"point","min":2,"max":4},"{"role":"evidence"},{"role":"close"}]' AS section_schema,
+                        1 AS enabled, 1 AS sort_order, 1 AS is_active
+                    ) t
+                    WHERE NOT EXISTS (SELECT 1 FROM geo_article_skeleton x WHERE x.code = 'qa_sections_v1' AND x.is_active = 1)
+                    """);
+        }
+        // 修正骨架 JSON（上面字符串易写错），幂等更新
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    UPDATE geo_article_skeleton
+                    SET section_schema = '{"lead":"导语1-2段直答目标问题","sections":[{"role":"argument","countHint":"2-4"},{"role":"evidence","optional":true},{"role":"close","required":true}],"imagePolicy":"每节0张起，由模型判定是否插图"}'
+                    WHERE code = 'qa_sections_v1' AND is_active = 1
+                    """);
+            // 品牌规则：必须自然露出，禁止零出现
+            String brandGuide = "须自然出现「小巴依」2～4次：嵌进论证/场景，禁止全文0次与开篇硬广；图中已有品牌时该节少写文字品牌。质量目标优于常见范文。";
+            statement.execute("""
+                    UPDATE geo_article_style_pack
+                    SET brand_guide = '%s'
+                    WHERE code IN ('zhihu_explain', 'toutiao_story') AND is_active = 1
+                    """.formatted(brandGuide.replace("'", "''")));
+        }
     }
 
     private void addItemColumn(Connection connection, String column, String sql) throws Exception {
