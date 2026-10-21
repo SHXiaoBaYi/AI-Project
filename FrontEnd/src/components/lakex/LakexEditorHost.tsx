@@ -74,22 +74,32 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
             supportCustomStyle: true,
           },
           math: { KaTexURL: withBase('lakex/katex.js') },
-          image: uploadImage
-            ? {
-                async createUploadPromise(request: { data?: Blob | File; type?: string }) {
-                  const blob = request.data;
-                  if (!blob) throw new Error('无上传文件');
-                  const file =
-                    blob instanceof File
-                      ? blob
-                      : new File([blob], `image.${(request.type || 'png').replace('image/', '')}`, {
-                          type: request.type || 'image/png',
-                        });
-                  const url = await uploadImage(file);
-                  return { url, size: file.size, filename: file.name };
-                },
-              }
-            : undefined,
+          // Lake 默认 capturePatterns 会抓取几乎所有外链图并重传；素材库 URL 必须用原址，否则变 data:image 并「上传失败」
+          image: {
+            capturePatterns: [/^data:image\//i, /^blob:/i],
+            excludeCapturePatterns: [/\/uploads\//i, /\/api\/uploads\//i, /\/shxby\/api\/uploads\//i],
+            useOriginSrc: (src?: string) => {
+              const s = src || '';
+              if (!s || s.startsWith('data:') || s.startsWith('blob:')) return false;
+              return /\/uploads\//i.test(s) || /^https?:\/\//i.test(s) || s.startsWith('/');
+            },
+            ...(uploadImage
+              ? {
+                  async createUploadPromise(request: { data?: Blob | File; type?: string }) {
+                    const blob = request.data;
+                    if (!blob) throw new Error('无上传文件');
+                    const file =
+                      blob instanceof File
+                        ? blob
+                        : new File([blob], `image.${(request.type || 'png').replace('image/', '')}`, {
+                            type: request.type || 'image/png',
+                          });
+                    const url = await uploadImage(file);
+                    return { url, size: file.size, filename: file.name };
+                  },
+                }
+              : {}),
+          },
         });
 
         if (disposed) {

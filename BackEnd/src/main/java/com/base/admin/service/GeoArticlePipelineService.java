@@ -257,8 +257,8 @@ public class GeoArticlePipelineService {
         String catalog = buildMediaCatalog(candidates);
         String system = """
                 你是插图编辑。根据正文与素材目录，决定每节是否插图（允许 0 张）。
-                规则：只使用目录中的 assetId；按 usageHint/tags/sceneTags 与段落意图匹配挂载。
-                图中 brandVisible=1 时，该节文字应减少品牌名露出。
+                规则：只返回目录中的 assetId（由服务端写入素材库真实 src，禁止你输出 data:image 或臆造 URL）。
+                按 usageHint/tags/sceneTags 与段落意图匹配。图中 brandVisible=1 时该节少写文字品牌。
                 只输出 JSON：{"placements":[{"sectionKey":"s1","assetId":12,"afterHeading":true,"caption":"..."}]}
                 若全不插图：{"placements":[]}
                 """;
@@ -292,9 +292,10 @@ public class GeoArticlePipelineService {
                 String caption = StringUtils.hasText(p.path("caption").asText())
                         ? p.path("caption").asText().trim()
                         : (StringUtils.hasText(asset.getCaption()) ? asset.getCaption() : asset.getTitle());
-                String publicUrl = fileStorageService.toPublicUrl(asset.getFileUrl());
+                // 同源相对路径，直接引用素材库文件；禁止 data:image，避免 Lake 重传失败
+                String imgSrc = toArticleImgSrc(asset.getFileUrl());
                 String alt = StringUtils.hasText(asset.getAltText()) ? asset.getAltText() : caption;
-                String img = "<figure><img src=\"" + escapeAttr(publicUrl) + "\" alt=\"" + escapeAttr(alt)
+                String img = "<figure><img src=\"" + escapeAttr(imgSrc) + "\" alt=\"" + escapeAttr(alt)
                         + "\" /><figcaption>" + escapeHtml(caption) + "</figcaption></figure>";
                 String placeholder = "<!--IMG:" + sectionKey + "-->";
                 if (html.contains(placeholder)) {
@@ -319,6 +320,7 @@ public class GeoArticlePipelineService {
             html = dampenBrandNearMarkers(html);
             html = html.replace("<!--brand-in-image-->", "");
         }
+        html = stripDataImages(html);
         return new IllustrateResult(new Parsed(draft.title(), html), used, sectionMap);
     }
 
@@ -357,7 +359,7 @@ public class GeoArticlePipelineService {
     private Parsed chatRewrite(GeoContentPlacement placement, GeoArticleStylePack style,
                                Parsed draft, String feedback, String pointsJson, String provider) {
         String system = """
-                按质检意见深度改写全文。保留已插入的 <figure>/<img>/<figcaption> 与 src，除非意见明确要求删图。
+                按质检意见深度改写全文。必须原样保留已插入的 <figure>/<img>/<figcaption> 的 src（素材库路径），禁止改成 data:image 或外链臆造地址，除非意见明确要求删图。
                 事实只来自卖点库。改写后质量须明显好于流水账范文；品牌「小巴依」须自然出现至少 2 次。
                 """ + BRAND_QUALITY_RULES + """
                 只输出 JSON：{"title":"...","html":"..."}
@@ -445,7 +447,7 @@ public class GeoArticlePipelineService {
         if (!html.contains("<")) {
             html = plainToHtml(html);
         }
-        return new Parsed(title, html);
+        return new Parsed(title, stripDataImages(html));
     }
 
     private JsonNode readJson(String content) throws Exception {
@@ -472,7 +474,42 @@ public class GeoArticlePipelineService {
         html = html.replaceAll("(?is)<style[^>]*>.*?</style>", "");
         html = html.replaceAll("(?i)</?a\\b[^>]*>", "");
         html = html.replaceAll("(?i)\\s(style|class|onclick|onerror)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)", "");
+        html = stripDataImages(html);
         return html.trim();
+    }
+
+    /**
+     * Lake 正文用同源路径直接引用素材库（如 /shxby/api/uploads/geo/xxx.jpg），
+     * 避免绝对外链被编辑器抓取重传成 data:image。
+     */
+    private String toArticleImgSrc(String fileUrl) {
+        String publicUrl = fileStorageService.toPublicUrl(fileUrl);
+        if (!StringUtils.hasText(publicUrl)) {
+            return fileUrl == null ? "" : fileUrl;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(publicUrl.trim());
+            String path = uri.getPath();
+            if (StringUtils.hasText(path) && path.contains("/uploads/")) {
+                return path;
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        if (publicUrl.startsWith("/")) {
+            return publicUrl;
+        }
+        return publicUrl;
+    }
+
+    private static String stripDataImages(String html) {
+        if (!StringUtils.hasText(html) || !html.toLowerCase(Locale.ROOT).contains("data:image")) {
+            return html;
+        }
+        // 去掉 data URI 图及其空 figure，避免编辑器「上传失败」
+        String out = html.replaceAll("(?is)<img[^>]*src\\s*=\\s*[\"']data:image[^\"']*[\"'][^>]*/?>", "");
+        out = out.replaceAll("(?is)<figure>\\s*(?:<figcaption>[\\s\\S]*?</figcaption>)?\\s*</figure>", "");
+        return out;
     }
 
     private static String plainToHtml(String text) {
