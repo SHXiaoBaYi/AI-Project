@@ -6,7 +6,8 @@ import {
   addGeoContentArticleOpinionApi,
   addGeoContentPlatformArticleApi,
   addGeoContentReviewAnnotationApi,
-  aiGenerateGeoContentArticleApi,
+  getAiGenerateJobApi,
+  startAiGenerateGeoContentArticleApi,
   deleteGeoContentReviewAnnotationApi,
   getGeoAiProvidersApi,
   getGeoContentArticleBundleApi,
@@ -87,12 +88,13 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiStepIndex, setAiStepIndex] = useState(0);
   const [aiStages, setAiStages] = useState<GeoPipelineStage[]>([]);
+  const [aiCurrentMessage, setAiCurrentMessage] = useState('');
   const [aiProvider, setAiProvider] = useState<string>();
   const [aiUserPrompt, setAiUserPrompt] = useState('');
   const [aiProviders, setAiProviders] = useState<
     { provider: string; label: string; model: string; available: boolean; hint?: string }[]
   >([]);
-  const aiStepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const aiPollAbortRef = useRef(false);
   const [editorEpoch, setEditorEpoch] = useState(0);
   const [reviewHints, setReviewHints] = useState<{
     roundLabel: string;
@@ -379,20 +381,22 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     }
   };
 
-  const stopAiStepAnim = () => {
-    if (aiStepTimerRef.current) {
-      clearInterval(aiStepTimerRef.current);
-      aiStepTimerRef.current = null;
-    }
+  const stopAiPoll = () => {
+    aiPollAbortRef.current = true;
   };
 
-  const startAiStepAnim = () => {
-    stopAiStepAnim();
-    setAiStepIndex(0);
-    setAiStages([]);
-    aiStepTimerRef.current = setInterval(() => {
-      setAiStepIndex((i) => Math.min(i + 1, AI_PIPELINE_STEPS.length - 2));
-    }, 2800);
+  const applyAiJobProgress = (job: { currentCode?: string; currentMessage?: string; stages?: GeoPipelineStage[] }) => {
+    if (job.stages?.length) {
+      setAiStages(job.stages);
+    }
+    if (job.currentMessage) {
+      setAiCurrentMessage(job.currentMessage);
+    }
+    const code = job.currentCode;
+    if (code) {
+      const idx = AI_PIPELINE_STEPS.findIndex((s) => s.key === code);
+      if (idx >= 0) setAiStepIndex(idx);
+    }
   };
 
   const openAiGenerate = () => {
@@ -408,6 +412,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         setAiProvider(ready.find((p) => p.provider === 'tongyi')?.provider || ready[0]?.provider);
         setAiStepIndex(0);
         setAiStages([]);
+        setAiCurrentMessage('');
         setAiOpen(true);
       })
       .catch((e) => message.error(e instanceof Error ? e.message : '加载 AI 模型失败'));
@@ -433,21 +438,42 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       if (!ok) return;
     }
     clearTimer();
+    aiPollAbortRef.current = false;
     setAiGenerating(true);
-    startAiStepAnim();
+    setAiStepIndex(0);
+    setAiStages([]);
+    setAiCurrentMessage('已提交任务，等待开始…');
     try {
       const itemId = active !== 'shared' && article?.contentMode === 'custom' ? article.itemId : undefined;
-      const res = await aiGenerateGeoContentArticleApi({
+      const started = await startAiGenerateGeoContentArticleApi({
         placementId,
         itemId,
         provider: aiProvider,
         userPrompt: aiUserPrompt.trim() || undefined,
       });
-      stopAiStepAnim();
+      applyAiJobProgress(started);
+      let job = started;
+      while (job.status === 'RUNNING' && !aiPollAbortRef.current) {
+        await new Promise((r) => setTimeout(r, 1200));
+        if (aiPollAbortRef.current) break;
+        job = await getAiGenerateJobApi(started.jobId);
+        applyAiJobProgress(job);
+      }
+      if (aiPollAbortRef.current) {
+        return;
+      }
+      if (job.status === 'FAILED') {
+        throw new Error(job.currentMessage || 'AI 生成失败');
+      }
+      const res = job.result;
+      if (!res) {
+        throw new Error('生成完成但未返回结果');
+      }
       setAiStepIndex(AI_PIPELINE_STEPS.length - 1);
       if (res.stages?.length) {
         setAiStages(res.stages);
       }
+      setAiCurrentMessage('生成完成');
       setContentTitle(res.contentTitle || '');
       titleRef.current = res.contentTitle || '';
       setBody(res.contentBody || '');
@@ -465,7 +491,6 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       message.success(
         `已生成并写入${itemId ? '独立稿' : '统一稿'}${res.sourceAiModel ? `（${res.sourceAiModel}）` : ''}${extra ? ` · ${extra}` : ''}`,
       );
-      // 短暂展示完成态再关弹窗
       await new Promise((r) => setTimeout(r, 600));
       setAiOpen(false);
       if (placementId != null) {
@@ -474,7 +499,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     } catch (e) {
       message.error(e instanceof Error ? e.message : 'AI 生成失败');
     } finally {
-      stopAiStepAnim();
+      stopAiPoll();
       setAiGenerating(false);
     }
   };
@@ -987,7 +1012,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         open={aiOpen}
         onCancel={() => {
           if (aiGenerating) return;
-          stopAiStepAnim();
+          stopAiPoll();
           setAiOpen(false);
         }}
         onOk={() => void runAiGenerate()}
@@ -1015,6 +1040,17 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         </div>
         {(aiGenerating || aiStages.length > 0) && (
           <div className='mb-4 rounded-lg border border-neutral-100 bg-gradient-to-b from-sky-50/80 to-white px-3 py-3'>
+            {aiCurrentMessage ? (
+              <div className='mb-3 flex items-start gap-2 rounded border border-sky-100 bg-white px-2.5 py-2 text-sm text-sky-800'>
+                {aiGenerating ? (
+                  <Spin
+                    size='small'
+                    className='mt-0.5'
+                  />
+                ) : null}
+                <span className='min-w-0 leading-5'>{aiCurrentMessage}</span>
+              </div>
+            ) : null}
             <Steps
               direction='vertical'
               size='small'
@@ -1022,9 +1058,10 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
               status={aiGenerating ? 'process' : 'finish'}
               items={AI_PIPELINE_STEPS.map((s, idx) => {
                 const real = aiStages.find((x) => x.code === s.key);
+                const isCurrent = aiGenerating && idx === aiStepIndex;
                 return {
                   title: s.title,
-                  description: real?.message || (aiGenerating && idx === aiStepIndex ? '进行中…' : undefined),
+                  description: real?.message || (isCurrent ? aiCurrentMessage || '进行中…' : undefined),
                 };
               })}
             />

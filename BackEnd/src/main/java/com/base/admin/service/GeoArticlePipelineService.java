@@ -66,21 +66,31 @@ public class GeoArticlePipelineService {
     private final GeoArticleGenTraceMapper genTraceMapper;
     private final ObjectMapper objectMapper;
 
+    @FunctionalInterface
+    public interface ProgressListener {
+        void onStage(String code, String name, String status, String message);
+    }
+
     public GeoArticlePipelineResultVO run(GeoContentPlacement placement, GeoContentAiGenerateDTO dto, String provider) {
+        return run(placement, dto, provider, null);
+    }
+
+    public GeoArticlePipelineResultVO run(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
+                                          String provider, ProgressListener progress) {
         GeoArticlePipelineResultVO result = new GeoArticlePipelineResultVO();
         List<GeoPipelineStageVO> stages = result.getStages();
 
         // —— 阶段1：风格包 + 骨架 ——
-        mark(stages, "style", "加载风格与骨架", "running", null);
+        mark(stages, progress, "style", "加载风格与骨架", "running", "正在加载风格包与文章骨架…");
         GeoArticleStylePack style = pickStylePack();
         GeoArticleSkeleton skeleton = pickSkeleton();
         result.setStyleCode(style.getCode());
         result.setSkeletonCode(skeleton.getCode());
-        mark(stages, "style", "加载风格与骨架", "done",
+        mark(stages, progress, "style", "加载风格与骨架", "done",
                 style.getName() + " / " + skeleton.getName());
 
         // —— 阶段2：卖点召回 ——
-        mark(stages, "sell", "召回卖点", "running", null);
+        mark(stages, progress, "sell", "召回卖点", "running", "正在按话题/目标问题召回卖点…");
         GeoSellPointContextVO ctx = sellPointContextService.build(
                 placement.getTopicName(), placement.getTargetQuestion(), 12);
         int pointCnt = ctx.getPoints() == null ? 0 : ctx.getPoints().size();
@@ -91,59 +101,68 @@ public class GeoArticlePipelineService {
         } catch (Exception e) {
             throw new BusinessException("组装卖点上下文失败");
         }
-        mark(stages, "sell", "召回卖点", "done", "召回 " + pointCnt + " 条");
+        mark(stages, progress, "sell", "召回卖点", "done", "召回 " + pointCnt + " 条");
 
         // —— 阶段3：大纲 ——
-        mark(stages, "outline", "生成大纲", "running", null);
+        mark(stages, progress, "outline", "生成大纲", "running", "深度思考中：规划论点、品牌落点与证据顺序…");
         String outlineJson = chatOutline(placement, dto, style, skeleton, pointsJson, provider);
-        mark(stages, "outline", "生成大纲", "done", truncate(outlineJson, 120));
+        mark(stages, progress, "outline", "生成大纲", "done", truncate(outlineJson, 120));
 
         // —— 阶段4：语义召回素材（用途/标签匹配；话题仅软优先）——
-        mark(stages, "media", "语义召回素材", "running", null);
+        mark(stages, progress, "media", "语义召回素材", "running", "按用途/标签匹配素材库…");
         String mediaContext = nz(placement.getTopicName()) + " " + nz(placement.getTargetQuestion())
                 + (StringUtils.hasText(dto.getUserPrompt()) ? " " + dto.getUserPrompt() : "");
         List<GeoMediaAsset> candidates = mediaAssetService.recallForArticle(
                 placement.getTopicId(), mediaContext, 24);
-        mark(stages, "media", "语义召回素材", "done",
+        mark(stages, progress, "media", "语义召回素材", "done",
                 candidates.isEmpty()
                         ? "暂无生效素材，各节可为 0 图"
                         : ("候选 " + candidates.size() + " 张（用途/标签匹配，话题软优先）"));
 
         // —— 阶段5：扩写正文（含风格句式、品牌软约束）——
-        mark(stages, "expand", "扩写正文", "running", null);
+        mark(stages, progress, "expand", "扩写正文", "running", "深度扩写中（耗时较长，请稍候）…");
         Parsed draft = chatExpand(placement, dto, style, skeleton, pointsJson, outlineJson, candidates, provider);
-        mark(stages, "expand", "扩写正文", "done", "标题：" + truncate(draft.title(), 40));
+        mark(stages, progress, "expand", "扩写正文", "done", "标题：" + truncate(draft.title(), 40));
 
         // —— 阶段6：智能插图（模型判定每节 0+ 张）——
-        mark(stages, "illustrate", "智能插图", "running", null);
+        mark(stages, progress, "illustrate", "智能插图", "running", "判定各节是否挂载素材库图片…");
         IllustrateResult illustrated = illustrate(draft, candidates, provider);
         draft = illustrated.article();
         result.setUsedImageCount(illustrated.usedAssetIds().size());
         result.getUsedAssetIds().addAll(illustrated.usedAssetIds());
-        mark(stages, "illustrate", "智能插图", "done",
+        mark(stages, progress, "illustrate", "智能插图", "done",
                 illustrated.usedAssetIds().isEmpty()
                         ? "模型判定本节无需插图"
                         : ("插入 " + illustrated.usedAssetIds().size() + " 张"));
 
         // —— 阶段7：质检失败自动重写直到合格 ——
-        mark(stages, "qa", "质检与重写", "running", null);
+        mark(stages, progress, "qa", "质检与重写", "running", "准备质检…");
         int qaRounds = 0;
         for (int i = 0; i < MAX_QA_ROUNDS; i++) {
+            int round = i + 1;
+            mark(stages, progress, "qa", "质检与重写", "running",
+                    "第 " + round + "/" + MAX_QA_ROUNDS + " 轮质检中（品牌露出、结构、事实、文笔）…");
             QaResult qa = chatQa(placement, style, draft, provider);
-            qaRounds = i + 1;
+            qaRounds = round;
             if (qa.pass()) {
-                mark(stages, "qa", "质检与重写", "done",
+                mark(stages, progress, "qa", "质检与重写", "done",
                         "第 " + qaRounds + " 轮质检通过");
                 break;
             }
+            String reason = StringUtils.hasText(qa.feedback()) ? truncate(qa.feedback(), 80) : "未达标";
             if (i == MAX_QA_ROUNDS - 1) {
-                // 最后一轮仍失败：再强制重写一次后接受
+                mark(stages, progress, "qa", "质检与重写", "running",
+                        "第 " + round + " 轮未通过：" + reason + "；按末次意见强制重写中…");
                 draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, provider);
-                mark(stages, "qa", "质检与重写", "done",
+                mark(stages, progress, "qa", "质检与重写", "done",
                         "已达上限 " + MAX_QA_ROUNDS + " 轮，已按末次意见重写");
                 break;
             }
+            mark(stages, progress, "qa", "质检与重写", "running",
+                    "第 " + round + " 轮未通过：" + reason + "；正在重写…");
             draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, provider);
+            mark(stages, progress, "qa", "质检与重写", "running",
+                    "第 " + round + " 轮重写完成，继续下一轮质检…");
         }
         result.setQaRounds(qaRounds);
 
@@ -601,15 +620,27 @@ public class GeoArticlePipelineService {
         }
     }
 
-    private void mark(List<GeoPipelineStageVO> stages, String code, String name, String status, String message) {
+    private void mark(List<GeoPipelineStageVO> stages, ProgressListener progress,
+                      String code, String name, String status, String message) {
+        boolean updated = false;
         for (GeoPipelineStageVO s : stages) {
             if (code.equals(s.getCode())) {
                 s.setStatus(status);
                 s.setMessage(message);
-                return;
+                updated = true;
+                break;
             }
         }
-        stages.add(new GeoPipelineStageVO(code, name, status, message));
+        if (!updated) {
+            stages.add(new GeoPipelineStageVO(code, name, status, message));
+        }
+        if (progress != null) {
+            try {
+                progress.onStage(code, name, status, message);
+            } catch (Exception e) {
+                log.warn("进度回调失败: {}", e.getMessage());
+            }
+        }
     }
 
     private String resolveAiSourceLabel(String provider) {

@@ -42,6 +42,7 @@ import type {
   GeoContentPublisherRule,
   GeoContentWritingRow,
   GeoContentAiGenerateResult,
+  GeoAiGenerateJob,
   GeoArticleSkeleton,
   GeoArticleStylePack,
   GeoMediaAsset,
@@ -651,6 +652,20 @@ export function aiGenerateGeoContentArticleApi(data: {
     // 深度思考成文：大纲/扩写/质检均可能较慢，不求快
     timeout: 600000,
   });
+}
+
+/** 异步启动 AI 生成，立即返回 jobId；配合 getAiGenerateJobApi 轮询进度 */
+export function startAiGenerateGeoContentArticleApi(data: {
+  placementId: number;
+  itemId?: number | null;
+  provider?: string;
+  userPrompt?: string;
+}) {
+  return request.post<unknown, GeoAiGenerateJob>('/geo/content-placement/articles/ai-generate/start', data);
+}
+
+export function getAiGenerateJobApi(jobId: string) {
+  return request.get<unknown, GeoAiGenerateJob>(`/geo/content-placement/articles/ai-generate/jobs/${jobId}`);
 }
 
 export function getGeoMediaListApi(

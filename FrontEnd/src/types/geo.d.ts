@@ -989,6 +989,15 @@ export interface GeoContentAiGenerateResult {
   contentVersion?: number;
 }
 
+export interface GeoAiGenerateJob {
+  jobId: string;
+  status: 'RUNNING' | 'SUCCESS' | 'FAILED' | string;
+  currentCode?: string;
+  currentMessage?: string;
+  stages?: GeoPipelineStage[];
+  result?: GeoContentAiGenerateResult;
+}
+
 export interface GeoMediaAsset {
   id: number;
   title: string;

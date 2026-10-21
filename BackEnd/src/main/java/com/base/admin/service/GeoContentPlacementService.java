@@ -98,6 +98,10 @@ public interface GeoContentPlacementService {
     /** 按卖点库 + 话题/目标问题 AI 生成文章草稿并写入统一稿或独立稿 */
     GeoContentAiGenerateVO generateArticle(GeoContentAiGenerateDTO dto);
 
+    /** 同上，并回调流水线进度（异步任务轮询用） */
+    GeoContentAiGenerateVO generateArticle(GeoContentAiGenerateDTO dto,
+                                           GeoArticlePipelineService.ProgressListener progress);
+
     Long createItem(GeoContentPlacementItemDTO dto);
 
     /**

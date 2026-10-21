@@ -1187,6 +1187,13 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     @Override
     @Transactional(rollbackFor = Exception.class)
     public GeoContentAiGenerateVO generateArticle(GeoContentAiGenerateDTO dto) {
+        return generateArticle(dto, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public GeoContentAiGenerateVO generateArticle(GeoContentAiGenerateDTO dto,
+                                                  GeoArticlePipelineService.ProgressListener progress) {
         if (dto == null || dto.getPlacementId() == null) {
             throw new BusinessException("内容投放ID不能为空");
         }
@@ -1212,14 +1219,18 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             throw new BusinessException("未配置可用 AI 模型，请到「系统管理 → AI模型配置」中填写");
         }
 
-        // 后台两阶段流水线（大纲→扩写→插图→质检重写）；前端仍一键调用
+        // 后台两阶段流水线（大纲→扩写→插图→质检重写）；前端异步轮询进度
         GeoArticlePipelineResultVO pipeline;
         try {
-            pipeline = articlePipelineService.run(placement, dto, provider);
+            pipeline = articlePipelineService.run(placement, dto, provider, progress);
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             throw new BusinessException("AI 生成失败: " + e.getMessage());
+        }
+
+        if (progress != null) {
+            progress.onStage("save", "写入草稿", "running", "正在写入统一稿/独立稿…");
         }
 
         String title = pipeline.getTitle();

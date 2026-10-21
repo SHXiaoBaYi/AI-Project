@@ -19,6 +19,7 @@ import com.base.admin.domain.dto.GeoGenerateSimilarBatchDTO;
 import com.base.admin.domain.dto.GeoGenerateSimilarDTO;
 import com.base.admin.domain.dto.GeoSimilarQuestionCommitDTO;
 import com.base.admin.domain.vo.GeoSimilarQuestionPreviewVO;
+import com.base.admin.domain.vo.GeoAiGenerateJobVO;
 import com.base.admin.domain.vo.GeoAiProviderOptionVO;
 import com.base.admin.domain.vo.GeoContentAiGenerateVO;
 import com.base.admin.domain.vo.GeoContentArticleBundleVO;
@@ -35,6 +36,7 @@ import com.base.admin.domain.vo.GeoTargetQuestionOptionVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 import com.base.admin.common.Constants;
 import com.base.admin.domain.entity.GeoPlatform;
+import com.base.admin.service.GeoAiGenerateJobService;
 import com.base.admin.service.GeoContentPlacementService;
 import com.base.admin.service.GeoImportJobService;
 import com.base.admin.service.GeoPlatformService;
@@ -70,6 +72,7 @@ public class GeoContentPlacementController {
     private final GeoContentPlacementService contentPlacementService;
     private final GeoPlatformService platformService;
     private final GeoImportJobService importJobService;
+    private final GeoAiGenerateJobService aiGenerateJobService;
 
     @Operation(summary = "分页查询内容投放（按内容聚合）")
     @PostMapping("/list")
@@ -233,6 +236,21 @@ public class GeoContentPlacementController {
     @Log(title = "GEO内容投放-AI生成文章", businessType = 1)
     public Result<GeoContentAiGenerateVO> aiGenerateArticle(@Valid @RequestBody GeoContentAiGenerateDTO dto) {
         return Result.ok(contentPlacementService.generateArticle(dto));
+    }
+
+    @Operation(summary = "异步启动 AI 生成文章（立即返回 jobId，轮询进度）")
+    @PostMapping("/articles/ai-generate/start")
+    @RequiresPermission({"geo:content:work", "geo:content:edit", "geo:write:mine"})
+    @Log(title = "GEO内容投放-AI生成文章(异步)", businessType = 1)
+    public Result<GeoAiGenerateJobVO> aiGenerateArticleStart(@Valid @RequestBody GeoContentAiGenerateDTO dto) {
+        return Result.ok(aiGenerateJobService.start(dto));
+    }
+
+    @Operation(summary = "查询 AI 生成文章任务进度")
+    @GetMapping("/articles/ai-generate/jobs/{jobId}")
+    @RequiresPermission({"geo:content:work", "geo:content:edit", "geo:write:mine"})
+    public Result<GeoAiGenerateJobVO> aiGenerateArticleJob(@PathVariable String jobId) {
+        return Result.ok(aiGenerateJobService.get(jobId));
     }
 
     @Operation(summary = "预览相似目标问题，不落库")
