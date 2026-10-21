@@ -1,24 +1,23 @@
 import { withBase } from '@/utils/basePath';
 
 /**
- * 仅作非浏览器兜底；线上页面优先跟当前站点同源，避免写死测试/生产 IP。
- * 本地若要强制打开某台 ECS 附件，设 VITE_UPLOAD_PUBLIC_BASE。
+ * 附件根解析规则（禁止在前端源码写死生产/测试 ECS IP）：
+ * 1) VITE_UPLOAD_PUBLIC_BASE（仅本地 .env：测 170.82 / 慎用生产 119.134）
+ * 2) 浏览器同源：当前页 origin + /shxby/api（生产打开就是 119.134，测试打开就是 170.82）
+ * 3) 无浏览器上下文：相对路径 withBase('/api/uploads/...')
  */
-export const UPLOAD_PUBLIC_BASE = 'http://121.40.170.82/shxby/api';
-
 function uploadPublicBase(): string {
   const fromEnv = String(import.meta.env.VITE_UPLOAD_PUBLIC_BASE || '')
     .trim()
     .replace(/\/$/, '');
   if (fromEnv) return fromEnv;
 
-  // 钉钉 H5 / 线上后台：跟当前页面同源（含 /shxby/api），配图与接口同机，文档更新后不再指到错环境
   if (typeof window !== 'undefined' && window.location?.origin) {
     const apiPath = withBase('/api').replace(/\/$/, '');
     return `${window.location.origin}${apiPath}`;
   }
 
-  return UPLOAD_PUBLIC_BASE;
+  return '';
 }
 
 /** 从任意 URL/路径中取出 /uploads/... 相对路径 */
@@ -45,7 +44,7 @@ function extractUploadsPath(raw: string): string | null {
 
 /**
  * 把后端落库或接口返回的附件路径，统一成可打开地址。
- * 默认：当前站点同源 `/shxby/api/uploads/...`；本地可用 VITE_UPLOAD_PUBLIC_BASE 指向某台 ECS。
+ * 线上跟打开页面的环境走；本地用 .env.example 里的测试地址。
  */
 export function resolveUploadUrl(url?: string | null): string {
   if (!url) return '#';
@@ -55,7 +54,9 @@ export function resolveUploadUrl(url?: string | null): string {
 
   const uploadsPath = extractUploadsPath(raw);
   if (uploadsPath) {
-    return `${uploadPublicBase()}${uploadsPath}`;
+    const base = uploadPublicBase();
+    if (base) return `${base}${uploadsPath}`;
+    return withBase(`/api${uploadsPath}`);
   }
 
   // 非上传资源：保持相对 api 前缀

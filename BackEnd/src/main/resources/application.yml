@@ -19,7 +19,8 @@ spring:
       max-file-size: 10MB
       max-request-size: 10MB
 
-# 默认 = 测试环境（local/dev/test）。生产主机在 application-prod.yml 覆盖。
+# 本文件默认 = 本地/测试（profile local|dev|test）。
+# 生产 ECS 必须 SPRING_PROFILES_ACTIVE=prod，由 application-prod.yml 覆盖为 119.134。
 # 测试 RDS：rm-bp15f2a3k5b93293k ；测试 ECS：121.40.170.82
 # 生产 RDS：rm-bp18jx12jxs1884h9 ；生产 ECS：121.40.119.134
 # 注意：测试库外网域名需在阿里云「申请外网地址」后才有 *so* DNS；未申请时本机请代理测试 ECS，ECS 用 internal-host。
@@ -32,7 +33,8 @@ xby:
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
   upload-dir: ${UPLOAD_DIR:./uploads}
-  # 附件对外访问根（含 /api）。落库仍用 /uploads/...，接口返回时拼成公网地址
+  # 仅 local/test 默认测试机；生产见 application-prod.yml → http://121.40.119.134/shxby/api
+  # Java 代码不得再写死 IP 作 @Value 默认值
   upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.170.82/shxby/api}
   # 账号密码登录：默认仅 localhost；测试环境在 application-test.yml 打开
   auth:

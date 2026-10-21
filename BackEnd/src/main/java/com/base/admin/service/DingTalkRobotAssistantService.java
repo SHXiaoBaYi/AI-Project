@@ -85,7 +85,8 @@ public class DingTalkRobotAssistantService {
     private final ObjectMapper objectMapper;
     private final ObjectProvider<RobotIngressService> robotIngressService;
 
-    @Value("${xby.upload-public-base:http://121.40.170.82/shxby/api}")
+    /** 禁止写死 ECS IP；由 application-local/test/prod.yml 注入 */
+    @Value("${xby.upload-public-base:}")
     private String uploadPublicBase;
 
     private final ExecutorService worker = Executors.newFixedThreadPool(2, r -> {
