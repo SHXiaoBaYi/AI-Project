@@ -267,6 +267,15 @@ public class TrainDocService {
         jdbc.update("UPDATE train_doc SET latest_version_id = ? WHERE id = ?", versionId, docId);
         if (versionId != null) {
             trainQaCalibrateService.markStaleForDocExceptVersion(docId, versionId);
+            // 上传当下就在本机抽配图，避免首问才抽、或本机抽完公网仍 404
+            try {
+                DocBundle freshly = loadDocVersion(docId, versionId);
+                if (freshly != null) {
+                    prepareIndexedDoc(freshly);
+                }
+            } catch (Exception e) {
+                log.warn("上传后预抽答疑配图失败 versionId={}: {}", versionId, e.getMessage());
+            }
         }
         return versionId;
     }
@@ -280,7 +289,7 @@ public class TrainDocService {
         if (doc == null) {
             throw new BusinessException("文档版本不存在");
         }
-        return aiExtractQa(question, doc);
+        return withPublicImages(aiExtractQa(question, doc));
     }
 
     private DocBundle loadDocVersion(long docId, long versionId) {
@@ -588,7 +597,7 @@ public class TrainDocService {
                 TrainAssistantAskVO vo = new TrainAssistantAskVO();
                 vo.setStatus("HIT");
                 vo.setMessage("已命中人工校准答案");
-                vo.setItems(List.of(calibrated.item()));
+                vo.setItems(withPublicImages(List.of(calibrated.item())));
                 vo.setVersionLabel(latest.versionLabel);
                 vo.setHasOlderVersions(latest.hasOlder);
                 vo.setDocId(latest.docId);
@@ -604,7 +613,7 @@ public class TrainDocService {
                     TrainAssistantAskVO vo = new TrainAssistantAskVO();
                     vo.setStatus("HIT");
                     vo.setMessage("已根据最新版培训文档找到相关问答");
-                    vo.setItems(latestHits);
+                    vo.setItems(withPublicImages(latestHits));
                     vo.setVersionLabel(latest.versionLabel);
                     vo.setHasOlderVersions(latest.hasOlder);
                     vo.setDocId(latest.docId);
@@ -619,7 +628,7 @@ public class TrainDocService {
                 TrainAssistantAskVO vo = new TrainAssistantAskVO();
                 vo.setStatus("HIT");
                 vo.setMessage("已命中校准答案（参考历史版本）");
-                vo.setItems(List.of(item));
+                vo.setItems(withPublicImages(List.of(item)));
                 vo.setVersionLabel(latest.versionLabel);
                 vo.setHasOlderVersions(latest.hasOlder);
                 vo.setDocId(latest.docId);
@@ -632,7 +641,7 @@ public class TrainDocService {
                 TrainAssistantAskVO vo = new TrainAssistantAskVO();
                 vo.setStatus("HIT");
                 vo.setMessage("已根据最新版培训文档找到相关问答");
-                vo.setItems(latestHits);
+                vo.setItems(withPublicImages(latestHits));
                 vo.setVersionLabel(latest.versionLabel);
                 vo.setHasOlderVersions(latest.hasOlder);
                 vo.setDocId(latest.docId);
@@ -679,7 +688,7 @@ public class TrainDocService {
         } else {
             vo.setStatus("HIT");
             vo.setMessage("已在旧版培训文档中找到相关问答");
-            vo.setItems(all);
+            vo.setItems(withPublicImages(all));
             vo.setVersionLabel(all.get(0).getVersionLabel());
         }
         return vo;
@@ -2696,6 +2705,60 @@ public class TrainDocService {
             }
         }
         return urls;
+    }
+
+    /**
+     * 答疑下发前把 /uploads/... 配图改成当前环境的公网绝对地址，
+     * 避免前端写死错主机时配图 404（内容对、图数对但打不开）。
+     */
+    private List<TrainAssistantAskVO.QaItem> withPublicImages(List<TrainAssistantAskVO.QaItem> items) {
+        if (items == null || items.isEmpty()) {
+            return items == null ? List.of() : items;
+        }
+        for (TrainAssistantAskVO.QaItem item : items) {
+            applyPublicImageUrls(item);
+        }
+        return items;
+    }
+
+    private void applyPublicImageUrls(TrainAssistantAskVO.QaItem item) {
+        if (item == null) {
+            return;
+        }
+        if (item.getImages() != null && !item.getImages().isEmpty()) {
+            List<String> pubs = new ArrayList<>(item.getImages().size());
+            for (String u : item.getImages()) {
+                String pub = fileStorage.toPublicUrl(u);
+                if (StringUtils.hasText(pub)) {
+                    pubs.add(pub);
+                }
+            }
+            item.setImages(pubs);
+        }
+        if (StringUtils.hasText(item.getAnswerHtml())) {
+            item.setAnswerHtml(rewriteUploadSrcToPublic(item.getAnswerHtml()));
+        }
+    }
+
+    private String rewriteUploadSrcToPublic(String html) {
+        if (!StringUtils.hasText(html) || !html.contains("/uploads/")) {
+            return html;
+        }
+        Matcher m = Pattern.compile("(?i)(\\bsrc=[\"'])([^\"']+)([\"'])").matcher(html);
+        StringBuilder sb = new StringBuilder();
+        while (m.find()) {
+            String src = m.group(2);
+            String pub = src;
+            if (src.contains("/uploads/")) {
+                String converted = fileStorage.toPublicUrl(src);
+                if (StringUtils.hasText(converted)) {
+                    pub = converted;
+                }
+            }
+            m.appendReplacement(sb, Matcher.quoteReplacement(m.group(1) + pub + m.group(3)));
+        }
+        m.appendTail(sb);
+        return sb.toString();
     }
 
     /** 把带 [图N] 的原文转成图文混排 HTML（图片插在原文位置）。 */
