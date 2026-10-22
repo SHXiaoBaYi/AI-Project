@@ -165,11 +165,27 @@ public class RobotSchemaMigrator implements ApplicationRunner {
                   host_suffixes   VARCHAR(500) NOT NULL DEFAULT 'xiaohongshu.com,xhslink.com',
                   enabled         TINYINT      NOT NULL DEFAULT 1,
                   remark          VARCHAR(500) DEFAULT '',
+                  last_cookie_alert_at DATETIME NULL COMMENT 'Cookie 失效告警最近一次（按日去重）',
                   update_by       VARCHAR(50)  DEFAULT '',
                   update_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                   PRIMARY KEY (id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='链接监控可选探测 Cookie'
                 """);
+        ensureColumn("ops_link_monitor_probe_cookie", "last_cookie_alert_at", """
+                ALTER TABLE ops_link_monitor_probe_cookie
+                  ADD COLUMN last_cookie_alert_at DATETIME NULL COMMENT 'Cookie 失效告警最近一次（按日去重）'
+                  AFTER remark
+                """);
+    }
+
+    private void ensureColumn(String table, String column, String ddl) {
+        Integer cnt = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+                """, Integer.class, table, column);
+        if (cnt == null || cnt == 0) {
+            jdbc.execute(ddl);
+        }
     }
 
     private void seedIntents() {
