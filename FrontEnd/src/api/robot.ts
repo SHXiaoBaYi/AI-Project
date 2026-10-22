@@ -107,7 +107,14 @@ export function deleteLinkMonitorApi(id: number) {
 }
 
 export function probeLinkMonitorApi(id: number) {
-  return request.post(`/robot/link-monitors/${id}/probe`);
+  return request.post<
+    unknown,
+    {
+      ok: boolean;
+      error?: string;
+      alerted?: boolean;
+    }
+  >(`/robot/link-monitors/${id}/probe`);
 }
 
 export function listLinkMonitorChecksApi(id: number) {

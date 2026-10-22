@@ -213,9 +213,14 @@ public class RobotAdminController {
     @PostMapping("/link-monitors/{id}/probe")
     @RequiresPermission("robot:link-monitor:probe")
     @Log(title = "链接监控探测", businessType = 2)
-    public Result<Void> probe(@PathVariable Long id) {
-        linkMonitorService.probeOne(id);
-        return Result.ok();
+    public Result<Map<String, Object>> probe(@PathVariable Long id) {
+        // 后台手动探测：失败必告警（推群@创建人，失败则通知 wangfangyang）
+        LinkMonitorService.ProbeResult r = linkMonitorService.probeOne(id, true);
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("ok", r.ok());
+        data.put("error", r.error() == null ? "" : r.error());
+        data.put("alerted", r.alerted());
+        return Result.ok(data);
     }
 
     @Operation(summary = "探测日志")

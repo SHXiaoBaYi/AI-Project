@@ -55,6 +55,14 @@ public class RobotIntentRouter {
         if (isDeleteMonitor(lower)) {
             return enabledOrFallback(RobotProductRules.INTENT_LINK_DELETE, 0.92, "start");
         }
+        // 异常查询须优先于列表：「哪些有异常」也含「哪些」，勿误判为全量列表
+        if (isAbnormalMonitor(lower)) {
+            return enabledOrFallback(RobotProductRules.INTENT_LINK_ABNORMAL, 0.95, "start");
+        }
+        // 查询列表须优先于添加：「有几个在监控的链接」含「监控+链接」勿误判为添加
+        if (isListMonitor(lower)) {
+            return enabledOrFallback(RobotProductRules.INTENT_LINK_LIST, 0.94, "start");
+        }
         if (isAddMonitor(lower) || (URL.matcher(t).find() && lower.contains("监控"))) {
             return enabledOrFallback(RobotProductRules.INTENT_LINK_ADD, 0.92, "start");
         }
@@ -133,9 +141,54 @@ public class RobotIntentRouter {
     }
 
     private static boolean isAddMonitor(String lower) {
+        if (isAbnormalMonitor(lower) || isListMonitor(lower)) {
+            return false;
+        }
         return lower.contains("监控") && (lower.contains("链接") || lower.contains("网址")
-                || lower.contains("网站") || lower.contains("添加") || lower.contains("加一个")
-                || lower.contains("帮我") || lower.contains("要监控"));
+                || lower.contains("网站") || lower.contains("笔记") || lower.contains("添加")
+                || lower.contains("加一个") || lower.contains("帮我") || lower.contains("要监控"));
+    }
+
+    /**
+     * 查询有异常的监控，例如「目前监控的笔记是否有异常」「监控的链接哪些有异常」。
+     * 口语里「笔记」按监控链接理解。
+     */
+    private static boolean isAbnormalMonitor(String lower) {
+        if (!lower.contains("监控")) {
+            return false;
+        }
+        // 「帮我监控异常链接」仍属添加，不走异常查询
+        if (lower.contains("添加") || lower.contains("加一个") || lower.contains("加个")
+                || lower.contains("新增") || lower.contains("帮我") || lower.contains("要监控")
+                || lower.contains("帮监控") || lower.contains("加入")) {
+            return false;
+        }
+        return lower.contains("异常") || lower.contains("有问题") || lower.contains("故障")
+                || lower.contains("挂了") || lower.contains("打不开") || lower.contains("失败")
+                || lower.contains("报错") || lower.contains("坏了") || lower.contains("不通");
+    }
+
+    /**
+     * 查询当前监控列表，例如「现在我有几个在监控的链接」「看看正在监控的网址」。
+     */
+    private static boolean isListMonitor(String lower) {
+        if (!lower.contains("监控") || isAbnormalMonitor(lower)) {
+            return false;
+        }
+        // 明确添加口吻不走列表
+        if (lower.contains("添加") || lower.contains("加一个") || lower.contains("加个")
+                || lower.contains("新增") || lower.contains("帮我") || lower.contains("要监控")
+                || lower.contains("帮监控") || lower.contains("加入") || lower.contains("加上")
+                || (lower.contains("加") && (lower.contains("链接") || lower.contains("网址")
+                || lower.contains("网站") || lower.contains("笔记")))) {
+            return false;
+        }
+        return lower.contains("有几个") || lower.contains("有多少") || lower.contains("哪些")
+                || lower.contains("列表") || lower.contains("列出")
+                || lower.contains("查看") || lower.contains("查下") || lower.contains("查一下")
+                || lower.contains("看看") || lower.contains("正在监控") || lower.contains("在监控")
+                || lower.contains("监控中") || lower.contains("当前监控") || lower.contains("我的监控")
+                || lower.contains("监控了几") || lower.contains("监控多少");
     }
 
     private static boolean isDeleteMonitor(String lower) {

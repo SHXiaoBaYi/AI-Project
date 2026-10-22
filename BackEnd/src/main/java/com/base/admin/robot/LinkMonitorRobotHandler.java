@@ -168,6 +168,54 @@ public class LinkMonitorRobotHandler {
         return RobotReply.text(sb.isEmpty() ? "没有变更。" : sb.toString().trim());
     }
 
+    public RobotReply handleList() {
+        List<Map<String, Object>> list = linkMonitorService.listActive(50);
+        if (list.isEmpty()) {
+            return RobotReply.text("当前没有正在监控的链接。");
+        }
+        StringBuilder md = new StringBuilder("当前共有 ").append(list.size()).append(" 条正在监控的链接：\n");
+        int i = 1;
+        for (Map<String, Object> row : list) {
+            String url = String.valueOf(row.get("url"));
+            String cid = row.get("open_conversation_id") == null ? "" : String.valueOf(row.get("open_conversation_id"));
+            String ctype = row.get("conversation_type") == null ? "" : String.valueOf(row.get("conversation_type"));
+            md.append(i++).append(". ").append(url);
+            if ("2".equals(ctype) && StringUtils.hasText(cid)) {
+                md.append("（告警群已绑定）");
+            }
+            md.append("\n");
+        }
+        md.append("\n如需停止某条，可说「删除监控」。查异常可说「监控哪些有异常」。");
+        return RobotReply.text(md.toString().trim());
+    }
+
+    public RobotReply handleAbnormal() {
+        List<Map<String, Object>> list = linkMonitorService.listAbnormal(50);
+        if (list.isEmpty()) {
+            return RobotReply.text("当前没有探测异常的监控链接（最近一次探测均正常，或尚未探测）。");
+        }
+        StringBuilder md = new StringBuilder("当前有 ").append(list.size()).append(" 条监控链接探测异常：\n");
+        int i = 1;
+        for (Map<String, Object> row : list) {
+            String url = String.valueOf(row.get("url"));
+            String err = row.get("last_error") == null ? "" : String.valueOf(row.get("last_error")).trim();
+            Object checked = row.get("last_check_at");
+            Object code = row.get("last_status_code");
+            md.append(i++).append(". ").append(url);
+            if (code != null) {
+                md.append("（HTTP ").append(code).append("）");
+            }
+            if (StringUtils.hasText(err)) {
+                md.append(" — ").append(err);
+            }
+            if (checked != null) {
+                md.append("，最近探测：").append(checked);
+            }
+            md.append("\n");
+        }
+        return RobotReply.text(md.toString().trim());
+    }
+
     public RobotReply handleDelete(String staffId) {
         List<Map<String, Object>> list = linkMonitorService.listActive(20);
         if (list.isEmpty()) {

@@ -45,6 +45,8 @@ public final class RobotProductRules {
 
     public static final String INTENT_CALENDAR_FREEBUSY = "calendar.freebusy";
     public static final String INTENT_LINK_ADD = "link_monitor.add";
+    public static final String INTENT_LINK_LIST = "link_monitor.list";
+    public static final String INTENT_LINK_ABNORMAL = "link_monitor.abnormal";
     public static final String INTENT_LINK_DELETE = "link_monitor.delete";
     public static final String INTENT_HELP = "robot.help";
 
