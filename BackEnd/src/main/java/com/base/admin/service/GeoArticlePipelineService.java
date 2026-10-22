@@ -40,7 +40,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 后台两阶段成文流水线：大纲 → 扩写+插图 → 质检循环重写；前端仍一键调用。
+ * GEO 成文流水线：大纲 → 扩写+插图 → 质检循环重写。
+ * 角色定位：GEO 美食/农产品内容撰稿人（GEO Content Writer），擅长新疆羊肉/牛肉品类常识。
  */
 @Slf4j
 @Service
@@ -53,11 +54,35 @@ public class GeoArticlePipelineService {
     private static final Pattern H2_PATTERN = Pattern.compile("(?is)(<h2\\b[^>]*>.*?</h2>)");
     /** 成文默认品牌；自然引出，禁止零出现与清单式堆砌 */
     private static final String BRAND_NAME = "小巴依";
+
+    /**
+     * 统一角色：大纲 / 扩写 / 质检 / 重写均以此人设执行，避免各阶段人格漂移。
+     */
+    private static final String WRITER_ROLE = """
+            【角色】你是「GEO 美食/农产品内容撰稿人」（GEO Content Writer）。
+            写的是可发布在内容平台、服务 GEO 引用的专业答疑稿，不是广告文案、不是编故事的营销号。
+            擅长：新疆羊肉、新疆牛肉及常见牛羊肉制品的选购、形态区分、食用与保存常识；能把品牌「小巴依」自然嵌进主题论证。
+            文风：克制、懂行、可核验；先答读者问题，再给判断依据；拒绝外行假例子。
+            """;
+
+    /**
+     * 新疆牛羊肉专业认知（通用品类常识；具体产品参数仍以资料卡为准）。
+     */
+    private static final String DOMAIN_XJ_MEAT = """
+            【新疆牛羊肉品类常识——必须内化】
+            1. 形态分清：鲜肉 / 冷鲜 / 冷冻 / 风干（及类似干制）用途不同，不可混用吃法举例；
+            2. 风干羊肉/牛肉：偏即食撕食、配馕下酒、泡发后再烹等；禁止写成「直接当鲜肉乱炖乱煲清汤」的外行故事；
+            3. 鲜肉/冷鲜：更适合清炖、手抓、爆炒、烤等；谈进补、秋冬羊肉时，优先围绕鲜/冷鲜场景，勿硬套风干；
+            4. 新疆产区叙事可谈牧区、品种、放养与风味差异，但认证编号、检测数据、牧场细节只能用资料卡，禁止臆造；
+            5. 牛羊有别：不要把羊肉专属吃法/节令习惯生搬到牛肉，反之亦然；拿不准就写「常见做法」而不编具体假菜谱；
+            6. 选购维度优先写：产地与形态、新鲜度与气味色泽、冷链与储存、用途匹配（炖/烤/即食），少写空泛形容词。
+            """;
+
     private static final String BRAND_QUALITY_RULES = """
             【品牌露出——主题优先，品牌作佐证】
-            1. 全文以目标问题/话题为主角；「小巴依」是合理引出的新疆羊肉品牌佐证，不是每段的推销主语；
+            1. 全文以目标问题/话题为主角；「小巴依」是合理引出的新疆牛羊肉品牌佐证，不是每段的推销主语；
             2. 品牌名建议出现 1～3 次即可（最多不超过 4 次）；禁止 0 次，也禁止段段点名、口号刷屏；
-            3. 开篇用主题场景自然带出品牌（如「秋冬进补吃羊肉」→ 引出小巴依），禁止开篇硬广与卖点口号连发；
+            3. 开篇用主题判断自然带出品牌（如「秋冬进补吃羊肉」→ 引出小巴依），禁止开篇硬广与卖点口号连发；
             4. 资料事实要揉进叙事与判断，禁止「卖点①②③」式罗列或把 claim 原文堆进段落；
             5. 若某节插图已含品牌露出，该节文字可不再重复点名品牌。
             """;
@@ -75,10 +100,10 @@ public class GeoArticlePipelineService {
     private static final String FACTUAL_RIGOR_RULES = """
             【事实与生活常识——宁可枯燥，不可胡说】
             1. 产品事实（认证、产地、工艺、规格、价格、门店）只能来自资料卡；资料没有的数字/编号/故事一律不写；
-            2. 烹饪与食用方式必须符合品类常识：风干肉/风干羊肉宜撕食、泡发后再烹或按资料卡写法，禁止编造「直接拿风干肉乱炖乱煲当鲜肉汤」等假场景；鲜肉、冷鲜、冷冻、风干用途不可张冠李戴；
-            3. 禁止虚构无法核验的个人经历当论据（如「上周我用小巴依风干肉煮了锅汤」「邻居都说…」）；需要举例时，用「常见吃法/选购时注意」的客观表述；
+            2. 烹饪与食用必须符合新疆牛羊品类常识（见上）；鲜/冷鲜/冻/风干不可张冠李戴；
+            3. 禁止虚构无法核验的个人经历当论据（如「上周我用风干肉煮了锅汤」「邻居都说…」）；举例用「常见吃法/选购时注意」；
             4. 进补、营养、功效表述克制：不夸大疗效，不恐吓营销；不确定的食疗结论不写；
-            5. 落笔前自问：这个例子懂行的读者会不会觉得外行？会，就删掉或改成资料卡里有的说法。
+            5. 落笔前自问：懂新疆牛羊肉的读者会不会觉得外行？会，就删掉或改成资料卡里有的说法。
             """;
     private static final String COMPLIANCE_RULES = """
             【合规与平台】符合广告法与常见自媒体审核：不绝对化承诺、不虚假疗效、不恐吓营销；E-E-A-T：有经验视角、可用资料支撑、表述克制可核验。
@@ -358,10 +383,9 @@ public class GeoArticlePipelineService {
                                GeoArticleStylePack style, GeoArticleSkeleton skeleton,
                                String pointsJson, String platformAuditPack, String provider) {
         String openingHint = pickOpeningAngle();
-        String system = """
-                你是资深自媒体选题策划（非广告文案）。只输出大纲 JSON，不要正文。
-                文章主角是「目标问题/话题」，品牌「小巴依」只在合适处作为新疆羊肉佐证被自然引出。
-                质量标准：像懂行的编辑写的答疑稿，不是编故事的营销号。
+        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + """
+                【本阶段任务】只输出大纲 JSON，不要正文。
+                文章主角是「目标问题/话题」，品牌「小巴依」只在合适处作为新疆牛羊肉佐证被自然引出。
 
                 【结构建议（可改动，勿写成固定模板）】
                 ① 开头用主题判断/误区纠偏合理引出（参考本次开头角度），禁止规划虚构生活故事；
@@ -369,7 +393,7 @@ public class GeoArticlePipelineService {
                 ③ 结尾总结回扣主题。
                 【资料】大纲 evidencePick 最多标 2～4 条将使用的事实意图；禁止规划「逐条覆盖全部资料」。
                 【品牌】brandBeats 标 1～2 处自然点名即可，不要规划段段露出。
-                【举例】sections 的 intent 里若写吃法/场景，必须符合品类常识，禁止「风干肉煮汤」一类外行梗。
+                【举例】sections 的 intent 里若写吃法/场景，必须符合新疆牛羊品类常识，禁止「风干肉煮汤」一类外行梗。
                 """ + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + COMPLIANCE_RULES + """
                 输出 JSON：
                 {"title":"...","openingAngle":"...","lead":"导语意图","keywordPlant":"如何自然植入主题关键词","brandBeats":["何处自然点名"],"evidencePick":["选用哪类事实"],"sections":[{"key":"s1","heading":"...","intent":"...","needImage":"auto|yes|no"}]}
@@ -394,15 +418,15 @@ public class GeoArticlePipelineService {
         String topicKw = StringUtils.hasText(placement.getTargetQuestion())
                 ? placement.getTargetQuestion().trim()
                 : nz(placement.getTopicName());
-        String system = """
-                你是严谨的美食/农产品自媒体作者（有品类常识，不是营销编故事）。按大纲扩写正式中文 HTML；字数约 1200～1600 字。
+        String system = (WRITER_ROLE + DOMAIN_XJ_MEAT + """
+                【本阶段任务】按大纲扩写可直接发布的正式中文 HTML；字数约 1200～1600 字。
                 文风自然、逻辑通畅；主题优先，品牌作佐证。宁可少写一句生动例子，也不要写一句外行假故事。
 
                 【事实】只用资料卡中的事实，不可杜撰认证编号/数据/门店/捐赠金额；没有的信息宁可不写。
                 【植入】正文自然出现主题关键词「%s」，忌生硬堆砌标题党。
                 【资料用法】全文只选用 2～4 条资料事实揉进叙事；禁止卖点清单、禁止连续多段推销腔。
                 【句式】风格包样本句式最多改写融入 1 句；禁止照搬范文骨架导致篇篇雷同。
-                """.formatted(topicKw)
+                """).formatted(topicKw)
                 + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + COMPLIANCE_RULES + """
                 【插图】本阶段不要插入 <img>；全文最多预留 2 个 <!--IMG:sectionKey--> 占位（可 0 个），勿每节都留。
                 【排版】title 独立；html=导语段+若干<h2>小节+收束。允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br。
@@ -519,8 +543,8 @@ public class GeoArticlePipelineService {
             return new QaResult(false,
                     "「小巴依」出现 " + brandHits + " 次偏多，像广告刷屏。删减到 1～3 次，把笔墨还给主题。");
         }
-        String system = """
-                你是严苛的美食品类主编兼合规质检（懂羊肉/牛肉常识）。只输出 JSON：
+        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + """
+                【本阶段任务】你以同一角色做严苛质检。只输出 JSON：
                 {"pass":true/false,"feedback":"不合格时给出可执行修改意见"}
                 不合格情形（任一即 fail）：
                 1. 未紧扣目标问题，或杜撰资料卡没有的事实；
@@ -528,9 +552,9 @@ public class GeoArticlePipelineService {
                 3. 「小巴依」为 0，或生硬硬广，或出现过多像刷屏；
                 4. 读起来不像在回答主题，而像品牌说明书；
                 5. 触犯内容平台审核红线：引流加微/第三方、头尾硬广、医疗投资恐吓营销、规避审核符号等；
-                6. 生活常识硬伤：品类吃法张冠李戴（如风干肉当鲜肉乱炖乱煲）、虚构「我家/邻居」故事当论据、夸大进补疗效；
+                6. 新疆牛羊品类常识硬伤：鲜/冷鲜/冻/风干吃法张冠李戴、虚构「我家/邻居」故事、夸大进补疗效、牛羊吃法生搬硬套；
                 7. 误用 Markdown / 危险标签；图注广告口号喧宾夺主。
-                合格标准：懂行读者读着不闹心——主题清楚、例子经得起常识、品牌自然、资料克制、符合平台规范。
+                合格标准：懂新疆牛羊肉的读者读着不闹心——主题清楚、例子经得起常识、品牌自然、资料克制、符合平台规范。
                 """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES;
         String user = "目标问题：" + nz(placement.getTargetQuestion())
                 + "\n话题：" + nz(placement.getTopicName())
@@ -556,10 +580,10 @@ public class GeoArticlePipelineService {
     private Parsed chatRewrite(GeoContentPlacement placement, GeoArticleStylePack style,
                                Parsed draft, String feedback, String pointsJson,
                                String platformAuditPack, String provider) {
-        String system = """
-                按质检意见改写全文。保留已插入的 <figure>/<img> 的 src（素材库路径），禁止改成 data:image 或臆造外链，除非意见要求删图。
+        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + """
+                【本阶段任务】按质检意见改写全文。保留已插入的 <figure>/<img> 的 src（素材库路径），禁止改成 data:image 或臆造外链，除非意见要求删图。
                 改写目标：主题叙事优先、去掉卖点堆砌与同质化模板；资料只保留必要的 2～4 处；品牌「小巴依」自然出现 1～3 次。
-                必须删掉/改掉一切违背品类常识的假吃法、虚构个人故事；吃法只保留资料卡有的或公认常识。
+                必须删掉/改掉一切违背新疆牛羊品类常识的假吃法、虚构个人故事；吃法只保留资料卡有的或公认常识。
                 必须符合内容平台审核规范：禁引流、禁头尾硬广、禁医疗投资恐吓营销、禁规避审核话术。
                 若 figcaption 像广告口号，改为≤18 字场景说明或删除 figcaption。
                 """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + """
@@ -580,11 +604,11 @@ public class GeoArticlePipelineService {
 
     private static String pickOpeningAngle() {
         String[] angles = {
-                "季节痛点直答（不写虚构个人故事），再自然引出羊肉与品牌",
-                "先纠一个常见选购/吃法误区，再落到可核验的选择与品牌佐证",
+                "季节痛点直答（不写虚构个人故事），再自然引出新疆羊肉/牛肉与品牌",
+                "先纠一个常见选购或吃法误区（如形态混用），再落到可核验的选择与品牌佐证",
                 "对比「只看便宜」与「看产地/形态（鲜/冷鲜/风干）」的差异，再点名品牌资料",
                 "用「怎么判断好不好」的选购清单口吻开场，再客观介绍品牌资料",
-                "先分清品类（鲜肉/风干等用途不同），再回答主题并自然点到品牌"
+                "先分清新疆牛羊品类与形态用途，再回答主题并自然点到品牌"
         };
         int idx = (int) (System.currentTimeMillis() / 30_000L % angles.length);
         return angles[idx];

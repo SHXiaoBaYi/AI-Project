@@ -1024,8 +1024,8 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         width={640}
       >
         <p className='mb-3 text-sm text-neutral-500'>
-          后台深度思考成文（不求快）：大纲 → 扩写插图 →
-          质检重写直至合格；品牌「小巴依」须自然露出；按素材语义挂图，每节可为 0 张。写入
+          角色：GEO 美食/农产品内容撰稿人（懂新疆羊肉/牛肉品类常识）。大纲 → 扩写插图 →
+          质检重写直至合格；主题优先、品牌自然露出；禁外行假吃法；按素材语义挂图，每节可为 0 张。写入
           {active !== 'shared' && article?.contentMode === 'custom' ? '当前独立稿' : '统一稿'}。
         </p>
         <div className='mb-3 rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600'>
