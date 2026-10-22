@@ -239,15 +239,18 @@ public class LinkMonitorService {
             } else if (status < 200 || status >= 400) {
                 err = "HTTP " + status;
             } else {
-                // 小红书等：失效笔记 302→/404 后仍返回 HTTP 200，需比对最终落地 URL
+                // 失效笔记常见：302→首页/登录页/404，落地仍 HTTP 200，不能只看状态码
+                boolean contentDeep = isContentDeepLink(url);
                 String soft = detectSoftRedirect(url, resp.uri());
                 if (StringUtils.hasText(soft)) {
                     err = soft;
                 } else {
                     String body = decodeBody(resp.body(), resp.headers().firstValue("Content-Type").orElse(""));
-                    String unavailable = detectUnavailableHint(body);
+                    String unavailable = detectUnavailableHint(body, contentDeep);
                     if (StringUtils.hasText(unavailable)) {
-                        err = "页面提示不可用：" + unavailable;
+                        err = contentDeep
+                                ? "笔记链接已失效（" + unavailable + "）"
+                                : "页面提示不可用：" + unavailable;
                     } else {
                         ok = true;
                     }
@@ -277,14 +280,17 @@ public class LinkMonitorService {
     }
 
     /**
-     * 跟随重定向后的落地页相对原链接「跑偏」：如小红书失效笔记 → /404（仍 HTTP 200）。
+     * 跟随重定向后，落地页是否仍是「原来那条内容」。
+     * 通则：原链接能识别出内容 id 时，最终 URL 必须仍指向同一内容；
+     * 落到泛首页（如 /explore）、登录页、404、或其它内容 → 一律失效。
+     * （小红书登录态失效笔记常跳到 https://www.xiaohongshu.com/explore，只是其中一例。）
      */
     static String detectSoftRedirect(String originalUrl, URI finalUri) {
         if (finalUri == null || !StringUtils.hasText(originalUrl)) {
             return "";
         }
-        String path = finalUri.getPath() == null ? "" : finalUri.getPath();
-        String pathLower = path.toLowerCase(Locale.ROOT);
+        String finalPath = normalizePath(finalUri.getPath());
+        String finalPathLower = finalPath.toLowerCase(Locale.ROOT);
         String queryDecoded = "";
         if (StringUtils.hasText(finalUri.getRawQuery())) {
             try {
@@ -293,28 +299,143 @@ public class LinkMonitorService {
                 queryDecoded = finalUri.getRawQuery();
             }
         }
-        if (pathLower.equals("/404") || pathLower.startsWith("/404/")) {
+        String queryLower = queryDecoded.toLowerCase(Locale.ROOT);
+
+        String origPath = "";
+        try {
+            origPath = normalizePath(URI.create(originalUrl.trim()).getPath());
+        } catch (Exception ignored) {
+            // keep empty
+        }
+        String contentId = extractContentId(origPath);
+        boolean expectNote = isContentDeepLink(originalUrl)
+                || StringUtils.hasText(contentId)
+                || isShareOrShortLink(originalUrl);
+        String failPrefix = expectNote ? "笔记链接已失效" : "链接已失效";
+
+        if (finalPathLower.equals("/404") || finalPathLower.startsWith("/404/") || finalPathLower.contains("/404.")) {
             String hint = extractQueryErrorMsg(queryDecoded);
             if (StringUtils.hasText(hint)) {
-                return "链接已失效（" + hint + "）";
+                return failPrefix + "（" + hint + "）";
             }
-            return "链接已失效（已跳转到404页）";
+            return failPrefix + "（已跳转到404页）";
+        }
+        if (isLoginLanding(finalPathLower, queryLower)) {
+            return failPrefix + "（已跳转到登录页）";
+        }
+
+        // —— 核心通则：有内容 id 时，落地必须仍是同一条内容 ——
+        if (StringUtils.hasText(contentId)) {
+            String finalId = extractContentId(finalPath);
+            if (!contentId.equalsIgnoreCase(finalId)) {
+                return failPrefix + "（已不是原笔记内容）";
+            }
+            // 同 id 仍在，视为未跑偏（正文提示另检）
+            return "";
+        }
+
+        // 短链/分享链无内容 id：落地若是泛首页、信息流入口等，也不是原笔记
+        if (expectNote && isGenericListingLanding(finalPathLower)) {
+            return failPrefix + "（已不是原笔记内容）";
+        }
+        return "";
+    }
+
+    static boolean isContentDeepLink(String url) {
+        if (!StringUtils.hasText(url)) {
+            return false;
         }
         try {
-            URI orig = URI.create(originalUrl.trim());
-            String origPath = orig.getPath() == null ? "" : orig.getPath();
-            String origLower = origPath.toLowerCase(Locale.ROOT);
-            boolean contentDeep = origLower.contains("/discovery/item/")
-                    || origLower.contains("/explore/")
-                    || origLower.matches(".*/(item|note|detail|post|status|aweme|video)/[^/]+.*");
-            String finalNorm = path.isEmpty() ? "/" : path;
-            if (contentDeep && (finalNorm.equals("/") || finalNorm.equalsIgnoreCase("/explore")
-                    || finalNorm.equalsIgnoreCase("/index") || finalNorm.equalsIgnoreCase("/home")
-                    || finalNorm.equalsIgnoreCase("/feed"))) {
-                return "链接已失效（已重定向到首页）";
+            String path = normalizePath(URI.create(url.trim()).getPath());
+            String p = path.toLowerCase(Locale.ROOT);
+            return p.contains("/discovery/item/")
+                    || p.matches(".*/explore/[a-z0-9_-]{6,}.*")
+                    || p.matches(".*/(item|note|detail|post|status|aweme|video)/[^/]+.*");
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    /** 短链/分享入口（最终会跳到正式内容页；失效时常落到站点首页）。 */
+    static boolean isShareOrShortLink(String url) {
+        if (!StringUtils.hasText(url)) {
+            return false;
+        }
+        try {
+            URI u = URI.create(url.trim());
+            String host = u.getHost() == null ? "" : u.getHost().toLowerCase(Locale.ROOT);
+            String path = normalizePath(u.getPath()).toLowerCase(Locale.ROOT);
+            if (host.contains("xhslink.com") || host.contains("xhs.cn")
+                    || host.contains("douyin.com") && (path.startsWith("/v/") || path.startsWith("/share/"))
+                    || host.contains("b23.tv") || host.contains("t.cn")) {
+                return true;
             }
-        } catch (Exception ignored) {
-            // ignore parse errors
+            return path.matches(".*/(s|m|share)/[^/]+.*");
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    /** 登录/鉴权落地页（各站点路径不一，按常见段匹配）。 */
+    static boolean isLoginLanding(String pathLower, String queryLower) {
+        String p = normalizePath(pathLower).toLowerCase(Locale.ROOT);
+        if (!StringUtils.hasText(p)) {
+            return false;
+        }
+        if (p.matches(".*/(login|signin|sign_in|sign-in|passport)(/.*)?$")) {
+            return true;
+        }
+        if (p.contains("/passport/")
+                || p.contains("/website-login")
+                || p.contains("/user/login")
+                || p.contains("/account/login")
+                || p.contains("/auth/login")
+                || p.contains("/web-login")) {
+            return true;
+        }
+        return p.contains("/login")
+                && (queryLower.contains("redirect") || queryLower.contains("return") || queryLower.contains("callback"));
+    }
+
+    /**
+     * 泛首页 / 信息流入口（不是某一条笔记）。
+     * 例：小红书 {@code /explore}、站点根路径等。
+     */
+    static boolean isGenericListingLanding(String pathLower) {
+        String p = normalizePath(pathLower).toLowerCase(Locale.ROOT);
+        if (!StringUtils.hasText(p) || "/".equals(p)) {
+            return true;
+        }
+        return p.equals("/explore")
+                || p.equals("/index")
+                || p.equals("/home")
+                || p.equals("/feed")
+                || p.equals("/recommend")
+                || p.equals("/index.html")
+                || p.equals("/home.html");
+    }
+
+    static String normalizePath(String path) {
+        if (!StringUtils.hasText(path)) {
+            return "/";
+        }
+        String p = path.trim();
+        while (p.length() > 1 && p.endsWith("/")) {
+            p = p.substring(0, p.length() - 1);
+        }
+        return p.isEmpty() ? "/" : p;
+    }
+
+    /** 从内容深链路径取出内容 id（explore/xxx、item/xxx 等末段）。 */
+    static String extractContentId(String path) {
+        if (!StringUtils.hasText(path)) {
+            return "";
+        }
+        Matcher m = Pattern.compile(
+                "(?i)/(?:discovery/item|explore|item|note|detail|post|status|aweme|video)/([A-Za-z0-9_-]{6,})")
+                .matcher(path);
+        if (m.find()) {
+            return m.group(1);
         }
         return "";
     }
@@ -341,10 +462,14 @@ public class LinkMonitorService {
     }
 
     /**
-     * 识别页面正文中的「不可用」提示：404 / 无权限 / 已删除 / 文章不存在 等。
-     * HTTP 200 但正文含这些文案也判失败。
+     * 识别页面正文中的「不可用」提示：404 / 无权限 / 已删除 / 登录墙 等。
+     * HTTP 200 但正文含这些文案也判失败。contentDeep 时额外识别登录墙。
      */
     static String detectUnavailableHint(String body) {
+        return detectUnavailableHint(body, false);
+    }
+
+    static String detectUnavailableHint(String body, boolean contentDeep) {
         if (!StringUtils.hasText(body)) {
             return "";
         }
@@ -385,6 +510,33 @@ public class LinkMonitorService {
         for (String[] p : patterns) {
             if (text.contains(p[0]) || lower.contains(p[0].toLowerCase(Locale.ROOT))) {
                 return p[1];
+            }
+        }
+        if (contentDeep) {
+            String[][] loginWall = {
+                    {"请先登录", "需登录才能查看"},
+                    {"登录后查看", "需登录才能查看"},
+                    {"登录后可见", "需登录才能查看"},
+                    {"登录后继续", "需登录才能查看"},
+                    {"扫码登录", "需登录才能查看"},
+                    {"手机号登录", "需登录才能查看"},
+                    {"立即登录", "需登录才能查看"},
+                    {"去登录", "需登录才能查看"},
+                    {"sign in to continue", "需登录才能查看"},
+                    {"please log in", "需登录才能查看"},
+                    {"please login", "需登录才能查看"},
+            };
+            for (String[] p : loginWall) {
+                if (text.contains(p[0]) || lower.contains(p[0].toLowerCase(Locale.ROOT))) {
+                    return p[1];
+                }
+            }
+            Matcher titleM = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
+            if (titleM.find()) {
+                String title = titleM.group(1).toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+                if (title.contains("登录") || title.contains("login") || title.contains("sign in")) {
+                    return "需登录才能查看";
+                }
             }
         }
         return "";
