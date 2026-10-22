@@ -125,6 +125,34 @@ export function listLinkMonitorAlertsApi(id: number) {
   return request.get<unknown, Record<string, unknown>[]>(`/robot/link-monitors/${id}/alerts`);
 }
 
+export type LinkMonitorProbeCookie = {
+  configured: boolean;
+  enabled: boolean;
+  cookieHeader: string;
+  hostSuffixes: string;
+  remark?: string;
+  updateBy?: string;
+  updateTime?: string;
+  cookiePreview?: string;
+};
+
+export function getLinkMonitorProbeCookieApi() {
+  return request.get<unknown, LinkMonitorProbeCookie>('/robot/link-monitor/probe-cookie');
+}
+
+export function saveLinkMonitorProbeCookieApi(data: {
+  cookieHeader?: string;
+  hostSuffixes?: string;
+  enabled?: boolean;
+  remark?: string;
+}) {
+  return request.put<unknown, LinkMonitorProbeCookie>('/robot/link-monitor/probe-cookie', data);
+}
+
+export function clearLinkMonitorProbeCookieApi() {
+  return request.delete<unknown, LinkMonitorProbeCookie>('/robot/link-monitor/probe-cookie');
+}
+
 export function getLinkMonitorFillContextApi(ticket: string) {
   return request.get<unknown, LinkMonitorFillContext>('/robot/link-monitor/fill/context', {
     params: { ticket },

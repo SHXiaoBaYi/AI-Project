@@ -233,6 +233,36 @@ public class RobotAdminController {
         return Result.ok(data);
     }
 
+    @Operation(summary = "查询探测 Cookie 配置")
+    @GetMapping("/link-monitor/probe-cookie")
+    @RequiresPermission("robot:link-monitor:list")
+    public Result<Map<String, Object>> getProbeCookie() {
+        return Result.ok(linkMonitorService.probeCookieStatusMap());
+    }
+
+    @Operation(summary = "保存探测 Cookie（浏览器会话，不存密码）")
+    @PutMapping("/link-monitor/probe-cookie")
+    @RequiresPermission("robot:link-monitor:edit")
+    @Log(title = "链接监控探测Cookie", businessType = 2)
+    public Result<Map<String, Object>> saveProbeCookie(@RequestBody ProbeCookieSaveDTO dto) {
+        linkMonitorService.saveProbeCookie(
+                dto.getCookieHeader(),
+                dto.getHostSuffixes(),
+                dto.getEnabled(),
+                dto.getRemark(),
+                SecurityUtils.getCurrentUsername());
+        return Result.ok(linkMonitorService.probeCookieStatusMap());
+    }
+
+    @Operation(summary = "清空探测 Cookie")
+    @DeleteMapping("/link-monitor/probe-cookie")
+    @RequiresPermission("robot:link-monitor:edit")
+    @Log(title = "链接监控探测Cookie", businessType = 3)
+    public Result<Map<String, Object>> clearProbeCookie() {
+        linkMonitorService.clearProbeCookie(SecurityUtils.getCurrentUsername());
+        return Result.ok(linkMonitorService.probeCookieStatusMap());
+    }
+
     @Operation(summary = "探测日志")
     @GetMapping("/link-monitors/{id}/checks")
     @RequiresPermission("robot:link-monitor:list")
@@ -291,5 +321,18 @@ public class RobotAdminController {
         private Integer timeoutMs;
         @Schema(description = "状态")
         private String status;
+    }
+
+    @Data
+    @Schema(description = "链接监控探测 Cookie")
+    public static class ProbeCookieSaveDTO {
+        @Schema(description = "Cookie 头原文，或 EditThisCookie JSON；空则清空")
+        private String cookieHeader;
+        @Schema(description = "适用域名后缀，逗号分隔，如 xiaohongshu.com,xhslink.com")
+        private String hostSuffixes;
+        @Schema(description = "是否启用")
+        private Boolean enabled;
+        @Schema(description = "备注")
+        private String remark;
     }
 }

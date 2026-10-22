@@ -2,6 +2,8 @@ package com.base.admin.robot;
 
 import com.base.admin.exception.BusinessException;
 import com.base.admin.service.DingTalkCalendarClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,6 +26,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -40,12 +43,167 @@ public class LinkMonitorService {
     private static final String BROWSER_UA =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    private static final String DEFAULT_COOKIE_HOSTS = "xiaohongshu.com,xhslink.com";
+    private static final ObjectMapper JSON = new ObjectMapper();
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalkCalendarClient;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
+
+    public record ProbeCookieConfig(boolean configured, boolean enabled, String cookieHeader,
+                                    String hostSuffixes, String remark, String updateBy, Object updateTime) {
+    }
+
+    /** 后台读取探测 Cookie（含原文，便于编辑）。 */
+    public ProbeCookieConfig getProbeCookieConfig() {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT cookie_header, host_suffixes, enabled, remark, update_by, update_time
+                FROM ops_link_monitor_probe_cookie WHERE id = 1 LIMIT 1
+                """);
+        if (rows.isEmpty()) {
+            return new ProbeCookieConfig(false, true, "", DEFAULT_COOKIE_HOSTS, "", "", null);
+        }
+        Map<String, Object> r = rows.getFirst();
+        String cookie = r.get("cookie_header") == null ? "" : String.valueOf(r.get("cookie_header"));
+        String hosts = r.get("host_suffixes") == null ? DEFAULT_COOKIE_HOSTS : String.valueOf(r.get("host_suffixes"));
+        if (!StringUtils.hasText(hosts)) {
+            hosts = DEFAULT_COOKIE_HOSTS;
+        }
+        boolean enabled = r.get("enabled") == null || ((Number) r.get("enabled")).intValue() == 1;
+        String remark = r.get("remark") == null ? "" : String.valueOf(r.get("remark"));
+        String updateBy = r.get("update_by") == null ? "" : String.valueOf(r.get("update_by"));
+        return new ProbeCookieConfig(StringUtils.hasText(cookie.trim()), enabled, cookie, hosts.trim(),
+                remark, updateBy, r.get("update_time"));
+    }
+
+    public Map<String, Object> probeCookieStatusMap() {
+        ProbeCookieConfig c = getProbeCookieConfig();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("configured", c.configured());
+        m.put("enabled", c.enabled());
+        m.put("cookieHeader", c.cookieHeader() == null ? "" : c.cookieHeader());
+        m.put("hostSuffixes", c.hostSuffixes());
+        m.put("remark", c.remark());
+        m.put("updateBy", c.updateBy());
+        m.put("updateTime", c.updateTime());
+        m.put("cookiePreview", previewCookie(c.cookieHeader()));
+        return m;
+    }
+
+    /** 保存可选探测 Cookie（浏览器导出会话头，不存密码）。空 cookie 视为清空。 */
+    public void saveProbeCookie(String cookieRaw, String hostSuffixes, Boolean enabled, String remark, String operator) {
+        String cookie = normalizeCookiePaste(cookieRaw);
+        String hosts = StringUtils.hasText(hostSuffixes) ? hostSuffixes.trim() : DEFAULT_COOKIE_HOSTS;
+        if (hosts.length() > 500) {
+            throw new BusinessException("适用域名过长");
+        }
+        int en = enabled == null || enabled ? 1 : 0;
+        String rem = remark == null ? "" : remark.trim();
+        if (rem.length() > 500) {
+            rem = rem.substring(0, 500);
+        }
+        Integer cnt = jdbc.queryForObject("SELECT COUNT(1) FROM ops_link_monitor_probe_cookie WHERE id = 1", Integer.class);
+        if (cnt != null && cnt > 0) {
+            jdbc.update("""
+                    UPDATE ops_link_monitor_probe_cookie
+                    SET cookie_header = ?, host_suffixes = ?, enabled = ?, remark = ?, update_by = ?, update_time = NOW()
+                    WHERE id = 1
+                    """, cookie, hosts, en, rem, operator == null ? "" : operator);
+        } else {
+            jdbc.update("""
+                    INSERT INTO ops_link_monitor_probe_cookie
+                      (id, cookie_header, host_suffixes, enabled, remark, update_by, update_time)
+                    VALUES (1, ?, ?, ?, ?, ?, NOW())
+                    """, cookie, hosts, en, rem, operator == null ? "" : operator);
+        }
+    }
+
+    public void clearProbeCookie(String operator) {
+        saveProbeCookie("", DEFAULT_COOKIE_HOSTS, true, "", operator);
+    }
+
+    /**
+     * 若已配置且启用、目标 host 匹配后缀，返回规范化 Cookie 头；否则空串。
+     */
+    public String resolveProbeCookieForUrl(String url) {
+        ProbeCookieConfig c = getProbeCookieConfig();
+        if (!c.configured() || !c.enabled() || !StringUtils.hasText(c.cookieHeader())) {
+            return "";
+        }
+        String host;
+        try {
+            host = URI.create(url.trim()).getHost();
+        } catch (Exception ex) {
+            return "";
+        }
+        if (!StringUtils.hasText(host)) {
+            return "";
+        }
+        String hostLower = host.toLowerCase(Locale.ROOT);
+        for (String rawSuffix : c.hostSuffixes().split("[,;\\s]+")) {
+            if (!StringUtils.hasText(rawSuffix)) {
+                continue;
+            }
+            String suffix = rawSuffix.trim().toLowerCase(Locale.ROOT);
+            while (suffix.startsWith(".")) {
+                suffix = suffix.substring(1);
+            }
+            if (!StringUtils.hasText(suffix)) {
+                continue;
+            }
+            if (hostLower.equals(suffix) || hostLower.endsWith("." + suffix)) {
+                return c.cookieHeader().trim();
+            }
+        }
+        return "";
+    }
+
+    static String normalizeCookiePaste(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        String s = raw.trim();
+        if (s.regionMatches(true, 0, "Cookie:", 0, 7)) {
+            s = s.substring(7).trim();
+        }
+        // EditThisCookie / 部分扩展导出的 JSON 数组
+        if (s.startsWith("[")) {
+            try {
+                JsonNode arr = JSON.readTree(s);
+                if (arr.isArray()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (JsonNode n : arr) {
+                        String name = n.path("name").asText("");
+                        String value = n.path("value").asText("");
+                        if (!StringUtils.hasText(name)) {
+                            continue;
+                        }
+                        if (!sb.isEmpty()) {
+                            sb.append("; ");
+                        }
+                        sb.append(name.trim()).append("=").append(value);
+                    }
+                    return sb.toString();
+                }
+            } catch (Exception ignored) {
+                // 按普通 Cookie 串继续
+            }
+        }
+        return s.replace("\r", " ").replace("\n", " ").trim();
+    }
+
+    static String previewCookie(String cookie) {
+        if (!StringUtils.hasText(cookie)) {
+            return "";
+        }
+        String t = cookie.trim();
+        if (t.length() <= 24) {
+            return t.substring(0, Math.min(8, t.length())) + "…";
+        }
+        return t.substring(0, 16) + "…（共 " + t.length() + " 字符）";
+    }
 
     public List<String> extractUrls(String text) {
         List<String> out = new ArrayList<>();
@@ -254,29 +412,34 @@ public class LinkMonitorService {
         Integer status = null;
         String err = "";
         try {
-            HttpRequest req = HttpRequest.newBuilder()
+            String probeCookie = resolveProbeCookieForUrl(url);
+            boolean withAuthCookie = StringUtils.hasText(probeCookie);
+            HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofMillis(Math.max(3000, timeout)))
                     .GET()
                     .header("User-Agent", BROWSER_UA)
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-                    .build();
-            HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
+                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+            if (withAuthCookie) {
+                reqBuilder.header("Cookie", probeCookie);
+            }
+            HttpResponse<byte[]> resp = http.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofByteArray());
             status = resp.statusCode();
             if (status == 404 || status == 403 || status == 410 || status == 451 || status >= 500) {
                 err = "HTTP " + status;
             } else if (status < 200 || status >= 400) {
                 err = "HTTP " + status;
             } else {
-                // 失效笔记常见：302→首页/登录页/404，落地仍 HTTP 200，不能只看状态码
+                // 失效笔记常见：302→首页/404/其它内容，落地仍 HTTP 200，不能只看状态码。
+                // 无 Cookie：跳登录页 ≠ 失效；有 Cookie：登录墙可视为会话失效或内容不可见。
                 boolean contentDeep = isContentDeepLink(url);
-                String soft = detectSoftRedirect(url, resp.uri());
+                String soft = detectSoftRedirect(url, resp.uri(), withAuthCookie);
                 if (StringUtils.hasText(soft)) {
                     err = soft;
                 } else {
                     String body = decodeBody(resp.body(), resp.headers().firstValue("Content-Type").orElse(""));
-                    String unavailable = detectUnavailableHint(body, contentDeep);
+                    String unavailable = detectUnavailableHint(body, contentDeep, withAuthCookie);
                     if (StringUtils.hasText(unavailable)) {
                         err = contentDeep
                                 ? "笔记链接已失效（" + unavailable + "）"
@@ -312,10 +475,14 @@ public class LinkMonitorService {
     /**
      * 跟随重定向后，落地页是否仍是「原来那条内容」。
      * 通则：原链接能识别出内容 id 时，最终 URL 必须仍指向同一内容；
-     * 落到泛首页（如 /explore）、登录页、404、或其它内容 → 一律失效。
-     * （小红书登录态失效笔记常跳到 https://www.xiaohongshu.com/explore，只是其中一例。）
+     * 落到泛首页（如 /explore）、404、或其它内容 id → 失效。
+     * 登录页：无 Cookie 时不当失败；带 Cookie 仍跳登录 → 会话失效/不可见，判失败。
      */
     static String detectSoftRedirect(String originalUrl, URI finalUri) {
+        return detectSoftRedirect(originalUrl, finalUri, false);
+    }
+
+    static String detectSoftRedirect(String originalUrl, URI finalUri, boolean withAuthCookie) {
         if (finalUri == null || !StringUtils.hasText(originalUrl)) {
             return "";
         }
@@ -351,7 +518,11 @@ public class LinkMonitorService {
             return failPrefix + "（已跳转到404页）";
         }
         if (isLoginLanding(finalPathLower, queryLower)) {
-            return failPrefix + "（已跳转到登录页）";
+            if (withAuthCookie) {
+                return failPrefix + "（已跳转到登录页，Cookie 可能失效）";
+            }
+            // 无凭证：机房 IP 常被拦，不按内容 id 丢失判死
+            return "";
         }
 
         // —— 核心通则：有内容 id 时，落地必须仍是同一条内容 ——
@@ -492,14 +663,18 @@ public class LinkMonitorService {
     }
 
     /**
-     * 识别页面正文中的「不可用」提示：404 / 无权限 / 已删除 / 登录墙 等。
-     * HTTP 200 但正文含这些文案也判失败。contentDeep 时额外识别登录墙。
+     * 识别页面正文中的「不可用」信号。
+     * 无 Cookie：笔记深链只认删帖/404 强信号；有 Cookie：额外认登录墙。
      */
     static String detectUnavailableHint(String body) {
-        return detectUnavailableHint(body, false);
+        return detectUnavailableHint(body, false, false);
     }
 
     static String detectUnavailableHint(String body, boolean contentDeep) {
+        return detectUnavailableHint(body, contentDeep, false);
+    }
+
+    static String detectUnavailableHint(String body, boolean contentDeep, boolean withAuthCookie) {
         if (!StringUtils.hasText(body)) {
             return "";
         }
@@ -509,7 +684,29 @@ public class LinkMonitorService {
                 .replaceAll("&nbsp;", " ")
                 .replaceAll("\\s+", " ");
         String lower = text.toLowerCase(Locale.ROOT);
-        String[][] patterns = {
+        // contentDeep 且无 Cookie：登录页常夹带「无法查看」文案，只认删帖/不存在类强信号
+        boolean strictNote = contentDeep && !withAuthCookie;
+        String[][] patterns = strictNote
+                ? new String[][]{
+                {"你访问的页面不见了", "你访问的页面不见了"},
+                {"页面不见了", "页面不见了"},
+                {"当前笔记暂时无法浏览", "当前笔记暂时无法浏览"},
+                {"暂时无法浏览", "暂时无法浏览"},
+                {"文章不存在", "文章不存在"},
+                {"笔记不存在", "笔记不存在"},
+                {"内容不存在", "内容不存在"},
+                {"页面不存在", "页面不存在"},
+                {"不存在或已被删除", "不存在或已被删除"},
+                {"已被删除", "已被删除"},
+                {"文章被删", "文章被删"},
+                {"笔记被删", "笔记被删"},
+                {"page not found", "page not found"},
+                {"404 not found", "404 not found"},
+                {"错误码：404", "404"},
+                {"错误码:404", "404"},
+                {"status code 404", "404"},
+        }
+                : new String[][]{
                 {"你访问的页面不见了", "你访问的页面不见了"},
                 {"页面不见了", "页面不见了"},
                 {"当前笔记暂时无法浏览", "当前笔记暂时无法浏览"},
@@ -542,19 +739,19 @@ public class LinkMonitorService {
                 return p[1];
             }
         }
-        if (contentDeep) {
+        if (contentDeep && withAuthCookie) {
             String[][] loginWall = {
-                    {"请先登录", "需登录才能查看"},
-                    {"登录后查看", "需登录才能查看"},
-                    {"登录后可见", "需登录才能查看"},
-                    {"登录后继续", "需登录才能查看"},
-                    {"扫码登录", "需登录才能查看"},
-                    {"手机号登录", "需登录才能查看"},
-                    {"立即登录", "需登录才能查看"},
-                    {"去登录", "需登录才能查看"},
-                    {"sign in to continue", "需登录才能查看"},
-                    {"please log in", "需登录才能查看"},
-                    {"please login", "需登录才能查看"},
+                    {"请先登录", "需登录才能查看（Cookie 可能失效）"},
+                    {"登录后查看", "需登录才能查看（Cookie 可能失效）"},
+                    {"登录后可见", "需登录才能查看（Cookie 可能失效）"},
+                    {"登录后继续", "需登录才能查看（Cookie 可能失效）"},
+                    {"扫码登录", "需登录才能查看（Cookie 可能失效）"},
+                    {"手机号登录", "需登录才能查看（Cookie 可能失效）"},
+                    {"立即登录", "需登录才能查看（Cookie 可能失效）"},
+                    {"去登录", "需登录才能查看（Cookie 可能失效）"},
+                    {"sign in to continue", "需登录才能查看（Cookie 可能失效）"},
+                    {"please log in", "需登录才能查看（Cookie 可能失效）"},
+                    {"please login", "需登录才能查看（Cookie 可能失效）"},
             };
             for (String[] p : loginWall) {
                 if (text.contains(p[0]) || lower.contains(p[0].toLowerCase(Locale.ROOT))) {
@@ -565,7 +762,7 @@ public class LinkMonitorService {
             if (titleM.find()) {
                 String title = titleM.group(1).toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
                 if (title.contains("登录") || title.contains("login") || title.contains("sign in")) {
-                    return "需登录才能查看";
+                    return "需登录才能查看（Cookie 可能失效）";
                 }
             }
         }

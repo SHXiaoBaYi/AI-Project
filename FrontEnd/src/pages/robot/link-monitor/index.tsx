@@ -1,16 +1,19 @@
 import { useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Form, Input, InputNumber, Modal, Select, Tag } from 'antd';
+import { App, Form, Input, InputNumber, Modal, Select, Switch, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import {
   addLinkMonitorApi,
+  clearLinkMonitorProbeCookieApi,
   deleteLinkMonitorApi,
+  getLinkMonitorProbeCookieApi,
   listLinkMonitorAlertsApi,
   listLinkMonitorChecksApi,
   listLinkMonitorsApi,
   probeLinkMonitorApi,
+  saveLinkMonitorProbeCookieApi,
   updateLinkMonitorApi,
   type LinkMonitor,
 } from '@/api/robot';
@@ -53,9 +56,32 @@ export default function LinkMonitorPage() {
   const actionRef = useRef<ActionType>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [cookieOpen, setCookieOpen] = useState(false);
+  const [cookieHint, setCookieHint] = useState('');
   const [editing, setEditing] = useState<LinkMonitor | null>(null);
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
+  const [cookieForm] = Form.useForm();
+
+  const openCookieModal = async () => {
+    const cfg = await getLinkMonitorProbeCookieApi();
+    cookieForm.setFieldsValue({
+      cookieHeader: cfg.cookieHeader || '',
+      hostSuffixes: cfg.hostSuffixes || 'xiaohongshu.com,xhslink.com',
+      enabled: cfg.enabled !== false,
+      remark: cfg.remark || '',
+    });
+    const parts: string[] = [];
+    if (cfg.configured) {
+      parts.push(`已配置${cfg.cookiePreview ? `：${cfg.cookiePreview}` : ''}`);
+      if (cfg.updateTime) parts.push(`更新于 ${cfg.updateTime}`);
+      if (cfg.updateBy) parts.push(`by ${cfg.updateBy}`);
+    } else {
+      parts.push('尚未配置；无 Cookie 时跳登录页不判失效');
+    }
+    setCookieHint(parts.filter(Boolean).join(' · '));
+    setCookieOpen(true);
+  };
 
   const columns: ProColumnType<LinkMonitor>[] = [
     {
@@ -178,8 +204,17 @@ export default function LinkMonitorPage() {
         actionRef={actionRef}
         rowKey='id'
         columns={columns}
-        headerTitle='链接监控（全局可见；群内添加的告警推回该群；每天 09:30 探测）'
+        headerTitle='链接监控（可选 Cookie 登录态探测；群内添加的告警推回该群；每天 09:30 探测）'
         toolBarRender={() => [
+          <PermissionButton
+            key='cookie'
+            perm='robot:link-monitor:edit'
+            onClick={() => {
+              void openCookieModal();
+            }}
+          >
+            探测 Cookie
+          </PermissionButton>,
           <PermissionButton
             key='add'
             perm='robot:link-monitor:add'
@@ -288,6 +323,87 @@ export default function LinkMonitorPage() {
                 { value: 'PAUSED', label: '暂停' },
               ]}
             />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title='探测 Cookie（浏览器会话）'
+        open={cookieOpen}
+        width={640}
+        onCancel={() => setCookieOpen(false)}
+        footer={(_, { OkBtn, CancelBtn }) => (
+          <div className='flex flex-wrap justify-end gap-2'>
+            <PermissionButton
+              perm='robot:link-monitor:edit'
+              danger
+              onClick={() => {
+                modal.confirm({
+                  title: '清空探测 Cookie？',
+                  onOk: async () => {
+                    await clearLinkMonitorProbeCookieApi();
+                    message.success('已清空');
+                    setCookieOpen(false);
+                  },
+                });
+              }}
+            >
+              清空
+            </PermissionButton>
+            <CancelBtn />
+            <OkBtn />
+          </div>
+        )}
+        onOk={async () => {
+          const v = await cookieForm.validateFields();
+          await saveLinkMonitorProbeCookieApi({
+            cookieHeader: v.cookieHeader,
+            hostSuffixes: v.hostSuffixes,
+            enabled: v.enabled,
+            remark: v.remark,
+          });
+          message.success('已保存');
+          setCookieOpen(false);
+        }}
+      >
+        <p className='mb-3 text-xs text-neutral-500'>
+          从已登录浏览器复制 Cookie（DevTools → Network 请求头，或 Application → Cookies）。支持 Cookie 原文或
+          EditThisCookie JSON。不存账号密码；过期后需重新粘贴。匹配域名的探测会带上该 Cookie，此时仍跳登录页会判异常。
+        </p>
+        {cookieHint ? <p className='mb-3 text-xs text-neutral-600'>{cookieHint}</p> : null}
+        <Form
+          form={cookieForm}
+          layout='vertical'
+        >
+          <Form.Item
+            name='enabled'
+            label='启用'
+            valuePropName='checked'
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            name='hostSuffixes'
+            label='适用域名后缀'
+            rules={[{ required: true, message: '请填写域名后缀' }]}
+            extra='逗号分隔，如 xiaohongshu.com,xhslink.com'
+          >
+            <Input placeholder='xiaohongshu.com,xhslink.com' />
+          </Form.Item>
+          <Form.Item
+            name='cookieHeader'
+            label='Cookie'
+            extra='留空并保存等同清空'
+          >
+            <Input.TextArea
+              rows={6}
+              placeholder='a1=...; web_session=... 或 [{"name":"a1","value":"..."}]'
+            />
+          </Form.Item>
+          <Form.Item
+            name='remark'
+            label='备注'
+          >
+            <Input placeholder='如：小红书个人号会话，预计 7 天过期' />
           </Form.Item>
         </Form>
       </Modal>

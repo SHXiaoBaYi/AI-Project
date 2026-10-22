@@ -158,6 +158,18 @@ public class RobotSchemaMigrator implements ApplicationRunner {
                   UNIQUE KEY uk_robot_group_cid (open_conversation_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='机器人已见钉钉群档案'
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS ops_link_monitor_probe_cookie (
+                  id              TINYINT      NOT NULL DEFAULT 1,
+                  cookie_header   MEDIUMTEXT   NULL COMMENT '浏览器 Cookie 头（会话），不含密码',
+                  host_suffixes   VARCHAR(500) NOT NULL DEFAULT 'xiaohongshu.com,xhslink.com',
+                  enabled         TINYINT      NOT NULL DEFAULT 1,
+                  remark          VARCHAR(500) DEFAULT '',
+                  update_by       VARCHAR(50)  DEFAULT '',
+                  update_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='链接监控可选探测 Cookie'
+                """);
     }
 
     private void seedIntents() {
