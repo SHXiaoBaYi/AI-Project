@@ -497,6 +497,12 @@ public class LinkMonitorService {
                 } else {
                     String body = decodeBody(resp.body(), resp.headers().firstValue("Content-Type").orElse(""));
                     String unavailable = detectUnavailableHint(body, contentDeep, withAuthCookie);
+                    // 仅登录态探测才校验 SSR 笔记载荷：无 Cookie 时登录空壳与失效空壳难区分，避免误杀
+                    if (!StringUtils.hasText(unavailable) && contentDeep && withAuthCookie) {
+                        // 同 id 落地仍可能是空壳：失效笔记常不跳转、也无「已删除」明文
+                        String contentId = extractContentId(normalizePath(URI.create(url.trim()).getPath()));
+                        unavailable = detectMissingNotePayload(body, contentId);
+                    }
                     if (StringUtils.hasText(unavailable)) {
                         err = contentDeep
                                 ? "笔记链接已失效（" + unavailable + "）"
@@ -882,7 +888,9 @@ public class LinkMonitorService {
         if (!StringUtils.hasText(body)) {
             return "";
         }
-        String text = body.replaceAll("(?is)<script[^>]*>.*?</script>", " ")
+        // SSR JSON 里常见 \\uXXXX，先还原再检文案
+        String rawDecoded = unescapeJsonUnicode(body);
+        String text = rawDecoded.replaceAll("(?is)<script[^>]*>.*?</script>", " ")
                 .replaceAll("(?is)<style[^>]*>.*?</style>", " ")
                 .replaceAll("(?is)<[^>]+>", " ")
                 .replaceAll("&nbsp;", " ")
@@ -904,6 +912,9 @@ public class LinkMonitorService {
                 {"已被删除", "已被删除"},
                 {"文章被删", "文章被删"},
                 {"笔记被删", "笔记被删"},
+                {"笔记已删除", "笔记已删除"},
+                {"内容已删除", "内容已删除"},
+                {"该内容无法展示", "该内容无法展示"},
                 {"page not found", "page not found"},
                 {"404 not found", "404 not found"},
                 {"错误码：404", "404"},
@@ -923,6 +934,9 @@ public class LinkMonitorService {
                 {"已被删除", "已被删除"},
                 {"文章被删", "文章被删"},
                 {"笔记被删", "笔记被删"},
+                {"笔记已删除", "笔记已删除"},
+                {"内容已删除", "内容已删除"},
+                {"该内容无法展示", "该内容无法展示"},
                 {"该内容无法查看", "该内容无法查看"},
                 {"内容无法查看", "内容无法查看"},
                 {"无法查看", "无法查看"},
@@ -939,29 +953,13 @@ public class LinkMonitorService {
                 {"status code 404", "404"},
         };
         for (String[] p : patterns) {
-            if (text.contains(p[0]) || lower.contains(p[0].toLowerCase(Locale.ROOT))) {
+            if (text.contains(p[0]) || lower.contains(p[0].toLowerCase(Locale.ROOT))
+                    || rawDecoded.contains(p[0])) {
                 return p[1];
             }
         }
+        // 带 Cookie 时只认 title 含登录；正文「立即登录」按钮在已登录页也常见，不当会话失效
         if (contentDeep && withAuthCookie) {
-            String[][] loginWall = {
-                    {"请先登录", "需登录才能查看（Cookie 可能失效）"},
-                    {"登录后查看", "需登录才能查看（Cookie 可能失效）"},
-                    {"登录后可见", "需登录才能查看（Cookie 可能失效）"},
-                    {"登录后继续", "需登录才能查看（Cookie 可能失效）"},
-                    {"扫码登录", "需登录才能查看（Cookie 可能失效）"},
-                    {"手机号登录", "需登录才能查看（Cookie 可能失效）"},
-                    {"立即登录", "需登录才能查看（Cookie 可能失效）"},
-                    {"去登录", "需登录才能查看（Cookie 可能失效）"},
-                    {"sign in to continue", "需登录才能查看（Cookie 可能失效）"},
-                    {"please log in", "需登录才能查看（Cookie 可能失效）"},
-                    {"please login", "需登录才能查看（Cookie 可能失效）"},
-            };
-            for (String[] p : loginWall) {
-                if (text.contains(p[0]) || lower.contains(p[0].toLowerCase(Locale.ROOT))) {
-                    return p[1];
-                }
-            }
             Matcher titleM = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
             if (titleM.find()) {
                 String title = titleM.group(1).toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
@@ -971,6 +969,77 @@ public class LinkMonitorService {
             }
         }
         return "";
+    }
+
+    /**
+     * 笔记深链：URL 仍带原 id，但 SSR 未下发笔记正文（失效常见表现）。
+     */
+    static String detectMissingNotePayload(String body, String contentId) {
+        if (!StringUtils.hasText(body) || !StringUtils.hasText(contentId)) {
+            return "";
+        }
+        String raw = unescapeJsonUnicode(body);
+        boolean hasInitial = body.contains("__INITIAL_STATE__") || raw.contains("__INITIAL_STATE__");
+        boolean hasNoteMap = body.contains("noteDetailMap") || raw.contains("noteDetailMap");
+        if (hasNoteMap) {
+            Matcher empty = Pattern.compile(
+                    "\"" + Pattern.quote(contentId) + "\"\\s*:\\s*(null|\\{\\s*\\}|\\{\\s*\"note\"\\s*:\\s*null)")
+                    .matcher(raw);
+            if (empty.find()) {
+                return "笔记数据为空或不存在";
+            }
+            if (!raw.contains("\"" + contentId + "\"")) {
+                return "页面未包含原笔记数据";
+            }
+            // 有 id 条目时，至少应有 title / desc / noteId 等字段之一
+            int idx = raw.indexOf("\"" + contentId + "\"");
+            if (idx >= 0) {
+                String window = raw.substring(idx, Math.min(raw.length(), idx + 2500));
+                boolean hasNoteFields = window.contains("\"title\"")
+                        || window.contains("\"displayTitle\"")
+                        || window.contains("\"desc\"")
+                        || window.contains("\"name\"")
+                        || window.contains("\"noteId\"");
+                if (!hasNoteFields) {
+                    return "笔记内容字段缺失";
+                }
+            }
+            return "";
+        }
+        if (hasInitial) {
+            // 登录壳 / 失效空壳常见：有 INITIAL_STATE 但无 noteDetailMap
+            return "页面未返回笔记内容";
+        }
+        Matcher titleM = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
+        if (titleM.find()) {
+            String title = titleM.group(1).replaceAll("\\s+", " ").trim();
+            if ("小红书".equals(title)
+                    || "小红书 - 你的生活兴趣社区".equals(title)
+                    || "xiaohongshu".equalsIgnoreCase(title)) {
+                return "页面无有效笔记标题";
+            }
+        }
+        return "";
+    }
+
+    static String unescapeJsonUnicode(String s) {
+        if (!StringUtils.hasText(s) || !s.contains("\\u")) {
+            return s == null ? "" : s;
+        }
+        Matcher m = Pattern.compile("\\\\u([0-9a-fA-F]{4})").matcher(s);
+        StringBuilder sb = new StringBuilder(s.length());
+        int last = 0;
+        while (m.find()) {
+            sb.append(s, last, m.start());
+            try {
+                sb.append((char) Integer.parseInt(m.group(1), 16));
+            } catch (Exception ex) {
+                sb.append(m.group());
+            }
+            last = m.end();
+        }
+        sb.append(s, last, s.length());
+        return sb.toString();
     }
 
     private static String decodeBody(byte[] bytes, String contentType) {
