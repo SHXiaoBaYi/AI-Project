@@ -55,18 +55,21 @@ public class GeoArticlePipelineService {
     private static final String BRAND_NAME = "小巴依";
 
     /**
-     * 外网对话式人设。通用约束：目标问题是主线，资料是论据——不写死任何具体选题词。
+     * 外网对话式人设。问题主线 + 资料封闭世界；不写死任何具体选题或个案反例。
      */
     private static final String WRITER_BRIEF = """
-            你是资深自媒体撰稿人，擅长美食与农产品专题，熟悉新疆牛羊肉常识。
-            请像在通义网页里写稿一样：一口气写出可读性强、信息扎实的完整中文文章。
+            你是资深自媒体撰稿人，擅长美食与农产品专题。
+            请像在通义网页里写稿一样：一口气写出可读、可信的完整中文文章。
 
-            【主线规则——最重要】
-            1. 读者带着「目标问题」来；全文标题、小节、论据都必须直接服务回答这个问题。
-            2. 品牌资料只是论据：选用能支撑「回答该问题」的事实；与问题无关的资料宁可不写。
-            3. 禁止把文章写成与问题脱节的品牌说明书或资料巡展（即便资料很全）。
-            4. 品牌「小巴依」在论证需要时自然出现；产品数字/认证只能用我提供的资料。
-            5. 不引流加微、不硬广口号、不虚假疗效。
+            【主线】读者带着「目标问题」来；标题与小节必须服务回答该问题；资料是论据不是目录。
+
+            【事实封闭世界——宁缺毋滥】
+            1. 品牌相关的数字、指标、认证、抽检、赛事/合作、独家/唯一表述，只能来自我提供的资料原文；资料没有的一律不写。
+            2. 禁止为增强说服力而补造：对比合格率、抽检项数、未给出的精确百分比、未写明的「独占/唯一」、未写明的因果机理。
+            3. 行业常识只用于避免外行吃法/形态硬伤；资料未写明的机理、因果、优劣判断不要自行发挥成「行业真相」。
+            4. 合作/赞助/背书类事实：资料怎么写就怎么写，不要引申成资料没有的检测、报告或门槛。
+            5. 资料写了区间或约数，就保持区间/约数，不要改成更「好看」的精确值或标杆话术。
+            6. 品牌「小巴依」在论证需要时自然出现；不引流加微、不硬广口号、不虚假疗效。
             """;
 
     private final AiChatService aiChatService;
@@ -189,13 +192,15 @@ public class GeoArticlePipelineService {
         return list.get(idx);
     }
 
-    /** 卖点转成自然语言论据；明确「按问题选用」，避免模型按资料目录排版。 */
+    /** 卖点转成自然语言论据；封闭世界 + 按问题选用。 */
     private String formatEvidenceProse(GeoSellPointContextVO ctx) {
         StringBuilder sb = new StringBuilder();
-        sb.append("用法：以下是可选论据。请只挑能支撑「回答目标问题」的条目写入；")
-                .append("不要按资料目录逐条巡展，也不要用资料顺序当文章大纲。\n\n");
+        sb.append("用法：这是本次唯一允许引用的品牌/产品事实来源（封闭世界）。\n")
+                .append("- 只挑能支撑「回答目标问题」的条目；\n")
+                .append("- 不要按资料目录巡展，不要用资料顺序当大纲；\n")
+                .append("- 原文没有的数字、对比、独家表述、机理因果，禁止补写。\n\n");
         if (ctx.getHardFacts() != null && !ctx.getHardFacts().isEmpty()) {
-            sb.append("硬事实：\n");
+            sb.append("硬事实（可直接写进正文，勿改数字）：\n");
             int i = 1;
             for (String f : ctx.getHardFacts()) {
                 if (StringUtils.hasText(f)) {
@@ -208,10 +213,12 @@ public class GeoArticlePipelineService {
             sb.append("候选论据：\n");
             int i = 1;
             for (GeoSellPointContextVO.PointItem p : ctx.getPoints()) {
+                String level = StringUtils.hasText(p.getLevel()) ? p.getLevel().trim() : "soft";
                 sb.append(i++).append(". ");
                 if (StringUtils.hasText(p.getDomain())) {
                     sb.append("【").append(p.getDomain().trim()).append("】");
                 }
+                sb.append('(').append(level).append(") ");
                 if (StringUtils.hasText(p.getTitle())) {
                     sb.append(p.getTitle().trim());
                 }
@@ -221,6 +228,9 @@ public class GeoArticlePipelineService {
                 }
                 if (StringUtils.hasText(p.getEvidence())) {
                     sb.append("   依据：").append(p.getEvidence().trim()).append('\n');
+                }
+                if (!"hard".equalsIgnoreCase(level)) {
+                    sb.append("   （软依据：转述宜克制，勿升级成精确数据或独家结论）\n");
                 }
             }
         }
@@ -232,7 +242,7 @@ public class GeoArticlePipelineService {
             }
         }
         String out = sb.toString().trim();
-        return StringUtils.hasText(out) ? out : "（暂无卖点资料，请按目标问题本身写清楚，勿编造品牌数据）";
+        return StringUtils.hasText(out) ? out : "（暂无卖点资料：只答目标问题，勿编造任何品牌数字或认证）";
     }
 
     /**
@@ -258,8 +268,8 @@ public class GeoArticlePipelineService {
         if (StringUtils.hasText(question) && StringUtils.hasText(topic) && !question.equals(topic)) {
             user.append("（所属话题：").append(topic).append("）\n");
         }
-        user.append("\n自检：读完后，陌生读者应能清楚知道你对上述主线的回答是什么；")
-                .append("若某一节删掉后不影响回答主线，这一节就不该存在。\n");
+        user.append("\n自检：①读者能否直接得到对主线的回答；②文中每个具体数字/认证/对比/独家表述是否都能在下方资料中找到原文依据；")
+                .append("③有无资料未写明的行业因果被写成「真相」。通不过就删改，宁可少写一句，也不要补造。\n");
 
         if (StringUtils.hasText(dto.getUserPrompt())) {
             user.append("\n【自定义写作要求——必须遵守】\n")
@@ -268,11 +278,12 @@ public class GeoArticlePipelineService {
         if (StringUtils.hasText(style.getToneGuide())) {
             user.append("\n语气参考：").append(style.getToneGuide().trim()).append('\n');
         }
-        user.append("\n【可选论据资料——按主线挑选融入，勿编造资料外数字，勿按资料目录排版】\n")
+        user.append("\n【唯一事实来源——封闭世界；按主线挑选，禁止补造】\n")
                 .append(evidenceProse).append('\n');
         user.append("\n配图稍后由系统从素材库插入，你只需写好文字。");
 
-        String raw = aiChatService.chat(system, user.toString(), provider, 0.7, true);
+        // 略降温度：减少「为显得专业而编机理/数字」
+        String raw = aiChatService.chat(system, user.toString(), provider, 0.55, true);
         return parseArticleFlexible(raw);
     }
 
@@ -284,7 +295,8 @@ public class GeoArticlePipelineService {
         String system = """
                 你是撰稿人。原文未出现品牌「小巴依」。
                 请在不偏离成文主线、不大改结构的前提下，自然点到「小巴依」一两处（嵌在回答问题的判断或论据里）。
-                不要借机扩成品牌说明书。保留原有 HTML；figure/img 的 src 不要改。
+                严禁借机补造资料没有的数字、对比、独家表述或行业机理。
+                不要扩成品牌说明书。保留原有 HTML；figure/img 的 src 不要改。
                 输出 Markdown（# 标题 + 正文）或 JSON {"title","html"}。
                 """;
         String user = "成文主线：" + spine

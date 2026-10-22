@@ -47,6 +47,9 @@ public class SellPointContextService {
         ctx.setQuestion(question);
         ctx.getForbiddenHints().add("不得编造未收录的认证编号、检测数据、门店地址或捐赠金额");
         ctx.getForbiddenHints().add("不得夸大未出现在卖点库中的功效或承诺");
+        ctx.getForbiddenHints().add("不得编造资料未写明的对比合格率、抽检项、精确百分比或「独占/唯一」表述");
+        ctx.getForbiddenHints().add("不得把资料未写明的行业机理/因果写成既定真相");
+        ctx.getForbiddenHints().add("合作或赞助类事实不得引申为资料没有的检测报告或准入门槛");
 
         List<GeoSellPoint> points = pointMapper.selectList(new LambdaQueryWrapper<GeoSellPoint>()
                 .eq(GeoSellPoint::getStatus, "active")
