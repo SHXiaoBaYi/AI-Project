@@ -49,11 +49,47 @@ const PlatformPage = memo(function PlatformPage() {
     {
       title: '登录地址',
       dataIndex: 'loginUrl',
-      width: 220,
+      width: 180,
       search: false,
       ellipsis: true,
       fieldProps: { placeholder: '如 https://www.xxx.com/login' },
       render: (_, r) => r.loginUrl || '-',
+    },
+    {
+      title: '官方审核规范链接',
+      dataIndex: 'contentAuditUrls',
+      width: 220,
+      search: false,
+      ellipsis: true,
+      valueType: 'textarea',
+      fieldProps: {
+        placeholder: '可填多条，每行一个 URL（官方内容审核规范）',
+        autoSize: { minRows: 2, maxRows: 6 },
+      },
+      render: (_, r) => {
+        const text = (r.contentAuditUrls || '').trim();
+        if (!text) return '-';
+        const first =
+          text
+            .split(/\r?\n/)
+            .map((s) => s.trim())
+            .find(Boolean) || text;
+        const more = text.split(/\r?\n/).filter((s) => s.trim()).length > 1;
+        return more ? `${first} …` : first;
+      },
+    },
+    {
+      title: '审核规范摘要',
+      dataIndex: 'contentAuditNotes',
+      width: 200,
+      search: false,
+      ellipsis: true,
+      valueType: 'textarea',
+      fieldProps: {
+        placeholder: '垃圾信息/引流等红线摘要，AI 成文时会读取',
+        autoSize: { minRows: 3, maxRows: 8 },
+      },
+      render: (_, r) => r.contentAuditNotes || '-',
     },
     { title: '排序', dataIndex: 'sortOrder', search: false, valueType: 'digit' },
     { title: '备注', dataIndex: 'remark', search: false, ellipsis: true },
@@ -108,7 +144,7 @@ const PlatformPage = memo(function PlatformPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='平台管理'
-        scroll={{ x: 1000 }}
+        scroll={{ x: 1400 }}
         request={async (params) => {
           const res = await getGeoPlatformListApi({
             pageNum: params.current,
@@ -189,6 +225,8 @@ const PlatformPage = memo(function PlatformPage() {
             ...values,
             platformType: values.platformType || GEO_PLATFORM_TYPE_DEFAULT,
             loginUrl: values.loginUrl || '',
+            contentAuditUrls: values.contentAuditUrls || '',
+            contentAuditNotes: values.contentAuditNotes || '',
           };
           if (editing) {
             await updateGeoPlatformApi({ ...payload, id: editing.id });

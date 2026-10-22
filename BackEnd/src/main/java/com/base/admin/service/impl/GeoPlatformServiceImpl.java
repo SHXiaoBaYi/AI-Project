@@ -76,6 +76,8 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
         platform.setPlatformName(name);
         platform.setPlatformType(type);
         platform.setLoginUrl(dto.getLoginUrl() == null ? "" : dto.getLoginUrl().trim());
+        platform.setContentAuditUrls(nz(dto.getContentAuditUrls()));
+        platform.setContentAuditNotes(nz(dto.getContentAuditNotes()));
         platform.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : 0);
         platform.setRemark(dto.getRemark());
         platformMapper.insert(platform);
@@ -91,6 +93,8 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
         platform.setPlatformName(name);
         platform.setPlatformType(type);
         platform.setLoginUrl(dto.getLoginUrl() == null ? "" : dto.getLoginUrl().trim());
+        platform.setContentAuditUrls(nz(dto.getContentAuditUrls()));
+        platform.setContentAuditNotes(nz(dto.getContentAuditNotes()));
         platform.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : 0);
         platform.setRemark(dto.getRemark());
         platformMapper.updateById(platform);
@@ -180,5 +184,9 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
             return Constants.PLATFORM_TYPE_CONTENT;
         }
         return Constants.PLATFORM_TYPE_AI;
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s.trim();
     }
 }

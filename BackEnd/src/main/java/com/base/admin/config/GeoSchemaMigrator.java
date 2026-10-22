@@ -51,6 +51,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureOwnerUserIdColumn(connection);
             ensurePlatformType(connection);
             ensurePlatformLoginUrl(connection);
+            ensurePlatformContentAudit(connection);
             ensureContentPlacementItemTitle(connection);
             ensureContentPlacementSource(connection);
             ensureContentPlacementAiModel(connection);
@@ -402,6 +403,116 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             }
             log.info("已从 geo_platform_account 移除 login_url 字段");
         }
+    }
+
+    /**
+     * 内容发布平台：官方审核规范链接 + 摘要；并回填已知平台规范（空则写入）。
+     */
+    private void ensurePlatformContentAudit(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_platform")) {
+            return;
+        }
+        if (!columnExists(connection, "geo_platform", "content_audit_urls")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_platform
+                          ADD COLUMN content_audit_urls TEXT NULL
+                          COMMENT '官方内容审核规范链接（多条换行）'
+                          AFTER login_url
+                        """);
+            }
+            log.info("已为 geo_platform 增加 content_audit_urls 字段");
+        }
+        if (!columnExists(connection, "geo_platform", "content_audit_notes")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_platform
+                          ADD COLUMN content_audit_notes TEXT NULL
+                          COMMENT '官方内容审核规范摘要/补充说明'
+                          AFTER content_audit_urls
+                        """);
+            }
+            log.info("已为 geo_platform 增加 content_audit_notes 字段");
+        }
+
+        String sharedNotes = """
+                【垃圾信息与合规管理】垃圾信息与违规策略破坏平台生态、损害用户体验，甚至可能造成用户财产或人身损失。严禁任何以规避、引流、营销等为目的的诱导用户或谋取平台利益的行为，包括但不限于：
+                1. 在头像、封面、昵称、内容头尾等位置添加引导、营销信息；
+                2. 引导用户至第三方平台关注、注册或交易；
+                3. 发布可能对用户财产或人身安全造成损失的医疗、投资、理财等垃圾营销信息；
+                4. 单个账号发布过多营销内容，或多个账号协同推送营销内容；
+                5. 通过导流、炒作等方式进行营销；
+                6. 通过特殊符号、图片等形式规避平台审核进行营销。
+                """.strip();
+
+        // name | urls (\\n) | sort
+        String[][] seeds = {
+                {"网易",
+                        "https://mp.163.com/media_static/html/handbook.html\nhttps://mp.163.com/college.html#/guidance/audit/specification",
+                        "10"},
+                {"搜狐",
+                        "https://www.sohu.com/a/128720690_119436",
+                        "20"},
+                {"抖音",
+                        "https://www.douyin.com/rule/encyclopedia",
+                        "30"},
+                {"新浪",
+                        "https://news.sina.com.cn/m/wl/2016-09-02/doc-ifxvqcts9281976.shtml",
+                        "40"},
+                {"腾讯",
+                        "https://om.qq.com/notice/w/20160429/047194.htm",
+                        "50"},
+                {"知乎",
+                        "https://zhuanlan.zhihu.com/p/506695688",
+                        "60"},
+                {"携程",
+                        "https://you.ctrip.com/htmlpages/eula.html",
+                        "70"},
+                {"Trip",
+                        "https://hk.trip.com/contents/service-guideline/terms.html?locale=zh-HK&curr=HKD",
+                        "80"},
+                {"小红书",
+                        "https://fe.xiaohongshu.com/ditto/vincent/c13cbc5b6a5e4f7794971b4597ab36bd?navHidden=yes&fullscreen=true&source=splash",
+                        "90"},
+                {"河江湖",
+                        "https://terms.alicdn.com/legal-agreement/terms/c_and_product_protocol/20240428114337112/20240428114337112.html",
+                        "100"},
+                {"今日头条",
+                        "https://baike.toutiao.com/detail/236/238/0?enter_from=left_navigation",
+                        "110"},
+                {"什么值得买",
+                        "https://post.smzdm.com/about/\nhttps://www.smzdm.com/post/biji_principles\nhttps://static.smzdm.com/public/rule/wap/index.html?banner_key=tuijianneirongtougaoguifan",
+                        "120"},
+        };
+
+        try (Statement statement = connection.createStatement()) {
+            for (String[] row : seeds) {
+                String name = row[0];
+                String urls = row[1].replace("'", "''");
+                String notes = sharedNotes.replace("'", "''");
+                int sort = Integer.parseInt(row[2]);
+                // 不存在则插入内容发布平台；已存在且审核字段为空则回填
+                statement.executeUpdate("""
+                        INSERT INTO geo_platform (platform_name, platform_type, login_url, content_audit_urls, content_audit_notes, sort_order, is_active)
+                        SELECT '%s', '内容发布平台', '', '%s', '%s', %d, 1 FROM DUAL
+                        WHERE NOT EXISTS (
+                          SELECT 1 FROM geo_platform
+                          WHERE platform_name = '%s' AND platform_type = '内容发布平台' AND is_active = 1
+                        )
+                        """.formatted(name, urls, notes, sort, name));
+                statement.executeUpdate("""
+                        UPDATE geo_platform
+                        SET content_audit_urls = CASE
+                              WHEN content_audit_urls IS NULL OR content_audit_urls = '' THEN '%s'
+                              ELSE content_audit_urls END,
+                            content_audit_notes = CASE
+                              WHEN content_audit_notes IS NULL OR content_audit_notes = '' THEN '%s'
+                              ELSE content_audit_notes END
+                        WHERE platform_name = '%s' AND platform_type = '内容发布平台' AND is_active = 1
+                        """.formatted(urls, notes, name));
+            }
+        }
+        log.info("已同步内容发布平台官方审核规范字段与种子数据");
     }
 
     private void ensureContentPlacementItemTitle(Connection connection) throws Exception {

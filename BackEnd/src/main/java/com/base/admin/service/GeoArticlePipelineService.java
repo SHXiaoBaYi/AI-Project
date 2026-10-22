@@ -1,6 +1,7 @@
 package com.base.admin.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.base.admin.common.Constants;
 import com.base.admin.domain.dto.GeoContentAiGenerateDTO;
 import com.base.admin.domain.entity.GeoArticleGenTrace;
 import com.base.admin.domain.entity.GeoArticleSkeleton;
@@ -8,6 +9,7 @@ import com.base.admin.domain.entity.GeoArticleStylePack;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoMediaAsset;
 import com.base.admin.domain.entity.GeoMediaUsage;
+import com.base.admin.domain.entity.GeoPlatform;
 import com.base.admin.domain.vo.GeoArticlePipelineResultVO;
 import com.base.admin.domain.vo.GeoPipelineStageVO;
 import com.base.admin.domain.vo.GeoSellPointContextVO;
@@ -16,6 +18,7 @@ import com.base.admin.mapper.GeoArticleGenTraceMapper;
 import com.base.admin.mapper.GeoArticleSkeletonMapper;
 import com.base.admin.mapper.GeoArticleStylePackMapper;
 import com.base.admin.mapper.GeoMediaUsageMapper;
+import com.base.admin.mapper.GeoPlatformMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -68,6 +71,17 @@ public class GeoArticlePipelineService {
     private static final String COMPLIANCE_RULES = """
             【合规与平台】符合广告法与常见自媒体审核：不绝对化承诺、不虚假疗效、不恐吓营销；E-E-A-T：有经验视角、可用资料支撑、表述克制可核验。
             """;
+    /** 各内容平台通用的垃圾信息/引流红线（与平台管理「审核规范摘要」对齐） */
+    private static final String PLATFORM_SPAM_BASELINE = """
+            【内容平台垃圾信息与合规红线——必须遵守】
+            垃圾信息与违规策略破坏平台生态、损害用户体验，甚至可能造成用户财产或人身损失。严禁任何以规避、引流、营销等为目的的诱导用户或谋取平台利益的行为，包括但不限于：
+            1. 在标题、导语、正文头尾、配图说明中添加关注引导、加微、下单、跳转第三方等营销信息；
+            2. 引导用户至第三方平台关注、注册或交易；
+            3. 发布可能对用户财产或人身安全造成损失的医疗功效承诺、投资理财荐股等垃圾营销信息；
+            4. 全文不得写成硬广清单或协同刷屏式推销；
+            5. 不得通过导流、炒作、标题党夸张承诺进行营销；
+            6. 不得用特殊符号、拆字、隐晦图注等方式规避平台审核进行营销。
+            """;
 
     private final AiChatService aiChatService;
     private final SellPointContextService sellPointContextService;
@@ -77,6 +91,7 @@ public class GeoArticlePipelineService {
     private final GeoArticleSkeletonMapper skeletonMapper;
     private final GeoMediaUsageMapper mediaUsageMapper;
     private final GeoArticleGenTraceMapper genTraceMapper;
+    private final GeoPlatformMapper platformMapper;
     private final ObjectMapper objectMapper;
 
     @FunctionalInterface
@@ -112,9 +127,11 @@ public class GeoArticlePipelineService {
         mark(stages, progress, "sell", "召回资料", "done",
                 "候选 " + pointCnt + " 条（成文只选用 2～4 条，禁止清单堆砌）");
 
+        String platformAuditPack = buildPlatformAuditPack();
+
         // —— 阶段3：大纲 ——
         mark(stages, progress, "outline", "生成大纲", "running", "深度思考中：主题叙事框架与品牌自然引出…");
-        String outlineJson = chatOutline(placement, dto, style, skeleton, pointsJson, provider);
+        String outlineJson = chatOutline(placement, dto, style, skeleton, pointsJson, platformAuditPack, provider);
         mark(stages, progress, "outline", "生成大纲", "done", truncate(outlineJson, 120));
 
         // —— 阶段4：语义召回素材（用途/标签匹配；话题仅软优先）——
@@ -130,7 +147,8 @@ public class GeoArticlePipelineService {
 
         // —— 阶段5：扩写正文（含风格句式、品牌软约束）——
         mark(stages, progress, "expand", "扩写正文", "running", "深度扩写中（耗时较长，请稍候）…");
-        Parsed draft = chatExpand(placement, dto, style, skeleton, pointsJson, outlineJson, candidates, provider);
+        Parsed draft = chatExpand(placement, dto, style, skeleton, pointsJson, outlineJson, candidates,
+                platformAuditPack, provider);
         mark(stages, progress, "expand", "扩写正文", "done", "标题：" + truncate(draft.title(), 40));
 
         // —— 阶段6：智能插图（模型判定每节 0+ 张）——
@@ -151,7 +169,7 @@ public class GeoArticlePipelineService {
             int round = i + 1;
             mark(stages, progress, "qa", "质检与重写", "running",
                     "第 " + round + "/" + MAX_QA_ROUNDS + " 轮质检中（品牌露出、结构、事实、文笔）…");
-            QaResult qa = chatQa(placement, style, draft, provider);
+            QaResult qa = chatQa(placement, style, draft, platformAuditPack, provider);
             qaRounds = round;
             if (qa.pass()) {
                 mark(stages, progress, "qa", "质检与重写", "done",
@@ -162,14 +180,14 @@ public class GeoArticlePipelineService {
             if (i == MAX_QA_ROUNDS - 1) {
                 mark(stages, progress, "qa", "质检与重写", "running",
                         "第 " + round + " 轮未通过：" + reason + "；按末次意见强制重写中…");
-                draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, provider);
+                draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, platformAuditPack, provider);
                 mark(stages, progress, "qa", "质检与重写", "done",
                         "已达上限 " + MAX_QA_ROUNDS + " 轮，已按末次意见重写");
                 break;
             }
             mark(stages, progress, "qa", "质检与重写", "running",
                     "第 " + round + " 轮未通过：" + reason + "；正在重写…");
-            draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, provider);
+            draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, platformAuditPack, provider);
             mark(stages, progress, "qa", "质检与重写", "running",
                     "第 " + round + " 轮重写完成，继续下一轮质检…");
         }
@@ -272,9 +290,61 @@ public class GeoArticlePipelineService {
         }
     }
 
+    /**
+     * 汇总内容发布平台的官方审核规范（链接 + 摘要），供成文/质检约束。
+     */
+    private String buildPlatformAuditPack() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(PLATFORM_SPAM_BASELINE).append('\n');
+        sb.append("【各内容平台官方审核规范（须遵守，勿生成违规引流/硬广）】\n");
+        List<GeoPlatform> platforms;
+        try {
+            platforms = platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
+                    .eq(GeoPlatform::getPlatformType, Constants.PLATFORM_TYPE_CONTENT)
+                    .eq(GeoPlatform::getIsActive, 1)
+                    .orderByAsc(GeoPlatform::getSortOrder)
+                    .orderByAsc(GeoPlatform::getId)
+                    .last("LIMIT 40"));
+        } catch (Exception e) {
+            log.warn("读取内容平台审核规范失败: {}", e.getMessage());
+            return sb.toString();
+        }
+        if (platforms == null || platforms.isEmpty()) {
+            sb.append("（暂无平台明细，以上述红线为准）\n");
+            return sb.toString();
+        }
+        int n = 0;
+        for (GeoPlatform p : platforms) {
+            boolean hasUrls = StringUtils.hasText(p.getContentAuditUrls());
+            boolean hasNotes = StringUtils.hasText(p.getContentAuditNotes());
+            if (!hasUrls && !hasNotes) {
+                continue;
+            }
+            n++;
+            sb.append(n).append(". ").append(nz(p.getPlatformName())).append('\n');
+            if (hasUrls) {
+                sb.append("   规范链接：\n");
+                for (String line : p.getContentAuditUrls().split("\\R")) {
+                    String u = line == null ? "" : line.trim();
+                    if (StringUtils.hasText(u)) {
+                        sb.append("   - ").append(u).append('\n');
+                    }
+                }
+            }
+            if (hasNotes) {
+                sb.append("   摘要：").append(truncate(p.getContentAuditNotes().replaceAll("\\s+", " "), 280))
+                        .append('\n');
+            }
+        }
+        if (n == 0) {
+            sb.append("（平台未配置审核字段，以上述红线为准）\n");
+        }
+        return sb.toString();
+    }
+
     private String chatOutline(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
                                GeoArticleStylePack style, GeoArticleSkeleton skeleton,
-                               String pointsJson, String provider) {
+                               String pointsJson, String platformAuditPack, String provider) {
         String openingHint = pickOpeningAngle();
         String system = """
                 你是资深自媒体选题策划（非广告文案）。只输出大纲 JSON，不要正文。
@@ -297,6 +367,7 @@ public class GeoArticlePipelineService {
                 + "\n骨架参考（可偏离）：" + nz(skeleton.getSectionSchema())
                 + "\n品牌指引：" + nz(style.getBrandGuide())
                 + "\n" + BRAND_QUALITY_RULES
+                + "\n" + platformAuditPack
                 + "\n可引用资料卡：\n" + pointsJson;
         return aiChatService.chat(system, user, provider, 0.55, true);
     }
@@ -304,7 +375,7 @@ public class GeoArticlePipelineService {
     private Parsed chatExpand(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
                               GeoArticleStylePack style, GeoArticleSkeleton skeleton,
                               String pointsJson, String outlineJson,
-                              List<GeoMediaAsset> candidates, String provider) {
+                              List<GeoMediaAsset> candidates, String platformAuditPack, String provider) {
         String mediaHint = buildMediaCatalog(candidates);
         String topicKw = StringUtils.hasText(placement.getTargetQuestion())
                 ? placement.getTargetQuestion().trim()
@@ -314,10 +385,11 @@ public class GeoArticlePipelineService {
                 文风自然、语句通顺、逻辑通畅；主题叙事优先，品牌作佐证。
 
                 【事实】只用资料卡中的事实，不可杜撰认证编号/数据/门店/捐赠金额；没有的信息宁可不写。
-                【植入】正文自然出现主题关键词「""" + topicKw + """」，忌生硬堆砌标题党。
+                【植入】正文自然出现主题关键词「%s」，忌生硬堆砌标题党。
                 【资料用法】全文只选用 2～4 条资料事实揉进叙事；禁止卖点清单、禁止连续多段推销腔。
                 【句式】风格包样本句式最多改写融入 1 句；禁止照搬范文骨架导致篇篇雷同。
-                """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + COMPLIANCE_RULES + """
+                """.formatted(topicKw)
+                + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + COMPLIANCE_RULES + """
                 【插图】本阶段不要插入 <img>；全文最多预留 2 个 <!--IMG:sectionKey--> 占位（可 0 个），勿每节都留。
                 【排版】title 独立；html=导语段+若干<h2>小节+收束。允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br。
                 禁止 Markdown、脚本、外链、<h1>、内联 style/class。
@@ -330,9 +402,10 @@ public class GeoArticlePipelineService {
                 + "\n句式样本：" + nz(style.getSamplePhrases())
                 + "\n品牌指引：" + nz(style.getBrandGuide())
                 + "\n骨架参考：" + nz(skeleton.getSectionSchema())
+                + "\n" + platformAuditPack
                 + "\n可选素材目录（插图阶段再用）：\n" + mediaHint
                 + "\n可引用资料卡：\n" + pointsJson
-                + "\n自检：主题是否像一篇答疑文而非广告；「小巴依」约 1～3 次且不违和；未清单堆砌资料。";
+                + "\n自检：主题是否像一篇答疑文而非广告；「小巴依」约 1～3 次且不违和；未清单堆砌资料；未触犯平台审核红线。";
         String raw = aiChatService.chat(system, user, provider, 0.65, true);
         return parseArticle(raw);
     }
@@ -419,7 +492,8 @@ public class GeoArticlePipelineService {
         return new IllustrateResult(new Parsed(draft.title(), html), used, sectionMap);
     }
 
-    private QaResult chatQa(GeoContentPlacement placement, GeoArticleStylePack style, Parsed draft, String provider) {
+    private QaResult chatQa(GeoContentPlacement placement, GeoArticleStylePack style, Parsed draft,
+                            String platformAuditPack, String provider) {
         int brandHits = countBrandMentions(draft.html());
         if (brandHits < 1) {
             return new QaResult(false,
@@ -437,13 +511,15 @@ public class GeoArticlePipelineService {
                 2. 卖点/资料清单式堆砌、段段推销腔、同质化万能模板（先说结论→三条卖点→号召选择）；
                 3. 「小巴依」为 0，或生硬硬广，或出现过多像刷屏；
                 4. 读起来不像在回答主题，而像品牌说明书；
-                5. 误用 Markdown / 危险标签；图注广告口号喧宾夺主。
-                合格标准：像外网优质自媒体答疑文——主题清楚、品牌自然引出、资料客观克制、框架有辨识度。
+                5. 触犯内容平台审核红线：引流加微/第三方、头尾硬广、医疗投资恐吓营销、规避审核符号等；
+                6. 误用 Markdown / 危险标签；图注广告口号喧宾夺主。
+                合格标准：像外网优质自媒体答疑文——主题清楚、品牌自然引出、资料客观克制、框架有辨识度、符合平台审核规范。
                 """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES;
         String user = "目标问题：" + nz(placement.getTargetQuestion())
                 + "\n话题：" + nz(placement.getTopicName())
                 + "\n品牌指引：" + nz(style.getBrandGuide())
                 + "\n已统计「小巴依」出现次数：" + brandHits
+                + "\n" + platformAuditPack
                 + "\n标题：" + draft.title()
                 + "\n正文：\n" + draft.html();
         try {
@@ -461,10 +537,12 @@ public class GeoArticlePipelineService {
     }
 
     private Parsed chatRewrite(GeoContentPlacement placement, GeoArticleStylePack style,
-                               Parsed draft, String feedback, String pointsJson, String provider) {
+                               Parsed draft, String feedback, String pointsJson,
+                               String platformAuditPack, String provider) {
         String system = """
                 按质检意见改写全文。保留已插入的 <figure>/<img> 的 src（素材库路径），禁止改成 data:image 或臆造外链，除非意见要求删图。
                 改写目标：主题叙事优先、去掉卖点堆砌与同质化模板；资料只保留必要的 2～4 处；品牌「小巴依」自然出现 1～3 次。
+                必须符合内容平台审核规范：禁引流、禁头尾硬广、禁医疗投资恐吓营销、禁规避审核话术。
                 若 figcaption 像广告口号，改为≤18 字场景说明或删除 figcaption。
                 """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + """
                 只输出 JSON：{"title":"...","html":"..."}
@@ -473,10 +551,11 @@ public class GeoArticlePipelineService {
         String user = "目标问题：" + nz(placement.getTargetQuestion())
                 + "\n质检意见：" + nz(feedback)
                 + "\n品牌指引：" + nz(style.getBrandGuide())
+                + "\n" + platformAuditPack
                 + "\n原标题：" + draft.title()
                 + "\n原文：\n" + draft.html()
                 + "\n可引用资料卡（勿全用）：\n" + pointsJson
-                + "\n自检：像答疑文而非广告；「小巴依」1～3 次。";
+                + "\n自检：像答疑文而非广告；「小巴依」1～3 次；未触犯平台审核红线。";
         String raw = aiChatService.chat(system, user, provider, 0.55, true);
         return parseArticle(raw);
     }

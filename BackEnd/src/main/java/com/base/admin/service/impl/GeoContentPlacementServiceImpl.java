@@ -1528,13 +1528,23 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         if (dto.getId() == null) {
             throw new BusinessException("发布详情ID不能为空");
         }
-        GeoContentPlacementItem item = requireItem(dto.getId());
-        if (!item.getPlacementId().equals(dto.getPlacementId())) {
-            throw new BusinessException("发布详情与内容投放不匹配");
+        if (dto.getPlacementId() == null) {
+            throw new BusinessException("请选择目标问题");
         }
+        GeoContentPlacementItem item = requireItem(dto.getId());
+        Long oldPlacementId = item.getPlacementId();
+        Long newPlacementId = dto.getPlacementId();
+        // 允许已发布文章改绑话题/目标问题（换投放单）；引用记录同步迁到新投放单
+        requirePlacement(newPlacementId);
         String oldUrl = nz(item.getPublishUrl());
         fillItem(item, dto);
         itemMapper.updateById(item);
+        if (!Objects.equals(oldPlacementId, newPlacementId)) {
+            GeoContentPlacementCite move = new GeoContentPlacementCite();
+            move.setPlacementId(newPlacementId);
+            citeMapper.update(move, new LambdaQueryWrapper<GeoContentPlacementCite>()
+                    .eq(GeoContentPlacementCite::getItemId, item.getId()));
+        }
         String newUrl = nz(item.getPublishUrl());
         if (!Objects.equals(oldUrl, newUrl)) {
             GeoContentPlacementCite patch = new GeoContentPlacementCite();
@@ -1542,8 +1552,11 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             citeMapper.update(patch, new LambdaQueryWrapper<GeoContentPlacementCite>()
                     .eq(GeoContentPlacementCite::getItemId, item.getId()));
         }
-        syncPlacementDerived(item.getPlacementId());
-        placementTaskSyncService.completeArticlePublishTasks(item.getPlacementId());
+        syncPlacementDerived(oldPlacementId);
+        if (!Objects.equals(oldPlacementId, newPlacementId)) {
+            syncPlacementDerived(newPlacementId);
+        }
+        placementTaskSyncService.completeArticlePublishTasks(newPlacementId);
     }
 
     @Override

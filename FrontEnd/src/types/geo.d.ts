@@ -28,6 +28,10 @@ export interface GeoPlatform {
   platformName: string;
   platformType?: string;
   loginUrl?: string;
+  /** 官方内容审核规范链接，多条换行 */
+  contentAuditUrls?: string;
+  /** 官方内容审核规范摘要/补充说明 */
+  contentAuditNotes?: string;
   sortOrder?: number;
   remark?: string;
 }

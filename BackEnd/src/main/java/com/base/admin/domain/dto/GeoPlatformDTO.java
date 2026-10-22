@@ -22,6 +22,12 @@ public class GeoPlatformDTO {
     @Schema(description = "平台登录地址", example = "https://www.douyin.com")
     private String loginUrl;
 
+    @Schema(description = "官方内容审核规范链接（多条换行）")
+    private String contentAuditUrls;
+
+    @Schema(description = "官方内容审核规范摘要/补充说明")
+    private String contentAuditNotes;
+
     @Schema(description = "排序", example = "1")
     private Integer sortOrder;
 

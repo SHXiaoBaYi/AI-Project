@@ -475,6 +475,7 @@ const ArticlePage = memo(function ArticlePage() {
             name='topicId'
             label='话题'
             rules={[{ required: true, message: '请选择话题' }]}
+            extra={editing ? '已发布文章也可改绑话题/目标问题' : undefined}
           >
             <Select
               options={topicOptions}
@@ -497,7 +498,7 @@ const ArticlePage = memo(function ArticlePage() {
               showSearch
               optionFilterProp='label'
               placeholder={formTopicId ? '请选择目标问题' : '请先选择话题'}
-              disabled={!formTopicId && !editing}
+              disabled={!formTopicId}
             />
           </Form.Item>
           <Form.Item
