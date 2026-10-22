@@ -1,7 +1,6 @@
 package com.base.admin.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.base.admin.common.Constants;
 import com.base.admin.domain.dto.GeoContentAiGenerateDTO;
 import com.base.admin.domain.entity.GeoArticleGenTrace;
 import com.base.admin.domain.entity.GeoArticleSkeleton;
@@ -9,7 +8,6 @@ import com.base.admin.domain.entity.GeoArticleStylePack;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoMediaAsset;
 import com.base.admin.domain.entity.GeoMediaUsage;
-import com.base.admin.domain.entity.GeoPlatform;
 import com.base.admin.domain.vo.GeoArticlePipelineResultVO;
 import com.base.admin.domain.vo.GeoPipelineStageVO;
 import com.base.admin.domain.vo.GeoSellPointContextVO;
@@ -18,7 +16,6 @@ import com.base.admin.mapper.GeoArticleGenTraceMapper;
 import com.base.admin.mapper.GeoArticleSkeletonMapper;
 import com.base.admin.mapper.GeoArticleStylePackMapper;
 import com.base.admin.mapper.GeoMediaUsageMapper;
-import com.base.admin.mapper.GeoPlatformMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -40,40 +37,36 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * GEO 成文流水线（v2）：角色短、资料实、少堆规则。
+ * GEO 成文（外网模式）：一次写完正文，再挂素材图。
  * <pre>
- * 资料准备 → 大纲 → 扩写 → 插图 → 轻质检（必要时改一版）
+ * 卖点/素材/自定义提示词仍走系统库 → 一气呵成写稿 → 智能插图 →（缺品牌时轻补一句）
  * </pre>
- * 系统提示只保留人设与本阶段任务；话题、卖点、素材、平台规范放在用户侧上下文。
+ * 不做大纲→扩写→多轮质检；提示词仿网页对话，少管格式多管写好文。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class GeoArticlePipelineService {
 
-    private static final int MAX_QA_ROUNDS = 2;
     private static final int EVIDENCE_RECALL_LIMIT = 12;
     private static final Pattern H2_PATTERN = Pattern.compile("(?is)(<h2\\b[^>]*>.*?</h2>)");
+    private static final Pattern MD_H1 = Pattern.compile("(?m)^\\s*#\\s+(.+)$");
+    private static final Pattern MD_H2 = Pattern.compile("(?m)^\\s*##\\s+(.+)$");
     private static final String BRAND_NAME = "小巴依";
 
     /**
-     * 唯一成文人设。常识内化，不把负面示例当选题；结构由本次话题决定。
+     * 外网对话式人设。通用约束：目标问题是主线，资料是论据——不写死任何具体选题词。
      */
     private static final String WRITER_BRIEF = """
-            你是「GEO 内容撰稿人」。写可在内容平台发布、易被检索引用的中文专题稿。
-            你熟悉新疆牛羊肉基本常识，会用资料卡里的品牌事实，遵守平台创作红线。
-            标题与结构必须服务本次话题与目标问题；用资料写扎实；论证到品牌时自然点名「小巴依」。
-            像人写的好文章，不像说明书或硬广。产品数字、认证只能来自资料卡。
-            """;
+            你是资深自媒体撰稿人，擅长美食与农产品专题，熟悉新疆牛羊肉常识。
+            请像在通义网页里写稿一样：一口气写出可读性强、信息扎实的完整中文文章。
 
-    private static final String PLATFORM_RULES_SHORT =
-            "平台红线：不引流加微/跳转第三方；不头尾硬广；不虚假疗效与恐吓营销。";
-
-    private static final String PLATFORM_SPAM_BASELINE = """
-            【内容平台创作红线】
-            1. 标题、导语、正文头尾、图注不得引流（加微/下单/跳转第三方）；
-            2. 不得医疗功效承诺、投资荐股等垃圾营销；
-            3. 不得硬广清单或刷屏式推销。
+            【主线规则——最重要】
+            1. 读者带着「目标问题」来；全文标题、小节、论据都必须直接服务回答这个问题。
+            2. 品牌资料只是论据：选用能支撑「回答该问题」的事实；与问题无关的资料宁可不写。
+            3. 禁止把文章写成与问题脱节的品牌说明书或资料巡展（即便资料很全）。
+            4. 品牌「小巴依」在论证需要时自然出现；产品数字/认证只能用我提供的资料。
+            5. 不引流加微、不硬广口号、不虚假疗效。
             """;
 
     private final AiChatService aiChatService;
@@ -84,7 +77,6 @@ public class GeoArticlePipelineService {
     private final GeoArticleSkeletonMapper skeletonMapper;
     private final GeoMediaUsageMapper mediaUsageMapper;
     private final GeoArticleGenTraceMapper genTraceMapper;
-    private final GeoPlatformMapper platformMapper;
     private final ObjectMapper objectMapper;
 
     @FunctionalInterface
@@ -101,7 +93,7 @@ public class GeoArticlePipelineService {
         GeoArticlePipelineResultVO result = new GeoArticlePipelineResultVO();
         List<GeoPipelineStageVO> stages = result.getStages();
 
-        // 1. 风格（仅作语气参考，不驱动选题）
+        // 1. 语气参考（不驱动结构）
         mark(stages, progress, "style", "加载风格", "running", "加载语气参考…");
         GeoArticleStylePack style = pickStylePack();
         GeoArticleSkeleton skeleton = pickSkeleton();
@@ -109,24 +101,16 @@ public class GeoArticlePipelineService {
         result.setSkeletonCode(skeleton.getCode());
         mark(stages, progress, "style", "加载风格", "done", style.getName());
 
-        // 2. 卖点资料
-        mark(stages, progress, "sell", "召回资料", "running", "按话题召回品牌资料…");
+        // 2. 卖点
+        mark(stages, progress, "sell", "召回卖点", "running", "按话题召回品牌卖点…");
         GeoSellPointContextVO ctx = sellPointContextService.build(
                 placement.getTopicName(), placement.getTargetQuestion(), EVIDENCE_RECALL_LIMIT);
         int pointCnt = ctx.getPoints() == null ? 0 : ctx.getPoints().size();
         result.setUsedPointCount(pointCnt);
-        String pointsJson = compactEvidencePack(ctx);
-        mark(stages, progress, "sell", "召回资料", "done", "资料 " + pointCnt + " 条");
+        String evidenceProse = formatEvidenceProse(ctx);
+        mark(stages, progress, "sell", "召回卖点", "done", "卖点 " + pointCnt + " 条");
 
-        String platformAuditFull = buildPlatformAuditPack();
-        String assignment = buildAssignment(placement, dto, style);
-
-        // 3. 大纲：只围绕话题
-        mark(stages, progress, "outline", "生成大纲", "running", "围绕话题构思大纲…");
-        String outlineJson = chatOutline(assignment, pointsJson, provider);
-        mark(stages, progress, "outline", "生成大纲", "done", truncate(outlineJson, 120));
-
-        // 4. 素材
+        // 3. 素材（写作时只告知有图，插图阶段再挂）
         mark(stages, progress, "media", "召回素材", "running", "匹配素材库…");
         String mediaContext = nz(placement.getTopicName()) + " " + nz(placement.getTargetQuestion())
                 + (StringUtils.hasText(dto.getUserPrompt()) ? " " + dto.getUserPrompt() : "");
@@ -135,13 +119,24 @@ public class GeoArticlePipelineService {
         mark(stages, progress, "media", "召回素材", "done",
                 candidates.isEmpty() ? "暂无素材" : ("候选 " + candidates.size() + " 张"));
 
-        // 5. 扩写
-        mark(stages, progress, "expand", "扩写正文", "running", "按大纲与资料写正文…");
-        Parsed draft = chatExpand(assignment, pointsJson, outlineJson, provider);
-        mark(stages, progress, "expand", "扩写正文", "done", "标题：" + truncate(draft.title(), 40));
+        // 4. 外网模式：一气呵成写正文
+        mark(stages, progress, "write", "撰写正文", "running", "外网模式一气呵成写稿（较久）…");
+        Parsed draft = chatWriteOnce(placement, dto, style, evidenceProse, provider);
+        mark(stages, progress, "write", "撰写正文", "done", "标题：" + truncate(draft.title(), 40));
+
+        // 5. 缺品牌时轻补（不整篇质检重写）
+        int brandHits = countBrandMentions(draft.html());
+        result.setQaRounds(0);
+        if (brandHits < 1) {
+            mark(stages, progress, "brand", "品牌轻补", "running", "正文未点品牌，轻补一版…");
+            draft = chatWeaveBrand(placement, draft, evidenceProse, provider);
+            result.setQaRounds(1);
+            mark(stages, progress, "brand", "品牌轻补", "done",
+                    "小巴依 ×" + countBrandMentions(draft.html()));
+        }
 
         // 6. 插图
-        mark(stages, progress, "illustrate", "智能插图", "running", "判定是否插图…");
+        mark(stages, progress, "illustrate", "智能插图", "running", "按正文挂载素材…");
         IllustrateResult illustrated = illustrate(draft, candidates, provider);
         draft = illustrated.article();
         result.setUsedImageCount(illustrated.usedAssetIds().size());
@@ -150,30 +145,6 @@ public class GeoArticlePipelineService {
                 illustrated.usedAssetIds().isEmpty()
                         ? "不插图"
                         : ("插入 " + illustrated.usedAssetIds().size() + " 张"));
-
-        // 7. 轻质检（最多改一轮）
-        mark(stages, progress, "qa", "质检与改写", "running", "质检中…");
-        int qaRounds = 0;
-        for (int i = 0; i < MAX_QA_ROUNDS; i++) {
-            int round = i + 1;
-            mark(stages, progress, "qa", "质检与改写", "running",
-                    "第 " + round + "/" + MAX_QA_ROUNDS + " 轮质检…");
-            QaResult qa = chatQa(assignment, draft, platformAuditFull, provider);
-            qaRounds = round;
-            if (qa.pass()) {
-                mark(stages, progress, "qa", "质检与改写", "done", "第 " + qaRounds + " 轮通过");
-                break;
-            }
-            String reason = StringUtils.hasText(qa.feedback()) ? truncate(qa.feedback(), 80) : "未达标";
-            mark(stages, progress, "qa", "质检与改写", "running",
-                    "第 " + round + " 轮未通过：" + reason + "；改写中…");
-            draft = chatRewrite(assignment, draft, qa.feedback(), pointsJson, provider);
-            if (i == MAX_QA_ROUNDS - 1) {
-                mark(stages, progress, "qa", "质检与改写", "done",
-                        "已改写（上限 " + MAX_QA_ROUNDS + " 轮）");
-            }
-        }
-        result.setQaRounds(qaRounds);
 
         result.setTitle(draft.title());
         result.setHtml(normalizePublishableHtml(draft.html()));
@@ -195,9 +166,6 @@ public class GeoArticlePipelineService {
             fallback.setCode("default");
             fallback.setName("默认");
             fallback.setToneGuide("先答读者问题，再展开；段短、信息清楚。");
-            fallback.setStructureGuide("");
-            fallback.setSamplePhrases("[]");
-            fallback.setBrandGuide("论证需要时自然点名「小巴依」。");
             return fallback;
         }
         int idx = (int) (System.currentTimeMillis() / 60_000L % list.size());
@@ -212,143 +180,119 @@ public class GeoArticlePipelineService {
                         .last("LIMIT 8"));
         if (list == null || list.isEmpty()) {
             GeoArticleSkeleton fallback = new GeoArticleSkeleton();
-            fallback.setCode("topic_led_v2");
-            fallback.setName("话题主导");
-            fallback.setSectionSchema("{\"note\":\"结构由话题决定\"}");
+            fallback.setCode("web_once_v1");
+            fallback.setName("外网一次成稿");
+            fallback.setSectionSchema("{\"mode\":\"one-shot\"}");
             return fallback;
         }
         int idx = (int) ((System.currentTimeMillis() / 60_000L + 3) % list.size());
         return list.get(idx);
     }
 
-    /** 写作任务上下文：话题 / 语气 / 用户补充。不含写作禁令清单。 */
-    private String buildAssignment(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
-                                   GeoArticleStylePack style) {
+    /** 卖点转成自然语言论据；明确「按问题选用」，避免模型按资料目录排版。 */
+    private String formatEvidenceProse(GeoSellPointContextVO ctx) {
         StringBuilder sb = new StringBuilder();
-        sb.append("【本次写作任务】\n");
-        sb.append("话题：").append(nz(placement.getTopicName())).append('\n');
-        sb.append("目标问题：").append(nz(placement.getTargetQuestion())).append('\n');
-        if (StringUtils.hasText(dto.getUserPrompt())) {
-            sb.append("补充要求：\n").append(dto.getUserPrompt().trim()).append('\n');
-        }
-        if (StringUtils.hasText(style.getToneGuide())) {
-            sb.append("语气参考：").append(style.getToneGuide().trim()).append('\n');
-        }
-        sb.append(PLATFORM_RULES_SHORT);
-        return sb.toString();
-    }
-
-    /** 资料卡：只给事实。 */
-    private String compactEvidencePack(GeoSellPointContextVO ctx) {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("note", "品牌/产品资料，按话题需要选用；数字与认证以此为准。");
-        ArrayNode hard = root.putArray("hardFacts");
-        if (ctx.getHardFacts() != null) {
-            int n = 0;
+        sb.append("用法：以下是可选论据。请只挑能支撑「回答目标问题」的条目写入；")
+                .append("不要按资料目录逐条巡展，也不要用资料顺序当文章大纲。\n\n");
+        if (ctx.getHardFacts() != null && !ctx.getHardFacts().isEmpty()) {
+            sb.append("硬事实：\n");
+            int i = 1;
             for (String f : ctx.getHardFacts()) {
-                if (!StringUtils.hasText(f) || n >= 8) {
-                    break;
+                if (StringUtils.hasText(f)) {
+                    sb.append(i++).append(". ").append(f.trim()).append('\n');
                 }
-                hard.add(f.trim());
-                n++;
             }
+            sb.append('\n');
         }
-        ArrayNode candidates = root.putArray("candidates");
-        if (ctx.getPoints() != null) {
-            int n = 0;
+        if (ctx.getPoints() != null && !ctx.getPoints().isEmpty()) {
+            sb.append("候选论据：\n");
+            int i = 1;
             for (GeoSellPointContextVO.PointItem p : ctx.getPoints()) {
-                if (n >= EVIDENCE_RECALL_LIMIT) {
-                    break;
+                sb.append(i++).append(". ");
+                if (StringUtils.hasText(p.getDomain())) {
+                    sb.append("【").append(p.getDomain().trim()).append("】");
                 }
-                ObjectNode item = candidates.addObject();
-                item.put("domain", nz(p.getDomain()));
-                item.put("title", truncate(nz(p.getTitle()), 40));
-                item.put("claim", truncate(nz(p.getClaim()), 120));
-                item.put("evidence", truncate(nz(p.getEvidence()), 320));
-                item.put("level", nz(p.getLevel()));
-                n++;
+                if (StringUtils.hasText(p.getTitle())) {
+                    sb.append(p.getTitle().trim());
+                }
+                sb.append('\n');
+                if (StringUtils.hasText(p.getClaim())) {
+                    sb.append("   主张：").append(p.getClaim().trim()).append('\n');
+                }
+                if (StringUtils.hasText(p.getEvidence())) {
+                    sb.append("   依据：").append(p.getEvidence().trim()).append('\n');
+                }
             }
         }
-        ArrayNode forbid = root.putArray("forbidden");
         if (ctx.getForbiddenHints() != null) {
             for (String h : ctx.getForbiddenHints()) {
                 if (StringUtils.hasText(h)) {
-                    forbid.add(h);
+                    sb.append("注意：").append(h.trim()).append('\n');
                 }
             }
         }
-        try {
-            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-        } catch (Exception e) {
-            throw new BusinessException("组装资料上下文失败");
-        }
+        String out = sb.toString().trim();
+        return StringUtils.hasText(out) ? out : "（暂无卖点资料，请按目标问题本身写清楚，勿编造品牌数据）";
     }
 
-    private String buildPlatformAuditPack() {
-        StringBuilder sb = new StringBuilder();
-        sb.append(PLATFORM_SPAM_BASELINE).append('\n');
-        sb.append("【各平台审核摘要】\n");
-        List<GeoPlatform> platforms;
-        try {
-            platforms = platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
-                    .eq(GeoPlatform::getPlatformType, Constants.PLATFORM_TYPE_CONTENT)
-                    .eq(GeoPlatform::getIsActive, 1)
-                    .orderByAsc(GeoPlatform::getSortOrder)
-                    .orderByAsc(GeoPlatform::getId)
-                    .last("LIMIT 40"));
-        } catch (Exception e) {
-            log.warn("读取内容平台审核规范失败: {}", e.getMessage());
-            return sb.toString();
-        }
-        if (platforms == null || platforms.isEmpty()) {
-            sb.append("（暂无平台明细）\n");
-            return sb.toString();
-        }
-        int n = 0;
-        for (GeoPlatform p : platforms) {
-            boolean hasUrls = StringUtils.hasText(p.getContentAuditUrls());
-            boolean hasNotes = StringUtils.hasText(p.getContentAuditNotes());
-            if (!hasUrls && !hasNotes) {
-                continue;
-            }
-            n++;
-            sb.append(n).append(". ").append(nz(p.getPlatformName())).append('\n');
-            if (hasNotes) {
-                sb.append("   ").append(truncate(p.getContentAuditNotes().replaceAll("\\s+", " "), 200))
-                        .append('\n');
-            }
-        }
-        if (n == 0) {
-            sb.append("（平台未配置审核字段）\n");
-        }
-        return sb.toString();
-    }
-
-    private String chatOutline(String assignment, String pointsJson, String provider) {
+    /**
+     * 外网模式主调用：一次生成完整文章。
+     * 用户侧顺序：问题主线 → 自定义要求 → 语气 → 论据资料（故意把资料放后面，降低「资料绑架结构」）。
+     */
+    private Parsed chatWriteOnce(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
+                                 GeoArticleStylePack style, String evidenceProse, String provider) {
+        String topic = nz(placement.getTopicName());
+        String question = nz(placement.getTargetQuestion());
+        String spine = StringUtils.hasText(question) ? question : topic;
         String system = WRITER_BRIEF + """
-                【本阶段】只输出大纲 JSON，不要正文。
-                根据「话题 / 目标问题」自行设计标题与小节；结构服务话题，不要套无关模板。
-                输出：
-                {"title":"...","lead":"导语意图","sections":[{"key":"s1","heading":"...","intent":"..."}],"close":"收束意图"}
+                输出格式（二选一，优先 A）：
+                A) Markdown：第一行用「# 标题」，正文用「## 小节」分段，不要代码块包裹。
+                B) JSON：{"title":"...","html":"..."}，html 用 h2/p 等简单标签。
+                字数大约 1200～1800 字。专心写好文章，不要解释你的写法。
                 """;
-        String user = assignment
-                + "\n\n【品牌资料】\n" + pointsJson;
-        return aiChatService.chat(system, user, provider, 0.45, true);
+
+        StringBuilder user = new StringBuilder();
+        user.append("请写一篇能直接回答读者问题的专题文章。\n\n");
+        user.append("【成文主线——全文必须围绕它展开】\n");
+        user.append(spine).append('\n');
+        if (StringUtils.hasText(question) && StringUtils.hasText(topic) && !question.equals(topic)) {
+            user.append("（所属话题：").append(topic).append("）\n");
+        }
+        user.append("\n自检：读完后，陌生读者应能清楚知道你对上述主线的回答是什么；")
+                .append("若某一节删掉后不影响回答主线，这一节就不该存在。\n");
+
+        if (StringUtils.hasText(dto.getUserPrompt())) {
+            user.append("\n【自定义写作要求——必须遵守】\n")
+                    .append(dto.getUserPrompt().trim()).append('\n');
+        }
+        if (StringUtils.hasText(style.getToneGuide())) {
+            user.append("\n语气参考：").append(style.getToneGuide().trim()).append('\n');
+        }
+        user.append("\n【可选论据资料——按主线挑选融入，勿编造资料外数字，勿按资料目录排版】\n")
+                .append(evidenceProse).append('\n');
+        user.append("\n配图稍后由系统从素材库插入，你只需写好文字。");
+
+        String raw = aiChatService.chat(system, user.toString(), provider, 0.7, true);
+        return parseArticleFlexible(raw);
     }
 
-    private Parsed chatExpand(String assignment, String pointsJson, String outlineJson, String provider) {
-        String system = WRITER_BRIEF + """
-                【本阶段】按大纲写成可发布的正式中文 HTML，约 1200～1800 字。
-                紧扣话题写透；用资料支撑判断；自然带出品牌。本阶段不要插入 <img>。
-                允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br。
-                禁止 Markdown、脚本、外链、<h1>、内联 style/class。
-                只输出 JSON：{"title":"...","html":"..."}
+    private Parsed chatWeaveBrand(GeoContentPlacement placement, Parsed draft,
+                                  String evidenceProse, String provider) {
+        String spine = StringUtils.hasText(placement.getTargetQuestion())
+                ? placement.getTargetQuestion().trim()
+                : nz(placement.getTopicName());
+        String system = """
+                你是撰稿人。原文未出现品牌「小巴依」。
+                请在不偏离成文主线、不大改结构的前提下，自然点到「小巴依」一两处（嵌在回答问题的判断或论据里）。
+                不要借机扩成品牌说明书。保留原有 HTML；figure/img 的 src 不要改。
+                输出 Markdown（# 标题 + 正文）或 JSON {"title","html"}。
                 """;
-        String user = assignment
-                + "\n\n【大纲】\n" + outlineJson
-                + "\n\n【品牌资料】\n" + pointsJson;
-        String raw = aiChatService.chat(system, user, provider, 0.6, true);
-        return parseArticle(raw);
+        String user = "成文主线：" + spine
+                + "\n\n【可用论据】\n" + evidenceProse
+                + "\n\n原标题：" + draft.title()
+                + "\n原文：\n" + draft.html();
+        String raw = aiChatService.chat(system, user, provider, 0.45, true);
+        return parseArticleFlexible(raw);
     }
 
     private IllustrateResult illustrate(Parsed draft, List<GeoMediaAsset> candidates, String provider) {
@@ -402,10 +346,7 @@ public class GeoArticlePipelineService {
                         ? asset.getAltText()
                         : (StringUtils.hasText(asset.getTitle()) ? asset.getTitle() : "配图");
                 String img = buildFigureHtml(imgSrc, alt, caption);
-                String placeholder = "<!--IMG:" + sectionKey + "-->";
-                if (html.contains(placeholder)) {
-                    html = html.replace(placeholder, img);
-                } else if (afterHeading) {
+                if (afterHeading) {
                     html = insertAfterNthH2(html, img, sectionMap.size());
                 } else {
                     html = insertAfterNthH2FirstParagraph(html, img, sectionMap.size());
@@ -421,58 +362,12 @@ public class GeoArticlePipelineService {
         } catch (Exception e) {
             log.warn("解析插图决策失败: {}", e.getMessage());
         }
-        html = html.replaceAll("(?is)<!--\\s*IMG:[^>]*-->", "");
         if (html.contains("<!--brand-in-image-->")) {
             html = dampenBrandNearMarkers(html);
             html = html.replace("<!--brand-in-image-->", "");
         }
         html = stripDataImages(html);
         return new IllustrateResult(new Parsed(draft.title(), html), used, sectionMap);
-    }
-
-    private QaResult chatQa(String assignment, Parsed draft, String platformAuditPack, String provider) {
-        int brandHits = countBrandMentions(draft.html());
-        if (brandHits < 1) {
-            return new QaResult(false, "正文未出现「小巴依」，请在合适处自然点到品牌。");
-        }
-        String system = WRITER_BRIEF + """
-                【本阶段】质检。只输出 JSON：{"pass":true/false,"feedback":"不合格时的修改意见"}
-                不合格仅限：
-                1. 标题或正文明显跑题（未服务本次话题/目标问题）；
-                2. 杜撰资料中没有的数字/认证；
-                3. 触犯平台红线（引流、硬广、虚假疗效）；
-                4. 通篇空洞、几乎没有有效信息。
-                不要用「品牌出现次数」「必须分牧场/放养/品控」这类机械标准判 fail。
-                """;
-        String user = assignment
-                + "\n已统计「小巴依」出现次数：" + brandHits
-                + "\n" + platformAuditPack
-                + "\n标题：" + draft.title()
-                + "\n正文：\n" + draft.html();
-        try {
-            String raw = aiChatService.chat(system, user, provider, 0.15, true);
-            JsonNode node = readJson(raw);
-            return new QaResult(node.path("pass").asBoolean(false), node.path("feedback").asText("").trim());
-        } catch (Exception e) {
-            log.warn("质检调用失败，按品牌兜底: {}", e.getMessage());
-            return new QaResult(true, "");
-        }
-    }
-
-    private Parsed chatRewrite(String assignment, Parsed draft, String feedback,
-                               String pointsJson, String provider) {
-        String system = WRITER_BRIEF + """
-                【本阶段】按质检意见改写。保留已有 <figure>/<img> 的 src，禁止改成 data:image。
-                只输出 JSON：{"title":"...","html":"..."}
-                允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br,figure,img,figcaption。
-                """;
-        String user = assignment
-                + "\n质检意见：" + nz(feedback)
-                + "\n原标题：" + draft.title()
-                + "\n原文：\n" + draft.html()
-                + "\n\n【品牌资料】\n" + pointsJson;
-        String raw = aiChatService.chat(system, user, provider, 0.5, true);
-        return parseArticle(raw);
     }
 
     private static String sanitizeCaption(String modelCaption, GeoMediaAsset asset) {
@@ -529,39 +424,89 @@ public class GeoArticlePipelineService {
             n.put("caption", a.getCaption());
             n.put("usageHint", a.getUsageHint() == null ? "" : a.getUsageHint());
             n.put("brandVisible", a.getBrandVisible() != null && a.getBrandVisible() == 1);
-            n.put("sourceType", a.getSourceType());
             n.put("tags", a.getTagsJson());
             n.put("sceneTags", a.getSceneTagsJson());
         }
         return arr.toString();
     }
 
-    private Parsed parseArticle(String content) {
-        String title = "";
-        String html = "";
-        try {
-            JsonNode node = readJson(content);
-            title = node.path("title").asText("").trim();
-            if (node.has("html")) {
-                html = node.path("html").asText("").trim();
-            } else if (node.has("body")) {
-                html = node.path("body").asText("").trim();
-            } else if (node.has("content")) {
-                html = node.path("content").asText("").trim();
-            }
-        } catch (Exception e) {
-            html = content == null ? "" : content.trim();
-        }
-        if (!StringUtils.hasText(html)) {
+    /** 兼容 Markdown / JSON / 纯文本。 */
+    private Parsed parseArticleFlexible(String content) {
+        String text = content == null ? "" : content.trim();
+        if (!StringUtils.hasText(text)) {
             throw new BusinessException("AI 未返回可用正文，请重试");
+        }
+        // 去掉偶发的 ``` 包裹
+        if (text.startsWith("```")) {
+            text = text.replaceFirst("^```(?:json|markdown|md)?\\s*", "");
+            text = text.replaceFirst("\\s*```\\s*$", "").trim();
+        }
+
+        // JSON
+        if (text.startsWith("{") || text.contains("\"html\"") || text.contains("\"title\"")) {
+            try {
+                JsonNode node = readJson(text);
+                String title = node.path("title").asText("").trim();
+                String html = "";
+                if (node.has("html")) {
+                    html = node.path("html").asText("").trim();
+                } else if (node.has("body")) {
+                    html = node.path("body").asText("").trim();
+                } else if (node.has("content")) {
+                    html = node.path("content").asText("").trim();
+                } else if (node.has("markdown")) {
+                    return markdownToParsed(node.path("markdown").asText(""));
+                }
+                if (StringUtils.hasText(html)) {
+                    if (!html.contains("<")) {
+                        return markdownToParsed((StringUtils.hasText(title) ? "# " + title + "\n\n" : "") + html);
+                    }
+                    if (!StringUtils.hasText(title)) {
+                        title = "未命名文章";
+                    }
+                    return new Parsed(title, stripDataImages(html));
+                }
+            } catch (Exception ignored) {
+                // fall through to markdown
+            }
+        }
+
+        return markdownToParsed(text);
+    }
+
+    private Parsed markdownToParsed(String md) {
+        String text = md == null ? "" : md.trim();
+        String title = "";
+        Matcher h1 = MD_H1.matcher(text);
+        if (h1.find()) {
+            title = h1.group(1).trim();
+            text = text.substring(0, h1.start()) + text.substring(h1.end());
+        }
+        text = text.trim();
+        // ## → 临时标记再转 h2
+        String withHeads = MD_H2.matcher(text).replaceAll("\n\n@@H2@@$1@@/H2@@\n\n");
+        StringBuilder html = new StringBuilder();
+        for (String block : withHeads.replace("\r\n", "\n").split("\n{2,}")) {
+            String b = block.trim();
+            if (!StringUtils.hasText(b)) {
+                continue;
+            }
+            if (b.startsWith("@@H2@@") && b.endsWith("@@/H2@@")) {
+                String h = b.substring(6, b.length() - 7).trim();
+                html.append("<h2>").append(escapeHtml(h)).append("</h2>");
+                continue;
+            }
+            String para = escapeHtml(b).replace("\n", "<br/>");
+            para = para.replaceAll("\\*\\*(.+?)\\*\\*", "<strong>$1</strong>");
+            html.append("<p>").append(para).append("</p>");
         }
         if (!StringUtils.hasText(title)) {
             title = "未命名文章";
         }
-        if (!html.contains("<")) {
-            html = plainToHtml(html);
+        if (html.isEmpty()) {
+            throw new BusinessException("AI 未返回可用正文，请重试");
         }
-        return new Parsed(title, stripDataImages(html));
+        return new Parsed(title, stripDataImages(html.toString()));
     }
 
     private JsonNode readJson(String content) throws Exception {
@@ -619,18 +564,6 @@ public class GeoArticlePipelineService {
         String out = html.replaceAll("(?is)<img[^>]*src\\s*=\\s*[\"']data:image[^\"']*[\"'][^>]*/?>", "");
         out = out.replaceAll("(?is)<figure>\\s*(?:<figcaption>[\\s\\S]*?</figcaption>)?\\s*</figure>", "");
         return out;
-    }
-
-    private static String plainToHtml(String text) {
-        String[] parts = text.replace("\r\n", "\n").split("\n{2,}");
-        StringBuilder sb = new StringBuilder();
-        for (String part : parts) {
-            String p = part.trim();
-            if (!p.isEmpty()) {
-                sb.append("<p>").append(p.replace("\n", "<br/>")).append("</p>");
-            }
-        }
-        return sb.toString();
     }
 
     private static String insertAfterNthH2(String html, String img, int index) {
@@ -788,8 +721,6 @@ public class GeoArticlePipelineService {
     }
 
     private record Parsed(String title, String html) {}
-
-    private record QaResult(boolean pass, String feedback) {}
 
     private record IllustrateResult(Parsed article, List<Long> usedAssetIds, Map<String, Long> sectionAssetMap) {}
 }

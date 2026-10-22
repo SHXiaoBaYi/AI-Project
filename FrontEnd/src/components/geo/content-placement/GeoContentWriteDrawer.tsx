@@ -33,15 +33,14 @@ import type {
   GeoPlatform,
 } from '@/types/geo';
 
-/** 前端一键生成时的阶段动画（与后台两阶段流水线对齐） */
+/** 前端一键生成进度（与后台外网一次成稿流水线对齐） */
 const AI_PIPELINE_STEPS = [
-  { key: 'style', title: '加载风格与骨架' },
-  { key: 'sell', title: '召回资料' },
-  { key: 'outline', title: '生成大纲' },
-  { key: 'media', title: '语义召回素材' },
-  { key: 'expand', title: '扩写正文' },
+  { key: 'style', title: '加载风格' },
+  { key: 'sell', title: '召回卖点' },
+  { key: 'media', title: '召回素材' },
+  { key: 'write', title: '撰写正文' },
+  { key: 'brand', title: '品牌轻补' },
   { key: 'illustrate', title: '智能插图' },
-  { key: 'qa', title: '质检与重写' },
   { key: 'save', title: '写入草稿' },
 ] as const;
 
@@ -484,7 +483,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       setSaveState('saved');
       const extra = [
         res.usedImageCount != null ? `插图 ${res.usedImageCount}` : null,
-        res.qaRounds != null ? `质检 ${res.qaRounds} 轮` : null,
+        res.qaRounds != null && res.qaRounds > 0 ? `品牌轻补 ${res.qaRounds} 次` : null,
       ]
         .filter(Boolean)
         .join(' · ');
@@ -1024,8 +1023,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         width={640}
       >
         <p className='mb-3 text-sm text-neutral-500'>
-          角色：GEO 美食/农产品内容撰稿人（懂新疆羊肉/牛肉品类常识）。大纲 → 扩写插图 →
-          质检重写直至合格；主题优先、品牌自然露出；禁外行假吃法；按素材语义挂图，每节可为 0 张。写入
+          外网模式：一次写完正文（沿用系统卖点、素材库与下方自定义提示词），再智能插图。写入
           {active !== 'shared' && article?.contentMode === 'custom' ? '当前独立稿' : '统一稿'}。
         </p>
         <div className='mb-3 rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600'>
