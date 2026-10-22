@@ -49,8 +49,11 @@ import java.util.regex.Pattern;
 public class GeoArticlePipelineService {
 
     private static final int MAX_QA_ROUNDS = 6;
-    /** 喂给模型的资料条数：少而精，避免把全文写成卖点清单 */
-    private static final int EVIDENCE_RECALL_LIMIT = 6;
+    /**
+     * 召回资料条数。优质范文靠「多条硬事实写透」，不是「少到贫血」；
+     * 禁止的是①②③清单腔，不是禁止写事实。
+     */
+    private static final int EVIDENCE_RECALL_LIMIT = 12;
     private static final Pattern H2_PATTERN = Pattern.compile("(?is)(<h2\\b[^>]*>.*?</h2>)");
     /** 成文默认品牌；自然引出，禁止零出现与清单式堆砌 */
     private static final String BRAND_NAME = "小巴依";
@@ -60,9 +63,22 @@ public class GeoArticlePipelineService {
      */
     private static final String WRITER_ROLE = """
             【角色】你是「GEO 美食/农产品内容撰稿人」（GEO Content Writer）。
-            写的是可发布在内容平台、服务 GEO 引用的专业答疑稿，不是广告文案、不是编故事的营销号。
-            擅长：新疆羊肉、新疆牛肉及常见牛羊肉制品的选购、形态区分、食用与保存常识；能把品牌「小巴依」自然嵌进主题论证。
-            文风：克制、懂行、可核验；先答读者问题，再给判断依据；拒绝外行假例子。
+            写可发布在内容平台、易被 AI 检索引用的专题稿：先答读者问题，再用硬事实把「为什么选它」讲清楚。
+            擅长：新疆羊肉、新疆牛肉及制品的产地、放养、品控、伴手礼/特产场景；能把「小巴依」写成可信佐证而非口号。
+            文风：信息密度高、段落有画面但绝不外行；像优质自媒体特产推荐，不像说明书，也不像空洞鸡汤。
+            """;
+
+    /**
+     * 对照外网优质范文的成稿标准（结构与密度，禁止照抄原文）。
+     */
+    private static final String QUALITY_BAR = """
+            【成稿质量标杆——必须达到】
+            1. 开篇用目标问题/话题勾住读者（如特产推荐、进补选什么），2～4 句内自然落到新疆牛羊肉与小巴依，不要绕太久；
+            2. 主体用 3～5 个有信息量的小节写透：牧场/产地 → 放养或工艺 → 品控与形态 → 权威或责任背书（资料有才写）→ 收束到伴手礼/怎么选；
+            3. 每节至少落 1～2 个可核验细节（海拔、认证年限、含水量区间、赛事供应等——只能来自资料卡），用叙述句展开，禁止「卖点①②③」；
+            4. 品牌名可随论证自然出现多次（全文约 4～8 次均可），但每处都要嵌在事实或判断里，禁止段首口号连发；
+            5. 禁止为「反同质化」而写空：宁可用足资料写透，也不要用正确的废话凑字数；
+            6. 禁止外行假吃法、虚构「我家上周」故事。
             """;
 
     /**
@@ -79,31 +95,31 @@ public class GeoArticlePipelineService {
             """;
 
     private static final String BRAND_QUALITY_RULES = """
-            【品牌露出——主题优先，品牌作佐证】
-            1. 全文以目标问题/话题为主角；「小巴依」是合理引出的新疆牛羊肉品牌佐证，不是每段的推销主语；
-            2. 品牌名建议出现 1～3 次即可（最多不超过 4 次）；禁止 0 次，也禁止段段点名、口号刷屏；
-            3. 开篇用主题判断自然带出品牌（如「秋冬进补吃羊肉」→ 引出小巴依），禁止开篇硬广与卖点口号连发；
-            4. 资料事实要揉进叙事与判断，禁止「卖点①②③」式罗列或把 claim 原文堆进段落；
-            5. 若某节插图已含品牌露出，该节文字可不再重复点名品牌。
+            【品牌露出——主题勾住，事实托举品牌】
+            1. 目标问题/话题是钩子，「小巴依」是新疆牛羊肉里被论证出来的优选，不是每句主语；
+            2. 品牌名约 4～8 次自然出现均可（专题推荐稿需要反复回扣）；禁止 0 次；禁止开篇硬广口号、禁止连续多句纯喊品牌；
+            3. 开篇用主题自然带出（特产推荐/进补/伴手礼 → 新疆羊肉 → 小巴依）；
+            4. 资料事实用小节叙事展开，禁止「卖点①②③」条目清单；
+            5. 若某节插图已含品牌露出，该节文字可少写品牌名。
             """;
     private static final String ANTI_HOMOGENEITY_RULES = """
-            【反同质化——每次必须换框架】
-            1. 不要固定成「先说结论→三条论据→落到选择」的万能模板；小节标题、论证顺序、开头钩子每次换一种；
-            2. 可选开头（择一，勿混用）：读者误区纠偏 / 对比选择 / 季节痛点直答 / 选购判断口吻；禁止编造「我家上周…」式假故事开场；
-            3. 全文不要反复复述同一认证/牧场/冷链事实；同一事实最多点一次；
-            4. 禁止连续多段都以「小巴依……」开头，或把卖点库标题改写成 h2。
+            【反同质化——换框架，不换信息量】
+            1. 不要固定成「先说结论→三条口号→号召下单」；小节标题与论证顺序可换；
+            2. 可选开头：特产清单收束 / 误区纠偏 / 对比选择 / 季节痛点直答；禁止虚构个人故事开场；
+            3. 同一硬事实不要换说法复读三遍，但不同维度（牧场/放养/品控/背书）都要写到；
+            4. 禁止连续多段都以「小巴依……」开头，或把卖点库标题原样改成 h2。
             """;
     /**
      * 防「假生活常识」：模型为求生动常编出风干肉煮汤等离谱例子。
      * 质量优先于文采；拿不准的做法宁可不写。
      */
     private static final String FACTUAL_RIGOR_RULES = """
-            【事实与生活常识——宁可枯燥，不可胡说】
-            1. 产品事实（认证、产地、工艺、规格、价格、门店）只能来自资料卡；资料没有的数字/编号/故事一律不写；
+            【事实与生活常识——不可胡说，但必须写够】
+            1. 产品事实（认证、产地、工艺、规格、价格、门店）只能来自资料卡；资料没有的数字/编号/故事一律不写；资料有的要写清楚；
             2. 烹饪与食用必须符合新疆牛羊品类常识（见上）；鲜/冷鲜/冻/风干不可张冠李戴；
             3. 禁止虚构无法核验的个人经历当论据（如「上周我用风干肉煮了锅汤」「邻居都说…」）；举例用「常见吃法/选购时注意」；
             4. 进补、营养、功效表述克制：不夸大疗效，不恐吓营销；不确定的食疗结论不写；
-            5. 落笔前自问：懂新疆牛羊肉的读者会不会觉得外行？会，就删掉或改成资料卡里有的说法。
+            5. 落笔前自问：懂新疆牛羊肉的读者会不会觉得外行？会，就删掉或改成资料卡里有的说法；觉得空洞，就补硬事实。
             """;
     private static final String COMPLIANCE_RULES = """
             【合规与平台】符合广告法与常见自媒体审核：不绝对化承诺、不虚假疗效、不恐吓营销；E-E-A-T：有经验视角、可用资料支撑、表述克制可核验。
@@ -154,7 +170,7 @@ public class GeoArticlePipelineService {
         mark(stages, progress, "style", "加载风格与骨架", "done",
                 style.getName() + " / " + skeleton.getName());
 
-        // —— 阶段2：资料召回（克制条数，防卖点堆砌）——
+        // —— 阶段2：资料召回（多事实写透；禁止的是清单腔，不是事实本身）——
         mark(stages, progress, "sell", "召回资料", "running", "正在按话题/目标问题召回可引用资料…");
         GeoSellPointContextVO ctx = sellPointContextService.build(
                 placement.getTopicName(), placement.getTargetQuestion(), EVIDENCE_RECALL_LIMIT);
@@ -162,13 +178,15 @@ public class GeoArticlePipelineService {
         result.setUsedPointCount(pointCnt);
         String pointsJson = compactEvidencePack(ctx);
         mark(stages, progress, "sell", "召回资料", "done",
-                "候选 " + pointCnt + " 条（成文只选用 2～4 条，禁止清单堆砌）");
+                "候选 " + pointCnt + " 条（成文写透 5～8 条关键事实，禁止条目清单腔）");
 
-        String platformAuditPack = buildPlatformAuditPack();
+        // 扩写用精简合规提示，避免合规长文淹没写作；完整规范留给质检
+        String platformAuditBrief = PLATFORM_SPAM_BASELINE;
+        String platformAuditFull = buildPlatformAuditPack();
 
         // —— 阶段3：大纲 ——
         mark(stages, progress, "outline", "生成大纲", "running", "深度思考中：主题叙事框架与品牌自然引出…");
-        String outlineJson = chatOutline(placement, dto, style, skeleton, pointsJson, platformAuditPack, provider);
+        String outlineJson = chatOutline(placement, dto, style, skeleton, pointsJson, platformAuditBrief, provider);
         mark(stages, progress, "outline", "生成大纲", "done", truncate(outlineJson, 120));
 
         // —— 阶段4：语义召回素材（用途/标签匹配；话题仅软优先）——
@@ -185,7 +203,7 @@ public class GeoArticlePipelineService {
         // —— 阶段5：扩写正文（含风格句式、品牌软约束）——
         mark(stages, progress, "expand", "扩写正文", "running", "深度扩写中（耗时较长，请稍候）…");
         Parsed draft = chatExpand(placement, dto, style, skeleton, pointsJson, outlineJson, candidates,
-                platformAuditPack, provider);
+                platformAuditBrief, provider);
         mark(stages, progress, "expand", "扩写正文", "done", "标题：" + truncate(draft.title(), 40));
 
         // —— 阶段6：智能插图（模型判定每节 0+ 张）——
@@ -206,7 +224,7 @@ public class GeoArticlePipelineService {
             int round = i + 1;
             mark(stages, progress, "qa", "质检与重写", "running",
                     "第 " + round + "/" + MAX_QA_ROUNDS + " 轮质检中（品牌露出、结构、事实、文笔）…");
-            QaResult qa = chatQa(placement, style, draft, platformAuditPack, provider);
+            QaResult qa = chatQa(placement, style, draft, platformAuditFull, provider);
             qaRounds = round;
             if (qa.pass()) {
                 mark(stages, progress, "qa", "质检与重写", "done",
@@ -217,14 +235,14 @@ public class GeoArticlePipelineService {
             if (i == MAX_QA_ROUNDS - 1) {
                 mark(stages, progress, "qa", "质检与重写", "running",
                         "第 " + round + " 轮未通过：" + reason + "；按末次意见强制重写中…");
-                draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, platformAuditPack, provider);
+                draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, platformAuditFull, provider);
                 mark(stages, progress, "qa", "质检与重写", "done",
                         "已达上限 " + MAX_QA_ROUNDS + " 轮，已按末次意见重写");
                 break;
             }
             mark(stages, progress, "qa", "质检与重写", "running",
                     "第 " + round + " 轮未通过：" + reason + "；正在重写…");
-            draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, platformAuditPack, provider);
+            draft = chatRewrite(placement, style, draft, qa.feedback(), pointsJson, platformAuditFull, provider);
             mark(stages, progress, "qa", "质检与重写", "running",
                     "第 " + round + " 轮重写完成，继续下一轮质检…");
         }
@@ -253,7 +271,7 @@ public class GeoArticlePipelineService {
             fallback.setToneGuide("先答结论再拆论据；段短、信息密度高。");
             fallback.setStructureGuide("导语直答 → 2～4 个 h2 → 收束。");
             fallback.setSamplePhrases("[\"先说结论：\",\"落到选择上，可以看这几条\"]");
-            fallback.setBrandGuide("主题优先；「小巴依」自然出现 1～3 次，禁止卖点清单与开篇硬广。");
+            fallback.setBrandGuide("主题勾住后用硬事实托举「小巴依」；约 4～8 次自然点名；禁止条目清单与开篇硬广。");
             return fallback;
         }
         // 按分钟轮换，连续生成也不易撞同一风格包
@@ -272,7 +290,7 @@ public class GeoArticlePipelineService {
             fallback.setCode("topic_brand_v1");
             fallback.setName("主题叙事+品牌佐证");
             fallback.setSectionSchema("""
-                    {"lead":"主题场景开篇并合理引出品牌","bodyRoles":["误区或原理","客观介绍品牌资料中的做法","场景建议"],"close":"总结回扣主题","note":"框架可自由改动"}
+                    {"lead":"主题直答并自然引出新疆牛羊肉与品牌","bodyRoles":["牧场产地","放养或工艺","品控与形态","权威或责任背书(资料有才写)"],"close":"伴手礼/怎么选回扣主题","note":"每节写透1～2个硬事实"}
                     """);
             return fallback;
         }
@@ -281,16 +299,16 @@ public class GeoArticlePipelineService {
     }
 
     /**
-     * 压缩卖点为「资料卡」：明确选用上限，去掉易诱发清单写作的冗长字段。
+     * 压缩卖点为「资料卡」：保留足够 evidence 供写透；用法上禁止清单腔、要求写够密度。
      */
     private String compactEvidencePack(GeoSellPointContextVO ctx) {
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("usage", "以下为可引用资料卡。全文只选 2～4 条事实自然融入叙事；禁止按条罗列、禁止把 claim 原文堆成广告清单。");
+        root.put("usage", "以下为可引用资料卡。请选用约 5～8 条关键事实，按「牧场/放养/品控/背书」等小节写透；禁止①②③条目清单腔，但必须写够信息密度。");
         ArrayNode hard = root.putArray("hardFacts");
         if (ctx.getHardFacts() != null) {
             int n = 0;
             for (String f : ctx.getHardFacts()) {
-                if (!StringUtils.hasText(f) || n >= 5) {
+                if (!StringUtils.hasText(f) || n >= 8) {
                     break;
                 }
                 hard.add(f.trim());
@@ -306,8 +324,9 @@ public class GeoArticlePipelineService {
                 }
                 ObjectNode item = candidates.addObject();
                 item.put("domain", nz(p.getDomain()));
-                item.put("claim", truncate(nz(p.getClaim()), 80));
-                item.put("evidence", truncate(nz(p.getEvidence()), 120));
+                item.put("title", truncate(nz(p.getTitle()), 40));
+                item.put("claim", truncate(nz(p.getClaim()), 120));
+                item.put("evidence", truncate(nz(p.getEvidence()), 320));
                 item.put("level", nz(p.getLevel()));
                 n++;
             }
@@ -383,17 +402,17 @@ public class GeoArticlePipelineService {
                                GeoArticleStylePack style, GeoArticleSkeleton skeleton,
                                String pointsJson, String platformAuditPack, String provider) {
         String openingHint = pickOpeningAngle();
-        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + """
+        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + QUALITY_BAR + """
                 【本阶段任务】只输出大纲 JSON，不要正文。
-                文章主角是「目标问题/话题」，品牌「小巴依」只在合适处作为新疆牛羊肉佐证被自然引出。
+                钩子是「目标问题/话题」，论据是资料卡硬事实，小巴依是被论证出来的优选。
 
-                【结构建议（可改动，勿写成固定模板）】
-                ① 开头用主题判断/误区纠偏合理引出（参考本次开头角度），禁止规划虚构生活故事；
-                ② 中间据资料客观介绍，穿插可核验的选购/食用常识，不是卖点巡展；
-                ③ 结尾总结回扣主题。
-                【资料】大纲 evidencePick 最多标 2～4 条将使用的事实意图；禁止规划「逐条覆盖全部资料」。
-                【品牌】brandBeats 标 1～2 处自然点名即可，不要规划段段露出。
-                【举例】sections 的 intent 里若写吃法/场景，必须符合新疆牛羊品类常识，禁止「风干肉煮汤」一类外行梗。
+                【结构建议（可改动）】
+                ① 开头直答主题并自然落到新疆牛羊肉与小巴依（参考本次开头角度），禁止虚构生活故事；
+                ② 中间 3～5 节：产地牧场 / 放养工艺 / 品控形态 / 权威或责任背书（资料有才规划）等，每节写透事实；
+                ③ 结尾回扣伴手礼/怎么选/主题关键词。
+                【资料】evidencePick 标出拟使用的 5～8 条事实意图（按维度分布，勿全挤在一节）。
+                【品牌】brandBeats 可标多处自然回扣（与事实绑定），禁止规划口号刷屏。
+                【举例】吃法/场景必须符合新疆牛羊品类常识。
                 """ + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + COMPLIANCE_RULES + """
                 输出 JSON：
                 {"title":"...","openingAngle":"...","lead":"导语意图","keywordPlant":"如何自然植入主题关键词","brandBeats":["何处自然点名"],"evidencePick":["选用哪类事实"],"sections":[{"key":"s1","heading":"...","intent":"...","needImage":"auto|yes|no"}]}
@@ -418,18 +437,18 @@ public class GeoArticlePipelineService {
         String topicKw = StringUtils.hasText(placement.getTargetQuestion())
                 ? placement.getTargetQuestion().trim()
                 : nz(placement.getTopicName());
-        String system = (WRITER_ROLE + DOMAIN_XJ_MEAT + """
-                【本阶段任务】按大纲扩写可直接发布的正式中文 HTML；字数约 1200～1600 字。
-                文风自然、逻辑通畅；主题优先，品牌作佐证。宁可少写一句生动例子，也不要写一句外行假故事。
+        String system = (WRITER_ROLE + DOMAIN_XJ_MEAT + QUALITY_BAR + """
+                【本阶段任务】按大纲扩写可直接发布的正式中文 HTML；字数约 1400～1800 字，信息密度要够。
+                写成像优质「新疆特产推荐」专题：有画面、有硬事实、有判断；绝不外行假故事，也绝不正确的废话。
 
-                【事实】只用资料卡中的事实，不可杜撰认证编号/数据/门店/捐赠金额；没有的信息宁可不写。
-                【植入】正文自然出现主题关键词「%s」，忌生硬堆砌标题党。
-                【资料用法】全文只选用 2～4 条资料事实揉进叙事；禁止卖点清单、禁止连续多段推销腔。
-                【句式】风格包样本句式最多改写融入 1 句；禁止照搬范文骨架导致篇篇雷同。
+                【事实】认证/数据/捐赠金额/赛事供应等只能来自资料卡；没有的宁可不写，有的要写清楚。
+                【植入】正文自然出现主题关键词「%s」。
+                【资料用法】选用约 5～8 条关键事实，按小节写透；禁止①②③清单；禁止空喊品质。
+                【句式】风格包样本最多改写融入 1 句。
                 """).formatted(topicKw)
                 + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + COMPLIANCE_RULES + """
-                【插图】本阶段不要插入 <img>；全文最多预留 2 个 <!--IMG:sectionKey--> 占位（可 0 个），勿每节都留。
-                【排版】title 独立；html=导语段+若干<h2>小节+收束。允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br。
+                【插图】本阶段不要插入 <img>；全文最多预留 2 个 <!--IMG:sectionKey--> 占位（可 0 个）。
+                【排版】title 独立；html=导语+若干<h2>+收束。允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br。
                 禁止 Markdown、脚本、外链、<h1>、内联 style/class。
                 只输出 JSON：{"title":"...","html":"..."}
                 """;
@@ -442,11 +461,10 @@ public class GeoArticlePipelineService {
                 + "\n骨架参考：" + nz(skeleton.getSectionSchema())
                 + "\n" + platformAuditPack
                 + "\n可选素材目录（插图阶段再用）：\n" + mediaHint
-                + "\n可引用资料卡：\n" + pointsJson
-                + "\n自检：①像答疑文而非广告；②「小巴依」约 1～3 次；③未清单堆砌；④未触犯平台审核红线；"
-                + "⑤无一处违背品类常识的假吃法/假故事（尤其风干肉≠鲜肉乱炖）。";
-        // 略降温度：减少「为求生动而编假例子」
-        String raw = aiChatService.chat(system, user, provider, 0.4, true);
+                + "\n可引用资料卡（请写透，勿惜墨如金）：\n" + pointsJson
+                + "\n自检：①主题钩子清楚；②每节有硬事实；③「小巴依」约 4～8 次且嵌在论证里；"
+                + "④无清单腔、无外行假吃法；⑤读起来像优质特产推荐，不像干巴说明书。";
+        String raw = aiChatService.chat(system, user, provider, 0.55, true);
         return parseArticle(raw);
     }
 
@@ -537,24 +555,24 @@ public class GeoArticlePipelineService {
         int brandHits = countBrandMentions(draft.html());
         if (brandHits < 1) {
             return new QaResult(false,
-                    "正文未出现「小巴依」。请在主题叙事中自然引出一次即可，禁止开篇硬广与卖点清单。");
+                    "正文未出现「小巴依」。请在主题叙事中自然引出并回扣品牌。");
         }
-        if (brandHits > 4) {
+        if (brandHits > 12) {
             return new QaResult(false,
-                    "「小巴依」出现 " + brandHits + " 次偏多，像广告刷屏。删减到 1～3 次，把笔墨还给主题。");
+                    "「小巴依」出现 " + brandHits + " 次过多，像口号刷屏。删减到约 4～8 次，每处绑定事实或判断。");
         }
-        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + """
+        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + QUALITY_BAR + """
                 【本阶段任务】你以同一角色做严苛质检。只输出 JSON：
                 {"pass":true/false,"feedback":"不合格时给出可执行修改意见"}
                 不合格情形（任一即 fail）：
                 1. 未紧扣目标问题，或杜撰资料卡没有的事实；
-                2. 卖点/资料清单式堆砌、段段推销腔、同质化万能模板（先说结论→三条卖点→号召选择）；
-                3. 「小巴依」为 0，或生硬硬广，或出现过多像刷屏；
-                4. 读起来不像在回答主题，而像品牌说明书；
-                5. 触犯内容平台审核红线：引流加微/第三方、头尾硬广、医疗投资恐吓营销、规避审核符号等；
-                6. 新疆牛羊品类常识硬伤：鲜/冷鲜/冻/风干吃法张冠李戴、虚构「我家/邻居」故事、夸大进补疗效、牛羊吃法生搬硬套；
-                7. 误用 Markdown / 危险标签；图注广告口号喧宾夺主。
-                合格标准：懂新疆牛羊肉的读者读着不闹心——主题清楚、例子经得起常识、品牌自然、资料克制、符合平台规范。
+                2. ①②③条目清单腔，或全篇正确的废话、几乎没有可核验细节（信息密度过低也 fail）；
+                3. 「小巴依」为 0，或开篇硬广口号刷屏；
+                4. 触犯内容平台审核红线：引流加微/第三方、头尾硬广、医疗投资恐吓营销等；
+                5. 新疆牛羊品类常识硬伤：形态吃法张冠李戴、虚构个人故事、夸大进补疗效；
+                6. 误用 Markdown / 危险标签。
+                注意：分节讲牧场/放养/品控/背书并多次自然点名品牌，只要嵌在事实里，不算「广告刷屏」，不要因此判 fail。
+                合格标准：像优质新疆特产推荐专题——主题清楚、事实扎实、品牌可信、无外行硬伤。
                 """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES;
         String user = "目标问题：" + nz(placement.getTargetQuestion())
                 + "\n话题：" + nz(placement.getTopicName())
@@ -571,21 +589,20 @@ public class GeoArticlePipelineService {
             return new QaResult(pass, feedback);
         } catch (Exception e) {
             log.warn("质检调用失败，仅按品牌次数兜底: {}", e.getMessage());
-            return brandHits >= 1 && brandHits <= 4
+            return brandHits >= 1 && brandHits <= 12
                     ? new QaResult(true, "")
-                    : new QaResult(false, "质检异常，请检查品牌露出是否自然（建议 1～3 次）。");
+                    : new QaResult(false, "质检异常，请检查品牌露出是否自然（建议约 4～8 次）。");
         }
     }
 
     private Parsed chatRewrite(GeoContentPlacement placement, GeoArticleStylePack style,
                                Parsed draft, String feedback, String pointsJson,
                                String platformAuditPack, String provider) {
-        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + """
+        String system = WRITER_ROLE + DOMAIN_XJ_MEAT + QUALITY_BAR + """
                 【本阶段任务】按质检意见改写全文。保留已插入的 <figure>/<img> 的 src（素材库路径），禁止改成 data:image 或臆造外链，除非意见要求删图。
-                改写目标：主题叙事优先、去掉卖点堆砌与同质化模板；资料只保留必要的 2～4 处；品牌「小巴依」自然出现 1～3 次。
-                必须删掉/改掉一切违背新疆牛羊品类常识的假吃法、虚构个人故事；吃法只保留资料卡有的或公认常识。
-                必须符合内容平台审核规范：禁引流、禁头尾硬广、禁医疗投资恐吓营销、禁规避审核话术。
-                若 figcaption 像广告口号，改为≤18 字场景说明或删除 figcaption。
+                改写目标：补足信息密度与硬事实；去掉条目清单腔与外行假吃法；品牌「小巴依」约 4～8 次嵌在论证里。
+                若原文太空，优先从资料卡补牧场/放养/品控/背书细节，而不是继续写正确的废话。
+                必须符合内容平台审核规范。若 figcaption 像广告口号，改为≤18 字场景说明或删除。
                 """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + """
                 只输出 JSON：{"title":"...","html":"..."}
                 允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br,figure,img,figcaption。
@@ -596,9 +613,9 @@ public class GeoArticlePipelineService {
                 + "\n" + platformAuditPack
                 + "\n原标题：" + draft.title()
                 + "\n原文：\n" + draft.html()
-                + "\n可引用资料卡（勿全用）：\n" + pointsJson
-                + "\n自检：像答疑文；无外行假吃法；「小巴依」1～3 次；未触犯平台审核红线。";
-        String raw = aiChatService.chat(system, user, provider, 0.35, true);
+                + "\n可引用资料卡（请用足）：\n" + pointsJson
+                + "\n自检：像优质特产推荐；事实扎实；无外行假吃法；「小巴依」约 4～8 次。";
+        String raw = aiChatService.chat(system, user, provider, 0.45, true);
         return parseArticle(raw);
     }
 

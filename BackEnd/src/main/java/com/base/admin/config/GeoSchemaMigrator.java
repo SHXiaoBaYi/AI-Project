@@ -1934,7 +1934,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                         '先答结论再拆论据；口语但克制，少口号；段短、信息密度高。' AS tone_guide,
                         '导语直答目标问题 → 2～4个h2分论点 → 收束立场。学结构不抄全文。' AS structure_guide,
                         '["先说结论：","很多人会纠结的一点是","落到选择上，可以看这几条"]' AS sample_phrases,
-                        '全文品牌名软约束：建议不超过3次；尽量不在第1段硬推品牌名。图中已有品牌时该节少写文字品牌。' AS brand_guide,
+                        '主题勾住后用硬事实托举「小巴依」；约4～8次自然点名（嵌在论证里）；禁止条目清单与开篇硬广；图中已有品牌时该节少写文字品牌。' AS brand_guide,
                         1 AS enabled, 1 AS sort_order, 1 AS is_active
                     ) t
                     WHERE NOT EXISTS (SELECT 1 FROM geo_article_style_pack x WHERE x.code = 'zhihu_explain' AND x.is_active = 1)
@@ -1950,7 +1950,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                         '场景开场，对比/转折推进，数据点穿插；可读性强。' AS tone_guide,
                         '场景导语 → 问题拆解小标题 → 证据段 → 行动建议收束。' AS structure_guide,
                         '["如果你也在纠结","换个角度看","真正拉开差距的，往往是"]' AS sample_phrases,
-                        '全文品牌名软约束：建议不超过3次；图中已有品牌时该节减少文字品牌露出。' AS brand_guide,
+                        '主题勾住后用硬事实托举「小巴依」；约4～8次自然点名（嵌在论证里）；禁止条目清单与开篇硬广；图中已有品牌时该节少写文字品牌。' AS brand_guide,
                         1 AS enabled, 2 AS sort_order, 1 AS is_active
                     ) t
                     WHERE NOT EXISTS (SELECT 1 FROM geo_article_style_pack x WHERE x.code = 'toutiao_story' AND x.is_active = 1)
@@ -1972,14 +1972,18 @@ public class GeoSchemaMigrator implements ApplicationRunner {
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
                     UPDATE geo_article_skeleton
-                    SET section_schema = '{"lead":"导语1-2段直答目标问题","sections":[{"role":"argument","countHint":"2-4"},{"role":"evidence","optional":true},{"role":"close","required":true}],"imagePolicy":"每节0张起，由模型判定是否插图"}'
+                    SET section_schema = '{"lead":"主题直答并自然引出新疆牛羊肉与品牌","bodyRoles":["牧场产地","放养或工艺","品控与形态","权威或责任背书(资料有才写)"],"close":"伴手礼/怎么选回扣主题","note":"每节写透1～2个硬事实","imagePolicy":"全文最多2图，由模型判定"}'
                     WHERE code = 'qa_sections_v1' AND is_active = 1
                     """);
-            // 品牌规则：必须自然露出，禁止零出现
-            String brandGuide = "须自然出现「小巴依」2～4次：嵌进论证/场景，禁止全文0次与开篇硬广；图中已有品牌时该节少写文字品牌。质量目标优于常见范文。";
+            // 品牌规则：专题稿需反复回扣事实，禁止零出现与口号刷屏（对齐优质范文密度）
+            String brandGuide = "主题勾住后用硬事实托举「小巴依」；约4～8次自然点名（嵌在论证里）；禁止条目清单与开篇硬广；图中已有品牌时该节少写文字品牌。";
             statement.execute("""
                     UPDATE geo_article_style_pack
-                    SET brand_guide = '%s'
+                    SET brand_guide = '%s',
+                        structure_guide = CASE code
+                          WHEN 'zhihu_explain' THEN '导语直答 → 3～5个h2（牧场/放养/品控/背书等）写透硬事实 → 收束伴手礼/怎么选。'
+                          WHEN 'toutiao_story' THEN '主题钩子 → 分节写透产地/工艺/品控/背书 → 行动建议收束。禁止空场景凑字。'
+                          ELSE structure_guide END
                     WHERE code IN ('zhihu_explain', 'toutiao_story') AND is_active = 1
                     """.formatted(brandGuide.replace("'", "''")));
         }
