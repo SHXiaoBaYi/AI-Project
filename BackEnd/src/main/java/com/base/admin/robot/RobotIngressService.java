@@ -68,7 +68,7 @@ public class RobotIngressService {
         DingTalkRobotAssistantService assistant = dingTalkRobotAssistantService.getObject();
         if (!StringUtils.hasText(text)) {
             assistant.replyPlain(webhook,
-                    "请发文字。可说：查某人闲忙 / 帮我监控一个链接 / 删除监控 / 帮助");
+                    "请发文字。可说：查某人闲忙 / 帮我监控一个链接 / 有几个在监控的链接 / 监控哪些有异常 / 删除监控 / 帮助");
             return;
         }
 
@@ -120,6 +120,10 @@ public class RobotIngressService {
             }
         } else if (RobotProductRules.INTENT_LINK_ADD.equals(intent)) {
             reply = linkMonitorRobotHandler.handleAdd(session, text, route.utteranceType(), staffId, userId);
+        } else if (RobotProductRules.INTENT_LINK_LIST.equals(intent)) {
+            reply = linkMonitorRobotHandler.handleList();
+        } else if (RobotProductRules.INTENT_LINK_ABNORMAL.equals(intent)) {
+            reply = linkMonitorRobotHandler.handleAbnormal();
         } else if (RobotProductRules.INTENT_LINK_DELETE.equals(intent)) {
             reply = linkMonitorRobotHandler.handleDelete(staffId);
         } else if (RobotProductRules.INTENT_CALENDAR_FREEBUSY.equals(intent)) {

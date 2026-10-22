@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -35,6 +36,10 @@ import java.util.regex.Pattern;
 public class LinkMonitorService {
 
     private static final Pattern URL_PAT = Pattern.compile("https?://[^\\s<>\"']+", Pattern.CASE_INSENSITIVE);
+    /** 浏览器 UA：部分站点对爬虫 UA 走登录页/首页，会掩盖真实失效跳转。 */
+    private static final String BROWSER_UA =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalkCalendarClient;
     private final HttpClient http = HttpClient.newBuilder()
@@ -132,6 +137,18 @@ public class LinkMonitorService {
                 """, Math.max(1, Math.min(limit, 100)));
     }
 
+    /** 最近一次探测失败的 ACTIVE 监控（last_ok = 0）。 */
+    public List<Map<String, Object>> listAbnormal(int limit) {
+        return jdbc.queryForList("""
+                SELECT id, url, name, status, open_conversation_id, conversation_type, interval_sec,
+                       last_check_at, last_ok, last_status_code, last_error, create_by, create_time, source
+                FROM ops_link_monitor
+                WHERE status = 'ACTIVE' AND is_active = 1 AND last_ok = 0
+                ORDER BY last_check_at DESC, id DESC
+                LIMIT ?
+                """, Math.max(1, Math.min(limit, 100)));
+    }
+
     public void softDelete(long id, String operatorStaffId, boolean fromGroup) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT id, open_conversation_id, conversation_type, creator_staff_id, status
@@ -178,14 +195,26 @@ public class LinkMonitorService {
                 """, (rs, i) -> rs.getLong(1));
     }
 
+    public record ProbeResult(boolean ok, String error, boolean alerted) {
+    }
+
+    /** 定时探测：失败时按自然日去重告警。 */
     public void probeOne(long monitorId) {
+        probeOne(monitorId, false);
+    }
+
+    /**
+     * @param forceAlert true=后台手动探测：失败必告警（不受当日去重限制）；
+     *                   优先推绑定群并 @ 创建人，群不可用/无法 @ 则钉钉通知 wangfangyang。
+     */
+    public ProbeResult probeOne(long monitorId, boolean forceAlert) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT id, url, timeout_ms, open_conversation_id, conversation_type,
                        creator_staff_id, creator_user_id
                 FROM ops_link_monitor WHERE id = ? AND is_active = 1 LIMIT 1
                 """, monitorId);
         if (rows.isEmpty()) {
-            return;
+            return new ProbeResult(false, "监控不存在", false);
         }
         Map<String, Object> row = rows.getFirst();
         String url = String.valueOf(row.get("url"));
@@ -199,8 +228,9 @@ public class LinkMonitorService {
                     .uri(URI.create(url))
                     .timeout(Duration.ofMillis(Math.max(3000, timeout)))
                     .GET()
-                    .header("User-Agent", "Mozilla/5.0 (compatible; XBY-LinkMonitor/1.0)")
+                    .header("User-Agent", BROWSER_UA)
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
                     .build();
             HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
             status = resp.statusCode();
@@ -209,12 +239,18 @@ public class LinkMonitorService {
             } else if (status < 200 || status >= 400) {
                 err = "HTTP " + status;
             } else {
-                String body = decodeBody(resp.body(), resp.headers().firstValue("Content-Type").orElse(""));
-                String unavailable = detectUnavailableHint(body);
-                if (StringUtils.hasText(unavailable)) {
-                    err = "页面提示不可用：" + unavailable;
+                // 小红书等：失效笔记 302→/404 后仍返回 HTTP 200，需比对最终落地 URL
+                String soft = detectSoftRedirect(url, resp.uri());
+                if (StringUtils.hasText(soft)) {
+                    err = soft;
                 } else {
-                    ok = true;
+                    String body = decodeBody(resp.body(), resp.headers().firstValue("Content-Type").orElse(""));
+                    String unavailable = detectUnavailableHint(body);
+                    if (StringUtils.hasText(unavailable)) {
+                        err = "页面提示不可用：" + unavailable;
+                    } else {
+                        ok = true;
+                    }
                 }
             }
         } catch (Exception ex) {
@@ -233,9 +269,75 @@ public class LinkMonitorService {
                   last_error = ?, update_time = NOW()
                 WHERE id = ?
                 """, ok ? 1 : 0, status, err, monitorId);
+        boolean alerted = false;
         if (!ok) {
-            alertFailure(monitorId, url, err, row);
+            alerted = alertFailure(monitorId, url, err, row, forceAlert);
         }
+        return new ProbeResult(ok, err, alerted);
+    }
+
+    /**
+     * 跟随重定向后的落地页相对原链接「跑偏」：如小红书失效笔记 → /404（仍 HTTP 200）。
+     */
+    static String detectSoftRedirect(String originalUrl, URI finalUri) {
+        if (finalUri == null || !StringUtils.hasText(originalUrl)) {
+            return "";
+        }
+        String path = finalUri.getPath() == null ? "" : finalUri.getPath();
+        String pathLower = path.toLowerCase(Locale.ROOT);
+        String queryDecoded = "";
+        if (StringUtils.hasText(finalUri.getRawQuery())) {
+            try {
+                queryDecoded = URLDecoder.decode(finalUri.getRawQuery(), StandardCharsets.UTF_8);
+            } catch (Exception ex) {
+                queryDecoded = finalUri.getRawQuery();
+            }
+        }
+        if (pathLower.equals("/404") || pathLower.startsWith("/404/")) {
+            String hint = extractQueryErrorMsg(queryDecoded);
+            if (StringUtils.hasText(hint)) {
+                return "链接已失效（" + hint + "）";
+            }
+            return "链接已失效（已跳转到404页）";
+        }
+        try {
+            URI orig = URI.create(originalUrl.trim());
+            String origPath = orig.getPath() == null ? "" : orig.getPath();
+            String origLower = origPath.toLowerCase(Locale.ROOT);
+            boolean contentDeep = origLower.contains("/discovery/item/")
+                    || origLower.contains("/explore/")
+                    || origLower.matches(".*/(item|note|detail|post|status|aweme|video)/[^/]+.*");
+            String finalNorm = path.isEmpty() ? "/" : path;
+            if (contentDeep && (finalNorm.equals("/") || finalNorm.equalsIgnoreCase("/explore")
+                    || finalNorm.equalsIgnoreCase("/index") || finalNorm.equalsIgnoreCase("/home")
+                    || finalNorm.equalsIgnoreCase("/feed"))) {
+                return "链接已失效（已重定向到首页）";
+            }
+        } catch (Exception ignored) {
+            // ignore parse errors
+        }
+        return "";
+    }
+
+    private static String extractQueryErrorMsg(String queryDecoded) {
+        if (!StringUtils.hasText(queryDecoded)) {
+            return "";
+        }
+        for (String part : queryDecoded.split("&")) {
+            int eq = part.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String key = part.substring(0, eq);
+            String val = part.substring(eq + 1);
+            if ("error_msg".equalsIgnoreCase(key) && StringUtils.hasText(val)) {
+                return val.length() > 80 ? val.substring(0, 80) : val;
+            }
+        }
+        if (queryDecoded.contains("无法浏览")) {
+            return "当前笔记暂时无法浏览";
+        }
+        return "";
     }
 
     /**
@@ -253,6 +355,10 @@ public class LinkMonitorService {
                 .replaceAll("\\s+", " ");
         String lower = text.toLowerCase(Locale.ROOT);
         String[][] patterns = {
+                {"你访问的页面不见了", "你访问的页面不见了"},
+                {"页面不见了", "页面不见了"},
+                {"当前笔记暂时无法浏览", "当前笔记暂时无法浏览"},
+                {"暂时无法浏览", "暂时无法浏览"},
                 {"文章不存在", "文章不存在"},
                 {"笔记不存在", "笔记不存在"},
                 {"内容不存在", "内容不存在"},
@@ -300,14 +406,26 @@ public class LinkMonitorService {
         return new String(slice, charset);
     }
 
-    /** 告警：群添加 → 推群；单聊/后台添加 → 推添加人（无钉钉则兜底 wangfangyang）。 */
-    private void alertFailure(long monitorId, String url, String err, Map<String, Object> row) {
-        LocalDateTime lastAlert = jdbc.query("""
-                SELECT last_alert_at FROM ops_link_monitor WHERE id = ?
-                """, rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null, monitorId);
-        // 同一自然日只告警一次
-        if (lastAlert != null && lastAlert.toLocalDate().equals(LocalDateTime.now().toLocalDate())) {
-            return;
+    /**
+     * 告警。
+     * <ul>
+     *   <li>定时：同自然日去重；有绑定群则推群，并通知创建人（失败兜底 wangfangyang）</li>
+     *   <li>后台手动（forceAlert）：不过滤当日；优先推绑定群并 @ 创建人；
+     *       群不在/推送失败/无法解析创建人钉钉 userid → 钉钉通知 wangfangyang</li>
+     * </ul>
+     *
+     * @return 是否实际发出了告警（含兜底）
+     */
+    private boolean alertFailure(long monitorId, String url, String err, Map<String, Object> row, boolean forceAlert) {
+        if (!forceAlert) {
+            LocalDateTime lastAlert = jdbc.query("""
+                    SELECT last_alert_at FROM ops_link_monitor WHERE id = ?
+                    """, rs -> rs.next() && rs.getTimestamp(1) != null
+                    ? rs.getTimestamp(1).toLocalDateTime() : null, monitorId);
+            // 同一自然日只告警一次
+            if (lastAlert != null && lastAlert.toLocalDate().equals(LocalDateTime.now().toLocalDate())) {
+                return false;
+            }
         }
         String conversationId = row.get("open_conversation_id") == null ? "" : String.valueOf(row.get("open_conversation_id"));
         String conversationType = row.get("conversation_type") == null ? "1" : String.valueOf(row.get("conversation_type"));
@@ -324,25 +442,61 @@ public class LinkMonitorService {
         if (isGroup) {
             contentSb.append("来源群：").append(StringUtils.hasText(groupTitle) ? groupTitle : conversationId);
         } else {
-            contentSb.append("来源：").append("1".equals(conversationType) ? "单聊/后台" : "未知");
+            contentSb.append("来源：").append(forceAlert ? "后台手动探测" : ("1".equals(conversationType) ? "单聊/后台" : "未知"));
         }
         String content = contentSb.toString();
-        if (isGroup) {
-            // 告警推回「当初添加监控的那个群」
+        String atUserId = resolveDingUserId(creatorStaffId, creatorUserId);
+        boolean alerted = false;
+
+        if (forceAlert) {
+            // 手动探测：群 + @创建人；否则兜底 wangfangyang
+            if (isGroup) {
+                List<String> atList = StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of();
+                DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
+                        conversationId, "链接监控告警", content.replace("\n", "  \n"), atList);
+                String targetLabel = StringUtils.hasText(groupTitle)
+                        ? (groupTitle + "|" + conversationId)
+                        : conversationId;
+                String groupErr = groupCall.success() ? "" : (groupCall.message() == null ? "群消息失败" : groupCall.message());
+                if (groupCall.success() && atList.isEmpty()) {
+                    groupErr = "无法@创建人（无钉钉userid）";
+                }
+                boolean groupOk = groupCall.success() && !atList.isEmpty();
+                writeAlert(monitorId, "GROUP", targetLabel, content, groupOk,
+                        groupOk ? "" : (StringUtils.hasText(groupErr) ? groupErr : "群不可用或无法@创建人"));
+                if (groupOk) {
+                    alerted = true;
+                } else {
+                    // 群不在 / 推送失败 / 创建人不在群（无 userid 无法@）→ 通知 wangfangyang
+                    notifyByUsername(monitorId, content + "\n（兜底：群告警失败或无法@创建人）",
+                            RobotProductRules.DM_ALERT_USERNAME);
+                    alerted = true;
+                }
+            } else {
+                writeAlert(monitorId, "ADMIN", "backend-manual", content, true, "无绑定告警群，改通知兜底人");
+                notifyByUsername(monitorId, content + "\n（兜底：监控未绑定告警群）",
+                        RobotProductRules.DM_ALERT_USERNAME);
+                alerted = true;
+            }
+        } else if (isGroup) {
+            // 定时：告警推回当初添加监控的群，并通知创建人
             DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
-                    conversationId, "链接监控告警", content.replace("\n", "  \n"));
+                    conversationId, "链接监控告警", content.replace("\n", "  \n"),
+                    StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of());
             String targetLabel = StringUtils.hasText(groupTitle)
                     ? (groupTitle + "|" + conversationId)
                     : conversationId;
             writeAlert(monitorId, "GROUP", targetLabel, content, groupCall.success(),
                     groupCall.success() ? "" : groupCall.message());
-            // 同时通知添加人，避免群推送失败时无人知晓
             notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
+            alerted = true;
         } else {
             writeAlert(monitorId, "ADMIN", "backend", content, true, "");
             notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
+            alerted = true;
         }
         jdbc.update("UPDATE ops_link_monitor SET last_alert_at = NOW() WHERE id = ?", monitorId);
+        return alerted;
     }
 
     /** 解析监控绑定的群名称（robot_group_profile）。 */

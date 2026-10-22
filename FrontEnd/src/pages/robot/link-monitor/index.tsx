@@ -70,8 +70,13 @@ export default function LinkMonitorPage() {
               label: '探测',
               perm: 'robot:link-monitor:probe',
               onClick: async () => {
-                await probeLinkMonitorApi(row.id);
-                message.success('已探测');
+                const res = await probeLinkMonitorApi(row.id);
+                if (res?.ok) {
+                  message.success('探测正常');
+                } else {
+                  const tip = res?.error ? `：${res.error}` : '';
+                  message.warning(res?.alerted ? `探测异常已告警${tip}` : `探测异常${tip || '，请查看探测日志'}`);
+                }
                 actionRef.current?.reload();
               },
             },

@@ -163,6 +163,10 @@ public class RobotSchemaMigrator implements ApplicationRunner {
     private void seedIntents() {
         upsertIntent("calendar.freebusy", "查闲忙/约面试开会", 1, "查 Bella 有没有空;安排面试;约开会", "calendarFreeBusyHandler", 1, 1, 10);
         upsertIntent("link_monitor.add", "添加链接监控", 1, "帮我监控一个链接;要监控这个网址", "linkMonitorHandler", 1, 1, 20);
+        upsertIntent("link_monitor.list", "查询监控链接", 1, "现在我有几个在监控的链接;看看正在监控的网址", "linkMonitorHandler", 1, 1, 25);
+        upsertIntent("link_monitor.abnormal", "查询异常监控", 1,
+                "目前监控的笔记是否有异常;监控的链接哪些有异常;监控有没有问题",
+                "linkMonitorHandler", 1, 1, 26);
         upsertIntent("link_monitor.delete", "删除链接监控", 1, "删掉监控链接;取消监控", "linkMonitorHandler", 1, 1, 30);
         upsertIntent("robot.help", "帮助/菜单", 1, "你能做什么;帮助;菜单", "helpHandler", 1, 1, 1);
     }

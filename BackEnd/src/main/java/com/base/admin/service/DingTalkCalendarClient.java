@@ -177,6 +177,15 @@ public class DingTalkCalendarClient {
      * robotCode 默认用 ClientId；msgKey=sampleMarkdown。
      */
     public NoticeCall sendRobotGroupMarkdown(String openConversationId, String title, String text) {
+        return sendRobotGroupMarkdown(openConversationId, title, text, List.of());
+    }
+
+    /**
+     * 群 Markdown；{@code atUserIds} 会写入正文 {@code @userid}（企业内部机器人群内 @ 约定）。
+     * 若被 @ 的人不在群里，钉钉通常仍返回成功但无法真正触达，调用方需自行兜底。
+     */
+    public NoticeCall sendRobotGroupMarkdown(String openConversationId, String title, String text,
+                                             List<String> atUserIds) {
         if (!ready()) {
             return NoticeCall.fail("钉钉未配置");
         }
@@ -188,6 +197,20 @@ public class DingTalkCalendarClient {
             if (cred == null || !StringUtils.hasText(cred.clientId())) {
                 return NoticeCall.fail("钉钉 ClientId 未配置，无法发群消息");
             }
+            StringBuilder md = new StringBuilder();
+            if (atUserIds != null) {
+                for (String uid : atUserIds) {
+                    if (StringUtils.hasText(uid)) {
+                        md.append('@').append(uid.trim()).append(' ');
+                    }
+                }
+                if (!md.isEmpty()) {
+                    md.append("  \n");
+                }
+            }
+            if (StringUtils.hasText(text)) {
+                md.append(text);
+            }
             String token = accessToken(cred);
             ObjectNode body = objectMapper.createObjectNode();
             body.put("robotCode", cred.clientId().trim());
@@ -195,7 +218,7 @@ public class DingTalkCalendarClient {
             body.put("msgKey", "sampleMarkdown");
             ObjectNode param = objectMapper.createObjectNode();
             param.put("title", StringUtils.hasText(title) ? title : "告警");
-            param.put("text", text == null ? "" : text);
+            param.put("text", md.toString());
             body.put("msgParam", objectMapper.writeValueAsString(param));
             apiPost(token, "https://api.dingtalk.com/v1.0/robot/groupMessages/send", body);
             return NoticeCall.ok(false);
