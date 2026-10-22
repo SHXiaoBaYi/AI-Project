@@ -190,26 +190,25 @@ public class LinkMonitorRobotHandler {
     }
 
     public RobotReply handleAbnormal() {
-        List<Map<String, Object>> list = linkMonitorService.listAbnormal(50);
-        if (list.isEmpty()) {
-            return RobotReply.text("当前没有探测异常的监控链接（最近一次探测均正常，或尚未探测）。");
+        // 先对全部在监控链接即时探测，再按本轮结果回复（不读过期缓存）
+        LinkMonitorService.ProbeBatchSummary batch = linkMonitorService.probeAllActiveNow(false);
+        if (batch.total() == 0) {
+            return RobotReply.text("当前没有正在监控的链接。");
         }
-        StringBuilder md = new StringBuilder("当前有 ").append(list.size()).append(" 条监控链接探测异常：\n");
+        StringBuilder md = new StringBuilder();
+        md.append("已即时探测 ").append(batch.total()).append(" 条监控链接：")
+                .append("正常 ").append(batch.okCount())
+                .append("，异常 ").append(batch.failCount()).append("。\n");
+        if (batch.failCount() == 0) {
+            md.append("目前没有异常。");
+            return RobotReply.text(md.toString());
+        }
+        md.append("\n异常明细：\n");
         int i = 1;
-        for (Map<String, Object> row : list) {
-            String url = String.valueOf(row.get("url"));
-            String err = row.get("last_error") == null ? "" : String.valueOf(row.get("last_error")).trim();
-            Object checked = row.get("last_check_at");
-            Object code = row.get("last_status_code");
-            md.append(i++).append(". ").append(url);
-            if (code != null) {
-                md.append("（HTTP ").append(code).append("）");
-            }
-            if (StringUtils.hasText(err)) {
-                md.append(" — ").append(err);
-            }
-            if (checked != null) {
-                md.append("，最近探测：").append(checked);
+        for (LinkMonitorService.ProbeFailItem item : batch.failures()) {
+            md.append(i++).append(". ").append(item.url());
+            if (StringUtils.hasText(item.error())) {
+                md.append(" — ").append(item.error());
             }
             md.append("\n");
         }

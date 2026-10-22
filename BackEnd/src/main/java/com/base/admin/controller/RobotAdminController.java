@@ -163,10 +163,20 @@ public class RobotAdminController {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT m.id, m.url, m.name, m.remark, m.scope_type, m.source, m.open_conversation_id, m.conversation_type,
                        m.status, m.interval_sec, m.last_check_at, m.last_ok, m.last_status_code, m.last_error,
-                       m.last_alert_at, m.create_by, m.create_time,
+                       m.last_alert_at, m.create_time,
+                       COALESCE(
+                         NULLIF(TRIM(u.nickname), ''),
+                         NULLIF(TRIM(u.username), ''),
+                         NULLIF(TRIM(u2.nickname), ''),
+                         NULLIF(TRIM(u2.username), ''),
+                         NULLIF(TRIM(m.create_by), '')
+                       ) AS create_by,
                        g.title AS group_title
                 FROM ops_link_monitor m
                 LEFT JOIN robot_group_profile g ON g.open_conversation_id = m.open_conversation_id AND g.is_active = 1
+                LEFT JOIN sys_user u ON u.user_id = m.creator_user_id AND u.is_active = 1
+                LEFT JOIN hr_user_dingtalk d ON d.is_active = 1 AND d.dingtalk_user_id = m.creator_staff_id
+                LEFT JOIN sys_user u2 ON u2.user_id = d.user_id AND u2.is_active = 1
                 """ + where + " ORDER BY m.id DESC LIMIT ? OFFSET ?", args.toArray());
         return Result.ok(new PageResult<>(total == null ? 0 : total, rows));
     }

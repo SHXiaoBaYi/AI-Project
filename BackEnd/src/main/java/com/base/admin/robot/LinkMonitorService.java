@@ -99,6 +99,8 @@ public class LinkMonitorService {
         if (exists != null && exists > 0) {
             throw new BusinessException("该链接已在监控列表中：" + normalized);
         }
+        // create_by 存可读人名，禁止直接落钉钉 staffId/工号
+        String creatorLabel = resolveCreatorDisplayName(creatorStaffId, creatorUserId, createBy);
         KeyHolder kh = new GeneratedKeyHolder();
         jdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement("""
@@ -119,7 +121,7 @@ public class LinkMonitorService {
                 ps.setLong(8, creatorUserId);
             }
             ps.setInt(9, RobotProductRules.DEFAULT_INTERVAL_SEC);
-            ps.setString(10, createBy == null ? "" : createBy);
+            ps.setString(10, creatorLabel);
             return ps;
         }, kh);
         Number key = kh.getKey();
@@ -134,7 +136,7 @@ public class LinkMonitorService {
                 WHERE status = 'ACTIVE' AND is_active = 1
                 ORDER BY id DESC
                 LIMIT ?
-                """, Math.max(1, Math.min(limit, 100)));
+                """, Math.max(1, Math.min(limit, 200)));
     }
 
     /** 最近一次探测失败的 ACTIVE 监控（last_ok = 0）。 */
@@ -146,7 +148,35 @@ public class LinkMonitorService {
                 WHERE status = 'ACTIVE' AND is_active = 1 AND last_ok = 0
                 ORDER BY last_check_at DESC, id DESC
                 LIMIT ?
-                """, Math.max(1, Math.min(limit, 100)));
+                """, Math.max(1, Math.min(limit, 200)));
+    }
+
+    public record ProbeFailItem(long id, String url, String error) {
+    }
+
+    public record ProbeBatchSummary(int total, int okCount, int failCount, List<ProbeFailItem> failures) {
+    }
+
+    /**
+     * 对当前全部 ACTIVE 监控即时跑一轮探测（用于「是否有异常」意图）。
+     * {@code forceAlert=false}：失败仍按自然日去重告警，避免用户多问一次就刷屏。
+     */
+    public ProbeBatchSummary probeAllActiveNow(boolean forceAlert) {
+        List<Map<String, Object>> active = listActive(200);
+        int okCount = 0;
+        List<ProbeFailItem> failures = new ArrayList<>();
+        for (Map<String, Object> row : active) {
+            long id = ((Number) row.get("id")).longValue();
+            String url = row.get("url") == null ? "" : String.valueOf(row.get("url"));
+            ProbeResult r = probeOne(id, forceAlert);
+            if (r.ok()) {
+                okCount++;
+            } else {
+                String err = StringUtils.hasText(r.error()) ? r.error() : "探测失败";
+                failures.add(new ProbeFailItem(id, url, err));
+            }
+        }
+        return new ProbeBatchSummary(active.size(), okCount, failures.size(), failures);
     }
 
     public void softDelete(long id, String operatorStaffId, boolean fromGroup) {
@@ -210,7 +240,7 @@ public class LinkMonitorService {
     public ProbeResult probeOne(long monitorId, boolean forceAlert) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT id, url, timeout_ms, open_conversation_id, conversation_type,
-                       creator_staff_id, creator_user_id
+                       creator_staff_id, creator_user_id, create_by
                 FROM ops_link_monitor WHERE id = ? AND is_active = 1 LIMIT 1
                 """, monitorId);
         if (rows.isEmpty()) {
@@ -596,6 +626,11 @@ public class LinkMonitorService {
         } else {
             contentSb.append("来源：").append(forceAlert ? "后台手动探测" : ("1".equals(conversationType) ? "单聊/后台" : "未知"));
         }
+        String creatorName = resolveCreatorDisplayName(creatorStaffId, creatorUserId,
+                row.get("create_by") == null ? "" : String.valueOf(row.get("create_by")));
+        if (StringUtils.hasText(creatorName)) {
+            contentSb.append("\n创建人：").append(creatorName);
+        }
         String content = contentSb.toString();
         String atUserId = resolveDingUserId(creatorStaffId, creatorUserId);
         boolean alerted = false;
@@ -604,8 +639,9 @@ public class LinkMonitorService {
             // 手动探测：群 + @创建人；否则兜底 wangfangyang
             if (isGroup) {
                 List<String> atList = StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of();
+                List<String> atLabels = StringUtils.hasText(atUserId) ? List.of(creatorName) : List.of();
                 DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
-                        conversationId, "链接监控告警", content.replace("\n", "  \n"), atList);
+                        conversationId, "链接监控告警", content.replace("\n", "  \n"), atList, atLabels);
                 String targetLabel = StringUtils.hasText(groupTitle)
                         ? (groupTitle + "|" + conversationId)
                         : conversationId;
@@ -632,9 +668,10 @@ public class LinkMonitorService {
             }
         } else if (isGroup) {
             // 定时：告警推回当初添加监控的群，并通知创建人
+            List<String> atList = StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of();
+            List<String> atLabels = StringUtils.hasText(atUserId) ? List.of(creatorName) : List.of();
             DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
-                    conversationId, "链接监控告警", content.replace("\n", "  \n"),
-                    StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of());
+                    conversationId, "链接监控告警", content.replace("\n", "  \n"), atList, atLabels);
             String targetLabel = StringUtils.hasText(groupTitle)
                     ? (groupTitle + "|" + conversationId)
                     : conversationId;
@@ -684,7 +721,63 @@ public class LinkMonitorService {
         }
     }
 
+    /**
+     * 解析创建人展示名：优先系统昵称/用户名，避免直接展示钉钉 staffId/工号。
+     */
+    public String resolveCreatorDisplayName(String staffId, Long userId, String fallback) {
+        if (userId != null) {
+            String byUid = jdbc.query("""
+                    SELECT COALESCE(NULLIF(TRIM(nickname), ''), NULLIF(TRIM(username), ''))
+                    FROM sys_user WHERE user_id = ? AND is_active = 1 LIMIT 1
+                    """, rs -> rs.next() ? rs.getString(1) : null, userId);
+            if (StringUtils.hasText(byUid)) {
+                return byUid.trim();
+            }
+        }
+        if (StringUtils.hasText(staffId)) {
+            String byDing = jdbc.query("""
+                    SELECT COALESCE(NULLIF(TRIM(u.nickname), ''), NULLIF(TRIM(u.username), ''))
+                    FROM hr_user_dingtalk d
+                    INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
+                    WHERE d.is_active = 1 AND d.dingtalk_user_id = ?
+                    LIMIT 1
+                    """, rs -> rs.next() ? rs.getString(1) : null, staffId.trim());
+            if (StringUtils.hasText(byDing)) {
+                return byDing.trim();
+            }
+        }
+        if (StringUtils.hasText(fallback) && !looksLikeStaffId(fallback)) {
+            return fallback.trim();
+        }
+        if (StringUtils.hasText(fallback)) {
+            return fallback.trim();
+        }
+        return StringUtils.hasText(staffId) ? staffId.trim() : "";
+    }
+
+    /** 纯数字长串多半是工号/钉钉 userid，不宜当作「人名」展示。 */
+    static boolean looksLikeStaffId(String s) {
+        if (!StringUtils.hasText(s)) {
+            return false;
+        }
+        String t = s.trim();
+        return t.matches("\\d{5,}") || t.matches("[A-Za-z0-9_-]{16,}");
+    }
+
     private String resolveDingUserId(String staffId, Long userId) {
+        // 优先按系统用户绑定取钉钉 userid
+        if (userId != null) {
+            String byUid = jdbc.query("""
+                    SELECT d.dingtalk_user_id
+                    FROM hr_user_dingtalk d
+                    INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
+                    WHERE d.is_active = 1 AND d.user_id = ?
+                    LIMIT 1
+                    """, rs -> rs.next() ? rs.getString(1) : null, userId);
+            if (StringUtils.hasText(byUid)) {
+                return byUid.trim();
+            }
+        }
         if (StringUtils.hasText(staffId)) {
             String byStaff = jdbc.query("""
                     SELECT d.dingtalk_user_id
@@ -696,17 +789,8 @@ public class LinkMonitorService {
             if (StringUtils.hasText(byStaff)) {
                 return byStaff.trim();
             }
-            // staffId 本身就是钉钉 userid，可直接用于工作通知
+            // Stream 入站 senderStaffId 通常即钉钉 userid
             return staffId.trim();
-        }
-        if (userId != null) {
-            return jdbc.query("""
-                    SELECT d.dingtalk_user_id
-                    FROM hr_user_dingtalk d
-                    INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
-                    WHERE d.is_active = 1 AND d.user_id = ?
-                    LIMIT 1
-                    """, rs -> rs.next() ? rs.getString(1) : null, userId);
         }
         return "";
     }

@@ -181,11 +181,17 @@ public class DingTalkCalendarClient {
     }
 
     /**
-     * 群 Markdown；{@code atUserIds} 会写入正文 {@code @userid}（企业内部机器人群内 @ 约定）。
+     * 群 Markdown；{@code atUserIds} 写入正文 {@code @userid}（钉钉 @ 协议必须用 userid）。
+     * {@code atLabels} 可选，与 atUserIds 对齐，展示为人名：{@code @userid（张三）}。
      * 若被 @ 的人不在群里，钉钉通常仍返回成功但无法真正触达，调用方需自行兜底。
      */
     public NoticeCall sendRobotGroupMarkdown(String openConversationId, String title, String text,
                                              List<String> atUserIds) {
+        return sendRobotGroupMarkdown(openConversationId, title, text, atUserIds, null);
+    }
+
+    public NoticeCall sendRobotGroupMarkdown(String openConversationId, String title, String text,
+                                             List<String> atUserIds, List<String> atLabels) {
         if (!ready()) {
             return NoticeCall.fail("钉钉未配置");
         }
@@ -199,10 +205,20 @@ public class DingTalkCalendarClient {
             }
             StringBuilder md = new StringBuilder();
             if (atUserIds != null) {
-                for (String uid : atUserIds) {
-                    if (StringUtils.hasText(uid)) {
-                        md.append('@').append(uid.trim()).append(' ');
+                for (int i = 0; i < atUserIds.size(); i++) {
+                    String uid = atUserIds.get(i);
+                    if (!StringUtils.hasText(uid)) {
+                        continue;
                     }
+                    md.append('@').append(uid.trim());
+                    if (atLabels != null && i < atLabels.size() && StringUtils.hasText(atLabels.get(i))) {
+                        String label = atLabels.get(i).trim();
+                        // 避免人名与 userid 相同时重复括号
+                        if (!label.equals(uid.trim())) {
+                            md.append('（').append(label).append('）');
+                        }
+                    }
+                    md.append(' ');
                 }
                 if (!md.isEmpty()) {
                     md.append("  \n");
