@@ -36,7 +36,7 @@ import type {
 /** 前端一键生成时的阶段动画（与后台两阶段流水线对齐） */
 const AI_PIPELINE_STEPS = [
   { key: 'style', title: '加载风格与骨架' },
-  { key: 'sell', title: '召回卖点' },
+  { key: 'sell', title: '召回资料' },
   { key: 'outline', title: '生成大纲' },
   { key: 'media', title: '语义召回素材' },
   { key: 'expand', title: '扩写正文' },
