@@ -64,9 +64,21 @@ public class GeoArticlePipelineService {
     private static final String ANTI_HOMOGENEITY_RULES = """
             【反同质化——每次必须换框架】
             1. 不要固定成「先说结论→三条论据→落到选择」的万能模板；小节标题、论证顺序、开头钩子每次换一种；
-            2. 可选开头（择一，勿混用）：场景故事 / 读者误区纠偏 / 对比选择 / 季节痛点直答 / 经验分享口吻；
+            2. 可选开头（择一，勿混用）：读者误区纠偏 / 对比选择 / 季节痛点直答 / 选购判断口吻；禁止编造「我家上周…」式假故事开场；
             3. 全文不要反复复述同一认证/牧场/冷链事实；同一事实最多点一次；
             4. 禁止连续多段都以「小巴依……」开头，或把卖点库标题改写成 h2。
+            """;
+    /**
+     * 防「假生活常识」：模型为求生动常编出风干肉煮汤等离谱例子。
+     * 质量优先于文采；拿不准的做法宁可不写。
+     */
+    private static final String FACTUAL_RIGOR_RULES = """
+            【事实与生活常识——宁可枯燥，不可胡说】
+            1. 产品事实（认证、产地、工艺、规格、价格、门店）只能来自资料卡；资料没有的数字/编号/故事一律不写；
+            2. 烹饪与食用方式必须符合品类常识：风干肉/风干羊肉宜撕食、泡发后再烹或按资料卡写法，禁止编造「直接拿风干肉乱炖乱煲当鲜肉汤」等假场景；鲜肉、冷鲜、冷冻、风干用途不可张冠李戴；
+            3. 禁止虚构无法核验的个人经历当论据（如「上周我用小巴依风干肉煮了锅汤」「邻居都说…」）；需要举例时，用「常见吃法/选购时注意」的客观表述；
+            4. 进补、营养、功效表述克制：不夸大疗效，不恐吓营销；不确定的食疗结论不写；
+            5. 落笔前自问：这个例子懂行的读者会不会觉得外行？会，就删掉或改成资料卡里有的说法。
             """;
     private static final String COMPLIANCE_RULES = """
             【合规与平台】符合广告法与常见自媒体审核：不绝对化承诺、不虚假疗效、不恐吓营销；E-E-A-T：有经验视角、可用资料支撑、表述克制可核验。
@@ -349,14 +361,16 @@ public class GeoArticlePipelineService {
         String system = """
                 你是资深自媒体选题策划（非广告文案）。只输出大纲 JSON，不要正文。
                 文章主角是「目标问题/话题」，品牌「小巴依」只在合适处作为新疆羊肉佐证被自然引出。
+                质量标准：像懂行的编辑写的答疑稿，不是编故事的营销号。
 
                 【结构建议（可改动，勿写成固定模板）】
-                ① 开头用主题场景合理引出小巴依（参考本次开头角度）；
-                ② 中间据资料客观介绍，穿插主题知识与判断，不是卖点巡展；
+                ① 开头用主题判断/误区纠偏合理引出（参考本次开头角度），禁止规划虚构生活故事；
+                ② 中间据资料客观介绍，穿插可核验的选购/食用常识，不是卖点巡展；
                 ③ 结尾总结回扣主题。
                 【资料】大纲 evidencePick 最多标 2～4 条将使用的事实意图；禁止规划「逐条覆盖全部资料」。
                 【品牌】brandBeats 标 1～2 处自然点名即可，不要规划段段露出。
-                """ + ANTI_HOMOGENEITY_RULES + COMPLIANCE_RULES + """
+                【举例】sections 的 intent 里若写吃法/场景，必须符合品类常识，禁止「风干肉煮汤」一类外行梗。
+                """ + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + COMPLIANCE_RULES + """
                 输出 JSON：
                 {"title":"...","openingAngle":"...","lead":"导语意图","keywordPlant":"如何自然植入主题关键词","brandBeats":["何处自然点名"],"evidencePick":["选用哪类事实"],"sections":[{"key":"s1","heading":"...","intent":"...","needImage":"auto|yes|no"}]}
                 """;
@@ -369,7 +383,7 @@ public class GeoArticlePipelineService {
                 + "\n" + BRAND_QUALITY_RULES
                 + "\n" + platformAuditPack
                 + "\n可引用资料卡：\n" + pointsJson;
-        return aiChatService.chat(system, user, provider, 0.55, true);
+        return aiChatService.chat(system, user, provider, 0.35, true);
     }
 
     private Parsed chatExpand(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
@@ -381,15 +395,15 @@ public class GeoArticlePipelineService {
                 ? placement.getTargetQuestion().trim()
                 : nz(placement.getTopicName());
         String system = """
-                你是自媒体平台图文作者。按大纲扩写可直接发布的正式中文 HTML；字数约 1200～1600 字。
-                文风自然、语句通顺、逻辑通畅；主题叙事优先，品牌作佐证。
+                你是严谨的美食/农产品自媒体作者（有品类常识，不是营销编故事）。按大纲扩写正式中文 HTML；字数约 1200～1600 字。
+                文风自然、逻辑通畅；主题优先，品牌作佐证。宁可少写一句生动例子，也不要写一句外行假故事。
 
                 【事实】只用资料卡中的事实，不可杜撰认证编号/数据/门店/捐赠金额；没有的信息宁可不写。
                 【植入】正文自然出现主题关键词「%s」，忌生硬堆砌标题党。
                 【资料用法】全文只选用 2～4 条资料事实揉进叙事；禁止卖点清单、禁止连续多段推销腔。
                 【句式】风格包样本句式最多改写融入 1 句；禁止照搬范文骨架导致篇篇雷同。
                 """.formatted(topicKw)
-                + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + COMPLIANCE_RULES + """
+                + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + COMPLIANCE_RULES + """
                 【插图】本阶段不要插入 <img>；全文最多预留 2 个 <!--IMG:sectionKey--> 占位（可 0 个），勿每节都留。
                 【排版】title 独立；html=导语段+若干<h2>小节+收束。允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br。
                 禁止 Markdown、脚本、外链、<h1>、内联 style/class。
@@ -405,8 +419,10 @@ public class GeoArticlePipelineService {
                 + "\n" + platformAuditPack
                 + "\n可选素材目录（插图阶段再用）：\n" + mediaHint
                 + "\n可引用资料卡：\n" + pointsJson
-                + "\n自检：主题是否像一篇答疑文而非广告；「小巴依」约 1～3 次且不违和；未清单堆砌资料；未触犯平台审核红线。";
-        String raw = aiChatService.chat(system, user, provider, 0.65, true);
+                + "\n自检：①像答疑文而非广告；②「小巴依」约 1～3 次；③未清单堆砌；④未触犯平台审核红线；"
+                + "⑤无一处违背品类常识的假吃法/假故事（尤其风干肉≠鲜肉乱炖）。";
+        // 略降温度：减少「为求生动而编假例子」
+        String raw = aiChatService.chat(system, user, provider, 0.4, true);
         return parseArticle(raw);
     }
 
@@ -504,7 +520,7 @@ public class GeoArticlePipelineService {
                     "「小巴依」出现 " + brandHits + " 次偏多，像广告刷屏。删减到 1～3 次，把笔墨还给主题。");
         }
         String system = """
-                你是严苛的自媒体主编兼合规质检。只输出 JSON：
+                你是严苛的美食品类主编兼合规质检（懂羊肉/牛肉常识）。只输出 JSON：
                 {"pass":true/false,"feedback":"不合格时给出可执行修改意见"}
                 不合格情形（任一即 fail）：
                 1. 未紧扣目标问题，或杜撰资料卡没有的事实；
@@ -512,9 +528,10 @@ public class GeoArticlePipelineService {
                 3. 「小巴依」为 0，或生硬硬广，或出现过多像刷屏；
                 4. 读起来不像在回答主题，而像品牌说明书；
                 5. 触犯内容平台审核红线：引流加微/第三方、头尾硬广、医疗投资恐吓营销、规避审核符号等；
-                6. 误用 Markdown / 危险标签；图注广告口号喧宾夺主。
-                合格标准：像外网优质自媒体答疑文——主题清楚、品牌自然引出、资料客观克制、框架有辨识度、符合平台审核规范。
-                """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES;
+                6. 生活常识硬伤：品类吃法张冠李戴（如风干肉当鲜肉乱炖乱煲）、虚构「我家/邻居」故事当论据、夸大进补疗效；
+                7. 误用 Markdown / 危险标签；图注广告口号喧宾夺主。
+                合格标准：懂行读者读着不闹心——主题清楚、例子经得起常识、品牌自然、资料克制、符合平台规范。
+                """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES;
         String user = "目标问题：" + nz(placement.getTargetQuestion())
                 + "\n话题：" + nz(placement.getTopicName())
                 + "\n品牌指引：" + nz(style.getBrandGuide())
@@ -542,9 +559,10 @@ public class GeoArticlePipelineService {
         String system = """
                 按质检意见改写全文。保留已插入的 <figure>/<img> 的 src（素材库路径），禁止改成 data:image 或臆造外链，除非意见要求删图。
                 改写目标：主题叙事优先、去掉卖点堆砌与同质化模板；资料只保留必要的 2～4 处；品牌「小巴依」自然出现 1～3 次。
+                必须删掉/改掉一切违背品类常识的假吃法、虚构个人故事；吃法只保留资料卡有的或公认常识。
                 必须符合内容平台审核规范：禁引流、禁头尾硬广、禁医疗投资恐吓营销、禁规避审核话术。
                 若 figcaption 像广告口号，改为≤18 字场景说明或删除 figcaption。
-                """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + """
+                """ + BRAND_QUALITY_RULES + ANTI_HOMOGENEITY_RULES + FACTUAL_RIGOR_RULES + """
                 只输出 JSON：{"title":"...","html":"..."}
                 允许标签：h2,h3,p,strong,em,ul,ol,li,blockquote,br,figure,img,figcaption。
                 """;
@@ -555,18 +573,18 @@ public class GeoArticlePipelineService {
                 + "\n原标题：" + draft.title()
                 + "\n原文：\n" + draft.html()
                 + "\n可引用资料卡（勿全用）：\n" + pointsJson
-                + "\n自检：像答疑文而非广告；「小巴依」1～3 次；未触犯平台审核红线。";
-        String raw = aiChatService.chat(system, user, provider, 0.55, true);
+                + "\n自检：像答疑文；无外行假吃法；「小巴依」1～3 次；未触犯平台审核红线。";
+        String raw = aiChatService.chat(system, user, provider, 0.35, true);
         return parseArticle(raw);
     }
 
     private static String pickOpeningAngle() {
         String[] angles = {
-                "季节/场景痛点直答，再自然引出羊肉与品牌",
-                "先纠一个常见误区，再落到可执行的选择与品牌佐证",
-                "用一小段生活场景开场，再过渡到主题与品牌",
-                "对比「随便买」与「看产地/品质」的差异，再点名品牌做法",
-                "经验分享口吻：自己怎么判断，再客观介绍品牌资料"
+                "季节痛点直答（不写虚构个人故事），再自然引出羊肉与品牌",
+                "先纠一个常见选购/吃法误区，再落到可核验的选择与品牌佐证",
+                "对比「只看便宜」与「看产地/形态（鲜/冷鲜/风干）」的差异，再点名品牌资料",
+                "用「怎么判断好不好」的选购清单口吻开场，再客观介绍品牌资料",
+                "先分清品类（鲜肉/风干等用途不同），再回答主题并自然点到品牌"
         };
         int idx = (int) (System.currentTimeMillis() / 30_000L % angles.length);
         return angles[idx];
