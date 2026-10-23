@@ -1,22 +1,31 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Form, Input, Modal, Select, Tag, Typography } from 'antd';
+import { App, Form, Input, Modal, Select, Spin, Tag, Typography } from 'antd';
 import { useSelector } from 'react-redux';
 import type { RootState } from '@/store';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { aiStatusTag, GeoReviewAiPanel } from '@/components/geo/content-placement/GeoReviewAiPanel';
 import { warmLakexAssetsOnIdle } from '@/components/lakex/loadLakexAssets';
 import {
+  getGeoContentArticleBundleApi,
   getGeoContentReviewCompareApi,
   getGeoOwnerOptionsApi,
   getGeoTopicOptionsApi,
   getMyGeoWritingsApi,
+  precheckGeoContentDraftApi,
   submitGeoContentMultiReviewApi,
 } from '@/api/geo';
 import { GeoReviewAnnotationReadonly } from '@/components/geo/content-placement/GeoReviewAnnotations';
-import type { GeoContentReviewAnnotation, GeoContentWritingRow, GeoOwnerOption, GeoTopic } from '@/types/geo';
+import type {
+  GeoContentReviewAi,
+  GeoContentReviewAnnotation,
+  GeoContentWritingRow,
+  GeoOwnerOption,
+  GeoTopic,
+} from '@/types/geo';
 
 const STATUS_META: Record<string, { text: string; color: string }> = {
   drafting: { text: '草稿', color: 'default' },
@@ -66,6 +75,10 @@ const MyWritingsPage = memo(function MyWritingsPage() {
   const [compareOpen, setCompareOpen] = useState(false);
   const [comparePlacementId, setComparePlacementId] = useState<number | null>(null);
   const [compareFocusId, setCompareFocusId] = useState<number | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiRow, setAiRow] = useState<GeoContentWritingRow | null>(null);
+  const [aiPrecheckLoading, setAiPrecheckLoading] = useState(false);
+  const [aiPrecheckResult, setAiPrecheckResult] = useState<GeoContentReviewAi | null>(null);
 
   useEffect(() => {
     warmLakexAssetsOnIdle();
@@ -74,6 +87,54 @@ const MyWritingsPage = memo(function MyWritingsPage() {
       setTopics(topicOpts ?? []);
     });
   }, []);
+
+  const runDraftPrecheck = async (row: GeoContentWritingRow) => {
+    setAiPrecheckLoading(true);
+    setAiPrecheckResult(null);
+    try {
+      const bundle = await getGeoContentArticleBundleApi(row.placementId);
+      const title = bundle?.shared?.contentTitle || row.contentTitle || '';
+      const body = (bundle?.shared?.contentBody || '').trim();
+      if (!body) {
+        message.warning('当前统一稿正文为空，请先撰写或 AI 生成后再预审');
+        setAiPrecheckResult({
+          status: 'none',
+          summary: '正文为空，未执行预检',
+          issues: [],
+        });
+        return;
+      }
+      const check = await precheckGeoContentDraftApi({
+        placementId: row.placementId,
+        title: title || undefined,
+        body,
+      });
+      setAiPrecheckResult(check);
+      if (check.status === 'done' && check.suggestion === 'reject') {
+        message.warning(check.summary || '预检发现风险点');
+      } else if (check.status === 'done' && check.suggestion === 'approve') {
+        message.success(check.summary || '预检通过');
+      } else if (check.status === 'failed') {
+        message.warning(check.errorMsg || '草稿预检失败');
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : 'AI 预审失败');
+      setAiPrecheckResult({
+        status: 'failed',
+        errorMsg: e instanceof Error ? e.message : 'AI 预审失败',
+        issues: [],
+      });
+    } finally {
+      setAiPrecheckLoading(false);
+    }
+  };
+
+  const openAiPrecheck = (row: GeoContentWritingRow) => {
+    setAiRow(row);
+    setAiPrecheckResult(null);
+    setAiOpen(true);
+    void runDraftPrecheck(row);
+  };
 
   useEffect(() => {
     if (!reviewOpen || reviewRow?.placementId == null || reviewRow.latestReviewId == null) {
@@ -101,12 +162,13 @@ const MyWritingsPage = memo(function MyWritingsPage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 320,
+      width: 380,
       search: false,
       render: (_, record) => {
         const locked = LOCKED_STATUSES.has(record.contentStatus || '');
         return (
           <ActionButtons
+            maxVisible={4}
             items={[
               {
                 key: 'edit',
@@ -117,6 +179,12 @@ const MyWritingsPage = memo(function MyWritingsPage() {
                   setWritePlacementId(record.placementId);
                   setWriteOpen(true);
                 },
+              },
+              {
+                key: 'ai-precheck',
+                label: 'AI 预审',
+                perm: 'geo:write:mine',
+                onClick: () => openAiPrecheck(record),
               },
               {
                 key: 'compare',
@@ -304,6 +372,102 @@ const MyWritingsPage = memo(function MyWritingsPage() {
           setCompareFocusId(null);
         }}
       />
+
+      <Modal
+        title='AI 预审'
+        open={aiOpen}
+        destroyOnHidden
+        width={640}
+        onCancel={() => {
+          setAiOpen(false);
+          setAiRow(null);
+          setAiPrecheckResult(null);
+          setAiPrecheckLoading(false);
+        }}
+        footer={null}
+      >
+        <p className='mb-3 text-sm text-neutral-500'>
+          {aiRow?.topicName || '话题'} · {aiRow?.contentTitle || aiRow?.targetQuestion || ''}
+        </p>
+        {aiRow?.latestReviewId || aiRow?.currentReviewId ? (
+          <div className='mb-4 rounded border border-violet-100 bg-violet-50/60 px-3 py-2.5'>
+            <div className='mb-2 flex flex-wrap items-center gap-2'>
+              <span className='text-sm font-medium text-violet-900'>本轮正式预审</span>
+              <span className='text-xs text-violet-600/80'>提审后自动跑，结果随审核轮次保存</span>
+            </div>
+            <GeoReviewAiPanel
+              reviewId={aiRow.currentReviewId ?? aiRow.latestReviewId ?? null}
+              canAct={false}
+            />
+          </div>
+        ) : (
+          <p className='mb-3 text-xs text-neutral-400'>尚未提审：下方为对照审稿知识库的草稿预检（不落库）。</p>
+        )}
+        <div className='rounded border border-neutral-100 px-3 py-2.5'>
+          <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+            <div className='flex flex-wrap items-center gap-2'>
+              <span className='text-sm font-medium text-neutral-800'>当前统一稿预检</span>
+              {aiStatusTag(aiPrecheckResult)}
+            </div>
+            <Typography.Link
+              disabled={aiPrecheckLoading || !aiRow}
+              onClick={() => {
+                if (aiRow) void runDraftPrecheck(aiRow);
+              }}
+            >
+              {aiPrecheckLoading ? '预检中…' : '重新预检'}
+            </Typography.Link>
+          </div>
+          {aiPrecheckLoading ? (
+            <div className='flex items-center gap-2 py-4 text-sm text-neutral-600'>
+              <Spin size='small' />
+              对照审稿知识库检查杜撰/口径中…
+            </div>
+          ) : aiPrecheckResult?.status === 'done' ? (
+            <div className='flex flex-col gap-2'>
+              <div className='flex flex-wrap items-center gap-2'>
+                <Tag color={aiPrecheckResult.suggestion === 'approve' ? 'success' : 'warning'}>
+                  {aiPrecheckResult.suggestion === 'approve' ? '建议可通过' : '建议改后再提审'}
+                </Tag>
+                {aiPrecheckResult.score != null ? (
+                  <span className='text-xs text-neutral-500'>{aiPrecheckResult.score} 分</span>
+                ) : null}
+              </div>
+              {aiPrecheckResult.summary ? (
+                <p className='mb-0 text-sm text-neutral-700'>{aiPrecheckResult.summary}</p>
+              ) : null}
+              {(aiPrecheckResult.issues?.length ?? 0) > 0 ? (
+                <ul className='m-0 max-h-64 list-none space-y-1.5 overflow-auto p-0'>
+                  {aiPrecheckResult.issues!.map((issue, idx) => (
+                    <li
+                      key={`${issue.quoteText}-${idx}`}
+                      className='rounded border border-neutral-100 bg-neutral-50 px-2 py-1.5 text-xs'
+                    >
+                      <div className='mb-0.5 flex items-center gap-1'>
+                        <Tag
+                          color={issue.level === 'high' ? 'error' : issue.level === 'low' ? 'default' : 'warning'}
+                          className='mr-0'
+                        >
+                          {issue.level || 'mid'}
+                        </Tag>
+                        <span className='truncate text-neutral-500'>「{issue.quoteText}」</span>
+                      </div>
+                      <div className='text-neutral-800'>{issue.commentText}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className='text-xs text-neutral-400'>未检出需划词的问题</div>
+              )}
+              <p className='mb-0 text-xs text-neutral-400'>草稿预检不落库；正式提审后仍会再跑一轮 AI 预审。</p>
+            </div>
+          ) : (
+            <div className='text-sm text-neutral-600'>
+              {aiPrecheckResult?.errorMsg || aiPrecheckResult?.summary || '暂无预检结果'}
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <Modal
         title='审核意见'
