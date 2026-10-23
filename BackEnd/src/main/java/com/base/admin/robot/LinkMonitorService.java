@@ -433,7 +433,7 @@ public class LinkMonitorService {
      */
     public ProbeResult probeOne(long monitorId, boolean forceAlert) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT id, url, timeout_ms, open_conversation_id, conversation_type,
+                SELECT id, url, timeout_ms, open_conversation_id, conversation_type, source,
                        creator_staff_id, creator_user_id, create_by
                 FROM ops_link_monitor WHERE id = ? AND is_active = 1 LIMIT 1
                 """, monitorId);
@@ -1061,12 +1061,10 @@ public class LinkMonitorService {
     /**
      * 告警。
      * <ul>
-     *   <li>定时：同自然日去重；有绑定群则推群，并通知创建人（失败兜底 wangfangyang）</li>
-     *   <li>后台手动（forceAlert）：不过滤当日；优先推绑定群并 @ 创建人；
-     *       群不在/推送失败/无法解析创建人钉钉 userid → 钉钉通知 wangfangyang</li>
+     *   <li>有绑定群：必须先推该群（@创建人）；群成功则不再打兜底账号</li>
+     *   <li>群失败 / 无绑定群：再通知创建人；创建人也失败才兜底 wangfangyang</li>
+     *   <li>定时同自然日去重；手动 forceAlert 不过滤当日</li>
      * </ul>
-     *
-     * @return 是否实际发出了告警（含兜底）
      */
     private boolean alertFailure(long monitorId, String url, String err, Map<String, Object> row, boolean forceAlert) {
         if (!forceAlert) {
@@ -1079,79 +1077,79 @@ public class LinkMonitorService {
                 return false;
             }
         }
-        String conversationId = row.get("open_conversation_id") == null ? "" : String.valueOf(row.get("open_conversation_id"));
-        String conversationType = row.get("conversation_type") == null ? "1" : String.valueOf(row.get("conversation_type"));
+        String conversationId = row.get("open_conversation_id") == null ? "" : String.valueOf(row.get("open_conversation_id")).trim();
+        String conversationType = row.get("conversation_type") == null ? "1" : String.valueOf(row.get("conversation_type")).trim();
+        String source = row.get("source") == null ? "" : String.valueOf(row.get("source")).trim();
         String creatorStaffId = row.get("creator_staff_id") == null ? "" : String.valueOf(row.get("creator_staff_id"));
         Long creatorUserId = row.get("creator_user_id") == null ? null : ((Number) row.get("creator_user_id")).longValue();
         String groupTitle = resolveGroupTitle(conversationId);
+
+        // 群会话：type=2；openConversationId 以 cid 开头也视为群（兼容历史 type 脏数据）；单聊 type=1 不推群
+        boolean isGroup = StringUtils.hasText(conversationId)
+                && !"1".equals(conversationType)
+                && ("2".equals(conversationType)
+                || conversationId.regionMatches(true, 0, "cid", 0, 3)
+                || "robot".equalsIgnoreCase(source));
+
+        String creatorName = resolveCreatorDisplayName(creatorStaffId, creatorUserId,
+                row.get("create_by") == null ? "" : String.valueOf(row.get("create_by")));
+        String atUserId = resolveDingUserId(creatorStaffId, creatorUserId);
 
         StringBuilder contentSb = new StringBuilder();
         contentSb.append("【链接监控告警】链接不可用\n");
         contentSb.append("URL：").append(url).append("\n");
         contentSb.append("原因：").append(err).append("\n");
         contentSb.append("时间：").append(LocalDateTime.now()).append("\n");
-        boolean isGroup = "2".equals(conversationType) && StringUtils.hasText(conversationId);
         if (isGroup) {
             contentSb.append("来源群：").append(StringUtils.hasText(groupTitle) ? groupTitle : conversationId);
         } else {
             contentSb.append("来源：").append(forceAlert ? "后台手动探测" : ("1".equals(conversationType) ? "单聊/后台" : "未知"));
         }
-        String creatorName = resolveCreatorDisplayName(creatorStaffId, creatorUserId,
-                row.get("create_by") == null ? "" : String.valueOf(row.get("create_by")));
         if (StringUtils.hasText(creatorName)) {
             contentSb.append("\n创建人：").append(creatorName);
         }
         String content = contentSb.toString();
-        String atUserId = resolveDingUserId(creatorStaffId, creatorUserId);
         boolean alerted = false;
 
-        if (forceAlert) {
-            // 手动探测：群 + @创建人；否则兜底 wangfangyang
-            if (isGroup) {
-                List<String> atList = StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of();
-                // 正文只 @userid，勿拼（姓名），否则钉钉无法真正 @ 到人
-                DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
-                        conversationId, "链接监控告警", content.replace("\n", "  \n"), atList);
-                String targetLabel = StringUtils.hasText(groupTitle)
-                        ? (groupTitle + "|" + conversationId)
-                        : conversationId;
-                String groupErr = groupCall.success() ? "" : (groupCall.message() == null ? "群消息失败" : groupCall.message());
-                if (groupCall.success() && atList.isEmpty()) {
-                    groupErr = "无法@创建人（无钉钉userid）";
-                }
-                boolean groupOk = groupCall.success() && !atList.isEmpty();
-                writeAlert(monitorId, "GROUP", targetLabel, content, groupOk,
-                        groupOk ? "" : (StringUtils.hasText(groupErr) ? groupErr : "群不可用或无法@创建人"));
-                if (groupOk) {
-                    alerted = true;
-                } else {
-                    // 群不在 / 推送失败 / 创建人不在群（无 userid 无法@）→ 通知 wangfangyang
-                    notifyByUsername(monitorId, content + "\n（兜底：群告警失败或无法@创建人）",
-                            RobotProductRules.DM_ALERT_USERNAME);
-                    alerted = true;
-                }
-            } else {
-                writeAlert(monitorId, "ADMIN", "backend-manual", content, true, "无绑定告警群，改通知兜底人");
-                notifyByUsername(monitorId, content + "\n（兜底：监控未绑定告警群）",
-                        RobotProductRules.DM_ALERT_USERNAME);
-                alerted = true;
-            }
-        } else if (isGroup) {
-            // 定时：告警推回当初添加监控的群，并通知创建人
+        if (isGroup) {
             List<String> atList = StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of();
+            List<String> atNames = StringUtils.hasText(creatorName) ? List.of(creatorName) : List.of();
             DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
-                    conversationId, "链接监控告警", content.replace("\n", "  \n"), atList);
+                    conversationId, "链接监控告警", content.replace("\n", "  \n"), atList, atNames);
             String targetLabel = StringUtils.hasText(groupTitle)
                     ? (groupTitle + "|" + conversationId)
                     : conversationId;
+            String groupErr = groupCall.success() ? "" : (groupCall.message() == null ? "群消息失败" : groupCall.message());
+            // resumeSent=true 表示 sessionWebhook 真实 @ 成功（客户端显示 @姓名）
+            boolean realAt = groupCall.success() && groupCall.resumeSent();
             writeAlert(monitorId, "GROUP", targetLabel, content, groupCall.success(),
-                    groupCall.success() ? "" : groupCall.message());
-            notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
-            alerted = true;
+                    groupCall.success()
+                            ? (realAt ? "群内真实@" : (atList.isEmpty()
+                            ? "已推群（无userid，仅明文）"
+                            : "已推群（OpenAPI不支持真@，正文@姓名；已尝试工作通知）"))
+                            : groupErr);
+            if (groupCall.success()) {
+                alerted = true;
+                // OpenAPI 无法真 @：再给创建人发工作通知，确保有人被点到
+                if (!realAt && StringUtils.hasText(atUserId)) {
+                    notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
+                }
+            } else {
+                log.warn("link monitor group alert failed monitorId={} cid={} err={}", monitorId, conversationId, groupErr);
+                notifyByUsername(monitorId, content + "\n（兜底：群告警失败：" + groupErr + "）",
+                        RobotProductRules.DM_ALERT_USERNAME);
+                alerted = true;
+            }
         } else {
-            writeAlert(monitorId, "ADMIN", "backend", content, true, "");
-            notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
-            alerted = true;
+            writeAlert(monitorId, "ADMIN", forceAlert ? "backend-manual" : "backend", content, true,
+                    StringUtils.hasText(conversationId) ? "" : "无绑定告警群");
+            // 无群：通知创建人，失败才兜底
+            alerted = notifyCreatorOrFallback(monitorId, content, creatorStaffId, creatorUserId);
+            if (!alerted) {
+                notifyByUsername(monitorId, content + "\n（兜底：监控未绑定告警群且创建人通知失败）",
+                        RobotProductRules.DM_ALERT_USERNAME);
+                alerted = true;
+            }
         }
         jdbc.update("UPDATE ops_link_monitor SET last_alert_at = NOW() WHERE id = ?", monitorId);
         return alerted;
@@ -1169,24 +1167,22 @@ public class LinkMonitorService {
         return title == null ? "" : title.trim();
     }
 
-    private void notifyCreatorOrFallback(long monitorId, String content, String creatorStaffId, Long creatorUserId) {
+    /** @return 创建人单聊是否发送成功（不含兜底） */
+    private boolean notifyCreatorOrFallback(long monitorId, String content, String creatorStaffId, Long creatorUserId) {
         String dingUserId = resolveDingUserId(creatorStaffId, creatorUserId);
         String targetLabel = StringUtils.hasText(creatorStaffId) ? creatorStaffId : ("uid:" + creatorUserId);
         if (!StringUtils.hasText(dingUserId)) {
-            notifyByUsername(monitorId, content, RobotProductRules.DM_ALERT_USERNAME);
-            return;
+            return false;
         }
         try {
             DingTalkCalendarClient.NoticeCall call = dingTalkCalendarClient.notifyMarkdown(
                     dingUserId, "链接监控告警", content);
             writeAlert(monitorId, "USER", targetLabel, content, call.success(),
                     call.success() ? "" : call.message());
-            if (!call.success()) {
-                notifyByUsername(monitorId, content, RobotProductRules.DM_ALERT_USERNAME);
-            }
+            return call.success();
         } catch (Exception ex) {
             writeAlert(monitorId, "USER", targetLabel, content, false, ex.getMessage());
-            notifyByUsername(monitorId, content, RobotProductRules.DM_ALERT_USERNAME);
+            return false;
         }
     }
 

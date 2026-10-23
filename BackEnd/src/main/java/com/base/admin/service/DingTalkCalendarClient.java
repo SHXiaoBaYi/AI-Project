@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -51,6 +52,7 @@ public class DingTalkCalendarClient {
     private final DingTalkProperties properties;
     private final DingTalkAppService dingTalkAppService;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbc;
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
 
     public CalendarCall createEvent(String unionId, String title, String description, LocalDateTime start,
@@ -181,10 +183,11 @@ public class DingTalkCalendarClient {
     }
 
     /**
-     * 群消息并 @ 人。正文只写 {@code @userid }（钉钉协议），不要拼 {@code @userid（姓名）}，否则无法真正 @ 到人。
-     * 客户端会把合法 {@code @userid} 渲染成人名。有 @ 时用 sampleText（官方：Markdown @ 不支持高亮触达）。
-     * {@code atLabels} 已废弃，保留参数兼容旧调用。
-     * 若被 @ 的人不在群里，钉钉通常仍返回成功但无法真正触达，调用方需自行兜底。
+     * 群消息并尽量真实 @ 人。
+     * <p>官方：OpenAPI {@code groupMessages/send} <b>暂不支持 @</b>。
+     * 能真正 @ 到人（客户端显示 {@code @陶劲}）的方式是 sessionWebhook + {@code at.atUserIds}。
+     * 入站时会缓存 webhook；未过期优先走 webhook。
+     * <p>webhook 不可用时：群里明文写 {@code @姓名}（可读），并返回成功由调用方再发工作通知触达。
      */
     public NoticeCall sendRobotGroupMarkdown(String openConversationId, String title, String text,
                                              List<String> atUserIds) {
@@ -199,48 +202,143 @@ public class DingTalkCalendarClient {
         if (!StringUtils.hasText(openConversationId)) {
             return NoticeCall.fail("缺少群 openConversationId");
         }
+        String plain = (StringUtils.hasText(text) ? text : "").replace("  \n", "\n");
+        String displayName = firstAtLabel(atLabels);
+        List<String> cleanAtIds = new ArrayList<>();
+        if (atUserIds != null) {
+            for (String uid : atUserIds) {
+                if (StringUtils.hasText(uid)) {
+                    cleanAtIds.add(uid.trim());
+                }
+            }
+        }
+
+        // 1) sessionWebhook：唯一能真正 @ 且显示为人名的通道
+        String webhook = findFreshGroupSessionWebhook(openConversationId.trim());
+        if (StringUtils.hasText(webhook) && !cleanAtIds.isEmpty()) {
+            try {
+                StringBuilder content = new StringBuilder();
+                for (String uid : cleanAtIds) {
+                    content.append('@').append(uid).append(' ');
+                }
+                content.append('\n');
+                if (StringUtils.hasText(title)) {
+                    content.append(title).append('\n');
+                }
+                content.append(plain);
+                ObjectNode root = objectMapper.createObjectNode();
+                root.put("msgtype", "text");
+                root.putObject("text").put("content", content.toString());
+                ObjectNode at = root.putObject("at");
+                at.put("isAtAll", false);
+                ArrayNode atArr = at.putArray("atUserIds");
+                for (String uid : cleanAtIds) {
+                    atArr.add(uid);
+                }
+                postRobotSessionWebhook(webhook, root);
+                return NoticeCall.ok(true);
+            } catch (Exception ex) {
+                log.warn("group sessionWebhook @ failed, fallback OpenAPI: {}", ex.getMessage());
+            }
+        }
+
+        // 2) OpenAPI：不能真 @，正文用「@姓名」可读占位（勿写 @工号）
         try {
             DingTalkAppService.Credential cred = credential();
             if (cred == null || !StringUtils.hasText(cred.clientId())) {
                 return NoticeCall.fail("钉钉 ClientId 未配置，无法发群消息");
             }
-            boolean hasAt = false;
-            StringBuilder atPrefix = new StringBuilder();
-            if (atUserIds != null) {
-                for (String uid : atUserIds) {
-                    if (!StringUtils.hasText(uid)) {
-                        continue;
-                    }
-                    // 仅 @userid + 空格；紧跟中文括号/姓名会打断钉钉 @ 解析，变成纯文本
-                    atPrefix.append('@').append(uid.trim()).append(' ');
-                    hasAt = true;
-                }
+            StringBuilder openContent = new StringBuilder();
+            if (StringUtils.hasText(displayName) && !looksLikeNumericId(displayName)) {
+                openContent.append('@').append(displayName.trim()).append('\n');
             }
+            if (StringUtils.hasText(title)) {
+                openContent.append(title).append('\n');
+            }
+            openContent.append(plain);
             String token = accessToken(cred);
             ObjectNode body = objectMapper.createObjectNode();
             body.put("robotCode", cred.clientId().trim());
             body.put("openConversationId", openConversationId.trim());
+            body.put("msgKey", "sampleText");
             ObjectNode param = objectMapper.createObjectNode();
-            if (hasAt) {
-                // sampleText 才能稳定 @ 到人；正文里已有「创建人：姓名」可读信息
-                String plain = (StringUtils.hasText(text) ? text : "").replace("  \n", "\n");
-                String content = atPrefix + (StringUtils.hasText(title) ? title + "\n" : "") + plain;
-                body.put("msgKey", "sampleText");
-                param.put("content", content);
-            } else {
-                String md = StringUtils.hasText(text) ? text : "";
-                body.put("msgKey", "sampleMarkdown");
-                param.put("title", StringUtils.hasText(title) ? title : "告警");
-                param.put("text", md);
-            }
+            param.put("content", openContent.toString());
             body.put("msgParam", objectMapper.writeValueAsString(param));
             apiPost(token, "https://api.dingtalk.com/v1.0/robot/groupMessages/send", body);
+            // softAt=false：调用方应再给创建人发工作通知，否则无人被真正点到
             return NoticeCall.ok(false);
         } catch (BusinessException ex) {
             return NoticeCall.fail(ex.getMessage());
         } catch (Exception ex) {
             return NoticeCall.fail("机器人发群消息失败：" + ex.getMessage());
         }
+    }
+
+    private String findFreshGroupSessionWebhook(String openConversationId) {
+        try {
+            return jdbc.query("""
+                    SELECT session_webhook FROM robot_group_profile
+                    WHERE open_conversation_id = ? AND is_active = 1
+                      AND session_webhook IS NOT NULL AND TRIM(session_webhook) <> ''
+                      AND session_webhook_expire_at IS NOT NULL
+                      AND session_webhook_expire_at > DATE_ADD(NOW(), INTERVAL 1 MINUTE)
+                    LIMIT 1
+                    """, rs -> rs.next() ? rs.getString(1) : null, openConversationId);
+        } catch (Exception ex) {
+            log.warn("load group sessionWebhook failed: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private void postRobotSessionWebhook(String webhook, ObjectNode body) throws Exception {
+        byte[] payload = objectMapper.writeValueAsBytes(body);
+        HttpRequest request = HttpRequest.newBuilder(URI.create(webhook.trim()))
+                .timeout(Duration.ofSeconds(15))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() >= 300) {
+            throw new BusinessException("sessionWebhook HTTP " + response.statusCode()
+                    + ": " + abbreviate(response.body(), 180));
+        }
+        // 钉钉 webhook 常返回 {"errcode":0}；非 0 视为失败
+        if (StringUtils.hasText(response.body()) && response.body().contains("errcode")) {
+            try {
+                JsonNode json = objectMapper.readTree(response.body());
+                int err = json.path("errcode").asInt(0);
+                if (err != 0) {
+                    throw new BusinessException("sessionWebhook errcode=" + err + " " + json.path("errmsg").asText(""));
+                }
+            } catch (BusinessException ex) {
+                throw ex;
+            } catch (Exception ignored) {
+                // ignore parse
+            }
+        }
+    }
+
+    private static String firstAtLabel(List<String> atLabels) {
+        if (atLabels == null) {
+            return "";
+        }
+        for (String s : atLabels) {
+            if (StringUtils.hasText(s)) {
+                return s.trim();
+            }
+        }
+        return "";
+    }
+
+    private static boolean looksLikeNumericId(String s) {
+        return s != null && s.trim().matches("\\d{5,}");
+    }
+
+    private static String abbreviate(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
     /**

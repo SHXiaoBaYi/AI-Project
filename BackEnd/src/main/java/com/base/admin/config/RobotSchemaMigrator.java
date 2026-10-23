@@ -151,12 +151,24 @@ public class RobotSchemaMigrator implements ApplicationRunner {
                   title                VARCHAR(200) DEFAULT '',
                   enabled              TINYINT      NOT NULL DEFAULT 1,
                   remark               VARCHAR(500) DEFAULT '',
+                  session_webhook      VARCHAR(1000) DEFAULT '' COMMENT '最近一次入站 sessionWebhook，用于群内真实@',
+                  session_webhook_expire_at DATETIME NULL COMMENT 'sessionWebhook 过期时间',
                   create_time          DATETIME     DEFAULT CURRENT_TIMESTAMP,
                   update_time          DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                   is_active            TINYINT      NOT NULL DEFAULT 1,
                   PRIMARY KEY (id),
                   UNIQUE KEY uk_robot_group_cid (open_conversation_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='机器人已见钉钉群档案'
+                """);
+        ensureColumn("robot_group_profile", "session_webhook", """
+                ALTER TABLE robot_group_profile
+                  ADD COLUMN session_webhook VARCHAR(1000) DEFAULT '' COMMENT '最近一次入站 sessionWebhook，用于群内真实@'
+                  AFTER remark
+                """);
+        ensureColumn("robot_group_profile", "session_webhook_expire_at", """
+                ALTER TABLE robot_group_profile
+                  ADD COLUMN session_webhook_expire_at DATETIME NULL COMMENT 'sessionWebhook 过期时间'
+                  AFTER session_webhook
                 """);
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS ops_link_monitor_probe_cookie (

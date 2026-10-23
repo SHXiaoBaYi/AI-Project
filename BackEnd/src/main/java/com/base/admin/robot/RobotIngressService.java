@@ -62,7 +62,18 @@ public class RobotIngressService {
                 log.info("robot accept group message without @ due to active multi-turn staffId={}", staffId);
             }
             String groupTitle = blank(readString(message, "getConversationTitle", "getTitle"));
-            upsertGroupProfile(conversationId, groupTitle);
+            Long webhookExpireMs = null;
+            Object exp = readObject(message, "getSessionWebhookExpiredTime", "sessionWebhookExpiredTime");
+            if (exp instanceof Number n) {
+                webhookExpireMs = n.longValue();
+            } else if (exp != null) {
+                try {
+                    webhookExpireMs = Long.parseLong(String.valueOf(exp).trim());
+                } catch (Exception ignored) {
+                    // keep null
+                }
+            }
+            upsertGroupProfile(conversationId, groupTitle, webhook, webhookExpireMs);
         }
 
         DingTalkRobotAssistantService assistant = dingTalkRobotAssistantService.getObject();
@@ -176,7 +187,7 @@ public class RobotIngressService {
                 """, rs -> rs.next() ? rs.getLong(1) : null, staffId.trim());
     }
 
-    private void upsertGroupProfile(String conversationId, String title) {
+    private void upsertGroupProfile(String conversationId, String title, String sessionWebhook, Long webhookExpireMs) {
         if (!StringUtils.hasText(conversationId)) {
             return;
         }
@@ -184,13 +195,27 @@ public class RobotIngressService {
         if (t.length() > 200) {
             t = t.substring(0, 200);
         }
+        String wh = sessionWebhook == null ? "" : sessionWebhook.trim();
+        if (wh.length() > 1000) {
+            wh = wh.substring(0, 1000);
+        }
+        java.sql.Timestamp expireTs = null;
+        if (webhookExpireMs != null && webhookExpireMs > 0) {
+            expireTs = new java.sql.Timestamp(webhookExpireMs);
+        } else if (StringUtils.hasText(wh)) {
+            // 未给过期时间时默认 90 分钟（贴近钉钉 sessionWebhook 常见有效期）
+            expireTs = java.sql.Timestamp.valueOf(java.time.LocalDateTime.now().plusMinutes(90));
+        }
         jdbc.update("""
-                INSERT INTO robot_group_profile (open_conversation_id, title, enabled, is_active)
-                VALUES (?, ?, 1, 1)
+                INSERT INTO robot_group_profile
+                  (open_conversation_id, title, enabled, session_webhook, session_webhook_expire_at, is_active)
+                VALUES (?, ?, 1, ?, ?, 1)
                 ON DUPLICATE KEY UPDATE
                   title = IF(VALUES(title) <> '', VALUES(title), title),
+                  session_webhook = IF(VALUES(session_webhook) <> '', VALUES(session_webhook), session_webhook),
+                  session_webhook_expire_at = IF(VALUES(session_webhook) <> '', VALUES(session_webhook_expire_at), session_webhook_expire_at),
                   update_time = NOW(), is_active = 1
-                """, conversationId, t);
+                """, conversationId, t, wh, expireTs);
     }
 
     private static boolean isMentioned(ChatbotMessage message, String text) {
