@@ -789,7 +789,10 @@ public class TrainDocService {
             int from = starts.get(i);
             int to = i + 1 < starts.size() ? starts.get(i + 1) : plain.length();
             String sec = plain.substring(from, to);
-            if (to < plain.length()) {
+            String bodyProbe = stripImageMarkers(trimSectionForDisplay(sec)).trim();
+            // 仅当本问已有答文时，才把「下一问题干→答：前」的图收回；
+            // 否则空答文 + 偷图 = 题干对了却只返回下一问配图（退单 case）
+            if (to < plain.length() && StringUtils.hasText(bodyProbe)) {
                 sec = sec + stealHeadingImages(plain.substring(to));
             }
             sec = sec.trim();
@@ -799,6 +802,12 @@ public class TrainDocService {
             }
             String mixed = trimSectionForDisplay(sec);
             if (!StringUtils.hasText(stripImageMarkers(mixed)) && countMarkers(mixed) == 0) {
+                continue;
+            }
+            // 仍无答文却只有图：丢掉偷来的图，避免错图充数
+            if (!StringUtils.hasText(stripImageMarkers(mixed)) && countMarkers(mixed) > 0) {
+                log.warn("答疑切块仅有配图无答文，丢弃配图以免串到下一问 title={}", title);
+                mixed = "";
                 continue;
             }
             QaBlock b = new QaBlock();
@@ -878,13 +887,27 @@ public class TrainDocService {
                 mixed = again;
             }
         }
-        if (countMarkers(mixed) == 0) {
+        // 答文为空时：禁止只用「下一问题干前的图」充数；优先按题干重切带图正文
+        if (!StringUtils.hasText(stripImageMarkers(mixed).trim())) {
+            String fromMarked = reloadSectionMixedFromMarked(block.question, indexed);
+            String markedBody = stripImageMarkers(nullToEmpty(fromMarked)).trim();
+            if (StringUtils.hasText(markedBody)) {
+                mixed = fromMarked;
+            } else if (countMarkers(mixed) > 0) {
+                log.warn("答疑命中题干但答文为空，丢弃可能串题的配图 title={}", item.getQuestion());
+                mixed = "";
+            }
+        } else if (countMarkers(mixed) == 0) {
             String fromMarked = reloadSectionMixedFromMarked(block.question, indexed);
             if (StringUtils.hasText(fromMarked) && countMarkers(fromMarked) > 0) {
                 String body = stripImageMarkers(mixed).trim();
-                mixed = StringUtils.hasText(body)
-                        ? (body + "\n" + keepImageMarkersOnly(fromMarked)).trim()
-                        : fromMarked;
+                // 重切结果若几乎无答文，只补图、不覆盖已有答文
+                String reloadBody = stripImageMarkers(fromMarked).trim();
+                if (StringUtils.hasText(reloadBody) && reloadBody.length() + 8 >= body.length()) {
+                    mixed = fromMarked;
+                } else {
+                    mixed = (body + "\n" + keepImageMarkersOnly(fromMarked)).trim();
+                }
             }
         }
         List<Integer> refs = extractMarkers(mixed, indexed);
@@ -893,6 +916,14 @@ public class TrainDocService {
         item.setImages(toImageUrls(refs, indexed));
         // answerHtml 仅由纯文 + 受控 <img> 拼出，禁止把文档 HTML/OOXML 原样下发
         item.setAnswerHtml(buildMixedAnswerHtml(mixed, indexed));
+        if (!StringUtils.hasText(answer) && (item.getImages() == null || item.getImages().isEmpty())) {
+            log.warn("答疑切块无答文无配图，丢弃 title={}", item.getQuestion());
+            return null;
+        }
+        if (!StringUtils.hasText(answer) && item.getImages() != null && !item.getImages().isEmpty()) {
+            log.warn("答疑切块仍无答文仅有图，丢弃以免返回下一问配图 title={}", item.getQuestion());
+            return null;
+        }
         if (TrainQaAnswerSanitizer.looksLikeSourceCode(item.getAnswer(), item.getAnswerHtml())) {
             log.warn("答疑切块疑似源码，丢弃 title={}", item.getQuestion());
             return null;
@@ -1238,10 +1269,7 @@ public class TrainDocService {
         }
         int from = c.from;
         int to = nextQaAfter(source, from);
-        String sec = source.substring(from, Math.min(to, source.length()));
-        if (to < source.length()) {
-            sec = sec + stealHeadingImages(source.substring(to));
-        }
+        String sec = appendStolenHeadingImagesIfHasBody(source, from, to);
         sec = sec.trim();
         if (!StringUtils.hasText(sec)) {
             return null;
@@ -1264,10 +1292,7 @@ public class TrainDocService {
             return null;
         }
         int to = nextQaAfter(source, from);
-        String sec = source.substring(from, Math.min(to, source.length()));
-        if (to < source.length()) {
-            sec = sec + stealHeadingImages(source.substring(to));
-        }
+        String sec = appendStolenHeadingImagesIfHasBody(source, from, to);
         sec = sec.trim();
         if (!StringUtils.hasText(sec)) {
             return null;
@@ -1279,6 +1304,16 @@ public class TrainDocService {
         hit.title = StringUtils.hasText(c.title) ? c.title : sectionTitle(sec);
         hit.bodyWithMarkers = trimSectionForDisplay(sec);
         return hit;
+    }
+
+    /** 有本问答文才回收下一问题干前的配图，避免空答文串下一问图 */
+    private static String appendStolenHeadingImagesIfHasBody(String source, int from, int to) {
+        String sec = source.substring(from, Math.min(to, source.length()));
+        String bodyProbe = stripImageMarkers(trimSectionForDisplay(sec)).trim();
+        if (to < source.length() && StringUtils.hasText(bodyProbe)) {
+            sec = sec + stealHeadingImages(source.substring(to));
+        }
+        return sec;
     }
 
     /** 带 [图N] 且能认出「问：」的正文优先，保证切段和配图同一份。 */
@@ -1393,35 +1428,74 @@ public class TrainDocService {
         return source.length();
     }
 
+    /**
+     * 题干起点。注意：
+     * 1) 「请问：」里的「问：」不能当新题（否则答文被提前切开，bodyLen=0 再偷下一问的图）；
+     * 2) 无序序号「1.问：」「（3）问：」也要认；
+     * 3) 文档已有「问：」题干时，不再把答文里的「如何/怎么」短行当新题。
+     */
     private static List<Integer> listQaStarts(String plain) {
         List<Integer> starts = new ArrayList<>();
         if (!StringUtils.hasText(plain)) {
             return starts;
         }
-        // 不要求必须行首：HTML 兜底常把「问：」粘在上一段末尾，导致整题被吞进上一问答正文
-        Matcher m = Pattern.compile("(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]").matcher(plain);
-        while (m.find()) {
-            int at = m.start();
-            if (starts.isEmpty() || at > starts.get(starts.size() - 1)) {
-                starts.add(at);
-            }
+        // 行首（可带无序/有序序号）+ 「问：/问答N：/问题N：」
+        Matcher lineAsk = Pattern.compile(
+                "(?m)^[\\t　 ]*(?:[\\d一二三四五六七八九十百]+[\\.、．\\)）]\\s*|[(（][\\d一二三四五六七八九十]+[)）]\\s*)?"
+                        + "(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]"
+        ).matcher(plain);
+        while (lineAsk.find()) {
+            addQaStart(starts, plain, lineAsk.start());
         }
-        Matcher lineHow = Pattern.compile("(?m)^[\\t　 ]*(?:如何|怎么)[^\\n\\r]{1,50}$").matcher(plain);
-        while (lineHow.find()) {
-            int at = lineHow.start();
-            boolean near = false;
-            for (int s : starts) {
-                if (Math.abs(s - at) <= 2) {
-                    near = true;
-                    break;
-                }
-            }
-            if (!near) {
-                starts.add(at);
+        // HTML 粘连兜底：非行首的「问：」，但不得落在「请/反/追/疑」等字后面（避免「请问：」假切）
+        Matcher glued = Pattern.compile(
+                "(?<![\\u4e00-\\u9fffA-Za-z0-9])(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]"
+        ).matcher(plain);
+        while (glued.find()) {
+            addQaStart(starts, plain, glued.start());
+        }
+        // 仅当全文几乎没有「问：」题干时，才用「如何/怎么」短行作题干（纯「如何折扣」类手册）
+        if (starts.size() < 2) {
+            Matcher lineHow = Pattern.compile("(?m)^[\\t　 ]*(?:如何|怎么)[^\\n\\r]{1,50}$").matcher(plain);
+            while (lineHow.find()) {
+                addQaStart(starts, plain, lineHow.start());
             }
         }
         starts.sort(Integer::compareTo);
         return starts;
+    }
+
+    private static void addQaStart(List<Integer> starts, String plain, int at) {
+        if (at < 0) {
+            return;
+        }
+        // 「1.问：」「（3）问：」行首与「问」字位置不同，按题干关键字对齐去重
+        int norm = normalizeAskAnchor(plain, at);
+        for (int i = 0; i < starts.size(); i++) {
+            int s = starts.get(i);
+            int sNorm = normalizeAskAnchor(plain, s);
+            if (Math.abs(sNorm - norm) <= 2 || Math.abs(s - at) <= 12) {
+                // 保留更靠前的行首偏移，便于截取完整题干行
+                if (at < s) {
+                    starts.set(i, at);
+                }
+                return;
+            }
+        }
+        starts.add(at);
+    }
+
+    private static int normalizeAskAnchor(String plain, int at) {
+        if (!StringUtils.hasText(plain) || at < 0 || at >= plain.length()) {
+            return at;
+        }
+        int end = Math.min(plain.length(), at + 24);
+        Matcher m = Pattern.compile("(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]").matcher(plain);
+        m.region(at, end);
+        if (m.find()) {
+            return m.start();
+        }
+        return at;
     }
 
     /** 诊断用：抽若干段标题，便于排查召回为空。 */
@@ -2262,9 +2336,10 @@ public class TrainDocService {
                     + "|(?:(?<=\\n)|^)\\s*\\d+[\\.、．][^\\n\\r]{1,40}"
                     + "|(?:(?<=\\n)|^)\\s*(?:组合支付|现金支付|扫码支付|银行卡支付|微信[^\\n]{0,12}|支付宝[^\\n]{0,12})\\s*(?=\\n|$)");
 
-    /** 问答模式题干行：问： / 问题1： / 如何进行折扣/改价 */
+    /** 问答模式题干行：问： / 1.问： / 问题1： / 如何进行折扣/改价 */
     private static final Pattern QA_LINE = Pattern.compile(
-            "(?m)^[\\t　 ]*(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]"
+            "(?m)^[\\t　 ]*(?:[\\d一二三四五六七八九十百]+[\\.、．\\)）]\\s*|[(（][\\d一二三四五六七八九十]+[)）]\\s*)?"
+                    + "(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]"
                     + "|(?m)^[\\t　 ]*(?:如何|怎么)[^\\n\\r]{1,40}$");
 
     private static final class SectionHit {
@@ -2410,10 +2485,7 @@ public class TrainDocService {
             return "";
         }
         int to = nextQaAfter(marked, from);
-        String sec = marked.substring(from, Math.min(to, marked.length()));
-        if (to < marked.length()) {
-            sec = sec + stealHeadingImages(marked.substring(to));
-        }
+        String sec = appendStolenHeadingImagesIfHasBody(marked, from, to);
         return trimSectionForDisplay(sec.trim());
     }
 
