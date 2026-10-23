@@ -730,9 +730,37 @@ export function getAiGenerateJobApi(jobId: string) {
   return request.get<unknown, GeoAiGenerateJob>(`/geo/content-placement/articles/ai-generate/jobs/${jobId}`);
 }
 
+async function pollAiGenerateJobUntilDone(
+  jobId: string,
+  handlers: {
+    onProgress?: (job: GeoAiGenerateJob) => void;
+    onDone?: (job: GeoAiGenerateJob) => void;
+    onError?: (message: string) => void;
+  },
+  signal?: AbortSignal,
+): Promise<GeoAiGenerateJob> {
+  while (true) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    const job = await getAiGenerateJobApi(jobId);
+    handlers.onProgress?.(job);
+    if (job.status === 'SUCCESS') {
+      handlers.onDone?.(job);
+      return job;
+    }
+    if (job.status === 'FAILED') {
+      handlers.onError?.(job.currentMessage || 'AI 生成失败');
+      throw new Error(job.currentMessage || 'AI 生成失败');
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
 /**
  * SSE 订阅生成进度。使用 fetch + Authorization（EventSource 无法带 Bearer）。
  * 事件：progress（阶段/草稿）、done（成功）、error（失败）。
+ * 网关未关缓冲时 SSE 可能 Network Error，自动降级为轮询。
  */
 export async function streamAiGenerateJobApi(
   jobId: string,
@@ -743,98 +771,107 @@ export async function streamAiGenerateJobApi(
   },
   signal?: AbortSignal,
 ): Promise<GeoAiGenerateJob> {
-  const res = await fetch(withBase(`/api/geo/content-placement/articles/ai-generate/jobs/${jobId}/stream`), {
-    method: 'GET',
-    headers: {
-      Accept: 'text/event-stream',
-      Authorization: `Bearer ${getToken()}`,
-    },
-    signal,
-  });
-  if (!res.ok || !res.body) {
-    const tip = res.status === 401 ? '登录已失效' : `SSE 连接失败（HTTP ${res.status}）`;
-    throw new Error(tip);
-  }
+  try {
+    const res = await fetch(withBase(`/api/geo/content-placement/articles/ai-generate/jobs/${jobId}/stream`), {
+      method: 'GET',
+      headers: {
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${getToken()}`,
+        'Cache-Control': 'no-cache',
+      },
+      cache: 'no-store',
+      signal,
+    });
+    if (!res.ok || !res.body) {
+      throw new Error(res.status === 401 ? '登录已失效' : `SSE 连接失败（HTTP ${res.status}）`);
+    }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  let lastJob: GeoAiGenerateJob | null = null;
-  let eventName = 'message';
-  let dataLines: string[] = [];
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let lastJob: GeoAiGenerateJob | null = null;
+    let eventName = 'message';
+    let dataLines: string[] = [];
 
-  const flushEvent = () => {
-    if (dataLines.length === 0) {
+    const flushEvent = () => {
+      if (dataLines.length === 0) {
+        eventName = 'message';
+        return;
+      }
+      const raw = dataLines.join('\n').trim();
+      dataLines = [];
+      const name = eventName || 'message';
       eventName = 'message';
-      return;
-    }
-    const raw = dataLines.join('\n').trim();
-    dataLines = [];
-    const name = eventName || 'message';
-    eventName = 'message';
-    if (!raw) return;
-    let job: GeoAiGenerateJob;
-    try {
-      job = JSON.parse(raw) as GeoAiGenerateJob;
-    } catch {
-      return;
-    }
-    lastJob = job;
-    if (name === 'done') {
-      handlers.onDone?.(job);
-      return;
-    }
-    if (name === 'error') {
-      handlers.onError?.(job.currentMessage || 'AI 生成失败');
+      if (!raw) return;
+      let job: GeoAiGenerateJob;
+      try {
+        job = JSON.parse(raw) as GeoAiGenerateJob;
+      } catch {
+        return;
+      }
+      lastJob = job;
+      if (name === 'done') {
+        handlers.onDone?.(job);
+        return;
+      }
+      if (name === 'error') {
+        handlers.onError?.(job.currentMessage || 'AI 生成失败');
+        handlers.onProgress?.(job);
+        return;
+      }
       handlers.onProgress?.(job);
-      return;
-    }
-    handlers.onProgress?.(job);
-  };
+    };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split(/\r?\n/);
-    buffer = parts.pop() ?? '';
-    for (const line of parts) {
-      if (line === '') {
-        flushEvent();
-        continue;
-      }
-      if (line.startsWith(':')) {
-        continue;
-      }
-      if (line.startsWith('event:')) {
-        eventName = line.slice(6).trim();
-        continue;
-      }
-      if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).trimStart());
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split(/\r?\n/);
+      buffer = parts.pop() ?? '';
+      for (const line of parts) {
+        if (line === '') {
+          flushEvent();
+          continue;
+        }
+        if (line.startsWith(':')) {
+          continue;
+        }
+        if (line.startsWith('event:')) {
+          eventName = line.slice(6).trim();
+          continue;
+        }
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart());
+        }
       }
     }
-  }
-  flushEvent();
+    flushEvent();
 
-  if (!lastJob) {
-    throw new Error('SSE 未返回任务结果');
-  }
-  if (lastJob.status === 'FAILED') {
-    throw new Error(lastJob.currentMessage || 'AI 生成失败');
-  }
-  if (lastJob.status !== 'SUCCESS' || !lastJob.result) {
-    // 连接中断时兜底拉一次快照
-    const fallback = await getAiGenerateJobApi(jobId);
-    if (fallback.status === 'FAILED') {
-      throw new Error(fallback.currentMessage || 'AI 生成失败');
+    if (!lastJob) {
+      throw new Error('SSE 未返回任务结果');
     }
-    if (fallback.status !== 'SUCCESS' || !fallback.result) {
-      throw new Error(fallback.currentMessage || '生成未完成或连接中断');
+    if (lastJob.status === 'FAILED') {
+      throw new Error(lastJob.currentMessage || 'AI 生成失败');
     }
-    return fallback;
+    if (lastJob.status !== 'SUCCESS' || !lastJob.result) {
+      const fallback = await getAiGenerateJobApi(jobId);
+      if (fallback.status === 'FAILED') {
+        throw new Error(fallback.currentMessage || 'AI 生成失败');
+      }
+      if (fallback.status !== 'SUCCESS' || !fallback.result) {
+        throw new Error(fallback.currentMessage || '生成未完成或连接中断');
+      }
+      return fallback;
+    }
+    return lastJob;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw e;
+    }
+    // 测试/生产 Nginx 未关 proxy_buffering 时常见 Network Error / Failed to fetch
+    console.warn('[AI generate] SSE 不可用，降级轮询', e);
+    return pollAiGenerateJobUntilDone(jobId, handlers, signal);
   }
-  return lastJob;
 }
 
 export function getGeoMediaListApi(

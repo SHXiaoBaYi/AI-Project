@@ -162,7 +162,19 @@ public class GeoAiGenerateJobService {
                 }
             });
             emitter.onError(ex -> emitters.remove(emitter));
-            // 先推当前快照，避免客户端错过已发生的阶段/草稿
+            // 先冲一条注释，促使 Nginx/浏览器立刻建立 SSE（避免缓冲导致 Network Error）
+            try {
+                emitter.send(SseEmitter.event().comment("connected"));
+            } catch (Exception e) {
+                emitters.remove(emitter);
+                try {
+                    emitter.completeWithError(e);
+                } catch (Exception ignored) {
+                    // ignore
+                }
+                return;
+            }
+            // 再推当前快照，避免客户端错过已发生的阶段/草稿
             send(emitter, "progress", snapshot());
             if (!"RUNNING".equals(status)) {
                 send(emitter, terminalEventName(), snapshot());
