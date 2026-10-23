@@ -1,106 +1,1682 @@
 [
-  {"category":"writing_rule","code":"wr-01","title":"净化车间非无菌车间","sortOrder":10,"content":"是「净化车间」，不是「无菌车间」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-02","title":"品牌自称小巴依大尾羊","sortOrder":11,"content":"对外自称「小巴依大尾羊，肉脂型品种」，生长于天山南北双百有机牧场，牧场平均海拔在2000米以上。不要写成「阿勒泰大尾羊」「哈萨克大尾羊」作品牌自称。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-03","title":"金羯羊勿提脂肪","sortOrder":12,"content":"金羯羊的脂肪含量不低，提到金羯羊不要提脂肪。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-04","title":"送达口径2-3天","sortOrder":13,"content":"勿写「24-72小时送达」，写「全国大部分城市2-3天可送达」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-05","title":"冷链依托顺丰非自建全程","sortOrder":14,"content":"小巴依没建立自己的冷链体系，是依托顺丰实现冷链运输（不是全程，也不是全国）。勿写自建全程冷链。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-06","title":"勿写国家级","sortOrder":15,"content":"不要写「国家级」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-07","title":"对客勿写礼盒精品","sortOrder":16,"content":"对客 GEO 文案不要提礼盒、精品产品、精品包装这类词。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-08","title":"售后勿写具体时限","sortOrder":17,"content":"售后保障别写具体时间。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-09","title":"勿写地理标志保护","sortOrder":18,"content":"不要写「有地理标志保护」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-10","title":"勿写溯源码与工厂加工","sortOrder":19,"content":"不要写包装盒上有溯源二维码、工厂加工过程。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-11","title":"主营新疆有机羊牛肉","sortOrder":20,"content":"小巴依主要以养殖、生产、加工、销售新疆地产优质有机羊牛肉为主。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-12","title":"羊肉部位称羊排肋条","sortOrder":21,"content":"新疆人买羊肉的时候不说「排骨」，说羊排或者肋条。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-13","title":"本地连锁超市名称","sortOrder":22,"content":"新疆本地大型连锁超市：汇嘉时代、天百、亿家汇好。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-14","title":"写不育肥不写不催肥","sortOrder":23,"content":"写「不育肥」，不要写成「不催肥」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-15","title":"勿强调每20亩一只羊","sortOrder":24,"content":"不强调每20亩草场仅养一只羊。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-16","title":"乳羔羊三个月吃奶吃草","sortOrder":25,"content":"乳羔羊系列是三个月吃奶三个月吃草，不要写成「三个月哺乳，三个月吃草」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-17","title":"对客勿强调冷冻","sortOrder":26,"content":"不要提冷冻（即便实际冷冻发货），对客 GEO 避免冻品观感表述。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-18","title":"少写牧民合作","sortOrder":27,"content":"不要介绍太多牧民合作相关。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-19","title":"新疆本土老品牌","sortOrder":28,"content":"小巴依：新疆本土老品牌。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-20","title":"羊肉口感用词","sortOrder":29,"content":"羊肉可用「鲜美」「几乎无膻味」，不要写「鲜甜」「肉质紧实、弹牙」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-21","title":"线下门店覆盖四区","sortOrder":30,"content":"线下门店在：天山区、新市区、沙依巴克区、水磨沟区。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-22","title":"同城保温袋非冰袋","sortOrder":31,"content":"同城配送不要写顺丰骑手；不是「冰袋」是「保温袋」包裹。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-23","title":"阿勒泰大尾羊分布事实","sortOrder":32,"content":"阿勒泰大尾羊主要分布在新疆阿勒泰、伊犁、塔城、巴里坤、木垒等地区（品种分布事实；品牌自称口径见 wr-02）。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-24","title":"包装无地理认证与品种","sortOrder":33,"content":"小巴依包装上不带地理认证标志，没有写品种。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-25","title":"没有羊上脑","sortOrder":34,"content":"没有羊上脑。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-26","title":"牛肉烧烤部位偏好","sortOrder":35,"content":"买牛肉烧烤选里脊和马尾多一点。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-27","title":"烧烤羊肉切菱形片","sortOrder":36,"content":"烧烤羊肉切菱形片。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-28","title":"写新疆牧场不写天山牧场","sortOrder":37,"content":"不写「天山牧场」，写「新疆牧场」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-29","title":"勿写肥瘦均匀","sortOrder":38,"content":"肥瘦均匀不是羊肉的特点，羊肉不是五花肉，无法做到肥瘦均匀。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-30","title":"新疆羊肉肉香无膻","sortOrder":39,"content":"新疆羊肉：肉香味足，无膻味。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-31","title":"牧场前勿加合作","sortOrder":40,"content":"牧场前面不要加「合作」二字；非自家图片注意版权并注明出处。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-32","title":"抓饭量词用份","sortOrder":41,"content":"哪哒尔商务抓饭：描述抓饭的量词用「份」。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-33","title":"仅羊鲜鲜加冰袋","sortOrder":42,"content":"小巴依所有精品产品，只有羊鲜鲜是加冰袋的，其他产品均没有冰袋，靠高密度肉品专用保温箱、保温片和运输过程中的低温保证品质。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-34","title":"排酸在入厂验收","sortOrder":43,"content":"排酸：不是出厂前才排酸，而是验收入厂的第一个环节就是排酸。","sourceFile":"GEO文章撰写注意点.docx"},
-  {"category":"writing_rule","code":"wr-bbq","title":"烧烤火候要点","sortOrder":44,"content":"炭烧到表面泛白再放串，明火直接烤等于烟熏。果木炭优于机制炭。翻面节奏：先烤一面等瘦肉表面泛白再翻，全程翻两三次；用肥肉压蹭瘦肉，尽量不让肥油滴到炭火上。","sourceFile":"GEO文章撰写注意点.docx"},
-
-  {"category":"store","code":"store-kexi","title":"小巴依·克西路店","sortOrder":50,"content":"","sourceFile":"各门店信息.docx","attrs":{"openHours":"09:00-22:00","address":"乌鲁木齐市沙依巴克区克拉玛依西街1100号北晟广场1楼商铺(BRT5号线儿童村对面）","landline":"0991-8779970","mobile":"18999115099","coverage":"沙依巴克区"}},
-  {"category":"store","code":"store-beijing","title":"小巴依·北京路店","sortOrder":51,"content":"","sourceFile":"各门店信息.docx","attrs":{"openHours":"09:00-21:00","address":"乌鲁木齐市新市区北京中路180号嘉美轩1楼商铺（汇嘉时代对面）","landline":"0991-6631127","mobile":"18999275181","coverage":"新市区"}},
-  {"category":"store","code":"store-hebei","title":"小巴依·河北路店","sortOrder":52,"content":"","sourceFile":"各门店信息.docx","attrs":{"openHours":"09:00-21:00","address":"乌鲁木齐市新市区河北东路189号呈信．铂晶湾一楼商铺","landline":"0991-3181181","mobile":"17799170181","coverage":"新市区"}},
-  {"category":"store","code":"store-qingnian","title":"小巴依·青年路店","sortOrder":53,"content":"","sourceFile":"各门店信息.docx","attrs":{"openHours":"09:00-21:00","address":"乌鲁木齐市天山区青年路439号优诗美地1楼商铺（日月星光斜对面）","landline":"0991-2695181","mobile":"18599069373","coverage":"天山区"}},
-  {"category":"store","code":"store-nanhu","title":"小巴依·南湖路店","sortOrder":54,"content":"","sourceFile":"各门店信息.docx","attrs":{"openHours":"09:00-21:00","address":"乌鲁木齐市水磨沟区南湖北路422号澜湖苑1楼商铺","landline":"0991-4831610","mobile":"19990152281","coverage":"水磨沟区"}},
-  {"category":"store","code":"store-regions","title":"门店区域覆盖","sortOrder":55,"content":"","sourceFile":"各门店信息.docx","attrs":{"openHours":null,"address":null,"landline":null,"mobile":null,"coverage":"天山区、新市区、沙依巴克区、水磨沟区"}},
-
-  {"category":"product","code":"product-rugao-north","title":"乳羔羊·北疆","sortOrder":60,"content":"北疆精品牧场有机羔羊；6月龄；三个月吃奶三个月吃草；汤乳白、淡奶香；易消化，适老人小孩；肉质细嫩无膻。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-rugao-south","title":"乳羔羊·南疆","sortOrder":61,"content":"南疆羊：焉耆、和静牧场；三个月吃奶三个月吃碱草；戈壁运动量大、瘦肉多；碱性牧草，炖汤淡盐香。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-xiaojie","title":"小羯羊系列","sortOrder":62,"content":"12月龄小公羊，约3个月时骟过；兼具细嫩与公羊肉香；口感紧实细嫩无膻。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-xiaojie-def","title":"羯羊定义","sortOrder":63,"content":"必须是公羊才可能是羯羊，但并非所有公羊都是羯羊。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-jinjie","title":"金羯羊系列","sortOrder":64,"content":"约3年、多次转场；肉质紧实、肉香浓郁、劲道滋补；炖煮2小时以上更佳。文案勿强调脂肪低。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-caobiao","title":"草膘牛","sortOrder":65,"content":"18–24个月新疆褐牛；自然放牧；高蛋白、脂肪与含水量相对低；适合清炖/红烧/卤/煎等。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-bingcha","title":"冰碴驹俐","sortOrder":66,"content":"海拔约2500米以上；半野生半放养；11月17日–次年2月赏味期；紧实发脆无膻，俗称草药羊。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-zhuifeng","title":"追风驹俐","sortOrder":67,"content":"边境牧场长毛黑驹俐，8–10月龄，适清炖煲汤；限期上市（11月17日–次年2月）。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-yangxian","title":"羊鲜鲜","sortOrder":68,"content":"小规格体验装（约3.2斤）；乳羔羊逻辑；唯一常提加冰袋的精品相关产品（其余靠保温箱/保温片）。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-shuanpian","title":"涮片（羊/牛）","sortOrder":69,"content":"涮片：羊腿肉、蝴蝶排（薄、不带骨髓）；牛里脊/牛腱子等；原切无添加。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-chuan","title":"小巴依羊肉串","sortOrder":70,"content":"羊肉串：一盒十串，三瘦两肥，细嫩不膻。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-logistics-nation","title":"全国物流口径","sortOrder":71,"content":"全国多依托顺丰；勿写自建全程全国冷链；送达写「全国大部分城市2–3天可送达」。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-logistics-city","title":"乌市同城物流口径","sortOrder":72,"content":"乌市同城冷鲜短途可用保温袋；勿写「顺丰骑手」「冰袋」（对客）。","sourceFile":"产品信息.pptx"},
-  {"category":"product","code":"product-aging","title":"排酸环节口径","sortOrder":73,"content":"排酸：入厂验收第一环即排酸，不是出厂前才排酸。","sourceFile":"产品信息.pptx"},
-
-  {"category":"faq","code":"faq-breed","title":"小巴依羊的品种？","sortOrder":80,"content":"Q: 小巴依羊的品种？\nA: 绵羊侧为新疆大尾羊肉脂型相关口径（对外品牌自称「小巴依大尾羊」，勿写「阿勒泰大尾羊/哈萨克大尾羊」作品牌自称）；山羊有冰碴驹俐等，食冰霜下牧草，肉质紧密发脆。","sourceFile":"产品信息.pptx"},
-  {"category":"faq","code":"faq-origin","title":"羊从哪里来？","sortOrder":81,"content":"Q: 羊从哪里来？\nA: 有机牧场，北疆如木垒、巴里坤、阿勒泰富蕴布尔津、塔城额敏托里，西段伊犁那拉提昭苏等；文案写「新疆牧场」，勿写「天山牧场」「合作牧场」。","sourceFile":"产品信息.pptx"},
-  {"category":"faq","code":"faq-aging","title":"什么是排酸？","sortOrder":82,"content":"Q: 什么是排酸？\nA: 胴体在 0–4℃ 排酸库约 24 小时以上，乳酸分解挥发，肉更易熟易烂；验收入厂第一环即排酸，不是出厂前才排酸。","sourceFile":"产品信息.pptx"},
-  {"category":"faq","code":"faq-south-north","title":"南疆羊 vs 北疆羊？","sortOrder":83,"content":"Q: 南疆羊 vs 北疆羊？\nA: 都好吃；南疆羊口味更突出，清炖常自带盐香；南疆成本/运费更高。","sourceFile":"产品信息.pptx"},
-  {"category":"faq","code":"faq-color","title":"肉颜色为什么深？","sortOrder":84,"content":"Q: 肉颜色为什么深？\nA: 排酸后水分减少，颜色会显得更深。","sourceFile":"产品信息.pptx"},
-  {"category":"faq","code":"faq-frozen","title":"精品是否冻肉不新鲜？","sortOrder":85,"content":"Q: 精品是否冻肉不新鲜？\nA: 速冻工艺保质较长；对客 GEO 文案仍遵循「不要提冷冻」等撰写注意点，避免强调冻品观感。","sourceFile":"产品信息.pptx"},
-  {"category":"faq","code":"faq-prove","title":"怎么证明是新疆羊肉？","sortOrder":86,"content":"Q: 怎么证明是新疆羊肉？\nA: 包装有乌鲁木齐动检标等（勿编造包装上没有的地理标志/品种标注/溯源二维码）。","sourceFile":"产品信息.pptx"},
-
-  {"category":"ai_friendly","code":"ai-01","title":"表达清晰避免歧义","sortOrder":100,"content":"使用明确主谓宾；少用省略句、双关、反讽、隐喻；指代清楚。通过：无缺主/宾语；代词有明确指代；无未解释修辞；多义词语境唯一；单句不过度嵌套。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"ai_friendly","code":"ai-02","title":"结构良好层次分明","sortOrder":101,"content":"有标题/小标题/编号/列表/分段；开头总述，结尾总结；段意集中。通过：有概括主题的标题；主体分块；段落不过长且一段一观点；开头引导、结尾结论；避免大段无分割文字。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"ai_friendly","code":"ai-03","title":"逻辑连贯因果完整","sortOrder":102,"content":"观点有顺序（因果/并列/递进/转折）；推理无跳跃；证据支持结论。通过：结论有论据；过渡恰当；无自相矛盾；因果成立；主线可还原。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"ai_friendly","code":"ai-04","title":"信息完整上下文充分","sortOrder":103,"content":"背景、时间、地点、数量、范围、条件交代清楚。通过：专有名词有必要说明；关键信息不缺；不依赖隐性知识；读完无「缺条件」疑问。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"ai_friendly","code":"ai-05","title":"格式规范符号正确","sortOrder":104,"content":"标题层级不跳级；列表/表格规范；标点正确；中英空格/数字单位尽量规范。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"ai_friendly","code":"ai-06","title":"信息密度适中噪声低","sortOrder":105,"content":"无空话套话、无害重复、错别字、乱码、过量表情。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"ai_friendly","code":"ai-07","title":"事实准确可验证","sortOrder":106,"content":"数据/引用可靠；区分事实、观点、推测；无明显虚假或常识错误。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"ai_friendly","code":"ai-08","title":"目标明确指令可执行","sortOrder":107,"content":"主题清晰；行动建议具体；输出要求明确。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"ai_friendly","code":"ai-09","title":"安全合规","sortOrder":108,"content":"无仇恨歧视暴力违法色情；无隐私/机密泄露；无虚假承诺与诱导绕过安全策略。","sourceFile":"内容审核智能体要求.docx"},
-
-  {"category":"article_structure","code":"as-title-keyword","title":"标题含核心关键词","sortOrder":110,"content":"标题含核心关键词，自然不堆砌。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-title-length","title":"标题字数15-25字","sortOrder":111,"content":"标题字数约15–25字（过短信息不足，过长易截断）。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-title-pattern","title":"标题题型","sortOrder":112,"content":"尽量符合问答式 / 对比式 / 避坑式之一。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-lead-conclusion","title":"开头先给结论","sortOrder":113,"content":"第一段直接给结论（怎么办/怎么选/哪个好/有什么坑）。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-lead-match","title":"开头回应标题问题","sortOrder":114,"content":"开头必须回应用户问题，与标题一一对应。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-lead-keyword","title":"开头植入提问词","sortOrder":115,"content":"开头自然植入用户提问关键词。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-body-layers","title":"正文分层编号","sortOrder":116,"content":"用1、2、3分层，2–5个清晰点，有小标题或编号。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-body-element","title":"至少一种结构化元素","sortOrder":117,"content":"至少一种结构化元素：对比表、步骤列表、优劣对比等。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-body-length","title":"段落不宜过长","sortOrder":118,"content":"每小段不超过约6行，避免文字墙。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-body-scenes","title":"多场景分别说明","sortOrder":119,"content":"涉及多人群/场景时至少覆盖2个常见场景分别说明。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-kw-positions","title":"长尾词头中尾各一次","sortOrder":120,"content":"长尾提问在开头、中间、结尾至少各出现一次。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-kw-density","title":"关键词密度合理","sortOrder":121,"content":"关键词密度合理，不像水文/硬广。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-kw-variants","title":"同义提问分散出现","sortOrder":122,"content":"同义提问与变体分散出现。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-eeat-expertise","title":"E-E-A-T·专业性","sortOrder":123,"content":"专业性：公司年限/技术/工艺，或作者身份经验。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-eeat-experience","title":"E-E-A-T·经验性","sortOrder":124,"content":"经验性：真实案例、客户反馈、服务过程至少一处。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-eeat-authority","title":"E-E-A-T·权威性","sortOrder":125,"content":"权威性：资质、第三方认可、行业标准、央媒、专家等至少一处可查证背书。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-eeat-trust","title":"E-E-A-T·可信性","sortOrder":126,"content":"可信性：数据来源 / 更新日期 / 售后安全避坑保障——至少覆盖两项。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-end-cta","title":"结尾有行动建议","sortOrder":127,"content":"结尾有下一步行动建议，不是「以上就是全部」。","sourceFile":"内容审核智能体要求.docx"},
-  {"category":"article_structure","code":"as-end-summary","title":"结尾可独立答标题","sortOrder":128,"content":"结尾再次总结核心结论，可独立回答标题问题。","sourceFile":"内容审核智能体要求.docx"},
-
-  {"category":"brand","code":"brand-founded","title":"成立时间与总部","sortOrder":140,"content":"品牌成立于2002年4月27日，总部位于新疆乌鲁木齐。","sourceFile":"小巴依对外品宣（通用文稿）.pdf"},
-  {"category":"brand","code":"brand-business","title":"主业定位","sortOrder":141,"content":"主业：养殖、生产、加工、销售新疆地产优质肉脂型有机羔羊肉及有机牛肉等；新疆高端有机羊牛肉一站式服务。","sourceFile":"小巴依对外品宣（通用文稿）.pdf"},
-  {"category":"brand","code":"brand-slogan","title":"品牌口号","sortOrder":142,"content":"口号：「一生只做一件事，为你看好每只羊」；「中国羊肉在新疆，新疆羊肉小巴依」；「少吃肉、吃好肉」。","sourceFile":"小巴依对外品宣（通用文稿）.pdf"},
-  {"category":"brand","code":"brand-pasture","title":"牧场与养殖方式","sortOrder":143,"content":"双百牧场遍布天山南北；自然繁衍一年一胎、一胎一羔；传统游牧四季转场；严控载畜量。对客文案勿写「每20亩一只羊」「合作牧场」「天山牧场」等（见撰写注意点）。","sourceFile":"小巴依对外品宣（通用文稿）.pdf"},
-  {"category":"brand","code":"brand-endorsement","title":"背书与赞助","sortOrder":144,"content":"2016年第十三届冬运会羊牛肉独家供应商；2012–2022连续十一年CBA新疆男篮唯一指定羊牛肉供应商；2018–2019新疆体育局运动员唯一指定肉品供应商；中国航天事业赞助商/支持商（2022–2024）；多次入选央视相关栏目。","sourceFile":"小巴依对外品宣（通用文稿）.pdf"},
-  {"category":"brand","code":"brand-lines","title":"产品线概览","sortOrder":145,"content":"产品线：乳羔羊、小羯羊、金羯羊、冰碴驹俐、追风驹俐、草膘牛等系列。","sourceFile":"小巴依对外品宣（通用文稿）.pdf"},
-  {"category":"brand","code":"brand-promise","title":"承诺方向（受禁词约束）","sortOrder":146,"content":"承诺方向：不育肥、四季轮牧、天然放养、严检、物流与售后。具体表述受撰写注意点约束：勿写自建全程冷链、勿写售后具体时限、勿写国家级等。","sourceFile":"小巴依对外品宣（通用文稿）.pdf"},
-  {"category":"brand","code":"brand-scan-todo","title":"扫描件待人工补录","sortOrder":147,"content":"《精品产品手册》《精品系列介绍PPT》为扫描版，需人工OCR后补录本知识库。《小巴依卖点.xlsx》已线上化至「卖点库」模块，审稿时可交叉引用。","sourceFile":"小巴依对外品宣（通用文稿）.pdf"}
+  {
+    "category": "writing_rule",
+    "code": "wr-01",
+    "title": "净化车间非无菌车间",
+    "sortOrder": 10,
+    "content": "是「净化车间」，不是「无菌车间」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-02",
+    "title": "品牌自称小巴依大尾羊",
+    "sortOrder": 11,
+    "content": "对外自称「小巴依大尾羊，肉脂型品种」，生长于天山南北双百有机牧场，牧场平均海拔在2000米以上。不要写成「阿勒泰大尾羊」「哈萨克大尾羊」作品牌自称。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-03",
+    "title": "金羯羊勿提脂肪",
+    "sortOrder": 12,
+    "content": "金羯羊的脂肪含量不低，提到金羯羊不要提脂肪。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-04",
+    "title": "送达口径2-3天",
+    "sortOrder": 13,
+    "content": "勿写「24-72小时送达」，写「全国大部分城市2-3天可送达」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-05",
+    "title": "冷链依托顺丰非自建全程",
+    "sortOrder": 14,
+    "content": "小巴依没建立自己的冷链体系，是依托顺丰实现冷链运输（不是全程，也不是全国）。勿写自建全程冷链。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-06",
+    "title": "勿写国家级",
+    "sortOrder": 15,
+    "content": "不要写「国家级」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-07",
+    "title": "对客勿写礼盒精品",
+    "sortOrder": 16,
+    "content": "对客 GEO 文案不要提礼盒、精品产品、精品包装这类词。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-08",
+    "title": "售后勿写具体时限",
+    "sortOrder": 17,
+    "content": "售后保障别写具体时间。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-09",
+    "title": "勿写地理标志保护",
+    "sortOrder": 18,
+    "content": "不要写「有地理标志保护」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-10",
+    "title": "勿写溯源码与工厂加工",
+    "sortOrder": 19,
+    "content": "不要写包装盒上有溯源二维码、工厂加工过程。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-11",
+    "title": "主营新疆有机羊牛肉",
+    "sortOrder": 20,
+    "content": "小巴依主要以养殖、生产、加工、销售新疆地产优质有机羊牛肉为主。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-12",
+    "title": "羊肉部位称羊排肋条",
+    "sortOrder": 21,
+    "content": "新疆人买羊肉的时候不说「排骨」，说羊排或者肋条。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-13",
+    "title": "本地连锁超市名称",
+    "sortOrder": 22,
+    "content": "新疆本地大型连锁超市：汇嘉时代、天百、亿家汇好。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-14",
+    "title": "写不育肥不写不催肥",
+    "sortOrder": 23,
+    "content": "写「不育肥」，不要写成「不催肥」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-15",
+    "title": "勿强调每20亩一只羊",
+    "sortOrder": 24,
+    "content": "不强调每20亩草场仅养一只羊。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-16",
+    "title": "乳羔羊三个月吃奶吃草",
+    "sortOrder": 25,
+    "content": "乳羔羊系列是三个月吃奶三个月吃草，不要写成「三个月哺乳，三个月吃草」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-17",
+    "title": "对客勿强调冷冻",
+    "sortOrder": 26,
+    "content": "不要提冷冻（即便实际冷冻发货），对客 GEO 避免冻品观感表述。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-18",
+    "title": "少写牧民合作",
+    "sortOrder": 27,
+    "content": "不要介绍太多牧民合作相关。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-19",
+    "title": "新疆本土老品牌",
+    "sortOrder": 28,
+    "content": "小巴依：新疆本土老品牌。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-20",
+    "title": "羊肉口感用词",
+    "sortOrder": 29,
+    "content": "羊肉可用「鲜美」「几乎无膻味」，不要写「鲜甜」「肉质紧实、弹牙」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-21",
+    "title": "线下门店覆盖四区",
+    "sortOrder": 30,
+    "content": "线下门店在：天山区、新市区、沙依巴克区、水磨沟区。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-22",
+    "title": "同城保温袋非冰袋",
+    "sortOrder": 31,
+    "content": "同城配送不要写顺丰骑手；不是「冰袋」是「保温袋」包裹。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-23",
+    "title": "阿勒泰大尾羊分布事实",
+    "sortOrder": 32,
+    "content": "阿勒泰大尾羊主要分布在新疆阿勒泰、伊犁、塔城、巴里坤、木垒等地区（品种分布事实；品牌自称口径见 wr-02）。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-24",
+    "title": "包装无地理认证与品种",
+    "sortOrder": 33,
+    "content": "小巴依包装上不带地理认证标志，没有写品种。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-25",
+    "title": "没有羊上脑",
+    "sortOrder": 34,
+    "content": "没有羊上脑。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-26",
+    "title": "牛肉烧烤部位偏好",
+    "sortOrder": 35,
+    "content": "买牛肉烧烤选里脊和马尾多一点。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-27",
+    "title": "烧烤羊肉切菱形片",
+    "sortOrder": 36,
+    "content": "烧烤羊肉切菱形片。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-28",
+    "title": "写新疆牧场不写天山牧场",
+    "sortOrder": 37,
+    "content": "不写「天山牧场」，写「新疆牧场」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-29",
+    "title": "勿写肥瘦均匀",
+    "sortOrder": 38,
+    "content": "肥瘦均匀不是羊肉的特点，羊肉不是五花肉，无法做到肥瘦均匀。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-30",
+    "title": "新疆羊肉肉香无膻",
+    "sortOrder": 39,
+    "content": "新疆羊肉：肉香味足，无膻味。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-31",
+    "title": "牧场前勿加合作",
+    "sortOrder": 40,
+    "content": "牧场前面不要加「合作」二字；非自家图片注意版权并注明出处。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-32",
+    "title": "抓饭量词用份",
+    "sortOrder": 41,
+    "content": "哪哒尔商务抓饭：描述抓饭的量词用「份」。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-33",
+    "title": "仅羊鲜鲜加冰袋",
+    "sortOrder": 42,
+    "content": "小巴依所有精品产品，只有羊鲜鲜是加冰袋的，其他产品均没有冰袋，靠高密度肉品专用保温箱、保温片和运输过程中的低温保证品质。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-34",
+    "title": "排酸在入厂验收",
+    "sortOrder": 43,
+    "content": "排酸：不是出厂前才排酸，而是验收入厂的第一个环节就是排酸。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-bbq",
+    "title": "烧烤火候要点",
+    "sortOrder": 44,
+    "content": "炭烧到表面泛白再放串，明火直接烤等于烟熏。果木炭优于机制炭。翻面节奏：先烤一面等瘦肉表面泛白再翻，全程翻两三次；用肥肉压蹭瘦肉，尽量不让肥油滴到炭火上。",
+    "sourceFile": "GEO文章撰写注意点.docx"
+  },
+  {
+    "category": "store",
+    "code": "store-kexi",
+    "title": "小巴依·克西路店",
+    "sortOrder": 50,
+    "content": "",
+    "sourceFile": "各门店信息.docx",
+    "attrs": {
+      "openHours": "09:00-22:00",
+      "address": "乌鲁木齐市沙依巴克区克拉玛依西街1100号北晟广场1楼商铺(BRT5号线儿童村对面）",
+      "landline": "0991-8779970",
+      "mobile": "18999115099",
+      "coverage": "沙依巴克区"
+    }
+  },
+  {
+    "category": "store",
+    "code": "store-beijing",
+    "title": "小巴依·北京路店",
+    "sortOrder": 51,
+    "content": "",
+    "sourceFile": "各门店信息.docx",
+    "attrs": {
+      "openHours": "09:00-21:00",
+      "address": "乌鲁木齐市新市区北京中路180号嘉美轩1楼商铺（汇嘉时代对面）",
+      "landline": "0991-6631127",
+      "mobile": "18999275181",
+      "coverage": "新市区"
+    }
+  },
+  {
+    "category": "store",
+    "code": "store-hebei",
+    "title": "小巴依·河北路店",
+    "sortOrder": 52,
+    "content": "",
+    "sourceFile": "各门店信息.docx",
+    "attrs": {
+      "openHours": "09:00-21:00",
+      "address": "乌鲁木齐市新市区河北东路189号呈信．铂晶湾一楼商铺",
+      "landline": "0991-3181181",
+      "mobile": "17799170181",
+      "coverage": "新市区"
+    }
+  },
+  {
+    "category": "store",
+    "code": "store-qingnian",
+    "title": "小巴依·青年路店",
+    "sortOrder": 53,
+    "content": "",
+    "sourceFile": "各门店信息.docx",
+    "attrs": {
+      "openHours": "09:00-21:00",
+      "address": "乌鲁木齐市天山区青年路439号优诗美地1楼商铺（日月星光斜对面）",
+      "landline": "0991-2695181",
+      "mobile": "18599069373",
+      "coverage": "天山区"
+    }
+  },
+  {
+    "category": "store",
+    "code": "store-nanhu",
+    "title": "小巴依·南湖路店",
+    "sortOrder": 54,
+    "content": "",
+    "sourceFile": "各门店信息.docx",
+    "attrs": {
+      "openHours": "09:00-21:00",
+      "address": "乌鲁木齐市水磨沟区南湖北路422号澜湖苑1楼商铺",
+      "landline": "0991-4831610",
+      "mobile": "19990152281",
+      "coverage": "水磨沟区"
+    }
+  },
+  {
+    "category": "store",
+    "code": "store-regions",
+    "title": "门店区域覆盖",
+    "sortOrder": 55,
+    "content": "",
+    "sourceFile": "各门店信息.docx",
+    "attrs": {
+      "openHours": null,
+      "address": null,
+      "landline": null,
+      "mobile": null,
+      "coverage": "天山区、新市区、沙依巴克区、水磨沟区"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-rugao",
+    "title": "乳羔羊系列·系列口径",
+    "sortOrder": 60,
+    "content": "6月龄小乳羔羊；一年一胎、一胎一羔；3个月吃奶、3个月吃草；肉质细嫩有奶香与草原清香；鲜嫩无腥、肉性温和、易吸收；老人小孩更推荐清炖/煲汤；四季可日常温补。整羊精细分割装箱不含头蹄内脏。",
+    "sourceFile": "精品产品手册+产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "rugao",
+      "seriesName": "乳羔羊系列"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-rugao-south",
+    "title": "乳羔羊·南疆系列·系列口径",
+    "sortOrder": 61,
+    "content": "南疆（焉耆、和静）牧场；走戈壁、吃碱草、喝雪水；精肉多、脂肪少，鲜香弹嫩；筋膜纤薄；清炖可体现淡淡盐香。规格参考：约10斤/1388元（以最新线上为准）。",
+    "sourceFile": "产品信息.pptx+精品系列介绍PPT",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "rugao-south",
+      "seriesName": "乳羔羊·南疆系列"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-xiaojie",
+    "title": "小羯羊系列·系列口径",
+    "sortOrder": 62,
+    "content": "断奶去势的小公羊在12个月龄前出栏；坚持新疆哈萨克族传统牧养、四季转场；兼具公羊肉质紧实与小乳羊脂香肉嫩；烹、烤、炒、炖等皆可。整羊精细分割装箱不含头蹄内脏。羯羊定义：必须是公羊才可能是羯羊，但并非所有公羊都是羯羊。",
+    "sourceFile": "精品产品手册+产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "xiaojie",
+      "seriesName": "小羯羊系列"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-jinjie",
+    "title": "金羯羊系列·系列口径",
+    "sortOrder": 63,
+    "content": "约3年大羯羊，历经约12次四季转场、近万里跋涉；肌肉组织强健且交叉少量脂肪；肉质极为紧实，风味醇厚、口感劲道、越嚼越香；清炖/煲汤/红烧通常需两小时以上；出栏量极少。文案勿强调脂肪低。",
+    "sourceFile": "精品产品手册+产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "jinjie",
+      "seriesName": "金羯羊系列"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-bingcha",
+    "title": "冰碴驹俐系列·系列口径",
+    "sortOrder": 64,
+    "content": "生长于海拔约2500米以上雪线牧场；攀悬崖、饮冰雪融水、食草药野果；半野生草药肉；入冬第一场雪后采食带冰碴牧草；口感紧实鲜嫩饱满。每年约11月17日封山上市，次年约2月28日回暖停售，约3个月赏味期。",
+    "sourceFile": "精品产品手册+产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "bingcha",
+      "seriesName": "冰碴驹俐系列"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-zhuifeng",
+    "title": "追风驹俐系列·系列口径",
+    "sortOrder": 65,
+    "content": "半野生半放养长毛黑驹俐；生长于新疆天山边境牧场；以崖壁牧草为食；得名于冬季迎风散热以平和药性；约10月龄；肉质细嫩有弹性、口感发脆；适清炖煲汤。",
+    "sourceFile": "精品产品手册+产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "zhuifeng",
+      "seriesName": "追风驹俐系列"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-caobiao",
+    "title": "草膘牛系列·系列口径",
+    "sortOrder": 66,
+    "content": "有机放养，食天然牧草、饮天山冰泉；精选约18–24月龄；纤维均衡口感弹嫩；高蛋白、相对低脂肪与含水量；鲜香浓郁；适中式炖烧。",
+    "sourceFile": "精品产品手册+产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "caobiao",
+      "seriesName": "草膘牛系列"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-yangxian",
+    "title": "羊鲜鲜·系列口径",
+    "sortOrder": 67,
+    "content": "小规格体验装（约3.2斤）；乳羔羊逻辑；唯一常提加冰袋的精品相关产品（其余靠保温箱/保温片）。",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "yangxian",
+      "seriesName": "羊鲜鲜"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-shuanpian",
+    "title": "牛羊涮片·系列口径",
+    "sortOrder": 68,
+    "content": "涮片：羊腿肉、蝴蝶排（薄、不带骨髓）；牛里脊/牛腱子等；原切无添加。规格常为200g/盒，选项常为6盒自由搭配。",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "shuanpian",
+      "seriesName": "牛羊涮片"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-beef-pie",
+    "title": "牛肉饼·系列口径",
+    "sortOrder": 69,
+    "content": "精选约18–24月龄有机牛肉；配料健康；多口味搭配；可煎制无需解冻。",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "beef-pie",
+      "seriesName": "牛肉饼"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-fresh-north",
+    "title": "冷鲜·北疆羔羊·系列口径",
+    "sortOrder": 70,
+    "content": "约12月龄北疆牧场有机羔羊；屠宰后约24小时排酸上架；部位含前腿/后腿/羊排/蝎子里脊/胴体整只等。对客GEO勿写顺丰骑手/冰袋细节。",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "fresh-north",
+      "seriesName": "冷鲜·北疆羔羊"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-fresh-south",
+    "title": "冷鲜·南疆羔羊·系列口径",
+    "sortOrder": 71,
+    "content": "约12月龄南疆牧场有机羔羊；食碱草、天然排酸感更强；清炖盐香更突出。对客GEO勿写顺丰骑手/冰袋细节。",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "fresh-south",
+      "seriesName": "冷鲜·南疆羔羊"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-series-fresh-brown-cattle",
+    "title": "冷鲜·褐牛·系列口径",
+    "sortOrder": 72,
+    "content": "约18–24月龄新疆土生土长小牛；有机放牧草膘逻辑；部位含牛腱子/马尾里脊/牛后腿/牛肋排/牛里脊/牛腩块/牛上脑等。",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "series",
+      "seriesCode": "fresh-brown-cattle",
+      "seriesName": "冷鲜·褐牛"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-rugao-quan-yang",
+    "title": "乳羔羊·全羊",
+    "sortOrder": 100,
+    "content": "规格 10斤；净重 5kg；毛重 6.5kg；参考价 999（以最新线上为准）；部位：羔羊鞍排、羔羊腿排、羔羊颈排、羔羊腿肉、羔羊腱子、羊肉大骨、羔羊羊腩、羔羊寸排、羔羊里脊纯肉等（整羊精细分割，不含头蹄内脏）",
+    "sourceFile": "精品产品手册p3+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "rugao",
+      "seriesName": "乳羔羊系列",
+      "netWeight": "5kg",
+      "grossWeight": "6.5kg",
+      "specJin": "10斤",
+      "priceYuan": "999",
+      "parts": "羔羊鞍排、羔羊腿排、羔羊颈排、羔羊腿肉、羔羊腱子、羊肉大骨、羔羊羊腩、羔羊寸排、羔羊里脊纯肉等（整羊精细分割，不含头蹄内脏）",
+      "imageUrl": "/uploads/geo/handbook/rugao-quan-yang.jpg",
+      "handbookPage": 3
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-rugao-jingpin",
+    "title": "乳羔羊·精品",
+    "sortOrder": 101,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 588（以最新线上为准）；部位：精选羊排、羊蝎子、羊颈排等部位",
+    "sourceFile": "精品产品手册p4+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "rugao",
+      "seriesName": "乳羔羊系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "588",
+      "parts": "精选羊排、羊蝎子、羊颈排等部位",
+      "imageUrl": "/uploads/geo/handbook/rugao-jingpin.jpg",
+      "handbookPage": 4
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-rugao-xiezi",
+    "title": "乳羔羊·精品羊蝎子",
+    "sortOrder": 102,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 588（以最新线上为准）；部位：羊蝎子精选",
+    "sourceFile": "精品产品手册p5+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "rugao",
+      "seriesName": "乳羔羊系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "588",
+      "parts": "羊蝎子精选",
+      "imageUrl": "/uploads/geo/handbook/rugao-xiezi.jpg",
+      "handbookPage": 5
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-rugao-yangpai",
+    "title": "乳羔羊·精品羊排",
+    "sortOrder": 103,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 688（以最新线上为准）；部位：羔羊羊排精选",
+    "sourceFile": "精品产品手册p6+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "rugao",
+      "seriesName": "乳羔羊系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "688",
+      "parts": "羔羊羊排精选",
+      "imageUrl": "/uploads/geo/handbook/rugao-yangpai.jpg",
+      "handbookPage": 6
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-rugao-fashi-yangpai",
+    "title": "乳羔羊·精品法式羊排",
+    "sortOrder": 104,
+    "content": "规格 约7.6斤；净重 3.8kg；毛重 4.5kg；参考价 588（以最新线上为准）；部位：法式羊排精选",
+    "sourceFile": "精品产品手册p7+精品系列介绍PPT",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "rugao",
+      "seriesName": "乳羔羊系列",
+      "netWeight": "3.8kg",
+      "grossWeight": "4.5kg",
+      "specJin": "约7.6斤",
+      "priceYuan": "588",
+      "parts": "法式羊排精选",
+      "imageUrl": "/uploads/geo/handbook/rugao-fashi-yangpai.jpg",
+      "handbookPage": 7
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-rugao-south",
+    "title": "乳羔羊·南疆羊",
+    "sortOrder": 105,
+    "content": "规格 10斤；净重 5kg；参考价 1388（以最新线上为准）；部位：羊腿肉块、羔羊腿排、羊大骨、羊腱子、腱子纯肉、羔羊颈排、羔羊寸排、羔羊鞍排、羊肉筋、里脊纯肉等",
+    "sourceFile": "精品产品手册p8+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "rugao-south",
+      "seriesName": "乳羔羊·南疆系列",
+      "netWeight": "5kg",
+      "specJin": "10斤",
+      "priceYuan": "1388",
+      "parts": "羊腿肉块、羔羊腿排、羊大骨、羊腱子、腱子纯肉、羔羊颈排、羔羊寸排、羔羊鞍排、羊肉筋、里脊纯肉等",
+      "imageUrl": "/uploads/geo/handbook/rugao-south.jpg",
+      "handbookPage": 8
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-xiaojie-quan-yang",
+    "title": "小羯羊·全羊",
+    "sortOrder": 106,
+    "content": "规格 16.8斤；净重 8.4kg；毛重 10.5kg；参考价 1588（以最新线上为准）；部位：羔羊鞍排、羔羊腿排、羔羊寸排、羊大骨、羔羊腱子、羊腩肉方、羔羊颈排、羊腿肉块、羔羊腿肉、羔羊里脊肉块等（不含头蹄内脏）",
+    "sourceFile": "精品产品手册p9+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "xiaojie",
+      "seriesName": "小羯羊系列",
+      "netWeight": "8.4kg",
+      "grossWeight": "10.5kg",
+      "specJin": "16.8斤",
+      "priceYuan": "1588",
+      "parts": "羔羊鞍排、羔羊腿排、羔羊寸排、羊大骨、羔羊腱子、羊腩肉方、羔羊颈排、羊腿肉块、羔羊腿肉、羔羊里脊肉块等（不含头蹄内脏）",
+      "imageUrl": "/uploads/geo/handbook/xiaojie-quan-yang.jpg",
+      "handbookPage": 9
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-xiaojie-yangpai",
+    "title": "小羯羊·精选羊排",
+    "sortOrder": 107,
+    "content": "规格 10斤；净重 5kg；毛重 6.5kg；参考价 999（以最新线上为准）；部位：羊排部位精选",
+    "sourceFile": "精品产品手册p10+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "xiaojie",
+      "seriesName": "小羯羊系列",
+      "netWeight": "5kg",
+      "grossWeight": "6.5kg",
+      "specJin": "10斤",
+      "priceYuan": "999",
+      "parts": "羊排部位精选",
+      "imageUrl": "/uploads/geo/handbook/xiaojie-yangpai.jpg",
+      "handbookPage": 10
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-xiaojie-jingxuan",
+    "title": "小羯羊·精选",
+    "sortOrder": 108,
+    "content": "规格 10斤；净重 5kg；毛重 6.5kg；参考价 899（以最新线上为准）；部位：羔羊鞍排、羔羊颈排、羔羊寸排、羔羊蝎子等",
+    "sourceFile": "精品产品手册p11+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "xiaojie",
+      "seriesName": "小羯羊系列",
+      "netWeight": "5kg",
+      "grossWeight": "6.5kg",
+      "specJin": "10斤",
+      "priceYuan": "899",
+      "parts": "羔羊鞍排、羔羊颈排、羔羊寸排、羔羊蝎子等",
+      "imageUrl": "/uploads/geo/handbook/xiaojie-jingxuan.jpg",
+      "handbookPage": 11
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-xiaojie-yangtui",
+    "title": "小羯羊·精品羊腿",
+    "sortOrder": 109,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 688（以最新线上为准）；部位：羔羊腱子、羔羊腿排、羊腿肉块、腱子纯肉、羊大骨等",
+    "sourceFile": "精品产品手册p12+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "xiaojie",
+      "seriesName": "小羯羊系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "688",
+      "parts": "羔羊腱子、羔羊腿排、羊腿肉块、腱子纯肉、羊大骨等",
+      "imageUrl": "/uploads/geo/handbook/xiaojie-yangtui.jpg",
+      "handbookPage": 12
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-xiaojie-yangtuirou",
+    "title": "小羯羊·精品羊腿肉",
+    "sortOrder": 110,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 799（以最新线上为准）；部位：羊腿肉块、原切羊脂（赠）等纯肉向规格",
+    "sourceFile": "精品产品手册p13+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "xiaojie",
+      "seriesName": "小羯羊系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "799",
+      "parts": "羊腿肉块、原切羊脂（赠）等纯肉向规格",
+      "imageUrl": "/uploads/geo/handbook/xiaojie-yangtuirou.jpg",
+      "handbookPage": 13
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-jinjie-quan-yang",
+    "title": "金羯羊·全羊",
+    "sortOrder": 111,
+    "content": "规格 16.8斤；净重 8.4kg；毛重 11kg；参考价 3888（以最新线上为准）；部位：羔羊寸排、羔羊腿排、羔羊蝎子、羊腿肉块、羊腱子、羊髋排、羊大骨、羊腩肉方、羔羊鞍排、羔羊颈排等（不含头蹄内脏）",
+    "sourceFile": "精品产品手册p14+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "jinjie",
+      "seriesName": "金羯羊系列",
+      "netWeight": "8.4kg",
+      "grossWeight": "11kg",
+      "specJin": "16.8斤",
+      "priceYuan": "3888",
+      "parts": "羔羊寸排、羔羊腿排、羔羊蝎子、羊腿肉块、羊腱子、羊髋排、羊大骨、羊腩肉方、羔羊鞍排、羔羊颈排等（不含头蹄内脏）",
+      "imageUrl": "/uploads/geo/handbook/jinjie-quan-yang.jpg",
+      "handbookPage": 14
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-jinjie-jingxuan",
+    "title": "金羯羊·精选",
+    "sortOrder": 112,
+    "content": "规格 12.8斤；净重 6.4kg；毛重 9kg；参考价 3888（以最新线上为准）；部位：羔羊寸排、羔羊腿排、羔羊蝎子等精选部位",
+    "sourceFile": "精品产品手册p15+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "jinjie",
+      "seriesName": "金羯羊系列",
+      "netWeight": "6.4kg",
+      "grossWeight": "9kg",
+      "specJin": "12.8斤",
+      "priceYuan": "3888",
+      "parts": "羔羊寸排、羔羊腿排、羔羊蝎子等精选部位",
+      "imageUrl": "/uploads/geo/handbook/jinjie-jingxuan.jpg",
+      "handbookPage": 15
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-bingcha-quan-yang",
+    "title": "冰碴驹俐·全羊",
+    "sortOrder": 113,
+    "content": "规格 16.8斤；净重 8.4kg；毛重 10.5kg；参考价 1888（以最新线上为准）；部位：羔羊鞍排、羔羊腿排、羔羊髋排、羔羊腱子、羔羊羊排、羔羊颈排、羔羊蝎子、羊腩肉方等（不含头蹄内脏）",
+    "sourceFile": "精品产品手册p16+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "bingcha",
+      "seriesName": "冰碴驹俐系列",
+      "netWeight": "8.4kg",
+      "grossWeight": "10.5kg",
+      "specJin": "16.8斤",
+      "priceYuan": "1888",
+      "parts": "羔羊鞍排、羔羊腿排、羔羊髋排、羔羊腱子、羔羊羊排、羔羊颈排、羔羊蝎子、羊腩肉方等（不含头蹄内脏）",
+      "imageUrl": "/uploads/geo/handbook/bingcha-quan-yang.jpg",
+      "handbookPage": 16
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-bingcha-jingxuan",
+    "title": "冰碴驹俐·精选",
+    "sortOrder": 114,
+    "content": "规格 10斤；净重 5kg；毛重 6.5kg；参考价 1388（以最新线上为准）；部位：精选羊腿等连骨部位",
+    "sourceFile": "精品产品手册p17+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "bingcha",
+      "seriesName": "冰碴驹俐系列",
+      "netWeight": "5kg",
+      "grossWeight": "6.5kg",
+      "specJin": "10斤",
+      "priceYuan": "1388",
+      "parts": "精选羊腿等连骨部位",
+      "imageUrl": "/uploads/geo/handbook/bingcha-jingxuan.jpg",
+      "handbookPage": 17
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-bingcha-jingpin",
+    "title": "冰碴驹俐·精品",
+    "sortOrder": 115,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 799（以最新线上为准）；部位：精选羊排、羊蝎子、羊颈排部位连骨分割",
+    "sourceFile": "精品产品手册p18+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "bingcha",
+      "seriesName": "冰碴驹俐系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "799",
+      "parts": "精选羊排、羊蝎子、羊颈排部位连骨分割",
+      "imageUrl": "/uploads/geo/handbook/bingcha-jingpin.jpg",
+      "handbookPage": 18
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-zhuifeng-quan-yang",
+    "title": "追风驹俐·全羊",
+    "sortOrder": 116,
+    "content": "规格 16.8斤；净重 8.4kg；毛重 10.5kg；参考价 2888（以最新线上为准）；部位：羔羊髋排、羔羊腿排、羔羊蝎子、羊腱子、羔羊颈排、羔羊寸排、羔羊鞍排、羊腩肉方等（不含头蹄内脏）",
+    "sourceFile": "精品产品手册p19+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "zhuifeng",
+      "seriesName": "追风驹俐系列",
+      "netWeight": "8.4kg",
+      "grossWeight": "10.5kg",
+      "specJin": "16.8斤",
+      "priceYuan": "2888",
+      "parts": "羔羊髋排、羔羊腿排、羔羊蝎子、羊腱子、羔羊颈排、羔羊寸排、羔羊鞍排、羊腩肉方等（不含头蹄内脏）",
+      "imageUrl": "/uploads/geo/handbook/zhuifeng-quan-yang.jpg",
+      "handbookPage": 19
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-caobiao-jingxuan",
+    "title": "草膘牛·精选",
+    "sortOrder": 117,
+    "content": "规格 10斤；净重 5kg；毛重 6.5kg；参考价 899（以最新线上为准）；部位：牛仔骨、牛腿肉、牛元宝、牛腩、牛腱子等",
+    "sourceFile": "精品产品手册p20+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "caobiao",
+      "seriesName": "草膘牛系列",
+      "netWeight": "5kg",
+      "grossWeight": "6.5kg",
+      "specJin": "10斤",
+      "priceYuan": "899",
+      "parts": "牛仔骨、牛腿肉、牛元宝、牛腩、牛腱子等",
+      "imageUrl": "/uploads/geo/handbook/caobiao-jingxuan.jpg",
+      "handbookPage": 20
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-caobiao-niutuirou",
+    "title": "草膘牛·精品牛腿肉",
+    "sortOrder": 118,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 488（以最新线上为准）；部位：牛腿肉部位精选",
+    "sourceFile": "精品产品手册p21+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "caobiao",
+      "seriesName": "草膘牛系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "488",
+      "parts": "牛腿肉部位精选",
+      "imageUrl": "/uploads/geo/handbook/caobiao-niutuirou.jpg",
+      "handbookPage": 21
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-caobiao-niunan",
+    "title": "草膘牛·原切牛腩",
+    "sortOrder": 119,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 588（以最新线上为准）；部位：牛腩",
+    "sourceFile": "精品产品手册p22+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "caobiao",
+      "seriesName": "草膘牛系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "588",
+      "parts": "牛腩",
+      "imageUrl": "/uploads/geo/handbook/caobiao-niunan.jpg",
+      "handbookPage": 22
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-caobiao-jingpin",
+    "title": "草膘牛·精品",
+    "sortOrder": 120,
+    "content": "规格 6.4斤；净重 3.2kg；毛重 4.5kg；参考价 588（以最新线上为准）；部位：牛仔骨、牛元宝、牛腩等",
+    "sourceFile": "精品产品手册p23+产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "caobiao",
+      "seriesName": "草膘牛系列",
+      "netWeight": "3.2kg",
+      "grossWeight": "4.5kg",
+      "specJin": "6.4斤",
+      "priceYuan": "588",
+      "parts": "牛仔骨、牛元宝、牛腩等",
+      "imageUrl": "/uploads/geo/handbook/caobiao-jingpin.jpg",
+      "handbookPage": 23
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-yangxian",
+    "title": "羊鲜鲜",
+    "sortOrder": 121,
+    "content": "规格 3.2斤；净重 1.6kg；参考价 358（以最新线上为准）；部位：羊蝎子、羊大骨、羊排、羊腿肉",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "yangxian",
+      "seriesName": "羊鲜鲜",
+      "netWeight": "1.6kg",
+      "specJin": "3.2斤",
+      "priceYuan": "358",
+      "parts": "羊蝎子、羊大骨、羊排、羊腿肉"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-shuanpian-pack",
+    "title": "牛羊涮片组合（6盒）",
+    "sortOrder": 122,
+    "content": "规格 200g×6盒；净重 1.2kg；参考价 269（以最新线上为准）；部位：羊腿肉涮片/蝴蝶排涮片；牛里脊涮片/牛腱子涮片（可自由搭配，总数6盒）",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "shuanpian",
+      "seriesName": "牛羊涮片",
+      "netWeight": "1.2kg",
+      "specJin": "200g×6盒",
+      "priceYuan": "269",
+      "parts": "羊腿肉涮片/蝴蝶排涮片；牛里脊涮片/牛腱子涮片（可自由搭配，总数6盒）"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-beef-pie-6",
+    "title": "牛肉饼·6盒",
+    "sortOrder": 123,
+    "content": "规格 牛肉饼110g/盒×6；参考价 189（以最新线上为准）；部位：原味/孜然/黑椒/玉米牛肉饼等口味可选",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "beef-pie",
+      "seriesName": "牛肉饼",
+      "specJin": "牛肉饼110g/盒×6",
+      "priceYuan": "189",
+      "parts": "原味/孜然/黑椒/玉米牛肉饼等口味可选"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-north-front-leg",
+    "title": "北疆·羔羊前腿",
+    "sortOrder": 124,
+    "content": "规格 按斤；参考价 95.8/kg（以最新线上为准）；部位：羊前腿",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-north",
+      "seriesName": "冷鲜·北疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "95.8/kg",
+      "parts": "羊前腿"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-north-hind-leg",
+    "title": "北疆·羔羊后腿",
+    "sortOrder": 125,
+    "content": "规格 按斤；参考价 98.6/kg（以最新线上为准）；部位：羊后腿",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-north",
+      "seriesName": "冷鲜·北疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "98.6/kg",
+      "parts": "羊后腿"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-north-yangpai",
+    "title": "北疆·羔羊羊排",
+    "sortOrder": 126,
+    "content": "规格 按斤；参考价 109.8/kg（以最新线上为准）；部位：羊排",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-north",
+      "seriesName": "冷鲜·北疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "109.8/kg",
+      "parts": "羊排"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-north-xiezi",
+    "title": "北疆·羔羊蝎子里脊",
+    "sortOrder": 127,
+    "content": "规格 按斤；参考价 95.8/kg（以最新线上为准）；部位：羊蝎子、羊里脊",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-north",
+      "seriesName": "冷鲜·北疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "95.8/kg",
+      "parts": "羊蝎子、羊里脊"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-north-carcass",
+    "title": "北疆·羔羊胴体整只",
+    "sortOrder": 128,
+    "content": "规格 按斤；参考价 89.8/kg（以最新线上为准）；部位：前腿、后腿、羊排、蝎子里脊",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-north",
+      "seriesName": "冷鲜·北疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "89.8/kg",
+      "parts": "前腿、后腿、羊排、蝎子里脊"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-south-front-leg",
+    "title": "南疆·羔羊多肉前腿",
+    "sortOrder": 129,
+    "content": "规格 按斤；参考价 158/kg（以最新线上为准）；部位：羊前腿",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-south",
+      "seriesName": "冷鲜·南疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "158/kg",
+      "parts": "羊前腿"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-south-hind-leg",
+    "title": "南疆·羔羊后腿",
+    "sortOrder": 130,
+    "content": "规格 按斤；参考价 148.6/kg（以最新线上为准）；部位：羊后腿",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-south",
+      "seriesName": "冷鲜·南疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "148.6/kg",
+      "parts": "羊后腿"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-south-yangpai",
+    "title": "南疆·羔羊羊排",
+    "sortOrder": 131,
+    "content": "规格 按斤；参考价 148/kg（以最新线上为准）；部位：羊排",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-south",
+      "seriesName": "冷鲜·南疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "148/kg",
+      "parts": "羊排"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-south-xiezi",
+    "title": "南疆·羔羊蝎子里脊",
+    "sortOrder": 132,
+    "content": "规格 按斤；参考价 138.6/kg（以最新线上为准）；部位：羊蝎子、羊里脊",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-south",
+      "seriesName": "冷鲜·南疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "138.6/kg",
+      "parts": "羊蝎子、羊里脊"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-south-carcass",
+    "title": "南疆·羔羊胴体整只",
+    "sortOrder": 133,
+    "content": "规格 按斤；参考价 138/kg（以最新线上为准）；部位：前腿、后腿、羊排、蝎子里脊",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-south",
+      "seriesName": "冷鲜·南疆羔羊",
+      "specJin": "按斤",
+      "priceYuan": "138/kg",
+      "parts": "前腿、后腿、羊排、蝎子里脊"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-brown-jianzi",
+    "title": "褐牛·牛腱子",
+    "sortOrder": 134,
+    "content": "规格 按斤；参考价 128/kg（以最新线上为准）；部位：牛腱子",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-brown-cattle",
+      "seriesName": "冷鲜·褐牛",
+      "specJin": "按斤",
+      "priceYuan": "128/kg",
+      "parts": "牛腱子"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-brown-liweiji",
+    "title": "褐牛·马尾里脊",
+    "sortOrder": 135,
+    "content": "规格 按斤；参考价 148/kg（以最新线上为准）；部位：马尾里脊",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-brown-cattle",
+      "seriesName": "冷鲜·褐牛",
+      "specJin": "按斤",
+      "priceYuan": "148/kg",
+      "parts": "马尾里脊"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-brown-houtui",
+    "title": "褐牛·牛后腿",
+    "sortOrder": 136,
+    "content": "规格 按斤；参考价 95.8/kg（以最新线上为准）；部位：牛后腿",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-brown-cattle",
+      "seriesName": "冷鲜·褐牛",
+      "specJin": "按斤",
+      "priceYuan": "95.8/kg",
+      "parts": "牛后腿"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-brown-leipai",
+    "title": "褐牛·牛肋排",
+    "sortOrder": 137,
+    "content": "规格 按斤；参考价 98.9/kg（以最新线上为准）；部位：牛肋排",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-brown-cattle",
+      "seriesName": "冷鲜·褐牛",
+      "specJin": "按斤",
+      "priceYuan": "98.9/kg",
+      "parts": "牛肋排"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-brown-liji",
+    "title": "褐牛·牛里脊",
+    "sortOrder": 138,
+    "content": "规格 按斤；参考价 148/kg（以最新线上为准）；部位：牛里脊",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-brown-cattle",
+      "seriesName": "冷鲜·褐牛",
+      "specJin": "按斤",
+      "priceYuan": "148/kg",
+      "parts": "牛里脊"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-brown-niunan",
+    "title": "褐牛·牛腩块",
+    "sortOrder": 139,
+    "content": "规格 按斤；参考价 98.9/kg（以最新线上为准）；部位：牛腩块",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-brown-cattle",
+      "seriesName": "冷鲜·褐牛",
+      "specJin": "按斤",
+      "priceYuan": "98.9/kg",
+      "parts": "牛腩块"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-sku-fresh-brown-shangnao",
+    "title": "褐牛·牛上脑",
+    "sortOrder": 140,
+    "content": "规格 按斤；参考价 148/kg（以最新线上为准）；部位：牛上脑",
+    "sourceFile": "产品信息.pptx",
+    "productAttrs": {
+      "kind": "sku",
+      "seriesCode": "fresh-brown-cattle",
+      "seriesName": "冷鲜·褐牛",
+      "specJin": "按斤",
+      "priceYuan": "148/kg",
+      "parts": "牛上脑"
+    }
+  },
+  {
+    "category": "product",
+    "code": "product-logistics-nation",
+    "title": "全国物流口径",
+    "sortOrder": 900,
+    "content": "手册有「全国包邮/全国配送」表述；对客GEO文案勿写自建全程全国冷链；送达写「全国大部分城市2–3天可送达」（勿照搬手册可能出现的24-72小时表述）。",
+    "sourceFile": "精品产品手册+撰写注意点"
+  },
+  {
+    "category": "product",
+    "code": "product-logistics-city",
+    "title": "乌市同城物流口径",
+    "sortOrder": 901,
+    "content": "乌市同城冷鲜短途可用保温袋；勿写「顺丰骑手」「冰袋」（对客）。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "product",
+    "code": "product-aging",
+    "title": "排酸环节口径",
+    "sortOrder": 902,
+    "content": "排酸：入厂验收第一环即排酸，不是出厂前才排酸。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "product",
+    "code": "product-contact",
+    "title": "客服与官网",
+    "sortOrder": 903,
+    "content": "手册载：24h客服热线400-000-5181；官网www.xiaobayi.net；渠道含线下门店、微商城、天猫旗舰店等（以最新线上为准）。",
+    "sourceFile": "精品产品手册"
+  },
+  {
+    "category": "product",
+    "code": "product-chuan",
+    "title": "小巴依羊肉串",
+    "sortOrder": 904,
+    "content": "羊肉串：一盒十串，三瘦两肥，细嫩不膻。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "faq",
+    "code": "faq-breed",
+    "title": "小巴依羊的品种？",
+    "sortOrder": 80,
+    "content": "Q: 小巴依羊的品种？\nA: 绵羊侧为新疆大尾羊肉脂型相关口径（对外品牌自称「小巴依大尾羊」，勿写「阿勒泰大尾羊/哈萨克大尾羊」作品牌自称）；山羊有冰碴驹俐等，食冰霜下牧草，肉质紧密发脆。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "faq",
+    "code": "faq-origin",
+    "title": "羊从哪里来？",
+    "sortOrder": 81,
+    "content": "Q: 羊从哪里来？\nA: 有机牧场，北疆如木垒、巴里坤、阿勒泰富蕴布尔津、塔城额敏托里，西段伊犁那拉提昭苏等；文案写「新疆牧场」，勿写「天山牧场」「合作牧场」。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "faq",
+    "code": "faq-aging",
+    "title": "什么是排酸？",
+    "sortOrder": 82,
+    "content": "Q: 什么是排酸？\nA: 胴体在 0–4℃ 排酸库约 24 小时以上，乳酸分解挥发，肉更易熟易烂；验收入厂第一环即排酸，不是出厂前才排酸。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "faq",
+    "code": "faq-south-north",
+    "title": "南疆羊 vs 北疆羊？",
+    "sortOrder": 83,
+    "content": "Q: 南疆羊 vs 北疆羊？\nA: 都好吃；南疆羊口味更突出，清炖常自带盐香；南疆成本/运费更高。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "faq",
+    "code": "faq-color",
+    "title": "肉颜色为什么深？",
+    "sortOrder": 84,
+    "content": "Q: 肉颜色为什么深？\nA: 排酸后水分减少，颜色会显得更深。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "faq",
+    "code": "faq-frozen",
+    "title": "精品是否冻肉不新鲜？",
+    "sortOrder": 85,
+    "content": "Q: 精品是否冻肉不新鲜？\nA: 速冻工艺保质较长；对客 GEO 文案仍遵循「不要提冷冻」等撰写注意点，避免强调冻品观感。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "faq",
+    "code": "faq-prove",
+    "title": "怎么证明是新疆羊肉？",
+    "sortOrder": 86,
+    "content": "Q: 怎么证明是新疆羊肉？\nA: 包装有乌鲁木齐动检标等（勿编造包装上没有的地理标志/品种标注/溯源二维码）。",
+    "sourceFile": "产品信息.pptx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-01",
+    "title": "表达清晰避免歧义",
+    "sortOrder": 100,
+    "content": "使用明确主谓宾；少用省略句、双关、反讽、隐喻；指代清楚。通过：无缺主/宾语；代词有明确指代；无未解释修辞；多义词语境唯一；单句不过度嵌套。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-02",
+    "title": "结构良好层次分明",
+    "sortOrder": 101,
+    "content": "有标题/小标题/编号/列表/分段；开头总述，结尾总结；段意集中。通过：有概括主题的标题；主体分块；段落不过长且一段一观点；开头引导、结尾结论；避免大段无分割文字。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-03",
+    "title": "逻辑连贯因果完整",
+    "sortOrder": 102,
+    "content": "观点有顺序（因果/并列/递进/转折）；推理无跳跃；证据支持结论。通过：结论有论据；过渡恰当；无自相矛盾；因果成立；主线可还原。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-04",
+    "title": "信息完整上下文充分",
+    "sortOrder": 103,
+    "content": "背景、时间、地点、数量、范围、条件交代清楚。通过：专有名词有必要说明；关键信息不缺；不依赖隐性知识；读完无「缺条件」疑问。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-05",
+    "title": "格式规范符号正确",
+    "sortOrder": 104,
+    "content": "标题层级不跳级；列表/表格规范；标点正确；中英空格/数字单位尽量规范。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-06",
+    "title": "信息密度适中噪声低",
+    "sortOrder": 105,
+    "content": "无空话套话、无害重复、错别字、乱码、过量表情。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-07",
+    "title": "事实准确可验证",
+    "sortOrder": 106,
+    "content": "数据/引用可靠；区分事实、观点、推测；无明显虚假或常识错误。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-08",
+    "title": "目标明确指令可执行",
+    "sortOrder": 107,
+    "content": "主题清晰；行动建议具体；输出要求明确。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-09",
+    "title": "安全合规",
+    "sortOrder": 108,
+    "content": "无仇恨歧视暴力违法色情；无隐私/机密泄露；无虚假承诺与诱导绕过安全策略。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-title-keyword",
+    "title": "标题含核心关键词",
+    "sortOrder": 110,
+    "content": "标题含核心关键词，自然不堆砌。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-title-length",
+    "title": "标题字数15-25字",
+    "sortOrder": 111,
+    "content": "标题字数约15–25字（过短信息不足，过长易截断）。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-title-pattern",
+    "title": "标题题型",
+    "sortOrder": 112,
+    "content": "尽量符合问答式 / 对比式 / 避坑式之一。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-lead-conclusion",
+    "title": "开头先给结论",
+    "sortOrder": 113,
+    "content": "第一段直接给结论（怎么办/怎么选/哪个好/有什么坑）。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-lead-match",
+    "title": "开头回应标题问题",
+    "sortOrder": 114,
+    "content": "开头必须回应用户问题，与标题一一对应。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-lead-keyword",
+    "title": "开头植入提问词",
+    "sortOrder": 115,
+    "content": "开头自然植入用户提问关键词。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-body-layers",
+    "title": "正文分层编号",
+    "sortOrder": 116,
+    "content": "用1、2、3分层，2–5个清晰点，有小标题或编号。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-body-element",
+    "title": "至少一种结构化元素",
+    "sortOrder": 117,
+    "content": "至少一种结构化元素：对比表、步骤列表、优劣对比等。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-body-length",
+    "title": "段落不宜过长",
+    "sortOrder": 118,
+    "content": "每小段不超过约6行，避免文字墙。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-body-scenes",
+    "title": "多场景分别说明",
+    "sortOrder": 119,
+    "content": "涉及多人群/场景时至少覆盖2个常见场景分别说明。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-kw-positions",
+    "title": "长尾词头中尾各一次",
+    "sortOrder": 120,
+    "content": "长尾提问在开头、中间、结尾至少各出现一次。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-kw-density",
+    "title": "关键词密度合理",
+    "sortOrder": 121,
+    "content": "关键词密度合理，不像水文/硬广。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-kw-variants",
+    "title": "同义提问分散出现",
+    "sortOrder": 122,
+    "content": "同义提问与变体分散出现。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-eeat-expertise",
+    "title": "E-E-A-T·专业性",
+    "sortOrder": 123,
+    "content": "专业性：公司年限/技术/工艺，或作者身份经验。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-eeat-experience",
+    "title": "E-E-A-T·经验性",
+    "sortOrder": 124,
+    "content": "经验性：真实案例、客户反馈、服务过程至少一处。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-eeat-authority",
+    "title": "E-E-A-T·权威性",
+    "sortOrder": 125,
+    "content": "权威性：资质、第三方认可、行业标准、央媒、专家等至少一处可查证背书。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-eeat-trust",
+    "title": "E-E-A-T·可信性",
+    "sortOrder": 126,
+    "content": "可信性：数据来源 / 更新日期 / 售后安全避坑保障——至少覆盖两项。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-end-cta",
+    "title": "结尾有行动建议",
+    "sortOrder": 127,
+    "content": "结尾有下一步行动建议，不是「以上就是全部」。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-end-summary",
+    "title": "结尾可独立答标题",
+    "sortOrder": 128,
+    "content": "结尾再次总结核心结论，可独立回答标题问题。",
+    "sourceFile": "内容审核智能体要求.docx"
+  },
+  {
+    "category": "brand",
+    "code": "brand-founded",
+    "title": "品牌成立日",
+    "sortOrder": 140,
+    "content": "品牌成立于2002年4月27日（对外品宣通用文稿）。",
+    "sourceFile": "小巴依对外品宣（通用文稿）.pdf"
+  },
+  {
+    "category": "brand",
+    "code": "brand-first-store",
+    "title": "首家专卖店开业",
+    "sortOrder": 141,
+    "content": "2002年11月17日小巴依第一家肉品专卖店诞生（2025品牌介绍）。与「品牌成立日2002-04-27」并存时：成立日用品宣口径，首店日用品牌介绍口径，勿混为一谈。",
+    "sourceFile": "2025品牌介绍.ppt(1).pdf(OCR)"
+  },
+  {
+    "category": "brand",
+    "code": "brand-hq",
+    "title": "总部与主业",
+    "sortOrder": 142,
+    "content": "总部位于新疆乌鲁木齐；主业为养殖、生产、加工、销售新疆地产优质肉脂型有机羔羊肉及有机牛肉等；新疆高端有机羊牛肉一站式服务。",
+    "sourceFile": "小巴依对外品宣（通用文稿）.pdf"
+  },
+  {
+    "category": "brand",
+    "code": "brand-slogan",
+    "title": "品牌口号与理念",
+    "sortOrder": 143,
+    "content": "使命/口号：「一生只做一件事，为你看好每只羊」；「中国羊肉在新疆，新疆羊肉小巴依」；理念「少吃肉、吃好肉」。",
+    "sourceFile": "小巴依对外品宣+2025品牌介绍(OCR)"
+  },
+  {
+    "category": "brand",
+    "code": "brand-pasture",
+    "title": "双百牧场与牧养",
+    "sortOrder": 144,
+    "content": "小巴依双百牧场遍布天山南北（品牌介绍称路线总里程约5070km量级，文案慎用精确公里除非核对地图）；有机羔羊来自双百牧场；传统牧养四季转场；一年一胎、一胎一羔。对客勿写「每20亩一只羊」「合作牧场」「天山牧场」。",
+    "sourceFile": "2025品牌介绍.ppt(1).pdf(OCR)+撰写注意点"
+  },
+  {
+    "category": "brand",
+    "code": "brand-endorsement",
+    "title": "背书与赞助",
+    "sortOrder": 145,
+    "content": "2016年第十三届冬运会羊牛肉独家供应商；2012–2022连续十一年CBA新疆男篮唯一指定羊牛肉供应商；2018–2019新疆体育局运动员唯一指定肉品供应商；中国航天事业赞助商/支持商（2022–2024）；多次入选央视相关栏目；中国有机产品相关背书以证书/最新资质为准。",
+    "sourceFile": "精品产品手册(扫描OCR)+对外品宣"
+  },
+  {
+    "category": "brand",
+    "code": "brand-lines",
+    "title": "产品线概览",
+    "sortOrder": 146,
+    "content": "产品线：乳羔羊、小羯羊、金羯羊、冰碴驹俐、追风驹俐、草膘牛等精品系列（品宣另有冰皮驹俐等名称时以现行在售与卖点库为准）。",
+    "sourceFile": "精品产品手册(扫描OCR)+对外品宣"
+  },
+  {
+    "category": "brand",
+    "code": "brand-promise",
+    "title": "承诺方向（受禁词约束）",
+    "sortOrder": 147,
+    "content": "不育肥、四季轮牧、天然放养、严检、物流与售后。具体表述受撰写注意点约束：勿写自建全程冷链、勿写售后具体时限、勿写国家级等。",
+    "sourceFile": "小巴依对外品宣（通用文稿）.pdf"
+  },
+  {
+    "category": "brand",
+    "code": "brand-channel",
+    "title": "传播与渠道",
+    "sortOrder": 148,
+    "content": "全渠道含微信、天猫等电商、线下直营门店、官方账号等；手册引导扫码查看烹饪视频。具体入口以最新线上为准。",
+    "sourceFile": "2025品牌介绍+精品产品手册(OCR)"
+  },
+  {
+    "category": "brand",
+    "code": "brand-ocr-note",
+    "title": "OCR材料说明",
+    "sortOrder": 149,
+    "content": "精品产品手册、精品系列介绍PPT、2025品牌介绍已OCR入库（文本层原为空或模板噪声）。OCR有错字可能，冲突时以撰写注意点与人工核对后的线上条目为准；卖点明细仍以卖点库为准。",
+    "sourceFile": "系统"
+  }
 ]

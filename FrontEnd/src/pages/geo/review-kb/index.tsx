@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Modal, Tag, Tabs, Typography } from 'antd';
+import { App, Image, Modal, Tag, Tabs, Typography } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -11,11 +11,27 @@ import {
   deleteGeoReviewKbBatchApi,
   getGeoReviewKbCategoriesApi,
   getGeoReviewKbListApi,
-  seedGeoReviewKbApi,
   updateGeoReviewKbApi,
 } from '@/api/geo';
-import type { GeoReviewKb, GeoReviewKbCategory, GeoReviewKbStoreAttrs } from '@/types/geo';
+import type { GeoReviewKb, GeoReviewKbCategory, GeoReviewKbProductAttrs, GeoReviewKbStoreAttrs } from '@/types/geo';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
+import { resolveUploadUrl } from '@/utils/uploadUrl';
+
+/** 后端 hydrate 前/旧包：从 attrs JSON 兜底解析产品结构化字段 */
+function resolveProductAttrs(row: GeoReviewKb): GeoReviewKbProductAttrs | undefined {
+  if (row.productAttrs && (row.productAttrs.seriesCode || row.productAttrs.kind || row.productAttrs.imageUrl)) {
+    return row.productAttrs;
+  }
+  const raw = row.attrs;
+  if (!raw || typeof raw !== 'string') return row.productAttrs;
+  try {
+    const parsed = JSON.parse(raw) as GeoReviewKbProductAttrs;
+    if (parsed && typeof parsed === 'object') return { ...parsed, ...row.productAttrs };
+  } catch {
+    /* ignore */
+  }
+  return row.productAttrs;
+}
 
 const ReviewKbPage = memo(function ReviewKbPage() {
   const { message } = App.useApp();
@@ -32,29 +48,136 @@ const ReviewKbPage = memo(function ReviewKbPage() {
   }, []);
 
   const isStore = activeCategory === 'store';
-  const categoryOptions = useMemo(() => categories.map((c) => ({ label: c.name, value: c.code })), [categories]);
+  const isProduct = activeCategory === 'product';
   const activeMeta = useMemo(() => categories.find((c) => c.code === activeCategory), [categories, activeCategory]);
-
-  const categoryName = (code?: string) => categories.find((c) => c.code === code)?.name || code || '-';
 
   const columns: ProColumnType<GeoReviewKb>[] = [
     {
-      title: '分类',
-      dataIndex: 'category',
-      width: 140,
-      valueType: 'select',
-      hideInSearch: true,
-      hideInTable: isStore,
-      fieldProps: { options: categoryOptions, showSearch: true, optionFilterProp: 'label' },
-      formItemProps: { rules: [{ required: true, message: '请选择分类' }] },
-      render: (_, r) => categoryName(r.category),
-    },
-    {
-      title: isStore ? '门店名称' : '标题',
+      title: isStore ? '门店名称' : isProduct ? '产品/系列' : '标题',
       dataIndex: 'title',
       ellipsis: true,
-      width: 200,
-      formItemProps: { rules: [{ required: true, message: isStore ? '请填写门店名称' : '请填写标题' }] },
+      width: isProduct ? 160 : 200,
+      formItemProps: {
+        rules: [{ required: true, message: isStore ? '请填写门店名称' : isProduct ? '请填写产品名称' : '请填写标题' }],
+      },
+    },
+    {
+      title: '产品图',
+      dataIndex: ['productAttrs', 'imageUrl'],
+      width: 88,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      render: (_, r) => {
+        const url = resolveProductAttrs(r)?.imageUrl;
+        if (!url) return <Typography.Text type='secondary'>—</Typography.Text>;
+        return (
+          <Image
+            src={resolveUploadUrl(url)}
+            width={56}
+            height={56}
+            className='rounded object-cover'
+            preview={{ src: resolveUploadUrl(url) }}
+          />
+        );
+      },
+      fieldProps: { placeholder: '/uploads/geo/handbook/xxx.jpg' },
+    },
+    {
+      title: '系列',
+      dataIndex: ['productAttrs', 'seriesName'],
+      width: 120,
+      ellipsis: true,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      render: (_, r) => resolveProductAttrs(r)?.seriesName || '—',
+    },
+    {
+      title: '类型',
+      dataIndex: ['productAttrs', 'kind'],
+      width: 80,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      valueType: 'select',
+      fieldProps: {
+        options: [
+          { label: '系列口径', value: 'series' },
+          { label: 'SKU', value: 'sku' },
+        ],
+      },
+      render: (_, r) => {
+        const k = resolveProductAttrs(r)?.kind;
+        if (k === 'sku') return <Tag color='blue'>SKU</Tag>;
+        if (k === 'series') return <Tag>系列</Tag>;
+        return <Tag>口径</Tag>;
+      },
+    },
+    {
+      title: '净重',
+      dataIndex: ['productAttrs', 'netWeight'],
+      width: 80,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      render: (_, r) => resolveProductAttrs(r)?.netWeight || '—',
+    },
+    {
+      title: '毛重',
+      dataIndex: ['productAttrs', 'grossWeight'],
+      width: 80,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      render: (_, r) => resolveProductAttrs(r)?.grossWeight || '—',
+    },
+    {
+      title: '规格',
+      dataIndex: ['productAttrs', 'specJin'],
+      width: 90,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      render: (_, r) => resolveProductAttrs(r)?.specJin || '—',
+    },
+    {
+      title: '参考价',
+      dataIndex: ['productAttrs', 'priceYuan'],
+      width: 100,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      fieldProps: { placeholder: '以最新线上为准' },
+      render: (_, r) => resolveProductAttrs(r)?.priceYuan || '—',
+    },
+    {
+      title: '部位',
+      dataIndex: ['productAttrs', 'parts'],
+      ellipsis: true,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      width: 180,
+      render: (_, r) => resolveProductAttrs(r)?.parts || '—',
+    },
+    {
+      title: '手册页',
+      dataIndex: ['productAttrs', 'handbookPage'],
+      width: 72,
+      search: false,
+      hideInTable: !isProduct,
+      hideInForm: !isProduct,
+      valueType: 'digit',
+      render: (_, r) => resolveProductAttrs(r)?.handbookPage ?? '—',
+    },
+    {
+      title: '系列编码',
+      dataIndex: ['productAttrs', 'seriesCode'],
+      width: 110,
+      search: false,
+      hideInTable: true,
+      hideInForm: !isProduct,
     },
     {
       title: '营业时间',
@@ -104,7 +227,7 @@ const ReviewKbPage = memo(function ReviewKbPage() {
       dataIndex: 'content',
       search: false,
       hideInForm: true,
-      hideInTable: isStore,
+      hideInTable: isStore || isProduct,
       ellipsis: true,
       render: (_, r) => (
         <Typography.Text
@@ -133,9 +256,11 @@ const ReviewKbPage = memo(function ReviewKbPage() {
       hideInForm: isStore,
       fieldProps: {
         rows: 5,
-        placeholder: '一条一检查点/一规则/一品/一问，保持简短便于单独启停',
+        placeholder: isProduct
+          ? '系列口径正文；SKU 可留空由结构化字段拼装'
+          : '一条一检查点/一规则/一品/一问，保持简短便于单独启停',
       },
-      formItemProps: isStore ? undefined : { rules: [{ required: true, message: '请填写内容' }] },
+      formItemProps: isStore || isProduct ? undefined : { rules: [{ required: true, message: '请填写内容' }] },
     },
     {
       title: '排序',
@@ -219,7 +344,7 @@ const ReviewKbPage = memo(function ReviewKbPage() {
         columns={columns}
         headerTitle={activeMeta?.name || '内容审稿知识库'}
         params={{ category: activeCategory }}
-        scroll={{ x: isStore ? 1400 : 1280 }}
+        scroll={{ x: isProduct ? 1680 : isStore ? 1400 : 1280 }}
         search={{ labelWidth: 'auto', defaultCollapsed: true }}
         request={async (params) => {
           const enabled =
@@ -230,15 +355,18 @@ const ReviewKbPage = memo(function ReviewKbPage() {
                 : 1;
           const res = await getGeoReviewKbListApi({
             pageNum: params.current,
-            pageSize: params.pageSize,
+            pageSize: params.pageSize ?? (activeCategory === 'product' ? 100 : 20),
             category: (params.category as string) || activeCategory,
             title: params.title,
             enabled,
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
           });
-          currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
-          return { data: res.rows, success: true, total: res.total };
+          const rows = (res.rows || []).map((r) =>
+            r.category === 'product' ? { ...r, productAttrs: resolveProductAttrs(r) } : r,
+          );
+          currentPageKeysRef.current = new Set(rows.map((r) => r.id));
+          return { data: rows, success: true, total: res.total };
         }}
         rowSelection={{
           selectedRowKeys,
@@ -255,41 +383,6 @@ const ReviewKbPage = memo(function ReviewKbPage() {
           },
         }}
         toolBarRender={() => [
-          <PermissionButton
-            key='seed'
-            perm='geo:reviewKb:edit'
-            onClick={() => {
-              Modal.confirm({
-                title: '从系统种子补齐缺失条目',
-                content: '补齐原子条目与门店结构化字段，并删除旧整篇。不会覆盖你已改过的同编码正文。',
-                onOk: async () => {
-                  const n = await seedGeoReviewKbApi(false);
-                  message.success(n > 0 ? `已处理 ${n} 条` : '无需补齐');
-                  actionRef.current?.reload();
-                },
-              });
-            }}
-          >
-            同步种子
-          </PermissionButton>,
-          <PermissionButton
-            key='seed-force'
-            perm='geo:reviewKb:edit'
-            onClick={() => {
-              Modal.confirm({
-                title: '强制覆盖种子正文？',
-                content: '用系统种子覆盖同编码条目（含门店结构化字段），手工修改会丢失。',
-                okButtonProps: { danger: true },
-                onOk: async () => {
-                  const n = await seedGeoReviewKbApi(true);
-                  message.success(`已覆盖/处理 ${n} 条`);
-                  actionRef.current?.reload();
-                },
-              });
-            }}
-          >
-            强制覆盖种子
-          </PermissionButton>,
           <PermissionButton
             key='del'
             color='danger'
@@ -324,13 +417,25 @@ const ReviewKbPage = memo(function ReviewKbPage() {
               setOpen(true);
             }}
           >
-            {isStore ? '新增门店' : '新增条目'}
+            {isStore ? '新增门店' : isProduct ? '新增产品' : '新增条目'}
           </PermissionButton>,
         ]}
       />
       <TableModal
         readonly={false}
-        title={editing ? (isStore ? '编辑门店' : '编辑审稿知识') : isStore ? '新增门店' : '新增审稿知识'}
+        title={
+          editing
+            ? isStore
+              ? '编辑门店'
+              : isProduct
+                ? '编辑产品'
+                : '编辑审稿知识'
+            : isStore
+              ? '新增门店'
+              : isProduct
+                ? '新增产品'
+                : '新增审稿知识'
+        }
         columns={columns as any}
         open={open}
         onOpenChange={setOpen}
@@ -340,16 +445,19 @@ const ReviewKbPage = memo(function ReviewKbPage() {
                 ...editing,
                 enabled: Number(editing.enabled) === 1,
                 storeAttrs: editing.storeAttrs || {},
+                productAttrs: editing.productAttrs || {},
               }
             : {
                 category: activeCategory || 'writing_rule',
                 enabled: true,
                 sortOrder: 100,
                 storeAttrs: {},
+                productAttrs: isProduct ? { kind: 'sku' } : {},
               }
         }
         onFinish={async (values) => {
           const storeAttrs = (values.storeAttrs || {}) as GeoReviewKbStoreAttrs;
+          const productAttrs = (values.productAttrs || {}) as GeoReviewKbProductAttrs;
           const payload = {
             category: values.category || activeCategory,
             code: values.code,
@@ -362,6 +470,23 @@ const ReviewKbPage = memo(function ReviewKbPage() {
                   landline: storeAttrs.landline,
                   mobile: storeAttrs.mobile,
                   coverage: storeAttrs.coverage,
+                }
+              : undefined,
+            productAttrs: isProduct
+              ? {
+                  kind: productAttrs.kind,
+                  seriesCode: productAttrs.seriesCode,
+                  seriesName: productAttrs.seriesName,
+                  netWeight: productAttrs.netWeight,
+                  grossWeight: productAttrs.grossWeight,
+                  specJin: productAttrs.specJin,
+                  priceYuan: productAttrs.priceYuan,
+                  parts: productAttrs.parts,
+                  imageUrl: productAttrs.imageUrl,
+                  handbookPage:
+                    productAttrs.handbookPage != null && productAttrs.handbookPage !== ('' as any)
+                      ? Number(productAttrs.handbookPage)
+                      : undefined,
                 }
               : undefined,
             sortOrder: values.sortOrder != null ? Number(values.sortOrder) : 100,

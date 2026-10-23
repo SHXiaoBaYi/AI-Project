@@ -22,13 +22,16 @@ description: >-
 | `article_structure` | 原 `## 一…六` 下每条要点 → **一检查点一条**（含 E-E-A-T 四维拆开） |
 | `brand` | 品宣要点 → **一事实一条** |
 | `store` | **一门店一条**；详情在 `attrs`：`openHours` / `address` / `landline` / `mobile` / `coverage`，勿再塞进 content |
-| `product` | 系列/物流等 → **一主题一条** |
+| `product` | **系列口径一条 + 每个 SKU 一条**；SKU 的 `productAttrs`：`seriesCode`/`seriesName`/`netWeight`/`grossWeight`/`specJin`/`priceYuan`/`parts`/`imageUrl`/`handbookPage`；图存相对路径 `/uploads/geo/handbook/*.jpg`，前端 `resolveUploadUrl` 按环境拼 |
 | `faq` | **一问一条** |
 
 - 不要按源文件拆侧栏菜单；页面用分类 Tab。
-- 唯一种子：`geo-review-kb/atomic-seeds.json`；启动 `GeoReviewKbSeedRunner` 自动补齐并**删除**旧整篇编码。
+- 产品主数据校对表：`geo-review-kb/product-catalog.json`（手册页 ↔ 产品信息.pptx ↔ 系列PPT）；再生成进 `atomic-seeds.json`。
+- 唯一种子：`geo-review-kb/atomic-seeds.json`；启动 `GeoReviewKbSeedRunner` 自动补齐并**删除**旧整篇/旧汇总编码。
 - 表 `geo_review_kb`；接口 `/geo/review-kb`；预审 `buildReviewPromptContext()`。
-- 卖点在卖点库；扫描版 PDF 人工补录。材料：`GEO/内容审核智能体要求/`。
+- 扫描版 PDF：用 `OcrGeoReviewPdfMain`（Tess4J+PDFBox，chi_sim）全量 OCR → `_extracted/ocr/*.ocr.txt`，再人工校对写入 catalog/seeds。
+- 手册产品主图：从 OCR 页 PNG 裁主视觉 → `BackEnd/uploads/geo/handbook/`，并同步到生产同路径。
+- 卖点在卖点库。材料：`GEO/内容审核智能体要求/`。
 
 ## 改代码时注意
 

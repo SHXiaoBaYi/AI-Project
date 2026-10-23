@@ -35,6 +35,20 @@ export interface GeoReviewKbStoreAttrs {
   coverage?: string;
 }
 
+export interface GeoReviewKbProductAttrs {
+  kind?: 'series' | 'sku' | string;
+  seriesCode?: string;
+  seriesName?: string;
+  netWeight?: string;
+  grossWeight?: string;
+  specJin?: string;
+  priceYuan?: string;
+  parts?: string;
+  /** 落库相对路径 /uploads/...，前端用 resolveUploadUrl 按环境拼接 */
+  imageUrl?: string;
+  handbookPage?: number;
+}
+
 export interface GeoReviewKb {
   id: number;
   category: string;
@@ -43,6 +57,7 @@ export interface GeoReviewKb {
   content?: string;
   attrs?: string;
   storeAttrs?: GeoReviewKbStoreAttrs;
+  productAttrs?: GeoReviewKbProductAttrs;
   sortOrder?: number;
   enabled?: number;
   sourceFile?: string;

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.GeoReviewKbDTO;
+import com.base.admin.domain.dto.GeoReviewKbProductAttrs;
 import com.base.admin.domain.dto.GeoReviewKbQueryDTO;
 import com.base.admin.domain.dto.GeoReviewKbStoreAttrs;
 import com.base.admin.domain.entity.GeoReviewKb;
@@ -15,6 +16,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -46,13 +49,21 @@ public class GeoReviewKbService {
             "writing-notes", "stores", "products", "faq",
             "ai-friendly", "article-structure", "brand-promo",
             "as-01", "as-02", "as-03", "as-04", "as-05", "as-06",
-            "product-rugao", "product-logistics", "product-bingcha-old"
+            "product-rugao", "product-logistics", "product-bingcha-old",
+            "brand-scan-todo",
+            // 旧「系列一口径 + 规格汇总」已拆成 series + sku
+            "product-rugao-north", "product-rugao-south", "product-rugao-sku",
+            "product-xiaojie", "product-xiaojie-def", "product-xiaojie-sku",
+            "product-jinjie", "product-jinjie-sku",
+            "product-bingcha", "product-zhuifeng", "product-caobiao",
+            "product-yangxian", "product-shuanpian"
     );
 
     private static final String ATOMIC_SEEDS_PATH = "geo-review-kb/atomic-seeds.json";
 
     private final GeoReviewKbMapper kbMapper;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbc;
 
     private volatile boolean migrated;
 
@@ -70,7 +81,7 @@ public class GeoReviewKbService {
         QueryWrappers.applyCreateTimeRange(qw, query, GeoReviewKb::getCreateTime);
         Page<GeoReviewKb> page = kbMapper.selectPage(
                 new Page<>(query.getPageNum(), query.getPageSize()), qw);
-        page.getRecords().forEach(this::hydrateStoreAttrs);
+        page.getRecords().forEach(this::hydrateAttrs);
         return new PageResult<>(page.getTotal(), page.getRecords());
     }
 
@@ -154,9 +165,14 @@ public class GeoReviewKbService {
                 sb.append("\n## ").append(categoryLabel(cat)).append('\n');
                 lastCat = cat;
             }
-            String body = CAT_STORE.equals(cat)
-                    ? formatStoreLine(row.getTitle(), parseStoreAttrs(row.getAttrs()))
-                    : compactContent(row.getContent());
+            String body;
+            if (CAT_STORE.equals(cat)) {
+                body = formatStoreLine(row.getTitle(), parseStoreAttrs(row.getAttrs()));
+            } else if (CAT_PRODUCT.equals(cat)) {
+                body = formatProductLine(row.getTitle(), parseProductAttrs(row.getAttrs()), row.getContent());
+            } else {
+                body = compactContent(row.getContent());
+            }
             String block = "- **" + nz(row.getTitle()) + "**：" + body + "\n";
             if (sb.length() + block.length() > PROMPT_BUDGET) {
                 sb.append("\n（后续知识条目已省略，请以已列出的硬性口径为准）\n");
@@ -175,13 +191,14 @@ public class GeoReviewKbService {
     }
 
     private int upsertSeed(AtomicSeed seed, boolean forceUpdateContent) {
-        String attrsJson = writeAttrsJson(seed.attrs());
+        String attrsJson = seedAttrsJson(seed);
         String content = CAT_STORE.equals(seed.category())
                 ? composeStoreContent(seed.title(), seed.attrs())
-                : nz(seed.content());
-        GeoReviewKb existing = kbMapper.selectOne(new LambdaQueryWrapper<GeoReviewKb>()
-                .eq(GeoReviewKb::getCode, seed.code())
-                .last("LIMIT 1"));
+                : (CAT_PRODUCT.equals(seed.category()) && seed.productAttrs() != null
+                ? composeProductContent(seed.title(), seed.productAttrs(), seed.content())
+                : nz(seed.content()));
+        // 含逻辑删除行：uk_code 仍占用，MP 默认 select 看不到
+        GeoReviewKb existing = findByCodeIncludingDeleted(seed.code());
         if (existing == null) {
             GeoReviewKb row = new GeoReviewKb();
             row.setCategory(seed.category());
@@ -193,10 +210,22 @@ public class GeoReviewKbService {
             row.setEnabled(1);
             row.setSourceFile(seed.sourceFile() == null ? "" : seed.sourceFile());
             row.setRemark("系统种子");
-            kbMapper.insert(row);
-            return 1;
+            row.setIsActive(1);
+            try {
+                kbMapper.insert(row);
+            } catch (DuplicateKeyException e) {
+                existing = findByCodeIncludingDeleted(seed.code());
+                if (existing == null) {
+                    throw e;
+                }
+            }
+            if (existing == null) {
+                return 1;
+            }
         }
-        if (forceUpdateContent) {
+        boolean systemRow = "系统种子".equals(existing.getRemark());
+        if (forceUpdateContent || systemRow) {
+            // 未改备注的系统种子允许同步刷新正文；手工改过备注的条目跳过，避免冲掉运营修改
             existing.setTitle(seed.title());
             existing.setContent(content);
             existing.setAttrs(attrsJson);
@@ -204,32 +233,135 @@ public class GeoReviewKbService {
             existing.setSortOrder(seed.sortOrder());
             existing.setSourceFile(seed.sourceFile() == null ? "" : seed.sourceFile());
             existing.setEnabled(1);
-            kbMapper.updateById(existing);
+            existing.setIsActive(1);
+            if (!StringUtils.hasText(existing.getRemark())) {
+                existing.setRemark("系统种子");
+            }
+            reviveOrUpdate(existing);
             return 1;
         }
-        // 门店缺结构化 attrs 时补齐（不覆盖已有 attrs）
-        if (CAT_STORE.equals(seed.category()) && !StringUtils.hasText(existing.getAttrs()) && StringUtils.hasText(attrsJson)) {
+        // 门店缺 attrs 时补齐；产品在缺 attrs 或缺少系列结构化字段时补齐（不冲掉运营改过的备注行正文以外的手工 attrs 若已完整）
+        if (CAT_STORE.equals(seed.category())
+                && !StringUtils.hasText(existing.getAttrs()) && StringUtils.hasText(attrsJson)) {
             existing.setAttrs(attrsJson);
             existing.setContent(content);
             existing.setEnabled(1);
-            kbMapper.updateById(existing);
+            existing.setIsActive(1);
+            reviveOrUpdate(existing);
             return 1;
         }
-        if (existing.getEnabled() == null || existing.getEnabled() == 0) {
+        if (CAT_PRODUCT.equals(seed.category()) && StringUtils.hasText(attrsJson)
+                && productAttrsNeedSync(existing.getAttrs(), attrsJson)) {
+            existing.setAttrs(attrsJson);
+            if (!StringUtils.hasText(existing.getContent()) || "系统种子".equals(existing.getRemark())) {
+                existing.setContent(content);
+            }
+            existing.setTitle(seed.title());
+            existing.setSortOrder(seed.sortOrder());
             existing.setEnabled(1);
-            kbMapper.updateById(existing);
+            existing.setIsActive(1);
+            reviveOrUpdate(existing);
+            return 1;
+        }
+        if (existing.getEnabled() == null || existing.getEnabled() == 0
+                || existing.getIsActive() == null || existing.getIsActive() == 0) {
+            existing.setEnabled(1);
+            existing.setIsActive(1);
+            reviveOrUpdate(existing);
             return 1;
         }
         return 0;
     }
 
-    private int purgeLegacyCodes() {
-        int n = kbMapper.delete(new LambdaQueryWrapper<GeoReviewKb>()
-                .in(GeoReviewKb::getCode, LEGACY_CODES));
-        if (n > 0) {
-            log.info("已删除旧整篇审稿知识 {} 条：{}", n, LEGACY_CODES);
+    private String seedAttrsJson(AtomicSeed seed) {
+        if (CAT_STORE.equals(seed.category())) {
+            return writeStoreAttrsJson(seed.attrs());
         }
-        return n;
+        if (CAT_PRODUCT.equals(seed.category())) {
+            return writeProductAttrsJson(seed.productAttrs());
+        }
+        return null;
+    }
+
+    /** 产品 attrs 为空、或缺少系列/图片等关键结构化字段时需要从种子同步 */
+    private static boolean productAttrsNeedSync(String existingAttrs, String seedAttrsJson) {
+        if (!StringUtils.hasText(existingAttrs)) {
+            return true;
+        }
+        String ex = existingAttrs;
+        // 旧产品行只有正文、没有 seriesCode/kind
+        if (!ex.contains("\"seriesCode\"") && seedAttrsJson.contains("\"seriesCode\"")) {
+            return true;
+        }
+        if (!ex.contains("\"kind\"") && seedAttrsJson.contains("\"kind\"")) {
+            return true;
+        }
+        if (!ex.contains("\"imageUrl\"") && seedAttrsJson.contains("\"imageUrl\"")) {
+            return true;
+        }
+        return false;
+    }
+
+    private GeoReviewKb findByCodeIncludingDeleted(String code) {
+        List<GeoReviewKb> rows = jdbc.query(
+                """
+                        SELECT id, category, code, title, content, attrs, sort_order, enabled, source_file, remark,
+                               create_by, create_time, update_by, update_time, is_active
+                        FROM geo_review_kb WHERE code = ? LIMIT 1
+                        """,
+                (rs, i) -> {
+                    GeoReviewKb row = new GeoReviewKb();
+                    row.setId(rs.getLong("id"));
+                    row.setCategory(rs.getString("category"));
+                    row.setCode(rs.getString("code"));
+                    row.setTitle(rs.getString("title"));
+                    row.setContent(rs.getString("content"));
+                    row.setAttrs(rs.getString("attrs"));
+                    row.setSortOrder(rs.getInt("sort_order"));
+                    row.setEnabled(rs.getInt("enabled"));
+                    row.setSourceFile(rs.getString("source_file"));
+                    row.setRemark(rs.getString("remark"));
+                    row.setCreateBy(rs.getString("create_by"));
+                    row.setUpdateBy(rs.getString("update_by"));
+                    row.setIsActive(rs.getInt("is_active"));
+                    return row;
+                },
+                code);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    private void reviveOrUpdate(GeoReviewKb existing) {
+        if (existing.getId() == null) {
+            kbMapper.updateById(existing);
+            return;
+        }
+        // 直接按主键写回，恢复软删行
+        jdbc.update("""
+                        UPDATE geo_review_kb
+                        SET category=?, title=?, content=?, attrs=?, sort_order=?, enabled=?,
+                            source_file=?, remark=?, is_active=1, update_time=NOW()
+                        WHERE id=?
+                        """,
+                existing.getCategory(),
+                existing.getTitle(),
+                existing.getContent(),
+                existing.getAttrs(),
+                existing.getSortOrder(),
+                existing.getEnabled(),
+                existing.getSourceFile(),
+                existing.getRemark(),
+                existing.getId());
+    }
+
+    private int purgeLegacyCodes() {
+        // 物理删旧整篇，避免软删后 uk_code 挡新种子
+        String placeholders = String.join(",", LEGACY_CODES.stream().map(c -> "?").toList());
+        Object[] args = LEGACY_CODES.toArray();
+        int deleted = jdbc.update("DELETE FROM geo_review_kb WHERE code IN (" + placeholders + ")", args);
+        if (deleted > 0) {
+            log.info("已物理删除旧整篇审稿知识 {} 条：{}", deleted, LEGACY_CODES);
+        }
+        return deleted;
     }
 
     private List<AtomicSeed> loadAtomicSeeds() {
@@ -274,9 +406,19 @@ public class GeoReviewKbService {
             if (!hasAnyStoreField(store)) {
                 throw new BusinessException("门店请至少填写营业时间、地址、电话或覆盖范围之一");
             }
-            row.setAttrs(writeAttrsJson(store));
+            row.setAttrs(writeStoreAttrsJson(store));
             row.setContent(composeStoreContent(dto.getTitle().trim(), store));
             row.setStoreAttrs(store);
+            row.setProductAttrs(null);
+        } else if (CAT_PRODUCT.equals(category)) {
+            GeoReviewKbProductAttrs product = normalizeProductAttrs(dto.getProductAttrs());
+            if (!hasAnyProductField(product) && !StringUtils.hasText(dto.getContent())) {
+                throw new BusinessException("产品请填写系列/规格信息或内容");
+            }
+            row.setAttrs(writeProductAttrsJson(product));
+            row.setContent(composeProductContent(dto.getTitle().trim(), product, dto.getContent()));
+            row.setProductAttrs(product);
+            row.setStoreAttrs(null);
         } else {
             if (!StringUtils.hasText(dto.getContent())) {
                 throw new BusinessException("内容不能为空");
@@ -284,6 +426,7 @@ public class GeoReviewKbService {
             row.setContent(dto.getContent());
             row.setAttrs(null);
             row.setStoreAttrs(null);
+            row.setProductAttrs(null);
         }
         row.setSortOrder(dto.getSortOrder() == null ? 100 : dto.getSortOrder());
         row.setEnabled(dto.getEnabled() == null || dto.getEnabled() != 0 ? 1 : 0);
@@ -291,9 +434,14 @@ public class GeoReviewKbService {
         row.setRemark(dto.getRemark() == null ? "" : dto.getRemark().trim());
     }
 
-    private void hydrateStoreAttrs(GeoReviewKb row) {
-        if (row != null && CAT_STORE.equals(row.getCategory())) {
+    private void hydrateAttrs(GeoReviewKb row) {
+        if (row == null) {
+            return;
+        }
+        if (CAT_STORE.equals(row.getCategory())) {
             row.setStoreAttrs(parseStoreAttrs(row.getAttrs()));
+        } else if (CAT_PRODUCT.equals(row.getCategory())) {
+            row.setProductAttrs(parseProductAttrs(row.getAttrs()));
         }
     }
 
@@ -309,7 +457,19 @@ public class GeoReviewKbService {
         }
     }
 
-    private String writeAttrsJson(GeoReviewKbStoreAttrs attrs) {
+    private GeoReviewKbProductAttrs parseProductAttrs(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, GeoReviewKbProductAttrs.class);
+        } catch (Exception e) {
+            log.warn("解析产品 attrs 失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String writeStoreAttrsJson(GeoReviewKbStoreAttrs attrs) {
         if (attrs == null || !hasAnyStoreField(attrs)) {
             return null;
         }
@@ -317,6 +477,17 @@ public class GeoReviewKbService {
             return objectMapper.writeValueAsString(normalizeStoreAttrs(attrs));
         } catch (Exception e) {
             throw new BusinessException("门店结构化字段序列化失败");
+        }
+    }
+
+    private String writeProductAttrsJson(GeoReviewKbProductAttrs attrs) {
+        if (attrs == null || !hasAnyProductField(attrs)) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(normalizeProductAttrs(attrs));
+        } catch (Exception e) {
+            throw new BusinessException("产品结构化字段序列化失败");
         }
     }
 
@@ -389,6 +560,94 @@ public class GeoReviewKbService {
         return parts.isEmpty() ? nz(title) : String.join("｜", parts);
     }
 
+    private static GeoReviewKbProductAttrs normalizeProductAttrs(GeoReviewKbProductAttrs raw) {
+        GeoReviewKbProductAttrs a = raw == null ? new GeoReviewKbProductAttrs() : raw;
+        GeoReviewKbProductAttrs out = new GeoReviewKbProductAttrs();
+        out.setKind(trimToNull(a.getKind()));
+        out.setSeriesCode(trimToNull(a.getSeriesCode()));
+        out.setSeriesName(trimToNull(a.getSeriesName()));
+        out.setNetWeight(trimToNull(a.getNetWeight()));
+        out.setGrossWeight(trimToNull(a.getGrossWeight()));
+        out.setSpecJin(trimToNull(a.getSpecJin()));
+        out.setPriceYuan(trimToNull(a.getPriceYuan()));
+        out.setParts(trimToNull(a.getParts()));
+        out.setImageUrl(trimToNull(a.getImageUrl()));
+        out.setHandbookPage(a.getHandbookPage());
+        return out;
+    }
+
+    private static boolean hasAnyProductField(GeoReviewKbProductAttrs a) {
+        if (a == null) {
+            return false;
+        }
+        return StringUtils.hasText(a.getKind())
+                || StringUtils.hasText(a.getSeriesCode())
+                || StringUtils.hasText(a.getSeriesName())
+                || StringUtils.hasText(a.getNetWeight())
+                || StringUtils.hasText(a.getGrossWeight())
+                || StringUtils.hasText(a.getSpecJin())
+                || StringUtils.hasText(a.getPriceYuan())
+                || StringUtils.hasText(a.getParts())
+                || StringUtils.hasText(a.getImageUrl())
+                || a.getHandbookPage() != null;
+    }
+
+    private static String composeProductContent(String title, GeoReviewKbProductAttrs raw, String fallback) {
+        GeoReviewKbProductAttrs a = normalizeProductAttrs(raw);
+        if ("series".equalsIgnoreCase(nz(a.getKind())) && StringUtils.hasText(fallback)) {
+            return fallback.trim();
+        }
+        List<String> bits = new ArrayList<>();
+        if (StringUtils.hasText(a.getSeriesName())) {
+            bits.add("系列 " + a.getSeriesName());
+        }
+        if (StringUtils.hasText(a.getSpecJin())) {
+            bits.add("规格 " + a.getSpecJin());
+        }
+        if (StringUtils.hasText(a.getNetWeight())) {
+            bits.add("净重 " + a.getNetWeight());
+        }
+        if (StringUtils.hasText(a.getGrossWeight())) {
+            bits.add("毛重 " + a.getGrossWeight());
+        }
+        if (StringUtils.hasText(a.getPriceYuan())) {
+            bits.add("参考价 " + a.getPriceYuan() + "（以最新线上为准）");
+        }
+        if (StringUtils.hasText(a.getParts())) {
+            bits.add("部位：" + a.getParts());
+        }
+        if (!bits.isEmpty()) {
+            return String.join("；", bits);
+        }
+        if (StringUtils.hasText(fallback)) {
+            return fallback.trim();
+        }
+        return nz(title);
+    }
+
+    private static String formatProductLine(String title, GeoReviewKbProductAttrs a, String content) {
+        if (a == null) {
+            return compactContent(content);
+        }
+        List<String> parts = new ArrayList<>();
+        if (StringUtils.hasText(a.getSeriesName())) {
+            parts.add(a.getSeriesName());
+        }
+        if (StringUtils.hasText(a.getSpecJin())) {
+            parts.add(a.getSpecJin());
+        }
+        if (StringUtils.hasText(a.getNetWeight())) {
+            parts.add("净重" + a.getNetWeight());
+        }
+        if (StringUtils.hasText(a.getPriceYuan())) {
+            parts.add("参考价" + a.getPriceYuan());
+        }
+        if (parts.isEmpty()) {
+            return compactContent(content);
+        }
+        return String.join("｜", parts);
+    }
+
     private static String normalizeCategory(String raw) {
         String c = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
         return switch (c) {
@@ -444,7 +703,8 @@ public class GeoReviewKbService {
             int sortOrder,
             String content,
             String sourceFile,
-            GeoReviewKbStoreAttrs attrs
+            GeoReviewKbStoreAttrs attrs,
+            GeoReviewKbProductAttrs productAttrs
     ) {
     }
 }

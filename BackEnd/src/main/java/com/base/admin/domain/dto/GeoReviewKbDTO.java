@@ -28,6 +28,9 @@ public class GeoReviewKbDTO {
     @Schema(description = "门店结构化详情（category=store 时使用）")
     private GeoReviewKbStoreAttrs storeAttrs;
 
+    @Schema(description = "产品结构化详情（category=product 时使用）")
+    private GeoReviewKbProductAttrs productAttrs;
+
     @Schema(description = "排序", example = "10")
     private Integer sortOrder;
 

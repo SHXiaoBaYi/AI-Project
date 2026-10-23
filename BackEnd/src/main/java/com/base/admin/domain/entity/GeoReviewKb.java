@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.base.admin.common.BaseEntity;
+import com.base.admin.domain.dto.GeoReviewKbProductAttrs;
 import com.base.admin.domain.dto.GeoReviewKbStoreAttrs;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -32,12 +33,16 @@ public class GeoReviewKb extends BaseEntity {
     @Schema(description = "正文 Markdown；门店可由 attrs 拼装")
     private String content;
 
-    @Schema(description = "分类扩展 JSON，门店存营业时间/地址/电话等")
+    @Schema(description = "分类扩展 JSON：门店营业信息 / 产品系列与SKU")
     private String attrs;
 
     @TableField(exist = false)
     @Schema(description = "门店结构化字段（由 attrs 解析，仅 store 分类）")
     private GeoReviewKbStoreAttrs storeAttrs;
+
+    @TableField(exist = false)
+    @Schema(description = "产品结构化字段（由 attrs 解析，仅 product 分类）")
+    private GeoReviewKbProductAttrs productAttrs;
 
     @Schema(description = "排序，越小越靠前", example = "10")
     private Integer sortOrder;
