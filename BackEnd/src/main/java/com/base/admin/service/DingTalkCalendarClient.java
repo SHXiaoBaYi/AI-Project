@@ -181,8 +181,9 @@ public class DingTalkCalendarClient {
     }
 
     /**
-     * 群 Markdown；{@code atUserIds} 写入正文 {@code @userid}（钉钉 @ 协议必须用 userid）。
-     * {@code atLabels} 可选，与 atUserIds 对齐，展示为人名：{@code @userid（张三）}。
+     * 群消息并 @ 人。正文只写 {@code @userid }（钉钉协议），不要拼 {@code @userid（姓名）}，否则无法真正 @ 到人。
+     * 客户端会把合法 {@code @userid} 渲染成人名。有 @ 时用 sampleText（官方：Markdown @ 不支持高亮触达）。
+     * {@code atLabels} 已废弃，保留参数兼容旧调用。
      * 若被 @ 的人不在群里，钉钉通常仍返回成功但无法真正触达，调用方需自行兜底。
      */
     public NoticeCall sendRobotGroupMarkdown(String openConversationId, String title, String text,
@@ -203,38 +204,35 @@ public class DingTalkCalendarClient {
             if (cred == null || !StringUtils.hasText(cred.clientId())) {
                 return NoticeCall.fail("钉钉 ClientId 未配置，无法发群消息");
             }
-            StringBuilder md = new StringBuilder();
+            boolean hasAt = false;
+            StringBuilder atPrefix = new StringBuilder();
             if (atUserIds != null) {
-                for (int i = 0; i < atUserIds.size(); i++) {
-                    String uid = atUserIds.get(i);
+                for (String uid : atUserIds) {
                     if (!StringUtils.hasText(uid)) {
                         continue;
                     }
-                    md.append('@').append(uid.trim());
-                    if (atLabels != null && i < atLabels.size() && StringUtils.hasText(atLabels.get(i))) {
-                        String label = atLabels.get(i).trim();
-                        // 避免人名与 userid 相同时重复括号
-                        if (!label.equals(uid.trim())) {
-                            md.append('（').append(label).append('）');
-                        }
-                    }
-                    md.append(' ');
+                    // 仅 @userid + 空格；紧跟中文括号/姓名会打断钉钉 @ 解析，变成纯文本
+                    atPrefix.append('@').append(uid.trim()).append(' ');
+                    hasAt = true;
                 }
-                if (!md.isEmpty()) {
-                    md.append("  \n");
-                }
-            }
-            if (StringUtils.hasText(text)) {
-                md.append(text);
             }
             String token = accessToken(cred);
             ObjectNode body = objectMapper.createObjectNode();
             body.put("robotCode", cred.clientId().trim());
             body.put("openConversationId", openConversationId.trim());
-            body.put("msgKey", "sampleMarkdown");
             ObjectNode param = objectMapper.createObjectNode();
-            param.put("title", StringUtils.hasText(title) ? title : "告警");
-            param.put("text", md.toString());
+            if (hasAt) {
+                // sampleText 才能稳定 @ 到人；正文里已有「创建人：姓名」可读信息
+                String plain = (StringUtils.hasText(text) ? text : "").replace("  \n", "\n");
+                String content = atPrefix + (StringUtils.hasText(title) ? title + "\n" : "") + plain;
+                body.put("msgKey", "sampleText");
+                param.put("content", content);
+            } else {
+                String md = StringUtils.hasText(text) ? text : "";
+                body.put("msgKey", "sampleMarkdown");
+                param.put("title", StringUtils.hasText(title) ? title : "告警");
+                param.put("text", md);
+            }
             body.put("msgParam", objectMapper.writeValueAsString(param));
             apiPost(token, "https://api.dingtalk.com/v1.0/robot/groupMessages/send", body);
             return NoticeCall.ok(false);

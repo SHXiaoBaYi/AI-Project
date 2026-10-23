@@ -1109,9 +1109,9 @@ public class LinkMonitorService {
             // 手动探测：群 + @创建人；否则兜底 wangfangyang
             if (isGroup) {
                 List<String> atList = StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of();
-                List<String> atLabels = StringUtils.hasText(atUserId) ? List.of(creatorName) : List.of();
+                // 正文只 @userid，勿拼（姓名），否则钉钉无法真正 @ 到人
                 DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
-                        conversationId, "链接监控告警", content.replace("\n", "  \n"), atList, atLabels);
+                        conversationId, "链接监控告警", content.replace("\n", "  \n"), atList);
                 String targetLabel = StringUtils.hasText(groupTitle)
                         ? (groupTitle + "|" + conversationId)
                         : conversationId;
@@ -1139,9 +1139,8 @@ public class LinkMonitorService {
         } else if (isGroup) {
             // 定时：告警推回当初添加监控的群，并通知创建人
             List<String> atList = StringUtils.hasText(atUserId) ? List.of(atUserId) : List.of();
-            List<String> atLabels = StringUtils.hasText(atUserId) ? List.of(creatorName) : List.of();
             DingTalkCalendarClient.NoticeCall groupCall = dingTalkCalendarClient.sendRobotGroupMarkdown(
-                    conversationId, "链接监控告警", content.replace("\n", "  \n"), atList, atLabels);
+                    conversationId, "链接监控告警", content.replace("\n", "  \n"), atList);
             String targetLabel = StringUtils.hasText(groupTitle)
                     ? (groupTitle + "|" + conversationId)
                     : conversationId;
