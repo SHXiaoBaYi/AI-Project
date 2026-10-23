@@ -36,8 +36,10 @@ description: >-
 ## 改代码时注意
 
 1. 改口径 → 改线上单条或改 `atomic-seeds.json` 后强制覆盖。
-2. 预审逻辑 → `GeoContentReviewAiServiceImpl`；冲突以撰写注意点为准。
-3. **禁止**再把整篇 Markdown（含多个 `##`）存成一条；操作列仍第一列左固定。
+2. 预审逻辑 → `GeoContentReviewAiServiceImpl`（提审后 `enqueueAfterSubmit`）；冲突以撰写注意点为准。
+3. **成文** → `GeoArticlePipelineService`：卖点库 + **审稿知识库硬性口径**双封闭世界；流式写稿推 `draftHtml` 供 Lake 打字机；高置信杜撰句式有兜底擦除。
+4. **成文后预检** → `POST /geo/content-write/ai/precheck`（`precheckDraft`）：对照审稿库同步跑一轮，不落审核轮次；前端生成完成后弹出风险列表。
+5. **禁止**再把整篇 Markdown（含多个 `##`）存成一条；操作列仍第一列左固定。
 
 ## 硬性口径摘要（勿与知识库冲突时自行发挥）
 

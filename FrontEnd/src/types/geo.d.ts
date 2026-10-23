@@ -1084,6 +1084,10 @@ export interface GeoAiGenerateJob {
   currentCode?: string;
   currentMessage?: string;
   stages?: GeoPipelineStage[];
+  /** 流式撰写中的标题草稿 */
+  draftTitle?: string;
+  /** 流式撰写中的 HTML 草稿（打字机预览） */
+  draftHtml?: string;
   result?: GeoContentAiGenerateResult;
 }
 

@@ -1,5 +1,6 @@
 package com.base.admin.service;
 
+import com.base.admin.domain.dto.GeoContentAiPrecheckDTO;
 import com.base.admin.domain.dto.GeoContentReviewAiBatchDTO;
 import com.base.admin.domain.dto.GeoContentReviewAiFeedbackDTO;
 import com.base.admin.domain.vo.GeoContentReviewAiVO;
@@ -13,6 +14,12 @@ public interface GeoContentReviewAiService {
 
     /** 提审后触发；规则关闭或 AI 不可用时静默跳过 */
     void enqueueAfterSubmit(Long reviewId);
+
+    /**
+     * 成文后草稿预检：对照审稿知识库同步跑一轮，不创建审核轮次、不落库。
+     * 供撰写抽屉在 AI 生成完成后立刻展示杜撰/口径风险。
+     */
+    GeoContentReviewAiVO precheckDraft(GeoContentAiPrecheckDTO dto);
 
     /** 查询本轮最新 AI 预审（含规则侧 block/mode） */
     GeoContentReviewAiVO getByReviewId(Long reviewId);

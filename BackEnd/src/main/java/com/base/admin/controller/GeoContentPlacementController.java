@@ -45,6 +45,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -55,6 +56,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -238,7 +240,7 @@ public class GeoContentPlacementController {
         return Result.ok(contentPlacementService.generateArticle(dto));
     }
 
-    @Operation(summary = "异步启动 AI 生成文章（立即返回 jobId，轮询进度）")
+    @Operation(summary = "异步启动 AI 生成文章（立即返回 jobId，配合 SSE 订阅进度）")
     @PostMapping("/articles/ai-generate/start")
     @RequiresPermission({"geo:content:work", "geo:content:edit", "geo:write:mine"})
     @Log(title = "GEO内容投放-AI生成文章(异步)", businessType = 1)
@@ -246,11 +248,18 @@ public class GeoContentPlacementController {
         return Result.ok(aiGenerateJobService.start(dto));
     }
 
-    @Operation(summary = "查询 AI 生成文章任务进度")
+    @Operation(summary = "查询 AI 生成文章任务进度（兜底；优先用 SSE）")
     @GetMapping("/articles/ai-generate/jobs/{jobId}")
     @RequiresPermission({"geo:content:work", "geo:content:edit", "geo:write:mine"})
     public Result<GeoAiGenerateJobVO> aiGenerateArticleJob(@PathVariable String jobId) {
         return Result.ok(aiGenerateJobService.get(jobId));
+    }
+
+    @Operation(summary = "SSE 订阅 AI 生成进度与打字机草稿")
+    @GetMapping(value = "/articles/ai-generate/jobs/{jobId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RequiresPermission({"geo:content:work", "geo:content:edit", "geo:write:mine"})
+    public SseEmitter aiGenerateArticleJobStream(@PathVariable String jobId) {
+        return aiGenerateJobService.subscribe(jobId);
     }
 
     @Operation(summary = "预览相似目标问题，不落库")

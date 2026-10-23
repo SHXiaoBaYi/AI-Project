@@ -576,6 +576,13 @@ export function batchGeoContentReviewAiApi(data: { reviewIds: number[] }) {
   return request.post<unknown, number>('/geo/content-write/review/ai/batch', data);
 }
 
+/** 成文后草稿预检（对照审稿知识库，不落审核轮次） */
+export function precheckGeoContentDraftApi(data: { placementId: number; title?: string; body: string }) {
+  return request.post<unknown, GeoContentReviewAi>('/geo/content-write/ai/precheck', data, {
+    timeout: 180000,
+  });
+}
+
 export function getGeoContentReviewCompareApi(placementId: number) {
   return request.get<unknown, GeoContentReviewCompare>(`/geo/content-write/placement/${placementId}/review-compare`);
 }
@@ -709,7 +716,7 @@ export function aiGenerateGeoContentArticleApi(data: {
   });
 }
 
-/** 异步启动 AI 生成，立即返回 jobId；配合 getAiGenerateJobApi 轮询进度 */
+/** 异步启动 AI 生成，立即返回 jobId；配合 streamAiGenerateJobApi（SSE）收进度与打字机草稿 */
 export function startAiGenerateGeoContentArticleApi(data: {
   placementId: number;
   itemId?: number | null;
@@ -721,6 +728,113 @@ export function startAiGenerateGeoContentArticleApi(data: {
 
 export function getAiGenerateJobApi(jobId: string) {
   return request.get<unknown, GeoAiGenerateJob>(`/geo/content-placement/articles/ai-generate/jobs/${jobId}`);
+}
+
+/**
+ * SSE 订阅生成进度。使用 fetch + Authorization（EventSource 无法带 Bearer）。
+ * 事件：progress（阶段/草稿）、done（成功）、error（失败）。
+ */
+export async function streamAiGenerateJobApi(
+  jobId: string,
+  handlers: {
+    onProgress?: (job: GeoAiGenerateJob) => void;
+    onDone?: (job: GeoAiGenerateJob) => void;
+    onError?: (message: string) => void;
+  },
+  signal?: AbortSignal,
+): Promise<GeoAiGenerateJob> {
+  const res = await fetch(withBase(`/api/geo/content-placement/articles/ai-generate/jobs/${jobId}/stream`), {
+    method: 'GET',
+    headers: {
+      Accept: 'text/event-stream',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const tip = res.status === 401 ? '登录已失效' : `SSE 连接失败（HTTP ${res.status}）`;
+    throw new Error(tip);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let lastJob: GeoAiGenerateJob | null = null;
+  let eventName = 'message';
+  let dataLines: string[] = [];
+
+  const flushEvent = () => {
+    if (dataLines.length === 0) {
+      eventName = 'message';
+      return;
+    }
+    const raw = dataLines.join('\n').trim();
+    dataLines = [];
+    const name = eventName || 'message';
+    eventName = 'message';
+    if (!raw) return;
+    let job: GeoAiGenerateJob;
+    try {
+      job = JSON.parse(raw) as GeoAiGenerateJob;
+    } catch {
+      return;
+    }
+    lastJob = job;
+    if (name === 'done') {
+      handlers.onDone?.(job);
+      return;
+    }
+    if (name === 'error') {
+      handlers.onError?.(job.currentMessage || 'AI 生成失败');
+      handlers.onProgress?.(job);
+      return;
+    }
+    handlers.onProgress?.(job);
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split(/\r?\n/);
+    buffer = parts.pop() ?? '';
+    for (const line of parts) {
+      if (line === '') {
+        flushEvent();
+        continue;
+      }
+      if (line.startsWith(':')) {
+        continue;
+      }
+      if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim();
+        continue;
+      }
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+  }
+  flushEvent();
+
+  if (!lastJob) {
+    throw new Error('SSE 未返回任务结果');
+  }
+  if (lastJob.status === 'FAILED') {
+    throw new Error(lastJob.currentMessage || 'AI 生成失败');
+  }
+  if (lastJob.status !== 'SUCCESS' || !lastJob.result) {
+    // 连接中断时兜底拉一次快照
+    const fallback = await getAiGenerateJobApi(jobId);
+    if (fallback.status === 'FAILED') {
+      throw new Error(fallback.currentMessage || 'AI 生成失败');
+    }
+    if (fallback.status !== 'SUCCESS' || !fallback.result) {
+      throw new Error(fallback.currentMessage || '生成未完成或连接中断');
+    }
+    return fallback;
+  }
+  return lastJob;
 }
 
 export function getGeoMediaListApi(

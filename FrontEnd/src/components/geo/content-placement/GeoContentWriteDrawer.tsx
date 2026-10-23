@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Drawer, Input, Modal, Segmented, Select, Space, Spin, Steps, Tag, Typography, message } from 'antd';
+import { Button, Drawer, Input, Modal, Segmented, Select, Space, Spin, Tag, Typography, message } from 'antd';
 import { LakexEditorHost, type LakexEditorHostHandle } from '@/components/lakex/LakexEditorHost';
-import { prefetchLakexAssets } from '@/components/lakex/loadLakexAssets';
+import { ensureLakexAntdCss, prefetchLakexAssets, removeLakexAntdCss } from '@/components/lakex/loadLakexAssets';
 import {
   addGeoContentArticleOpinionApi,
   addGeoContentPlatformArticleApi,
   addGeoContentReviewAnnotationApi,
-  getAiGenerateJobApi,
   startAiGenerateGeoContentArticleApi,
+  streamAiGenerateJobApi,
   deleteGeoContentReviewAnnotationApi,
   getGeoAiProvidersApi,
   getGeoContentArticleBundleApi,
   getGeoContentReviewCompareApi,
   getGeoPlatformOptionsApi,
   decideGeoContentReviewApi,
+  precheckGeoContentDraftApi,
   saveGeoContentDraftApi,
   saveGeoContentItemDraftApi,
   uploadGeoScreenshotApi,
@@ -29,11 +30,13 @@ import { GEO_PLATFORM_TYPE_CONTENT } from '@/constants/geo';
 import type {
   GeoContentArticle,
   GeoContentArticleBundle,
+  GeoContentReviewAi,
   GeoContentReviewAnnotation,
   GeoContentReviewRound,
   GeoPipelineStage,
   GeoPlatform,
 } from '@/types/geo';
+import './geo-ai-generate-modal.css';
 
 type ReviewPane = 'annotate' | 'body';
 
@@ -49,6 +52,7 @@ const AI_PIPELINE_STEPS = [
   { key: 'style', title: '加载风格' },
   { key: 'sell', title: '召回卖点' },
   { key: 'media', title: '召回素材' },
+  { key: 'guard', title: '加载审稿口径' },
   { key: 'write', title: '撰写正文' },
   { key: 'brand', title: '品牌轻补' },
   { key: 'illustrate', title: '智能插图' },
@@ -104,7 +108,17 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const [aiProviders, setAiProviders] = useState<
     { provider: string; label: string; model: string; available: boolean; hint?: string }[]
   >([]);
-  const aiPollAbortRef = useRef(false);
+  /** 撰写正文阶段：弹窗内打字机预览（不写 Lake，成文后再覆盖编辑器） */
+  const [aiDraftTitle, setAiDraftTitle] = useState('');
+  const [aiDraftHtml, setAiDraftHtml] = useState('');
+  const [aiElapsedSec, setAiElapsedSec] = useState(0);
+  const aiDraftScrollRef = useRef<HTMLDivElement>(null);
+  const aiStartedAtRef = useRef<number>(0);
+  /** 成文后对照审稿库的草稿预检结果 */
+  const [precheckOpen, setPrecheckOpen] = useState(false);
+  const [precheckLoading, setPrecheckLoading] = useState(false);
+  const [precheckResult, setPrecheckResult] = useState<GeoContentReviewAi | null>(null);
+  const aiStreamAbortRef = useRef<AbortController | null>(null);
   const [editorEpoch, setEditorEpoch] = useState(0);
   const [reviewHints, setReviewHints] = useState<{
     roundLabel: string;
@@ -430,11 +444,38 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     }
   };
 
-  const stopAiPoll = () => {
-    aiPollAbortRef.current = true;
+  const stopAiStream = () => {
+    aiStreamAbortRef.current?.abort();
+    aiStreamAbortRef.current = null;
   };
 
-  const applyAiJobProgress = (job: { currentCode?: string; currentMessage?: string; stages?: GeoPipelineStage[] }) => {
+  useEffect(() => {
+    if (!aiGenerating || (!aiDraftTitle && !aiDraftHtml)) return;
+    const el = aiDraftScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [aiGenerating, aiDraftTitle, aiDraftHtml]);
+
+  useEffect(() => {
+    if (!aiGenerating) {
+      setAiElapsedSec(0);
+      return;
+    }
+    aiStartedAtRef.current = Date.now();
+    setAiElapsedSec(0);
+    const timer = window.setInterval(() => {
+      setAiElapsedSec(Math.floor((Date.now() - aiStartedAtRef.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [aiGenerating]);
+
+  const applyAiJobProgress = (job: {
+    currentCode?: string;
+    currentMessage?: string;
+    stages?: GeoPipelineStage[];
+    draftTitle?: string;
+    draftHtml?: string;
+  }) => {
     if (job.stages?.length) {
       setAiStages(job.stages);
     }
@@ -446,6 +487,20 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       const idx = AI_PIPELINE_STEPS.findIndex((s) => s.key === code);
       if (idx >= 0) setAiStepIndex(idx);
     }
+    // 撰写阶段只更新弹窗打字机预览，不碰 Lake；成文后再一次性覆盖编辑器
+    if (job.draftTitle) {
+      setAiDraftTitle(job.draftTitle);
+    }
+    if (job.draftHtml) {
+      setAiDraftHtml(job.draftHtml);
+    }
+  };
+
+  const closeAiGenerateModal = () => {
+    stopAiStream();
+    setAiOpen(false);
+    // 弹窗关掉后恢复 Lake 工具栏所需的 antd v4 样式
+    void ensureLakexAntdCss();
   };
 
   const openAiGenerate = () => {
@@ -462,6 +517,10 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         setAiStepIndex(0);
         setAiStages([]);
         setAiCurrentMessage('');
+        setAiDraftTitle('');
+        setAiDraftHtml('');
+        // 卸掉 Lake 注入的 antd v4，避免污染弹窗内 Ant Design 6 控件
+        removeLakexAntdCss();
         setAiOpen(true);
       })
       .catch((e) => message.error(e instanceof Error ? e.message : '加载 AI 模型失败'));
@@ -477,7 +536,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       const ok = await new Promise<boolean>((resolve) => {
         Modal.confirm({
           title: '将覆盖当前标题与正文',
-          content: 'AI 生成会写入当前编辑中的统一稿或独立稿，是否继续？',
+          content: '生成完成后会一次性写入当前统一稿或独立稿，是否继续？',
           okText: '继续生成',
           cancelText: '取消',
           onOk: () => resolve(true),
@@ -487,11 +546,17 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       if (!ok) return;
     }
     clearTimer();
-    aiPollAbortRef.current = false;
+    stopAiStream();
+    const abort = new AbortController();
+    aiStreamAbortRef.current = abort;
     setAiGenerating(true);
     setAiStepIndex(0);
     setAiStages([]);
     setAiCurrentMessage('已提交任务，等待开始…');
+    setAiDraftTitle('');
+    setAiDraftHtml('');
+    setPrecheckResult(null);
+    // 弹窗保持打开：撰写正文阶段 SSE 打字机预览；Lake 等成文后再覆盖
     try {
       const itemId = active !== 'shared' && article?.contentMode === 'custom' ? article.itemId : undefined;
       const started = await startAiGenerateGeoContentArticleApi({
@@ -501,14 +566,18 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         userPrompt: aiUserPrompt.trim() || undefined,
       });
       applyAiJobProgress(started);
-      let job = started;
-      while (job.status === 'RUNNING' && !aiPollAbortRef.current) {
-        await new Promise((r) => setTimeout(r, 1200));
-        if (aiPollAbortRef.current) break;
-        job = await getAiGenerateJobApi(started.jobId);
-        applyAiJobProgress(job);
-      }
-      if (aiPollAbortRef.current) {
+      const job = await streamAiGenerateJobApi(
+        started.jobId,
+        {
+          onProgress: (j) => applyAiJobProgress(j),
+          onDone: (j) => applyAiJobProgress(j),
+          onError: (msg) => {
+            setAiCurrentMessage(msg);
+          },
+        },
+        abort.signal,
+      );
+      if (abort.signal.aborted) {
         return;
       }
       if (job.status === 'FAILED') {
@@ -522,15 +591,19 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       if (res.stages?.length) {
         setAiStages(res.stages);
       }
-      setAiCurrentMessage('生成完成');
+      // 成文：一次性覆盖 Lake 编辑器
       setContentTitle(res.contentTitle || '');
       titleRef.current = res.contentTitle || '';
       setBody(res.contentBody || '');
       bodyRef.current = res.contentBody || '';
       versionRef.current = res.contentVersion ?? versionRef.current + 1;
+      editorHostRef.current?.setLake(res.contentBody || '');
       setEditorEpoch((n) => n + 1);
       setEditorReady(false);
       setSaveState('saved');
+      closeAiGenerateModal();
+      setAiDraftTitle('');
+      setAiDraftHtml('');
       const extra = [
         res.usedImageCount != null ? `插图 ${res.usedImageCount}` : null,
         res.qaRounds != null && res.qaRounds > 0 ? `品牌轻补 ${res.qaRounds} 次` : null,
@@ -540,15 +613,45 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       message.success(
         `已生成并写入${itemId ? '独立稿' : '统一稿'}${res.sourceAiModel ? `（${res.sourceAiModel}）` : ''}${extra ? ` · ${extra}` : ''}`,
       );
-      await new Promise((r) => setTimeout(r, 600));
-      setAiOpen(false);
+
+      // 成文后立刻对照审稿知识库预检（不落审核轮次）；提审后仍会再跑正式 AI 预审
+      if (placementId != null && (res.contentBody || '').trim()) {
+        setAiCurrentMessage('生成完成，正在对照审稿库预检…');
+        setPrecheckLoading(true);
+        setPrecheckOpen(true);
+        try {
+          const check = await precheckGeoContentDraftApi({
+            placementId,
+            title: res.contentTitle || undefined,
+            body: res.contentBody || '',
+          });
+          setPrecheckResult(check);
+          if (check.status === 'done' && check.suggestion === 'reject') {
+            message.warning(check.summary || '预检发现风险点，请对照下方列表改稿');
+          } else if (check.status === 'done' && check.suggestion === 'approve') {
+            message.success(check.summary || '预检通过');
+          } else if (check.status === 'failed') {
+            message.warning(check.errorMsg || '草稿预检失败，可稍后提审时再跑 AI 预审');
+          }
+        } catch (e) {
+          message.warning(e instanceof Error ? e.message : '草稿预检失败，可稍后提审时再跑 AI 预审');
+          setPrecheckOpen(false);
+        } finally {
+          setPrecheckLoading(false);
+          setAiCurrentMessage('生成完成');
+        }
+      }
+
       if (placementId != null) {
         void load(placementId, active);
       }
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
       message.error(e instanceof Error ? e.message : 'AI 生成失败');
     } finally {
-      stopAiPoll();
+      stopAiStream();
       setAiGenerating(false);
     }
   };
@@ -1111,24 +1214,91 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
           ) : null}
         </Modal>
         <Modal
+          title='草稿 AI 预检（审稿知识库）'
+          open={precheckOpen}
+          onCancel={() => setPrecheckOpen(false)}
+          onOk={() => setPrecheckOpen(false)}
+          okText='知道了'
+          cancelButtonProps={{ style: { display: 'none' } }}
+          destroyOnHidden
+          width={560}
+        >
+          {precheckLoading ? (
+            <div className='flex items-center gap-2 py-6 text-sm text-neutral-600'>
+              <Spin size='small' />
+              对照审稿知识库检查杜撰/口径中…
+            </div>
+          ) : precheckResult?.status === 'done' ? (
+            <div className='flex flex-col gap-2'>
+              <div className='flex flex-wrap items-center gap-2'>
+                <Tag color={precheckResult.suggestion === 'approve' ? 'success' : 'warning'}>
+                  {precheckResult.suggestion === 'approve' ? '建议可通过' : '建议改后再提审'}
+                </Tag>
+                {precheckResult.score != null ? (
+                  <span className='text-xs text-neutral-500'>{precheckResult.score} 分</span>
+                ) : null}
+              </div>
+              {precheckResult.summary ? (
+                <p className='mb-0 text-sm text-neutral-700'>{precheckResult.summary}</p>
+              ) : null}
+              {(precheckResult.issues?.length ?? 0) > 0 ? (
+                <ul className='m-0 max-h-64 list-none space-y-1.5 overflow-auto p-0'>
+                  {precheckResult.issues!.map((issue, idx) => (
+                    <li
+                      key={`${issue.quoteText}-${idx}`}
+                      className='rounded border border-neutral-100 bg-neutral-50 px-2 py-1.5 text-xs'
+                    >
+                      <div className='mb-0.5 flex items-center gap-1'>
+                        <Tag
+                          color={issue.level === 'high' ? 'error' : issue.level === 'low' ? 'default' : 'warning'}
+                          className='mr-0'
+                        >
+                          {issue.level || 'mid'}
+                        </Tag>
+                        <span className='truncate text-neutral-500'>「{issue.quoteText}」</span>
+                      </div>
+                      <div className='text-neutral-800'>{issue.commentText}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className='text-xs text-neutral-400'>未检出需划词的问题</div>
+              )}
+              <p className='mb-0 text-xs text-neutral-400'>
+                正式提审后仍会再跑一轮 AI 预审；本结果不落库、不代替人工审核。
+              </p>
+            </div>
+          ) : (
+            <div className='text-sm text-neutral-600'>
+              {precheckResult?.errorMsg || precheckResult?.summary || '暂无预检结果'}
+            </div>
+          )}
+        </Modal>
+        <Modal
           title='AI 一键生成'
           open={aiOpen}
+          rootClassName='geo-ai-generate-modal'
           onCancel={() => {
-            if (aiGenerating) return;
-            stopAiPoll();
-            setAiOpen(false);
+            if (aiGenerating) {
+              stopAiStream();
+              setAiGenerating(false);
+              setAiCurrentMessage('已停止预览（后台任务可能仍在跑完）');
+              return;
+            }
+            closeAiGenerateModal();
           }}
           onOk={() => void runAiGenerate()}
           okText={aiGenerating ? '生成中…' : '开始生成'}
+          cancelText={aiGenerating ? '停止预览' : '取消'}
           confirmLoading={aiGenerating}
           okButtonProps={{ disabled: aiGenerating }}
-          cancelButtonProps={{ disabled: aiGenerating }}
           destroyOnHidden
-          width={640}
+          width={aiGenerating ? 780 : 640}
         >
           <p className='mb-3 text-sm text-neutral-500'>
-            外网模式：一次写完正文（沿用系统卖点、素材库与下方自定义提示词），再智能插图。写入
-            {active !== 'shared' && article?.contentMode === 'custom' ? '当前独立稿' : '统一稿'}。
+            「撰写正文」阶段经 SSE 在本弹窗打字机预览；成文后一次性写入
+            {active !== 'shared' && article?.contentMode === 'custom' ? '当前独立稿' : '统一稿'}的 Lake
+            编辑器，并自动对照审稿知识库预检。
           </p>
           <div className='mb-3 rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600'>
             <div>
@@ -1140,60 +1310,126 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
               {bundle?.targetQuestion || '-'}
             </div>
           </div>
-          {(aiGenerating || aiStages.length > 0) && (
-            <div className='mb-4 rounded-lg border border-neutral-100 bg-gradient-to-b from-sky-50/80 to-white px-3 py-3'>
-              {aiCurrentMessage ? (
-                <div className='mb-3 flex items-start gap-2 rounded border border-sky-100 bg-white px-2.5 py-2 text-sm text-sky-800'>
-                  {aiGenerating ? (
+          {!aiGenerating ? (
+            <>
+              <div className='geo-ai-generate-field'>
+                <div className='geo-ai-generate-label'>选择模型</div>
+                {/* 不用 antd Select：Lake 的 antd v4 会把箭头挤到左侧；选项不多，用自绘列表更稳 */}
+                <div className='flex flex-col gap-2'>
+                  {aiProviders.map((p) => {
+                    const label = p.model ? `${p.label}（${p.model}）` : p.label;
+                    const active = aiProvider === p.provider;
+                    return (
+                      <button
+                        key={p.provider}
+                        type='button'
+                        className={`w-full rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                          active
+                            ? 'border-blue-500 bg-blue-50 text-blue-900'
+                            : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-300'
+                        }`}
+                        onClick={() => setAiProvider(p.provider)}
+                      >
+                        <span className='flex items-center justify-between gap-2'>
+                          <span className='min-w-0 truncate'>{label}</span>
+                          {active ? <span className='shrink-0 text-xs text-blue-600'>已选</span> : null}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {aiProviders.length === 0 ? (
+                  <p className='mt-2 mb-0 text-xs text-amber-600'>
+                    暂无可用云厂商，请到「系统管理 → AI模型配置」填写 API Key。
+                  </p>
+                ) : null}
+              </div>
+              <div className='geo-ai-generate-field'>
+                <div className='geo-ai-generate-label'>写作提示词（可选）</div>
+                <Input.TextArea
+                  value={aiUserPrompt}
+                  onChange={(e) => setAiUserPrompt(e.target.value)}
+                  placeholder='例如：偏科普口吻，突出有机双认证与牧场自有；约 1000 字；开头先回答目标问题'
+                  autoSize={{ minRows: 3, maxRows: 8 }}
+                  maxLength={2000}
+                />
+                <div className='mt-1 text-right text-xs text-neutral-400'>{aiUserPrompt.length} / 2000</div>
+              </div>
+            </>
+          ) : (
+            <div className='flex flex-col gap-3'>
+              <div className='rounded-lg border border-sky-100 bg-sky-50/70 px-3 py-2.5'>
+                <div className='mb-2 flex items-start justify-between gap-2'>
+                  <div className='flex min-w-0 items-start gap-2 text-sm text-sky-900'>
                     <Spin
                       size='small'
                       className='mt-0.5'
                     />
-                  ) : null}
-                  <span className='min-w-0 leading-5'>{aiCurrentMessage}</span>
+                    <span className='min-w-0 leading-5'>
+                      {aiCurrentMessage || AI_PIPELINE_STEPS[aiStepIndex]?.title || '进行中…'}
+                    </span>
+                  </div>
+                  <span className='shrink-0 text-xs text-sky-600/80'>{aiElapsedSec}s</span>
                 </div>
-              ) : null}
-              <Steps
-                direction='vertical'
-                size='small'
-                current={aiStepIndex}
-                status={aiGenerating ? 'process' : 'finish'}
-                items={AI_PIPELINE_STEPS.map((s, idx) => {
-                  const real = aiStages.find((x) => x.code === s.key);
-                  const isCurrent = aiGenerating && idx === aiStepIndex;
-                  return {
-                    title: s.title,
-                    description: real?.message || (isCurrent ? aiCurrentMessage || '进行中…' : undefined),
-                  };
-                })}
-              />
+                <div className='flex flex-wrap gap-1.5'>
+                  {AI_PIPELINE_STEPS.map((s, idx) => {
+                    const real = aiStages.find((x) => x.code === s.key);
+                    const done = idx < aiStepIndex || real?.status === 'done';
+                    const current = idx === aiStepIndex;
+                    return (
+                      <Tag
+                        key={s.key}
+                        color={done ? 'success' : current ? 'processing' : 'default'}
+                        className='mr-0'
+                      >
+                        {s.title}
+                      </Tag>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <div className='mb-1.5 flex items-center justify-between gap-2'>
+                  <span className='text-xs font-medium text-neutral-600'>撰写正文 · 打字机预览</span>
+                  <span className='text-xs text-neutral-400'>成文后写入编辑器</span>
+                </div>
+                <div
+                  ref={aiDraftScrollRef}
+                  className='max-h-[min(420px,50vh)] min-h-[180px] overflow-auto rounded-lg border border-neutral-200 bg-white px-3 py-3'
+                >
+                  {aiDraftTitle || aiDraftHtml ? (
+                    <>
+                      {aiDraftTitle ? (
+                        <h3 className='mt-0 mb-2 text-base font-semibold text-neutral-900'>{aiDraftTitle}</h3>
+                      ) : null}
+                      {aiDraftHtml ? (
+                        <div
+                          className='prose prose-sm prose-headings:text-neutral-900 prose-p:my-2 max-w-none text-neutral-800'
+                          dangerouslySetInnerHTML={{ __html: aiDraftHtml }}
+                        />
+                      ) : (
+                        <p className='mb-0 text-sm text-neutral-400'>标题已出，正文生成中…</p>
+                      )}
+                    </>
+                  ) : (
+                    <div className='flex h-full min-h-[140px] flex-col items-center justify-center gap-2 px-4 text-center'>
+                      <Spin size='small' />
+                      <p className='mb-0 text-sm text-neutral-600'>
+                        {aiStepIndex < AI_PIPELINE_STEPS.findIndex((s) => s.key === 'write')
+                          ? '准备中：加载风格 / 卖点 / 审稿口径…'
+                          : aiCurrentMessage?.includes('深度思考') || aiCurrentMessage?.includes('已请求模型')
+                            ? '模型正在深度思考，正文会在思考结束后开始逐字出现'
+                            : '等待模型输出正文…'}
+                      </p>
+                      <p className='mb-0 text-xs text-neutral-400'>
+                        已等待 {aiElapsedSec} 秒{aiElapsedSec >= 15 ? ' · 深度思考通常需要数十秒，请稍候' : ''}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
-          <div className='mb-1 text-xs text-neutral-500'>选择模型</div>
-          <Select
-            className='mb-3 w-full'
-            placeholder='请选择已配置的 AI 模型'
-            value={aiProvider}
-            disabled={aiGenerating}
-            options={aiProviders.map((p) => ({
-              value: p.provider,
-              label: p.model ? `${p.label}（${p.model}）` : p.label,
-            }))}
-            onChange={setAiProvider}
-          />
-          {aiProviders.length === 0 ? (
-            <p className='mb-3 text-xs text-amber-600'>暂无可用云厂商，请到「系统管理 → AI模型配置」填写 API Key。</p>
-          ) : null}
-          <div className='mb-1 text-xs text-neutral-500'>写作提示词（可选）</div>
-          <Input.TextArea
-            value={aiUserPrompt}
-            onChange={(e) => setAiUserPrompt(e.target.value)}
-            placeholder='例如：偏科普口吻，突出有机双认证与牧场自有；约 1000 字；开头先回答目标问题'
-            autoSize={{ minRows: 3, maxRows: 8 }}
-            maxLength={2000}
-            showCount
-            disabled={aiGenerating}
-          />
         </Modal>
       </Drawer>
 

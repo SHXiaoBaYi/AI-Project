@@ -21,6 +21,8 @@ type Props = {
 export type LakexEditorHostHandle = {
   /** 编辑器未就绪时返回 null，避免把空串当成「用户清空了正文」 */
   getLake: () => string | null;
+  /** 外部流式写入（打字机）；不触发 onChange 回环 */
+  setLake: (lake: string) => void;
 };
 
 /**
@@ -46,6 +48,13 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
       const editor = editorRef.current;
       if (!editor?.getDocument) return null;
       return editor.getDocument(LAKE_SCHEME, { includeMeta: true }) ?? '';
+    },
+    setLake: (lake: string) => {
+      const editor = editorRef.current;
+      if (!editor?.setDocument) return;
+      const next = lake ?? '';
+      lastSetRef.current = next;
+      editor.setDocument(LAKE_SCHEME, next);
     },
   }));
 

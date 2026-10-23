@@ -16,7 +16,14 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -26,6 +33,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 @Slf4j
 @Service
@@ -99,6 +107,14 @@ public class AiChatService {
      * @param deepThink 成文等重任务开启深度思考（通义 enable_thinking；超时加长；不求快求稳）
      */
     public String chat(String systemPrompt, String userPrompt, String provider, Double temperature, boolean deepThink) {
+        return chat(systemPrompt, userPrompt, provider, temperature, deepThink, null);
+    }
+
+    /**
+     * @param topP 核采样上限；null 表示不传（沿用厂商默认）。成文建议约 0.85 与低温搭配压杜撰。
+     */
+    public String chat(String systemPrompt, String userPrompt, String provider, Double temperature,
+                       boolean deepThink, Double topP) {
         boolean explicit = StringUtils.hasText(provider);
         List<String> candidates = explicit
                 ? List.of(aiProperties.normalizeProvider(provider))
@@ -119,13 +135,67 @@ public class AiChatService {
                 continue;
             }
             try {
-                return chatOnce(systemPrompt, userPrompt, p, temperature, deepThink);
+                return chatOnce(systemPrompt, userPrompt, p, temperature, deepThink, topP);
             } catch (BusinessException e) {
                 lastBiz = e;
                 if (!explicit && isRateLimitedMessage(e.getMessage()) && i < candidates.size() - 1) {
                     String next = candidates.get(i + 1);
                     log.warn("厂商 [{}] 限流，自动改用 [{}]",
                             aiProperties.resolveDisplayName(p), aiProperties.resolveDisplayName(next));
+                    continue;
+                }
+                throw e;
+            }
+        }
+        throw lastBiz != null ? lastBiz : new BusinessException("没有可用的 AI 厂商");
+    }
+
+    /**
+     * 流式 chat：边收边回调 delta（OpenAI 兼容 SSE）。
+     * 失败时抛 BusinessException，由调用方决定是否回退非流式。
+     */
+    public String chatStream(String systemPrompt, String userPrompt, String provider, Double temperature,
+                             boolean deepThink, Consumer<String> onDelta) {
+        return chatStream(systemPrompt, userPrompt, provider, temperature, deepThink, null, onDelta);
+    }
+
+    public String chatStream(String systemPrompt, String userPrompt, String provider, Double temperature,
+                             boolean deepThink, Double topP, Consumer<String> onDelta) {
+        return chatStream(systemPrompt, userPrompt, provider, temperature, deepThink, topP, onDelta, null);
+    }
+
+    /**
+     * @param onReasoning 深度思考增量（不入正文）；用于前端提示「思考中」
+     */
+    public String chatStream(String systemPrompt, String userPrompt, String provider, Double temperature,
+                             boolean deepThink, Double topP, Consumer<String> onDelta,
+                             Consumer<String> onReasoning) {
+        boolean explicit = StringUtils.hasText(provider);
+        List<String> candidates = explicit
+                ? List.of(aiProperties.normalizeProvider(provider))
+                : buildFallbackChain(aiProperties.resolveDefaultProvider());
+
+        BusinessException lastBiz = null;
+        for (int i = 0; i < candidates.size(); i++) {
+            String p = candidates.get(i);
+            if (aiProperties.isLocalProvider(p)) {
+                throw new BusinessException("本地模板不走云端调用");
+            }
+            if (isInRateLimitCooldown(p)) {
+                lastBiz = new BusinessException(cooldownMessage(p));
+                if (explicit) {
+                    throw lastBiz;
+                }
+                continue;
+            }
+            try {
+                String full = chatOnceStream(systemPrompt, userPrompt, p, temperature, deepThink, topP,
+                        onDelta, onReasoning);
+                clearRateLimit(p);
+                return full;
+            } catch (BusinessException e) {
+                lastBiz = e;
+                if (!explicit && isRateLimitedMessage(e.getMessage()) && i < candidates.size() - 1) {
                     continue;
                 }
                 throw e;
@@ -152,7 +222,7 @@ public class AiChatService {
         clearRateLimit(p);
         for (String model : models) {
             try {
-                String raw = invokeChatCompletions(ep, model, "你是连通性探测。", "只回复：ok", 0.1);
+                String raw = invokeChatCompletions(ep, model, "你是连通性探测。", "只回复：ok", 0.1, false, null);
                 attempts.add(model + " => OK");
                 clearRateLimit(p);
                 return SysAiProviderTestVO.builder()
@@ -229,19 +299,16 @@ public class AiChatService {
         return chain;
     }
 
-    private String chatOnce(String systemPrompt, String userPrompt, String p, Double temperature) {
-        return chatOnce(systemPrompt, userPrompt, p, temperature, false);
-    }
-
-    private String chatOnce(String systemPrompt, String userPrompt, String p, Double temperature, boolean deepThink) {
+    private String chatOnce(String systemPrompt, String userPrompt, String p, Double temperature,
+                            boolean deepThink, Double topP) {
         ResolvedEndpoint ep = resolveEndpoint(p);
         List<String> models = modelCandidates(p, ep.model());
         CallFailedException lastRate = null;
         for (String model : models) {
             try {
-                log.info("调用 AI [{}] model={} deepThink={} baseUrl={}",
-                        ep.displayName(), model, deepThink, ep.baseUrl());
-                String raw = invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature, deepThink);
+                log.info("调用 AI [{}] model={} deepThink={} topP={} baseUrl={}",
+                        ep.displayName(), model, deepThink, topP, ep.baseUrl());
+                String raw = invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature, deepThink, topP);
                 JsonNode root = objectMapper.readTree(raw);
                 JsonNode message = root.path("choices").path(0).path("message");
                 JsonNode content = message.path("content");
@@ -272,7 +339,7 @@ public class AiChatService {
                     log.warn("深度思考调用失败，降级普通模式重试 [{}] model={} HTTP {}",
                             ep.displayName(), model, e.httpStatus());
                     try {
-                        String raw = invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature, false);
+                        String raw = invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature, false, topP);
                         JsonNode root = objectMapper.readTree(raw);
                         JsonNode content = root.path("choices").path(0).path("message").path("content");
                         if (content.isMissingNode() || !StringUtils.hasText(content.asText())) {
@@ -305,14 +372,140 @@ public class AiChatService {
         throw new BusinessException("调用 AI 失败（" + ep.displayName() + "）");
     }
 
-    private String invokeChatCompletions(ResolvedEndpoint ep, String model,
-                                         String systemPrompt, String userPrompt, Double temperature) {
-        return invokeChatCompletions(ep, model, systemPrompt, userPrompt, temperature, false);
+    private String chatOnceStream(String systemPrompt, String userPrompt, String p, Double temperature,
+                                  boolean deepThink, Double topP, Consumer<String> onDelta,
+                                  Consumer<String> onReasoning) {
+        ResolvedEndpoint ep = resolveEndpoint(p);
+        List<String> models = modelCandidates(p, ep.model());
+        CallFailedException lastRate = null;
+        for (String model : models) {
+            try {
+                log.info("流式调用 AI [{}] model={} deepThink={} topP={}", ep.displayName(), model, deepThink, topP);
+                return invokeChatCompletionsStream(ep, model, systemPrompt, userPrompt, temperature, deepThink, topP,
+                        onDelta, onReasoning);
+            } catch (CallFailedException e) {
+                if (e.rateLimited()) {
+                    lastRate = e;
+                    continue;
+                }
+                // 通义深度思考流式不稳定时降级非思考流式
+                if (deepThink && e.httpStatus() >= 400 && e.httpStatus() < 500) {
+                    try {
+                        return invokeChatCompletionsStream(ep, model, systemPrompt, userPrompt, temperature, false, topP,
+                                onDelta, onReasoning);
+                    } catch (Exception ignored) {
+                        // fall through
+                    }
+                }
+                throw new BusinessException(friendlyAiError(ep.displayName(), e));
+            } catch (BusinessException e) {
+                throw e;
+            } catch (Exception e) {
+                if (isRateLimitedMessage(e.getMessage())) {
+                    lastRate = new CallFailedException(429, e.getMessage(), true);
+                    continue;
+                }
+                throw new BusinessException("流式调用失败（" + ep.displayName() + "）：" + truncate(e.getMessage(), 200));
+            }
+        }
+        markRateLimited(p);
+        if (lastRate != null) {
+            throw new BusinessException(friendlyRateLimit(ep.displayName(), lastRate.body(), models));
+        }
+        throw new BusinessException("流式调用 AI 失败（" + ep.displayName() + "）");
+    }
+
+    private String invokeChatCompletionsStream(ResolvedEndpoint ep, String model,
+                                               String systemPrompt, String userPrompt, Double temperature,
+                                               boolean deepThink, Double topP, Consumer<String> onDelta,
+                                               Consumer<String> onReasoning) throws Exception {
+        int timeoutSec = Math.max(10, aiProperties.getTimeoutSeconds());
+        if (AiProperties.PROVIDER_TONGYI.equals(ep.provider())) {
+            timeoutSec = Math.max(timeoutSec, deepThink ? 300 : 120);
+        } else if (deepThink) {
+            timeoutSec = Math.max(timeoutSec, 240);
+        }
+        Duration timeout = Duration.ofSeconds(timeoutSec);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("temperature", temperature != null ? temperature : 0.8);
+        putTopP(body, topP);
+        body.put("stream", true);
+        List<Map<String, String>> messages = new ArrayList<>();
+        if (StringUtils.hasText(systemPrompt)) {
+            messages.add(Map.of("role", "system", "content", systemPrompt));
+        }
+        messages.add(Map.of("role", "user", "content", userPrompt));
+        body.put("messages", messages);
+        if (deepThink && AiProperties.PROVIDER_TONGYI.equals(ep.provider())) {
+            body.put("enable_thinking", true);
+        }
+        String json = objectMapper.writeValueAsString(body);
+
+        HttpRequest.Builder req = HttpRequest.newBuilder()
+                .uri(URI.create(trimSlash(ep.baseUrl()) + "/chat/completions"))
+                .timeout(timeout)
+                .header("Authorization", "Bearer " + ep.apiKey())
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8));
+        if (AiProperties.PROVIDER_TONGYI.equals(ep.provider())) {
+            req.header("X-DashScope-Wait-Timeout", deepThink ? "120" : DASHSCOPE_WAIT_TIMEOUT);
+        }
+
+        HttpClient client = HttpClient.newBuilder().connectTimeout(timeout).build();
+        HttpResponse<InputStream> resp = client.send(req.build(), HttpResponse.BodyHandlers.ofInputStream());
+        int status = resp.statusCode();
+        if (status == 429) {
+            String err = new String(resp.body().readAllBytes(), StandardCharsets.UTF_8);
+            throw new CallFailedException(429, err, true);
+        }
+        if (status < 200 || status >= 300) {
+            String err = new String(resp.body().readAllBytes(), StandardCharsets.UTF_8);
+            throw new CallFailedException(status, err, isRateLimitedMessage(err));
+        }
+
+        StringBuilder full = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.startsWith("data:")) {
+                    continue;
+                }
+                String data = line.substring(5).trim();
+                if (data.isEmpty() || "[DONE]".equalsIgnoreCase(data)) {
+                    continue;
+                }
+                try {
+                    JsonNode root = objectMapper.readTree(data);
+                    JsonNode delta = root.path("choices").path(0).path("delta");
+                    String reasoning = delta.path("reasoning_content").asText("");
+                    if (StringUtils.hasText(reasoning) && onReasoning != null) {
+                        onReasoning.accept(reasoning);
+                    }
+                    String piece = delta.path("content").asText("");
+                    if (StringUtils.hasText(piece)) {
+                        full.append(piece);
+                        if (onDelta != null) {
+                            onDelta.accept(piece);
+                        }
+                    }
+                } catch (Exception parseEx) {
+                    log.debug("跳过无法解析的 SSE 行: {}", truncate(data, 80));
+                }
+            }
+        }
+        String text = full.toString().trim();
+        if (!StringUtils.hasText(text)) {
+            throw new BusinessException("AI 流式返回内容为空（" + ep.displayName() + "）");
+        }
+        return text;
     }
 
     private String invokeChatCompletions(ResolvedEndpoint ep, String model,
                                          String systemPrompt, String userPrompt, Double temperature,
-                                         boolean deepThink) {
+                                         boolean deepThink, Double topP) {
         int timeoutSec = Math.max(10, aiProperties.getTimeoutSeconds());
         if (AiProperties.PROVIDER_TONGYI.equals(ep.provider())) {
             timeoutSec = Math.max(timeoutSec, deepThink ? 300 : 90);
@@ -337,6 +530,7 @@ public class AiChatService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("temperature", temperature != null ? temperature : 0.8);
+        putTopP(body, topP);
         List<Map<String, String>> messages = new ArrayList<>();
         if (StringUtils.hasText(systemPrompt)) {
             messages.add(Map.of("role", "system", "content", systemPrompt));
@@ -489,6 +683,14 @@ public class AiChatService {
                     ? ": " + truncate(re.getResponseBodyAsString(), 280) : "");
         }
         return "调用 AI 失败（" + displayName + "）: " + truncate(nz(detail), 400);
+    }
+
+    /** null 或越界时不传，避免部分厂商校验失败 */
+    private static void putTopP(Map<String, Object> body, Double topP) {
+        if (topP == null || topP <= 0 || topP > 1) {
+            return;
+        }
+        body.put("top_p", topP);
     }
 
     private static String truncate(String s, int max) {

@@ -25,6 +25,12 @@ public class GeoAiGenerateJobVO {
     @Schema(description = "流水线各阶段快照")
     private List<GeoPipelineStageVO> stages = new ArrayList<>();
 
+    @Schema(description = "流式撰写中的标题草稿（打字机预览）")
+    private String draftTitle;
+
+    @Schema(description = "流式撰写中的 HTML 草稿（打字机预览，尚未落库）")
+    private String draftHtml;
+
     @Schema(description = "成功后的生成结果")
     private GeoContentAiGenerateVO result;
 }

@@ -3,6 +3,7 @@ package com.base.admin.controller;
 import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.GeoContentAiPrecheckDTO;
 import com.base.admin.domain.dto.GeoContentReviewAiBatchDTO;
 import com.base.admin.domain.dto.GeoContentReviewAiFeedbackDTO;
 import com.base.admin.domain.dto.GeoContentReviewAnnotationSaveDTO;
@@ -150,5 +151,13 @@ public class GeoContentWriteController {
     @Log(title = "GEO文章批量AI预审", businessType = 2)
     public Result<Integer> batchReviewAi(@Valid @RequestBody GeoContentReviewAiBatchDTO dto) {
         return Result.ok(reviewAiService.batchEnqueue(dto));
+    }
+
+    @Operation(summary = "成文后草稿预检（对照审稿知识库，不落审核轮次）")
+    @PostMapping("/ai/precheck")
+    @RequiresPermission("geo:write:mine")
+    @Log(title = "GEO文章草稿AI预检", businessType = 0)
+    public Result<GeoContentReviewAiVO> precheckDraft(@Valid @RequestBody GeoContentAiPrecheckDTO dto) {
+        return Result.ok(reviewAiService.precheckDraft(dto));
     }
 }

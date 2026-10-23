@@ -2,6 +2,7 @@ package com.base.admin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.base.admin.common.Constants;
+import com.base.admin.domain.dto.GeoContentAiPrecheckDTO;
 import com.base.admin.domain.dto.GeoContentReviewAiBatchDTO;
 import com.base.admin.domain.dto.GeoContentReviewAiFeedbackDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
@@ -60,6 +61,8 @@ public class GeoContentReviewAiServiceImpl implements GeoContentReviewAiService 
             规则：
             - suggestion=approve 表示整体可过；reject 表示建议退回修改。
             - 出现禁词、错误品牌事实、错误产品口径、结构严重不合 GEO 要求时，应 reject 并在 issues 划出原文。
+            - 重点抓「杜撰/越权发挥」：知识库未写明却出现的渠道场景（如乌鲁木齐机场选购）、定制场景（如修行场景设计）、未给出的检测报告安心理由、自建全程冷链/冷链不断供、礼盒精品包装、顺丰骑手/冰袋、冬运会指定、航天赞助商等；一律 high 并倾向 reject。
+            - 背书/赞助类表述：知识库有则可保留，但不得引申成库中没有的检测、门槛、渠道或赛事/航天背书。
             - score 越高质量越好；事实错误、违规、跑题、空泛灌水应偏低并 reject。
             - issues 只列需要划词指出的具体问题，approve 时可为空数组；每条 quoteText 必须能在正文中找到原句，不要编造。
             - summary 用中文，不超过 200 字；commentText 简洁可执行，可引用知识库口径。
@@ -115,6 +118,65 @@ public class GeoContentReviewAiServiceImpl implements GeoContentReviewAiService 
             return;
         }
         scheduleRun(row.getId());
+    }
+
+    @Override
+    public GeoContentReviewAiVO precheckDraft(GeoContentAiPrecheckDTO dto) {
+        if (dto == null || dto.getPlacementId() == null) {
+            throw new BusinessException("内容投放ID不能为空");
+        }
+        if (!StringUtils.hasText(dto.getBody())) {
+            throw new BusinessException("正文不能为空");
+        }
+        GeoContentPlacement placement = requirePlacement(dto.getPlacementId());
+        assertCanPrecheckPlacement(placement, requireUserId());
+        GeoContentReviewAiVO vo = emptyVo(placement.getOwnerUserId(), null, placement.getId());
+        if (!reviewRuleService.aiPreReviewEnabled(placement.getOwnerUserId())) {
+            vo.setStatus("none");
+            vo.setSummary("该撰写人未开启 AI 预审，已跳过草稿预检");
+            return vo;
+        }
+        if (!aiChatService.isEnabled()) {
+            throw new BusinessException("尚未配置可用的 AI 模型");
+        }
+        String title = nz(dto.getTitle());
+        String body = nz(dto.getBody());
+        try {
+            String kb = reviewKbService.buildReviewPromptContext();
+            String userPrompt = (StringUtils.hasText(kb) ? "【审稿知识库】\n" + kb + "\n\n" : "")
+                    + "【待审文章】\n标题：\n" + (StringUtils.hasText(title) ? title : "（无）")
+                    + "\n\n正文：\n" + truncate(body, 12000);
+            String raw = aiChatService.chat(SYSTEM_PROMPT, userPrompt, null, 0.2);
+            Parsed parsed = parse(raw);
+            vo.setStatus("done");
+            vo.setSuggestion(parsed.suggestion());
+            vo.setScore(parsed.score());
+            vo.setSummary(parsed.summary());
+            vo.setIssues(parsed.issues());
+            vo.setProvider(nz(parsed.provider()));
+            vo.setModelName(nz(parsed.model()));
+            vo.setFinishedAt(LocalDateTime.now());
+            return vo;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("草稿预检失败 placementId={}: {}", placement.getId(), e.getMessage());
+            vo.setStatus("failed");
+            vo.setErrorMsg(truncate(e.getMessage(), 480));
+            vo.setFinishedAt(LocalDateTime.now());
+            return vo;
+        }
+    }
+
+    /** 草稿预检：仅投放归属人可调用 */
+    private void assertCanPrecheckPlacement(GeoContentPlacement placement, Long uid) {
+        if (placement == null || uid == null) {
+            throw new BusinessException("无权预检该草稿");
+        }
+        if (Objects.equals(placement.getOwnerUserId(), uid)) {
+            return;
+        }
+        throw new BusinessException("无权预检该草稿");
     }
 
     @Override
