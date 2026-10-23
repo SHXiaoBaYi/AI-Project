@@ -425,6 +425,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         placementMapper.update(null, new LambdaUpdateWrapper<GeoContentPlacement>()
                 .eq(GeoContentPlacement::getId, placement.getId())
                 .set(GeoContentPlacement::getContentTitle, nextTitle)
+                // 与撰写记录/投放维护列表标题对齐：投放标题跟正文标题走
+                .set(GeoContentPlacement::getTitle, nextTitle)
                 .set(GeoContentPlacement::getContentBody, nextBody)
                 .set(GeoContentPlacement::getContentFormat, Constants.CONTENT_FORMAT_LAKE)
                 .set(GeoContentPlacement::getContentStatus, nextStatus)
@@ -445,6 +447,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 throw new BusinessException("正文保存失败，请重试");
             }
         }
+        // 沿用统一稿的平台行标题同步为正文标题，避免「我的投放」维护里看到旧标题
+        syncSharedItemTitles(placement.getId(), nextTitle);
         if (changed) {
             markSharedArticlesNeedRevision(placement.getId());
         }
@@ -712,6 +716,24 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         note.setOpinion(text);
         note.setAuthorName(currentDisplayName());
         reviewNoteMapper.insert(note);
+    }
+
+    /** 统一稿平台行的「标题」字段与 contentTitle 对齐，供投放维护列表展示 */
+    private void syncSharedItemTitles(Long placementId, String contentTitle) {
+        String title = contentTitle == null ? "" : contentTitle.trim();
+        if (!StringUtils.hasText(title)) {
+            return;
+        }
+        for (GeoContentPlacementItem item : listPlacementItems(placementId)) {
+            if (!Constants.CONTENT_MODE_SHARED.equals(normalizeContentMode(item.getContentMode()))) {
+                continue;
+            }
+            if (title.equals(item.getTitle())) {
+                continue;
+            }
+            item.setTitle(title);
+            itemMapper.updateById(item);
+        }
     }
 
     private void markSharedArticlesNeedRevision(Long placementId) {
@@ -2239,7 +2261,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         GeoContentPlacementArticleListVO vo = new GeoContentPlacementArticleListVO();
         vo.setId(item.getId());
         vo.setPlacementId(item.getPlacementId());
-        vo.setTitle(item.getTitle());
+        vo.setTitle(resolveItemDisplayTitle(item, placement));
         vo.setPlatformName(item.getPlatformName());
         vo.setContentForm(normalizeContentForm(item.getContentForm(), item.getPlatformName()));
         vo.setPublishStatus(item.getPublishStatus());
@@ -2256,11 +2278,34 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             vo.setTopicId(placement.getTopicId());
             vo.setTopicName(placement.getTopicName());
             vo.setTargetQuestion(placement.getTargetQuestion());
-            if (!StringUtils.hasText(vo.getTitle())) {
-                vo.setTitle(placement.getTitle());
-            }
         }
         return vo;
+    }
+
+    /**
+     * 投放维护里看到的标题与撰写记录 contentTitle 对齐：
+     * 独立稿优先 contentTitle/title；统一稿优先投放 contentTitle。
+     */
+    private static String resolveItemDisplayTitle(GeoContentPlacementItem item, GeoContentPlacement placement) {
+        boolean custom = item != null && Constants.CONTENT_MODE_CUSTOM.equals(normalizeContentMode(item.getContentMode()));
+        if (custom) {
+            if (StringUtils.hasText(item.getContentTitle())) {
+                return item.getContentTitle().trim();
+            }
+            if (StringUtils.hasText(item.getTitle())) {
+                return item.getTitle().trim();
+            }
+        }
+        if (placement != null && StringUtils.hasText(placement.getContentTitle())) {
+            return placement.getContentTitle().trim();
+        }
+        if (item != null && StringUtils.hasText(item.getTitle())) {
+            return item.getTitle().trim();
+        }
+        if (placement != null && StringUtils.hasText(placement.getTitle())) {
+            return placement.getTitle().trim();
+        }
+        return "";
     }
 
     /** 批量统计附件数：按 fileUrl 去重（完成复制到关联任务后业务侧不重复计数） */
@@ -2311,6 +2356,10 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     }
 
     private static String resolveDisplayTitle(GeoContentPlacement entity, List<?> items) {
+        // 优先正文标题，与撰写记录一致；再回退平台行标题 / 投放标题
+        if (entity != null && StringUtils.hasText(entity.getContentTitle())) {
+            return entity.getContentTitle().trim();
+        }
         if (items != null) {
             for (Object row : items) {
                 String title = null;
@@ -2324,7 +2373,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 }
             }
         }
-        return entity.getTitle();
+        return entity == null ? null : entity.getTitle();
     }
 
     private static Integer publishProgress(int platformCount, int successCount) {

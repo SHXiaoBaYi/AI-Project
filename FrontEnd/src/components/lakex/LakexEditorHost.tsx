@@ -1,11 +1,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { withBase } from '@/utils/basePath';
 import {
+  ensureLakexAntdCss,
   LAKE_SCHEME,
   loadLakexAssets,
   removeLakexAntdCss,
   type LakexEditorInstance,
 } from '@/components/lakex/loadLakexAssets';
+import './lakex-host.css';
 
 type Props = {
   value: string;
@@ -54,6 +56,8 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
     void (async () => {
       if (!rootRef.current) return;
       try {
+        // 工具栏下拉 / 排版菜单依赖 Lakex antd v4；与后台 antd6 冲突，仅挂载期间注入
+        await ensureLakexAntdCss();
         const Doc = await loadLakexAssets();
         if (disposed || !rootRef.current) return;
 
@@ -66,7 +70,8 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
         const editor = create(mount, {
           defaultFontsize: 15,
           darkMode: false,
-          scrollNode: () => mount,
+          // 滚动交给外层 .lakex-host，避免 overflow 裁剪工具栏下拉
+          scrollNode: () => rootRef.current || mount,
           typography: { typography: 'classic', paragraphSpacing: 'default' },
           toc: { enable: false },
           codeblock: {
@@ -130,7 +135,6 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
 
     return () => {
       disposed = true;
-      removeLakexAntdCss();
       for (const d of disposers) d();
       try {
         editorRef.current?.destroy?.();
@@ -139,6 +143,8 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
       }
       editorRef.current = null;
       if (rootRef.current) rootRef.current.innerHTML = '';
+      // 抽屉关闭后卸掉 v4 antd，避免盖住后台表格
+      removeLakexAntdCss();
     };
     // 仅挂载一次；换稿靠父组件 key 重挂载
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -147,7 +153,7 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
   return (
     <div
       ref={rootRef}
-      className='lakex-host h-full w-full overflow-auto bg-white'
+      className='lakex-host h-full w-full bg-white'
     />
   );
 });

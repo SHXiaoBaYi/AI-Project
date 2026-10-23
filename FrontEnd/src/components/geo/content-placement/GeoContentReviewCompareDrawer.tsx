@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Checkbox, Drawer, Input, Modal, Segmented, Space, Spin, Tag, message } from 'antd';
+import { Button, Checkbox, Drawer, Input, Modal, Segmented, Space, Spin, Tag, Typography, message } from 'antd';
 import {
   GeoReviewAnnotationReadonly,
   ReviewAnnotationList,
@@ -13,7 +13,7 @@ import {
   getGeoContentReviewCompareApi,
 } from '@/api/geo';
 import type { GeoContentReviewAnnotation, GeoContentReviewCompare, GeoContentReviewRound } from '@/types/geo';
-import { diffBlocks, lakeToBlocks, titleDiff, type DiffBlock } from '@/utils/articleDiff';
+import { diffAnnotationQuotes, titleDiff, type DiffBlock, type QuoteDiffItem } from '@/utils/articleDiff';
 
 const STATUS_META: Record<string, { text: string; color: string }> = {
   pending: { text: '审核中', color: 'processing' },
@@ -102,7 +102,7 @@ function DiffBlockCard({ block }: { block: DiffBlock }) {
   if (block.type === 'remove') {
     return (
       <div className='rounded border border-red-200 bg-red-50 px-3 py-2'>
-        <div className='mb-1 text-xs font-medium text-red-600'>已删除</div>
+        <div className='mb-1 text-xs font-medium text-red-600'>旧稿有 / 新稿无</div>
         <div className='text-sm text-red-800 line-through'>{block.text}</div>
       </div>
     );
@@ -110,7 +110,7 @@ function DiffBlockCard({ block }: { block: DiffBlock }) {
   if (block.type === 'add') {
     return (
       <div className='rounded border border-emerald-200 bg-emerald-50 px-3 py-2'>
-        <div className='mb-1 text-xs font-medium text-emerald-700'>新增</div>
+        <div className='mb-1 text-xs font-medium text-emerald-700'>旧稿无 / 新稿有</div>
         <div className='text-sm text-emerald-900'>{block.text}</div>
       </div>
     );
@@ -120,6 +120,59 @@ function DiffBlockCard({ block }: { block: DiffBlock }) {
       <div className='mb-1 text-xs font-medium text-amber-700'>有改动</div>
       <div className='mb-2 text-sm text-red-700/90 line-through'>{block.before}</div>
       <div className='text-sm text-emerald-900'>{block.after}</div>
+    </div>
+  );
+}
+
+function QuoteDiffCard({ item }: { item: QuoteDiffItem }) {
+  return (
+    <div className='rounded border border-neutral-200 bg-white px-3 py-2'>
+      <div className='mb-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500'>
+        <Tag
+          color='gold'
+          className='mr-0'
+        >
+          划词
+        </Tag>
+        {item.authorName ? <span>{item.authorName}</span> : null}
+        {item.leftHit ? (
+          <Tag
+            color='default'
+            className='mr-0'
+          >
+            旧稿命中
+          </Tag>
+        ) : (
+          <Tag
+            color='error'
+            className='mr-0'
+          >
+            旧稿未命中
+          </Tag>
+        )}
+        {item.rightHit ? (
+          <Tag
+            color='success'
+            className='mr-0'
+          >
+            新稿命中
+          </Tag>
+        ) : (
+          <Tag
+            color='warning'
+            className='mr-0'
+          >
+            新稿未命中
+          </Tag>
+        )}
+      </div>
+      <DiffBlockCard block={item.block} />
+      {item.comment ? (
+        <div className='mt-2 border-t border-dashed border-neutral-100 pt-2 text-sm text-neutral-700'>
+          <span className='text-xs text-neutral-400'>批注 · </span>
+          {item.comment}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -255,7 +308,13 @@ function SidePreview({
             </Tag>
           ) : null}
         </div>
-        <div className='text-sm font-medium'>{round.contentTitle || '（无标题）'}</div>
+        <Typography.Paragraph
+          className='!mb-0 text-sm font-semibold text-neutral-900'
+          copyable={round.contentTitle ? { text: round.contentTitle, tooltips: ['复制标题', '已复制'] } : false}
+          ellipsis={{ rows: 2, tooltip: round.contentTitle || undefined }}
+        >
+          {round.contentTitle || '（无标题）'}
+        </Typography.Paragraph>
       </div>
       <div className='min-h-0 flex-1 overflow-hidden'>
         {!round.hasSnapshot && !(round.contentBody || '').trim() ? (
@@ -381,9 +440,11 @@ export function GeoContentReviewCompareDrawer({
   const diffResult = useMemo(() => {
     if (!pair) return null;
     const title = titleDiff(pair.left.contentTitle, pair.right.contentTitle);
-    const blocks = diffBlocks(lakeToBlocks(pair.left.contentBody), lakeToBlocks(pair.right.contentBody));
-    const changed = blocks.filter((b) => b.type !== 'equal');
-    return { title, blocks, changedCount: changed.length };
+    // 只针对两轮上的划词批注做对照，不做整篇段落 diff
+    const annos = [...(pair.left.annotations ?? []), ...(pair.right.annotations ?? [])];
+    const quotes = diffAnnotationQuotes(pair.left.contentBody, pair.right.contentBody, annos);
+    const changedCount = quotes.filter((q) => q.block.type !== 'equal').length;
+    return { title, quotes, changedCount };
   }, [pair]);
 
   const singleRound = useMemo(() => {
@@ -535,7 +596,7 @@ export function GeoContentReviewCompareDrawer({
             onChange={(v) => setView(v as ViewMode)}
             options={[
               ...(reviewing ? [{ label: '划词审核', value: 'annotate' as const }] : []),
-              { label: '差异块', value: 'diff' },
+              { label: '划词对照', value: 'diff' },
               { label: '左右原文', value: 'side' },
             ]}
           />
@@ -648,7 +709,17 @@ export function GeoContentReviewCompareDrawer({
                           </Tag>
                         ) : null}
                       </div>
-                      <div className='text-sm font-medium'>{focusRound.contentTitle || '（无标题）'}</div>
+                      <Typography.Paragraph
+                        className='!mb-0 text-base font-semibold text-neutral-900'
+                        copyable={
+                          focusRound.contentTitle
+                            ? { text: focusRound.contentTitle, tooltips: ['复制标题', '已复制'] }
+                            : false
+                        }
+                        ellipsis={{ rows: 2, tooltip: focusRound.contentTitle || undefined }}
+                      >
+                        {focusRound.contentTitle || '（无标题）'}
+                      </Typography.Paragraph>
                     </div>
                     <div className='min-h-0 flex-1'>
                       {focusRound.hasSnapshot || focusRound.contentBody || data.currentDraft?.contentBody ? (
@@ -693,9 +764,13 @@ export function GeoContentReviewCompareDrawer({
                     <span className='text-neutral-400'>→</span>
                     <Tag color='processing'>{labelOf(pair.right, latestRoundNo)}</Tag>
                     <span className='text-neutral-500'>
-                      {diffResult?.changedCount === 0 ? '正文段落无差异' : `差异块 ${diffResult?.changedCount ?? 0} 处`}
+                      {(diffResult?.quotes ?? []).length === 0
+                        ? '两轮均无划词批注'
+                        : diffResult?.changedCount === 0
+                          ? `划词 ${diffResult.quotes.length} 处均仍在两稿中`
+                          : `划词变动 ${diffResult?.changedCount ?? 0} / ${diffResult?.quotes.length ?? 0}`}
                     </span>
-                    <span className='text-xs text-neutral-400'>红=删除 / 绿=新增 / 黄=改动</span>
+                    <span className='text-xs text-neutral-400'>仅对照划词片段，不做整篇 diff</span>
                   </div>
 
                   {diffResult?.title && diffResult.title.type !== 'equal' ? (
@@ -706,30 +781,31 @@ export function GeoContentReviewCompareDrawer({
                   ) : (
                     <div className='mb-4 rounded border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm'>
                       <span className='text-xs text-neutral-400'>标题相同 · </span>
-                      {pair.right.contentTitle || '（无标题）'}
+                      <Typography.Text
+                        copyable={
+                          pair.right.contentTitle
+                            ? { text: pair.right.contentTitle, tooltips: ['复制标题', '已复制'] }
+                            : false
+                        }
+                      >
+                        {pair.right.contentTitle || '（无标题）'}
+                      </Typography.Text>
                     </div>
                   )}
 
-                  <div className='mb-1 text-xs font-medium text-neutral-500'>正文差异块</div>
-                  {(diffResult?.blocks ?? []).length === 0 ? (
-                    <div className='text-sm text-neutral-400'>两边都没有可解析正文</div>
+                  <div className='mb-1 text-xs font-medium text-neutral-500'>划词对照</div>
+                  {(diffResult?.quotes ?? []).length === 0 ? (
+                    <div className='rounded border border-dashed border-neutral-200 bg-neutral-50 px-3 py-6 text-center text-sm text-neutral-400'>
+                      所选两轮没有划词批注。请先在「划词审核」里批注，或切换「左右原文」查看全文。
+                    </div>
                   ) : (
-                    <div className='space-y-2'>
-                      {(diffResult?.blocks ?? []).map((block, idx) =>
-                        block.type === 'equal' ? (
-                          <div
-                            key={idx}
-                            className='rounded border border-dashed border-neutral-100 px-3 py-1.5 text-xs text-neutral-400'
-                          >
-                            相同段落：{block.text.length > 80 ? `${block.text.slice(0, 80)}…` : block.text}
-                          </div>
-                        ) : (
-                          <DiffBlockCard
-                            key={idx}
-                            block={block}
-                          />
-                        ),
-                      )}
+                    <div className='space-y-3'>
+                      {(diffResult?.quotes ?? []).map((item, idx) => (
+                        <QuoteDiffCard
+                          key={`${item.quote}-${idx}`}
+                          item={item}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>

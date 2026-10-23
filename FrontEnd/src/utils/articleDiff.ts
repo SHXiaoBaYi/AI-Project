@@ -117,3 +117,87 @@ export function titleDiff(left?: string | null, right?: string | null): DiffBloc
   if (a && !b) return { type: 'remove', text: a };
   return { type: 'change', before: a, after: b };
 }
+
+export type QuoteAnno = {
+  quoteText: string;
+  commentText?: string;
+  authorName?: string;
+};
+
+export type QuoteDiffItem = {
+  quote: string;
+  comment?: string;
+  authorName?: string;
+  /** 划词在左/右稿中的命中片段（归一化后） */
+  leftHit?: string | null;
+  rightHit?: string | null;
+  block: DiffBlock;
+};
+
+function normalizePlain(raw?: string | null): string {
+  return lakeToBlocks(raw).join('\n');
+}
+
+function findQuoteHit(plain: string, quote: string): string | null {
+  const q = (quote || '').replace(/\s+/g, ' ').trim();
+  if (!q || !plain) return null;
+  const compactPlain = plain.replace(/\s+/g, ' ');
+  const idx = compactPlain.indexOf(q);
+  if (idx >= 0) return q;
+  // 宽松：去掉空白再找
+  const loosePlain = plain.replace(/\s+/g, '');
+  const looseQ = q.replace(/\s+/g, '');
+  if (looseQ && loosePlain.includes(looseQ)) return q;
+  return null;
+}
+
+/**
+ * 仅针对划词批注做对照：以批注原文为锚，看左右稿是否仍包含该片段。
+ * 不做整篇段落 diff。
+ */
+export function diffAnnotationQuotes(
+  leftBody?: string | null,
+  rightBody?: string | null,
+  annotations?: QuoteAnno[] | null,
+): QuoteDiffItem[] {
+  const quotes = (annotations ?? [])
+    .map((a) => ({
+      quote: (a.quoteText || '').replace(/\s+/g, ' ').trim(),
+      comment: (a.commentText || '').trim() || undefined,
+      authorName: a.authorName,
+    }))
+    .filter((a) => a.quote.length > 0);
+  if (quotes.length === 0) return [];
+
+  const leftPlain = normalizePlain(leftBody);
+  const rightPlain = normalizePlain(rightBody);
+  const seen = new Set<string>();
+  const out: QuoteDiffItem[] = [];
+
+  for (const row of quotes) {
+    if (seen.has(row.quote)) continue;
+    seen.add(row.quote);
+    const leftHit = findQuoteHit(leftPlain, row.quote);
+    const rightHit = findQuoteHit(rightPlain, row.quote);
+    let block: DiffBlock;
+    if (leftHit && rightHit) {
+      block = { type: 'equal', text: row.quote };
+    } else if (leftHit && !rightHit) {
+      block = { type: 'remove', text: row.quote };
+    } else if (!leftHit && rightHit) {
+      block = { type: 'add', text: row.quote };
+    } else {
+      // 两稿都找不到：仍展示划词原文，标为改动提示「已不在正文中」
+      block = { type: 'change', before: row.quote, after: '（两稿正文中均未定位到该划词）' };
+    }
+    out.push({
+      quote: row.quote,
+      comment: row.comment,
+      authorName: row.authorName,
+      leftHit,
+      rightHit,
+      block,
+    });
+  }
+  return out;
+}

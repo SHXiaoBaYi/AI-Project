@@ -536,8 +536,17 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         header: { paddingBlock: 12 },
       }}
       title={
-        <div className='flex min-w-0 flex-col'>
+        <div className='flex min-w-0 flex-col gap-0.5'>
           <span className='font-medium'>{mode === 'review' ? '审核文章' : '撰写文章'}</span>
+          {contentTitle ? (
+            <Typography.Paragraph
+              className='!mb-0 max-w-[min(720px,70vw)] text-sm font-semibold text-neutral-800'
+              copyable={{ text: contentTitle, tooltips: ['复制标题', '已复制'] }}
+              ellipsis={{ rows: 1, tooltip: contentTitle }}
+            >
+              {contentTitle}
+            </Typography.Paragraph>
+          ) : null}
           <span className='truncate text-xs font-normal text-neutral-500'>
             {bundle?.topicName || '话题'} · {bundle?.targetQuestion || '目标问题'}
           </span>
@@ -751,18 +760,30 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                 </Tag>
               ) : null}
             </div>
-            <div className='border-b border-neutral-100 px-4 py-2'>
-              <Input
-                placeholder='文章标题'
-                autoComplete='off'
-                value={contentTitle}
-                disabled={readOnly && !sharedEditable}
-                onChange={(e) => {
-                  setContentTitle(e.target.value);
-                  titleRef.current = e.target.value;
-                  scheduleSave();
-                }}
-              />
+            <div className='border-b border-neutral-100 bg-neutral-50/80 px-4 py-3'>
+              <div className='mb-1 text-xs font-medium tracking-wide text-neutral-500'>文章标题</div>
+              {mode === 'review' || (readOnly && !sharedEditable) ? (
+                <Typography.Paragraph
+                  className='!mb-0 text-base font-semibold text-neutral-900'
+                  copyable={contentTitle ? { text: contentTitle, tooltips: ['复制标题', '已复制'] } : false}
+                  ellipsis={{ rows: 2, tooltip: contentTitle || undefined }}
+                >
+                  {contentTitle || '（无标题）'}
+                </Typography.Paragraph>
+              ) : (
+                <Input
+                  placeholder='请输入文章标题'
+                  autoComplete='off'
+                  size='large'
+                  className='!font-semibold'
+                  value={contentTitle}
+                  onChange={(e) => {
+                    setContentTitle(e.target.value);
+                    titleRef.current = e.target.value;
+                    scheduleSave();
+                  }}
+                />
+              )}
             </div>
             {reviewingLive ? (
               <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]'>

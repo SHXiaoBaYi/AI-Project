@@ -58,6 +58,14 @@ export function removeLakexAntdCss() {
   });
 }
 
+/**
+ * 编辑器挂载期间加载 Lakex 自带的 antd v4 样式。
+ * 工具栏下拉、排版/对齐菜单依赖它；关闭编辑器后务必 remove，以免污染后台 Ant Design 6。
+ */
+export function ensureLakexAntdCss(): Promise<void> {
+  return loadStyleOnce(asset('antd.css'));
+}
+
 function preloadScript(src: string) {
   if (document.querySelector(`link[data-lakex-preload="${src}"]`)) return;
   const link = document.createElement('link');
@@ -95,11 +103,11 @@ export function loadLakexAssets(): Promise<LakexDocApi> {
   if (loadPromise) return loadPromise;
 
   loadPromise = (async () => {
-    removeLakexAntdCss();
     // 先 preload 大包，再顺序执行，缩短「空等 → 下载」间隙
     preloadScript(asset('kitchen.js'));
     preloadScript(asset('doc.umd.js'));
     // 首屏只拉编辑器本体；CodeMirror / KaTeX 由编辑器按需通过 URL 再加载，避免每次打开卡顿
+    // antd.css 由 ensureLakexAntdCss 在编辑器挂载时按需注入，避免长期污染后台表格
     await loadStyleOnce(asset('doc.css'));
     const g = window as Window & { react?: unknown; ReactDOM?: unknown; React?: unknown };
     const needReact = !g.React && !g.react;

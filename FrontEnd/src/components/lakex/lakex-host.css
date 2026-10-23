@@ -1,0 +1,38 @@
+/* Lakex 挂载容器：保证工具栏下拉不被裁剪，对齐样式不被 Tailwind 冲掉 */
+
+.lakex-host {
+  position: relative;
+  overflow: auto;
+  /* 下拉挂在 fixed overlay 上，需高于 Ant Drawer（约 1000） */
+  --lakex-overlay-z: 1200;
+}
+
+.lakex-host .ne-overlay-container,
+.lakex-host .ne-inner-overlay-container {
+  z-index: var(--lakex-overlay-z) !important;
+}
+
+/* 卡片/图片/表格对齐：显式强化，避免被全局 reset 盖掉 */
+.lakex-host [ne-alignment='center'],
+.lakex-host [ne-alignment='center'] .ne-card-container,
+.lakex-host [ne-alignment='center'] .ne-image-wrap,
+.lakex-host [ne-alignment='center'] table {
+  text-align: center !important;
+  justify-content: center !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.lakex-host [ne-alignment='left'] {
+  text-align: left !important;
+}
+
+.lakex-host [ne-alignment='right'] {
+  text-align: right !important;
+  justify-content: flex-end !important;
+}
+
+/* 工具栏下拉打开时，允许菜单浮出滚动区 */
+.lakex-host .ant-dropdown {
+  z-index: calc(var(--lakex-overlay-z) + 10) !important;
+}
