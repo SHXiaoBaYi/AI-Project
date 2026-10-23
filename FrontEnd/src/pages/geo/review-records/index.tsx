@@ -24,6 +24,8 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
   const [compareOpen, setCompareOpen] = useState(false);
   const [comparePlacementId, setComparePlacementId] = useState<number | null>(null);
   const [compareFocusId, setCompareFocusId] = useState<number | null>(null);
+  /** 待我审时传入，对照抽屉可直接通过/退回 */
+  const [compareReviewId, setCompareReviewId] = useState<number | null>(null);
 
   useEffect(() => {
     warmLakexAssetsOnIdle();
@@ -56,11 +58,12 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
             },
             {
               key: 'compare',
-              label: '对照/批注',
+              label: record.myResult === 'pending' ? '审核对照' : '版本对照',
               perm: 'geo:write:review',
               onClick: () => {
                 setComparePlacementId(record.placementId);
                 setCompareFocusId(record.reviewId);
+                setCompareReviewId(record.myResult === 'pending' ? record.reviewId : null);
                 setCompareOpen(true);
               },
             },
@@ -202,10 +205,13 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
         open={compareOpen}
         placementId={comparePlacementId}
         focusReviewId={compareFocusId}
+        reviewId={compareReviewId}
         onClose={() => {
           setCompareOpen(false);
           setComparePlacementId(null);
           setCompareFocusId(null);
+          setCompareReviewId(null);
+          actionRef.current?.reload();
         }}
       />
     </>

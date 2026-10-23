@@ -49,6 +49,16 @@ export type DiffBlock =
   | { type: 'add'; text: string }
   | { type: 'change'; before: string; after: string };
 
+/** 字级 / 片段级内联差异 */
+export type InlinePart =
+  { type: 'equal'; text: string } | { type: 'remove'; text: string } | { type: 'add'; text: string };
+
+export type RefinedDiffBlock =
+  | { type: 'equal'; text: string }
+  | { type: 'remove'; text: string }
+  | { type: 'add'; text: string }
+  | { type: 'change'; before: string; after: string; parts: InlinePart[] };
+
 /** 基于 LCS 的段落级差异 */
 export function diffBlocks(leftBlocks: string[], rightBlocks: string[]): DiffBlock[] {
   const n = leftBlocks.length;
@@ -107,6 +117,163 @@ export function diffBlocks(leftBlocks: string[], rightBlocks: string[]): DiffBlo
   return out;
 }
 
+/** 字符 LCS 长度（短串）；超长时降采样近似 */
+function lcsLength(a: string, b: string): number {
+  const n = a.length;
+  const m = b.length;
+  if (n === 0 || m === 0) return 0;
+  // 限制 DP 规模，避免超长段落卡死
+  if (n * m > 400_000) {
+    return approxLcsLength(a, b);
+  }
+  let prev = new Array<number>(m + 1).fill(0);
+  let curr = new Array<number>(m + 1).fill(0);
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      if (a[i - 1] === b[j - 1]) curr[j] = prev[j - 1] + 1;
+      else curr[j] = Math.max(prev[j], curr[j - 1]);
+    }
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
+    curr.fill(0);
+  }
+  return prev[m];
+}
+
+function approxLcsLength(a: string, b: string): number {
+  const step = Math.max(1, Math.ceil(Math.max(a.length, b.length) / 800));
+  const aa = [...a].filter((_, i) => i % step === 0).join('');
+  const bb = [...b].filter((_, i) => i % step === 0).join('');
+  return lcsLength(aa, bb) * step;
+}
+
+/** 两段文本相似度 0~1（基于字符 LCS） */
+export function textSimilarity(a: string, b: string): number {
+  if (!a && !b) return 1;
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  return (2 * lcsLength(a, b)) / (a.length + b.length);
+}
+
+/**
+ * 字级 diff：尽量合并连续同类型片段，便于阅读。
+ * 中文按字比对，改几个字时只高亮那几个字。
+ */
+export function diffChars(left: string, right: string): InlinePart[] {
+  if (left === right) return left ? [{ type: 'equal', text: left }] : [];
+  if (!left) return right ? [{ type: 'add', text: right }] : [];
+  if (!right) return [{ type: 'remove', text: left }];
+
+  const a = left;
+  const b = right;
+  const n = a.length;
+  const m = b.length;
+
+  // 超长段落：退化为「公共前后缀 + 中间整段替换」，避免 O(n*m) 爆炸
+  if (n * m > 400_000) {
+    return diffCharsCoarse(a, b);
+  }
+
+  const dp: number[][] = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      if (a[i] === b[j]) dp[i][j] = dp[i + 1][j + 1] + 1;
+      else dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const raw: InlinePart[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      raw.push({ type: 'equal', text: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      raw.push({ type: 'remove', text: a[i++] });
+    } else {
+      raw.push({ type: 'add', text: b[j++] });
+    }
+  }
+  while (i < n) raw.push({ type: 'remove', text: a[i++] });
+  while (j < m) raw.push({ type: 'add', text: b[j++] });
+  return mergeInlineParts(raw);
+}
+
+function diffCharsCoarse(a: string, b: string): InlinePart[] {
+  let start = 0;
+  const minLen = Math.min(a.length, b.length);
+  while (start < minLen && a[start] === b[start]) start++;
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--;
+    endB--;
+  }
+  const parts: InlinePart[] = [];
+  if (start > 0) parts.push({ type: 'equal', text: a.slice(0, start) });
+  if (endA > start) parts.push({ type: 'remove', text: a.slice(start, endA) });
+  if (endB > start) parts.push({ type: 'add', text: b.slice(start, endB) });
+  if (endA < a.length) parts.push({ type: 'equal', text: a.slice(endA) });
+  return mergeInlineParts(parts);
+}
+
+function mergeInlineParts(parts: InlinePart[]): InlinePart[] {
+  const out: InlinePart[] = [];
+  for (const p of parts) {
+    if (!p.text) continue;
+    const last = out[out.length - 1];
+    if (last && last.type === p.type) {
+      last.text += p.text;
+    } else {
+      out.push({ ...p });
+    }
+  }
+  return out;
+}
+
+/**
+ * 相邻「整段删除 + 整段新增」若相似度够高，合并为 change，避免只改几字却整段红绿对打。
+ */
+export function refineDiffBlocks(blocks: DiffBlock[], similarityThreshold = 0.32): DiffBlock[] {
+  const out: DiffBlock[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const cur = blocks[i];
+    const next = blocks[i + 1];
+    if (cur.type === 'remove' && next?.type === 'add') {
+      const sim = textSimilarity(cur.text, next.text);
+      if (sim >= similarityThreshold) {
+        out.push({ type: 'change', before: cur.text, after: next.text });
+        i++;
+        continue;
+      }
+    }
+    if (cur.type === 'add' && next?.type === 'remove') {
+      const sim = textSimilarity(cur.text, next.text);
+      if (sim >= similarityThreshold) {
+        out.push({ type: 'change', before: next.text, after: cur.text });
+        i++;
+        continue;
+      }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
+/** 正文对照：段落对齐 + 改动段落内字级高亮 */
+export function diffArticleBody(left?: string | null, right?: string | null): RefinedDiffBlock[] {
+  const raw = refineDiffBlocks(diffBlocks(lakeToBlocks(left), lakeToBlocks(right)));
+  return raw.map((b): RefinedDiffBlock => {
+    if (b.type === 'change') {
+      return { type: 'change', before: b.before, after: b.after, parts: diffChars(b.before, b.after) };
+    }
+    return b;
+  });
+}
+
 export function titleDiff(left?: string | null, right?: string | null): DiffBlock | null {
   const a = (left || '').trim();
   const b = (right || '').trim();
@@ -132,6 +299,8 @@ export type QuoteDiffItem = {
   leftHit?: string | null;
   rightHit?: string | null;
   block: DiffBlock;
+  /** 若划词在两侧都能定位但正文上下文有变，附字级 parts（可选） */
+  parts?: InlinePart[];
 };
 
 function normalizePlain(raw?: string | null): string {
@@ -153,7 +322,6 @@ function findQuoteHit(plain: string, quote: string): string | null {
 
 /**
  * 仅针对划词批注做对照：以批注原文为锚，看左右稿是否仍包含该片段。
- * 不做整篇段落 diff。
  */
 export function diffAnnotationQuotes(
   leftBody?: string | null,

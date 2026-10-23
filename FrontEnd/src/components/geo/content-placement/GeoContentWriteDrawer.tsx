@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Drawer, Input, Modal, Select, Space, Spin, Steps, Tag, Typography, message } from 'antd';
+import { Button, Drawer, Input, Modal, Segmented, Select, Space, Spin, Steps, Tag, Typography, message } from 'antd';
 import { LakexEditorHost, type LakexEditorHostHandle } from '@/components/lakex/LakexEditorHost';
 import { prefetchLakexAssets } from '@/components/lakex/loadLakexAssets';
 import {
@@ -23,6 +23,8 @@ import {
   ReviewAnnotationList,
   SelectableReviewBody,
 } from '@/components/geo/content-placement/GeoReviewAnnotations';
+import { GeoArticleVersionDiff } from '@/components/geo/content-placement/GeoArticleVersionDiff';
+import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { GEO_PLATFORM_TYPE_CONTENT } from '@/constants/geo';
 import type {
   GeoContentArticle,
@@ -32,6 +34,15 @@ import type {
   GeoPipelineStage,
   GeoPlatform,
 } from '@/types/geo';
+
+type ReviewPane = 'annotate' | 'body';
+
+function roundLabel(round: GeoContentReviewRound, latestRoundNo?: number | null) {
+  const stage = round.stageNo === 2 ? '二审' : round.stageNo === 1 ? '一审' : '';
+  const base = `${stage ? `${stage}·` : ''}第${round.roundNo ?? '-'}轮`;
+  if (latestRoundNo != null && round.roundNo === latestRoundNo) return `${base}（当前稿）`;
+  return base;
+}
 
 /** 前端一键生成进度（与后台外网一次成稿流水线对齐） */
 const AI_PIPELINE_STEPS = [
@@ -103,6 +114,15 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   } | null>(null);
   /** 审核进行中：可在原文上划词的批注列表 */
   const [liveAnnotations, setLiveAnnotations] = useState<GeoContentReviewAnnotation[]>([]);
+  /** 审核主区：划词 / 版本对照（任务视角内嵌，不必再点顶栏） */
+  const [reviewPane, setReviewPane] = useState<ReviewPane>('annotate');
+  const [versionPair, setVersionPair] = useState<{
+    left: GeoContentReviewRound;
+    right: GeoContentReviewRound;
+    latestRoundNo: number | null;
+  } | null>(null);
+  /** 完整多轮勾选对照（次要入口） */
+  const [versionCompareOpen, setVersionCompareOpen] = useState(false);
   const [annoDraft, setAnnoDraft] = useState<{
     quoteText: string;
     quotePrefix: string;
@@ -193,6 +213,8 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     setOpinion('');
     setReviewHints(null);
     setLiveAnnotations([]);
+    setVersionPair(null);
+    setReviewPane('annotate');
     setAnnoDraft(null);
     setAnnoComment('');
     setEditorReady(false);
@@ -206,6 +228,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     void getGeoContentReviewCompareApi(placementId)
       .then((res) => {
         const rounds = res.rounds ?? [];
+        const latestRoundNo = rounds.reduce((m, r) => Math.max(m, r.roundNo ?? 0), 0) || null;
         const focus =
           (reviewId != null && rounds.find((r) => r.reviewId === reviewId)) ||
           (res.currentReviewId != null && rounds.find((r) => r.reviewId === res.currentReviewId)) ||
@@ -217,17 +240,43 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         if (!focus) {
           setReviewHints(null);
           setLiveAnnotations([]);
+          setVersionPair(null);
           return;
         }
-        const stage = focus.stageNo === 2 ? '二审' : focus.stageNo === 1 ? '一审' : '';
-        const annos = focus.annotations ?? [];
+        // 补齐最新一轮快照（与对照抽屉一致）
+        const focusFilled: GeoContentReviewRound =
+          focus.roundNo === latestRoundNo && res.currentDraft && !focus.hasSnapshot
+            ? {
+                ...focus,
+                contentTitle: res.currentDraft.contentTitle || focus.contentTitle,
+                contentBody: res.currentDraft.contentBody || focus.contentBody,
+                contentFormat: res.currentDraft.contentFormat || focus.contentFormat,
+                contentVersion: res.currentDraft.contentVersion ?? focus.contentVersion,
+                hasSnapshot: !!(res.currentDraft.contentTitle || res.currentDraft.contentBody),
+              }
+            : focus;
+        const prev = [...rounds]
+          .filter((r) => r.reviewId != null && r.reviewId !== focus.reviewId)
+          .filter((r) => (r.roundNo ?? 0) < (focus.roundNo ?? 0))
+          .sort((a, b) => (a.roundNo ?? 0) - (b.roundNo ?? 0))
+          .at(-1);
+        if (prev) {
+          setVersionPair({ left: prev, right: focusFilled, latestRoundNo });
+          // 有上一轮改稿时，审核默认先看版本对照（任务视角最需要）
+          if (mode === 'review') setReviewPane('body');
+        } else {
+          setVersionPair(null);
+          setReviewPane('annotate');
+        }
+        const stage = focusFilled.stageNo === 2 ? '二审' : focusFilled.stageNo === 1 ? '一审' : '';
+        const annos = focusFilled.annotations ?? [];
         setReviewHints({
-          roundLabel: `${stage ? `${stage}·` : ''}第${focus.roundNo ?? '-'}轮`,
-          contentBody: focus.contentBody || res.currentDraft?.contentBody || '',
+          roundLabel: `${stage ? `${stage}·` : ''}第${focusFilled.roundNo ?? '-'}轮`,
+          contentBody: focusFilled.contentBody || res.currentDraft?.contentBody || '',
           annotations: annos,
-          reviewers: focus.reviewers ?? [],
+          reviewers: focusFilled.reviewers ?? [],
         });
-        if (reviewId != null && focus.reviewId === reviewId) {
+        if (reviewId != null && focusFilled.reviewId === reviewId) {
           setLiveAnnotations(annos);
         } else if (reviewId != null) {
           const mine = rounds.find((r) => r.reviewId === reviewId);
@@ -239,6 +288,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       .catch(() => {
         setReviewHints(null);
         setLiveAnnotations([]);
+        setVersionPair(null);
       });
     return () => clearTimer();
   }, [open, placementId, mode, load, reviewId]);
@@ -521,597 +571,638 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
             : '';
 
   return (
-    <Drawer
-      open={open}
-      width='95vw'
-      placement='right'
-      maskClosable={false}
-      keyboard={false}
-      destroyOnHidden
-      onClose={() => {
-        void handleClose();
-      }}
-      styles={{
-        body: { padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-        header: { paddingBlock: 12 },
-      }}
-      title={
-        <div className='flex min-w-0 flex-col gap-0.5'>
-          <span className='font-medium'>{mode === 'review' ? '审核文章' : '撰写文章'}</span>
-          {contentTitle ? (
-            <Typography.Paragraph
-              className='!mb-0 max-w-[min(720px,70vw)] text-sm font-semibold text-neutral-800'
-              copyable={{ text: contentTitle, tooltips: ['复制标题', '已复制'] }}
-              ellipsis={{ rows: 1, tooltip: contentTitle }}
+    <>
+      <Drawer
+        open={open}
+        width='95vw'
+        placement='right'
+        maskClosable={false}
+        keyboard={false}
+        destroyOnHidden
+        onClose={() => {
+          void handleClose();
+        }}
+        styles={{
+          body: { padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+          header: { paddingBlock: 12 },
+        }}
+        title={
+          <div className='flex min-w-0 flex-col gap-0.5'>
+            <span className='font-medium'>{mode === 'review' ? '审核文章' : '撰写文章'}</span>
+            {contentTitle ? (
+              <Typography.Paragraph
+                className='!mb-0 max-w-[min(720px,70vw)] text-sm font-semibold text-neutral-800'
+                copyable={{ text: contentTitle, tooltips: ['复制标题', '已复制'] }}
+                ellipsis={{ rows: 1, tooltip: contentTitle }}
+              >
+                {contentTitle}
+              </Typography.Paragraph>
+            ) : null}
+            <span className='truncate text-xs font-normal text-neutral-500'>
+              {bundle?.topicName || '话题'} · {bundle?.targetQuestion || '目标问题'}
+            </span>
+          </div>
+        }
+        extra={
+          <Space>
+            <Typography.Text
+              type={saveState === 'error' ? 'danger' : 'secondary'}
+              className='text-xs'
             >
-              {contentTitle}
-            </Typography.Paragraph>
-          ) : null}
-          <span className='truncate text-xs font-normal text-neutral-500'>
-            {bundle?.topicName || '话题'} · {bundle?.targetQuestion || '目标问题'}
-          </span>
-        </div>
-      }
-      extra={
-        <Space>
-          <Typography.Text
-            type={saveState === 'error' ? 'danger' : 'secondary'}
-            className='text-xs'
-          >
-            {saveHint}
-          </Typography.Text>
-          {mode === 'write' ? (
-            <>
-              <Button
-                loading={aiGenerating}
-                disabled={readOnly && !sharedEditable}
-                onClick={openAiGenerate}
-              >
-                AI 生成
-              </Button>
-              <Button
-                type='primary'
-                loading={saveState === 'saving'}
-                onClick={() => void persist()}
-              >
-                保存
-              </Button>
-            </>
-          ) : null}
-          {mode === 'review' && reviewId != null ? (
-            <>
-              <Button
-                type='primary'
-                loading={acting}
-                onClick={() => {
-                  void (async () => {
-                    setActing(true);
-                    try {
-                      await decideGeoContentReviewApi({
-                        reviewId,
-                        action: 'approve',
-                        comment: opinion.trim() || undefined,
-                      });
-                      message.success('已通过');
-                      onClose();
-                    } catch (e) {
-                      message.error(e instanceof Error ? e.message : '审核失败');
-                    } finally {
-                      setActing(false);
-                    }
-                  })();
-                }}
-              >
-                通过
-              </Button>
-              <Button
-                loading={acting}
-                onClick={() => {
-                  void (async () => {
-                    if (!opinion.trim() && liveAnnotations.length === 0) {
-                      message.warning('退回修改时请填写意见，或先在原文划词批注');
-                      return;
-                    }
-                    setActing(true);
-                    try {
-                      await decideGeoContentReviewApi({
-                        reviewId,
-                        action: 'reject',
-                        comment: opinion.trim() || undefined,
-                      });
-                      message.success('已退回');
-                      onClose();
-                    } catch (e) {
-                      message.error(e instanceof Error ? e.message : '退回失败');
-                    } finally {
-                      setActing(false);
-                    }
-                  })();
-                }}
-              >
-                退回修改
-              </Button>
-            </>
-          ) : null}
-          <Button onClick={() => void handleClose()}>关闭</Button>
-        </Space>
-      }
-    >
-      {loading || !bundle ? (
-        <div className='flex flex-1 items-center justify-center py-24'>
-          <Spin tip='加载文章…' />
-        </div>
-      ) : (
-        <div className='flex min-h-0 flex-1'>
-          <aside className='flex w-64 shrink-0 flex-col border-r border-neutral-100'>
-            <div className='border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500'>
-              同一问题在各内容平台默认发同一篇稿，需要时可以改成独立稿。每篇文章单独审核。
-            </div>
-            <button
-              type='button'
-              className={`border-b border-neutral-100 px-3 py-2 text-left ${active === 'shared' ? 'bg-blue-50' : 'bg-white'}`}
-              onClick={() => void selectTarget('shared')}
-            >
-              <div className='text-sm font-medium'>统一稿</div>
-              <div className='text-xs text-neutral-400'>各平台默认正文</div>
-            </button>
-            <div className='min-h-0 flex-1 overflow-auto'>
-              {bundle.articles.length === 0 ? (
-                <p className='px-3 py-4 text-xs text-neutral-400'>
-                  {mode === 'write'
-                    ? '还没有内容平台。先在下方添加要发布的平台。'
-                    : '还没有平台文章，撰写人添加发布平台后才能审核。'}
-                </p>
-              ) : (
-                bundle.articles.map((row) => {
-                  const meta = statusMeta(row.contentStatus);
-                  return (
-                    <button
-                      key={row.itemId}
-                      type='button'
-                      className={`block w-full border-b border-neutral-100 px-3 py-2 text-left ${
-                        active === row.itemId ? 'bg-blue-50' : 'bg-white'
-                      }`}
-                      onClick={() => void selectTarget(row.itemId)}
-                    >
-                      <div className='flex items-center justify-between gap-2'>
-                        <span className='truncate text-sm'>{row.platformName}</span>
-                        <Tag
-                          color={meta.color}
-                          className='mr-0'
-                        >
-                          {meta.text}
-                        </Tag>
-                      </div>
-                      <div className='text-xs text-neutral-400'>
-                        {row.contentMode === 'custom' ? '独立稿' : '沿用统一稿'}
-                        {row.contentForm ? ` · ${row.contentForm}` : ''}
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
+              {saveHint}
+            </Typography.Text>
             {mode === 'write' ? (
-              <div className='border-t border-neutral-100 p-2'>
-                <Select
-                  key={bundle.articles.length}
-                  className='w-full'
-                  placeholder='添加发布平台'
-                  options={platformOptions}
-                  showSearch
-                  optionFilterProp='label'
-                  onChange={(platformName: string) => {
-                    if (!placementId || !platformName) return;
+              <>
+                <Button
+                  loading={aiGenerating}
+                  disabled={readOnly && !sharedEditable}
+                  onClick={openAiGenerate}
+                >
+                  AI 生成
+                </Button>
+                <Button
+                  type='primary'
+                  loading={saveState === 'saving'}
+                  onClick={() => void persist()}
+                >
+                  保存
+                </Button>
+              </>
+            ) : null}
+            {mode === 'review' && reviewId != null ? (
+              <>
+                <Button
+                  type='primary'
+                  loading={acting}
+                  onClick={() => {
                     void (async () => {
+                      setActing(true);
                       try {
-                        const created = await addGeoContentPlatformArticleApi({ placementId, platformName });
-                        setBundle((prev) => (prev ? { ...prev, articles: [...prev.articles, created] } : prev));
-                        message.success(`已添加 ${platformName}`);
-                        setActive(created.itemId);
-                        applyArticle(created, bundle);
+                        await decideGeoContentReviewApi({
+                          reviewId,
+                          action: 'approve',
+                          comment: opinion.trim() || undefined,
+                        });
+                        message.success('已通过');
+                        onClose();
                       } catch (e) {
-                        message.error(e instanceof Error ? e.message : '添加平台失败');
+                        message.error(e instanceof Error ? e.message : '审核失败');
+                      } finally {
+                        setActing(false);
                       }
                     })();
                   }}
-                />
-              </div>
-            ) : null}
-          </aside>
-          <section className='flex min-w-0 flex-1 flex-col'>
-            <div className='flex flex-wrap items-center gap-2 border-b border-neutral-100 px-4 py-2'>
-              {headerStatus ? <Tag color={headerStatus.color}>{headerStatus.text}</Tag> : <Tag>统一稿</Tag>}
-              {article ? (
-                <Tag>{article.contentMode === 'custom' ? '独立稿' : '沿用统一稿'}</Tag>
-              ) : (
-                <span className='text-xs text-neutral-400'>改这里会同步到所有「沿用统一稿」的平台</span>
-              )}
-              {mode === 'write' && article?.editable ? (
-                article.contentMode === 'custom' ? (
-                  <Button
-                    size='small'
-                    loading={acting}
-                    onClick={() => void switchMode('shared')}
-                  >
-                    改回统一稿
-                  </Button>
-                ) : (
-                  <Button
-                    size='small'
-                    loading={acting}
-                    onClick={() => void switchMode('custom')}
-                  >
-                    改为独立稿
-                  </Button>
-                )
-              ) : null}
-              {mode === 'write' ? (
-                <span className='text-xs text-neutral-400'>
-                  保存后在「我的撰写记录」发起一审/二审（串行，每阶段 1 人）
-                </span>
-              ) : null}
-              {reviewingLive ? (
-                <Tag
-                  color='gold'
-                  className='mr-0'
                 >
-                  原文划词{liveAnnotations.length > 0 ? ` · ${liveAnnotations.length}` : ''}
-                </Tag>
-              ) : null}
-            </div>
-            <div className='border-b border-neutral-100 bg-neutral-50/80 px-4 py-3'>
-              <div className='mb-1 text-xs font-medium tracking-wide text-neutral-500'>文章标题</div>
-              {mode === 'review' || (readOnly && !sharedEditable) ? (
-                <Typography.Paragraph
-                  className='!mb-0 text-base font-semibold text-neutral-900'
-                  copyable={contentTitle ? { text: contentTitle, tooltips: ['复制标题', '已复制'] } : false}
-                  ellipsis={{ rows: 2, tooltip: contentTitle || undefined }}
-                >
-                  {contentTitle || '（无标题）'}
-                </Typography.Paragraph>
-              ) : (
-                <Input
-                  placeholder='请输入文章标题'
-                  autoComplete='off'
-                  size='large'
-                  className='!font-semibold'
-                  value={contentTitle}
-                  onChange={(e) => {
-                    setContentTitle(e.target.value);
-                    titleRef.current = e.target.value;
-                    scheduleSave();
+                  通过
+                </Button>
+                <Button
+                  loading={acting}
+                  onClick={() => {
+                    void (async () => {
+                      if (!opinion.trim() && liveAnnotations.length === 0) {
+                        message.warning('退回修改时请填写意见，或先在原文划词批注');
+                        return;
+                      }
+                      setActing(true);
+                      try {
+                        await decideGeoContentReviewApi({
+                          reviewId,
+                          action: 'reject',
+                          comment: opinion.trim() || undefined,
+                        });
+                        message.success('已退回');
+                        onClose();
+                      } catch (e) {
+                        message.error(e instanceof Error ? e.message : '退回失败');
+                      } finally {
+                        setActing(false);
+                      }
+                    })();
                   }}
-                />
-              )}
-            </div>
-            {reviewingLive ? (
-              <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]'>
-                <div className='min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
-                  {annotateBody ? (
-                    <SelectableReviewBody
-                      contentKey={`review-${reviewId}-${annotateBody.length}`}
-                      contentBody={annotateBody}
-                      enabled
-                      annotations={liveAnnotations}
-                      editableReviewId={reviewId}
-                      onAnnotationsChange={setLiveAnnotations}
-                      onAdd={(d) => {
-                        setAnnoDraft(d);
-                        setAnnoComment('');
-                      }}
-                    />
-                  ) : (
-                    <div className='p-4 text-sm text-amber-700'>暂无原文快照，无法划词（请确认已提审并保存正文）</div>
-                  )}
-                </div>
-                <aside className='flex min-h-0 flex-col overflow-auto px-3 py-2'>
-                  <div className='mb-2 text-xs text-neutral-500'>
-                    批注列表{liveAnnotations.length > 0 ? `（${liveAnnotations.length}）` : ''}
-                    ；左侧 Lake 原文可划选，高亮处点数字查看
-                  </div>
-                  <ReviewAnnotationList
-                    annotations={liveAnnotations}
-                    editableReviewId={reviewId}
-                    onDelete={(id) => {
+                >
+                  退回修改
+                </Button>
+              </>
+            ) : null}
+            <Button onClick={() => void handleClose()}>关闭</Button>
+          </Space>
+        }
+      >
+        {loading || !bundle ? (
+          <div className='flex flex-1 items-center justify-center py-24'>
+            <Spin tip='加载文章…' />
+          </div>
+        ) : (
+          <div className='flex min-h-0 flex-1'>
+            <aside className='flex w-64 shrink-0 flex-col border-r border-neutral-100'>
+              <div className='border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500'>
+                同一问题在各内容平台默认发同一篇稿，需要时可以改成独立稿。每篇文章单独审核。
+              </div>
+              <button
+                type='button'
+                className={`border-b border-neutral-100 px-3 py-2 text-left ${active === 'shared' ? 'bg-blue-50' : 'bg-white'}`}
+                onClick={() => void selectTarget('shared')}
+              >
+                <div className='text-sm font-medium'>统一稿</div>
+                <div className='text-xs text-neutral-400'>各平台默认正文</div>
+              </button>
+              <div className='min-h-0 flex-1 overflow-auto'>
+                {bundle.articles.length === 0 ? (
+                  <p className='px-3 py-4 text-xs text-neutral-400'>
+                    {mode === 'write'
+                      ? '还没有内容平台。先在下方添加要发布的平台。'
+                      : '还没有平台文章，撰写人添加发布平台后才能审核。'}
+                  </p>
+                ) : (
+                  bundle.articles.map((row) => {
+                    const meta = statusMeta(row.contentStatus);
+                    return (
+                      <button
+                        key={row.itemId}
+                        type='button'
+                        className={`block w-full border-b border-neutral-100 px-3 py-2 text-left ${
+                          active === row.itemId ? 'bg-blue-50' : 'bg-white'
+                        }`}
+                        onClick={() => void selectTarget(row.itemId)}
+                      >
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='truncate text-sm'>{row.platformName}</span>
+                          <Tag
+                            color={meta.color}
+                            className='mr-0'
+                          >
+                            {meta.text}
+                          </Tag>
+                        </div>
+                        <div className='text-xs text-neutral-400'>
+                          {row.contentMode === 'custom' ? '独立稿' : '沿用统一稿'}
+                          {row.contentForm ? ` · ${row.contentForm}` : ''}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              {mode === 'write' ? (
+                <div className='border-t border-neutral-100 p-2'>
+                  <Select
+                    key={bundle.articles.length}
+                    className='w-full'
+                    placeholder='添加发布平台'
+                    options={platformOptions}
+                    showSearch
+                    optionFilterProp='label'
+                    onChange={(platformName: string) => {
+                      if (!placementId || !platformName) return;
                       void (async () => {
                         try {
-                          await deleteGeoContentReviewAnnotationApi(id);
-                          setLiveAnnotations((prev) => prev.filter((a) => a.id !== id));
-                          message.success('已删除');
+                          const created = await addGeoContentPlatformArticleApi({ placementId, platformName });
+                          setBundle((prev) => (prev ? { ...prev, articles: [...prev.articles, created] } : prev));
+                          message.success(`已添加 ${platformName}`);
+                          setActive(created.itemId);
+                          applyArticle(created, bundle);
                         } catch (e) {
-                          message.error(e instanceof Error ? e.message : '删除失败');
+                          message.error(e instanceof Error ? e.message : '添加平台失败');
                         }
                       })();
                     }}
-                    variant='panel'
                   />
-                </aside>
+                </div>
+              ) : null}
+            </aside>
+            <section className='flex min-w-0 flex-1 flex-col'>
+              <div className='flex flex-wrap items-center gap-2 border-b border-neutral-100 px-4 py-2'>
+                {headerStatus ? <Tag color={headerStatus.color}>{headerStatus.text}</Tag> : <Tag>统一稿</Tag>}
+                {article ? (
+                  <Tag>{article.contentMode === 'custom' ? '独立稿' : '沿用统一稿'}</Tag>
+                ) : (
+                  <span className='text-xs text-neutral-400'>改这里会同步到所有「沿用统一稿」的平台</span>
+                )}
+                {mode === 'write' && article?.editable ? (
+                  article.contentMode === 'custom' ? (
+                    <Button
+                      size='small'
+                      loading={acting}
+                      onClick={() => void switchMode('shared')}
+                    >
+                      改回统一稿
+                    </Button>
+                  ) : (
+                    <Button
+                      size='small'
+                      loading={acting}
+                      onClick={() => void switchMode('custom')}
+                    >
+                      改为独立稿
+                    </Button>
+                  )
+                ) : null}
+                {mode === 'write' ? (
+                  <span className='text-xs text-neutral-400'>
+                    保存后在「我的撰写记录」发起一审/二审（串行，每阶段 1 人）
+                  </span>
+                ) : null}
+                {reviewingLive ? (
+                  <>
+                    <Segmented
+                      size='small'
+                      value={reviewPane}
+                      onChange={(v) => setReviewPane(v as ReviewPane)}
+                      options={[
+                        {
+                          label: versionPair ? '版本对照' : '版本对照（无上一轮）',
+                          value: 'body',
+                          disabled: !versionPair,
+                        },
+                        {
+                          label: `划词审核${liveAnnotations.length > 0 ? ` · ${liveAnnotations.length}` : ''}`,
+                          value: 'annotate',
+                        },
+                      ]}
+                    />
+                    {versionPair ? (
+                      <Button
+                        size='small'
+                        type='link'
+                        className='!px-1'
+                        onClick={() => setVersionCompareOpen(true)}
+                      >
+                        选其他轮次
+                      </Button>
+                    ) : null}
+                  </>
+                ) : null}
               </div>
-            ) : (
-              <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px]'>
-                <div className='relative min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
-                  {!editorReady && (
-                    <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70'>
-                      <Spin tip='加载编辑器…' />
-                    </div>
-                  )}
-                  <LakexEditorHost
-                    ref={editorHostRef}
-                    key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}-${editorEpoch}`}
-                    value={body}
-                    readOnly={readOnly && !sharedEditable}
-                    onChange={(lake) => {
-                      setBody(lake);
-                      bodyRef.current = lake;
+              <div className='border-b border-neutral-100 bg-neutral-50/80 px-4 py-3'>
+                <div className='mb-1 text-xs font-medium tracking-wide text-neutral-500'>文章标题</div>
+                {mode === 'review' || (readOnly && !sharedEditable) ? (
+                  <Typography.Paragraph
+                    className='!mb-0 text-base font-semibold text-neutral-900'
+                    copyable={contentTitle ? { text: contentTitle, tooltips: ['复制标题', '已复制'] } : false}
+                    ellipsis={{ rows: 2, tooltip: contentTitle || undefined }}
+                  >
+                    {contentTitle || '（无标题）'}
+                  </Typography.Paragraph>
+                ) : (
+                  <Input
+                    placeholder='请输入文章标题'
+                    autoComplete='off'
+                    size='large'
+                    className='!font-semibold'
+                    value={contentTitle}
+                    onChange={(e) => {
+                      setContentTitle(e.target.value);
+                      titleRef.current = e.target.value;
                       scheduleSave();
                     }}
-                    onReady={() => setEditorReady(true)}
-                    onError={(err) => message.error(err.message)}
-                    uploadImage={async (file) => {
-                      const res = await uploadGeoScreenshotApi(file);
-                      return res.url;
-                    }}
                   />
-                </div>
-                <aside className='flex min-h-0 flex-col overflow-auto bg-neutral-50/60 px-3 py-2'>
-                  {reviewHints &&
-                  ((reviewHints.annotations?.length ?? 0) > 0 ||
-                    (reviewHints.reviewers ?? []).some((r) => r.comment?.trim())) ? (
-                    <div className='mb-3'>
-                      <div className='mb-2 text-xs font-medium text-amber-800'>
-                        {reviewHints.roundLabel} 审核反馈
-                        {mode === 'write' ? '（改稿请对照）' : ''}
-                      </div>
-                      {(reviewHints.reviewers ?? [])
-                        .filter((r) => r.comment?.trim())
-                        .map((r) => (
-                          <div
-                            key={`${r.userId}-${r.actedAt || r.comment}`}
-                            className='mb-2 rounded border border-neutral-100 bg-white px-3 py-2 text-sm'
-                          >
-                            <span className='text-xs text-neutral-400'>{r.userName || r.userId} · 总意见</span>
-                            <div className='text-neutral-800'>{r.comment}</div>
-                          </div>
-                        ))}
-                      {(reviewHints.annotations?.length ?? 0) > 0 ? (
-                        <div className='mt-1'>
-                          <div className='mb-1 text-xs font-medium text-amber-800'>划词批注</div>
-                          <GeoReviewAnnotationReadonly
-                            annotations={reviewHints.annotations}
-                            contentBody={reviewHints.contentBody}
-                            showOriginal={false}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className='mb-3 text-xs text-neutral-400'>暂无审核/批注记录</p>
-                  )}
-                  {article ? (
-                    <div className='mt-auto border-t border-neutral-100 pt-2'>
-                      <div className='mb-1 text-xs font-medium text-neutral-500'>内部意见</div>
-                      {(article.opinions ?? []).length === 0 ? (
-                        <p className='mb-2 text-xs text-neutral-400'>还没有意见</p>
-                      ) : (
-                        <ul className='mb-2 max-h-40 space-y-1 overflow-auto'>
-                          {(article.opinions ?? []).map((note) => (
-                            <li
-                              key={note.id}
-                              className='text-xs text-neutral-700'
-                            >
-                              <span className='text-neutral-400'>
-                                {note.authorName || '内部'} {note.createTime || ''}
-                              </span>
-                              <span className='ml-2'>{note.opinion}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      <Space.Compact className='w-full'>
-                        <Input
-                          placeholder='填写内部意见'
-                          value={opinion}
-                          onChange={(e) => setOpinion(e.target.value)}
-                        />
-                        <Button
-                          loading={acting}
-                          onClick={() => {
-                            const text = opinion.trim();
-                            if (!text) {
-                              message.warning('请填写意见');
-                              return;
-                            }
-                            void (async () => {
-                              setActing(true);
-                              try {
-                                const next = await addGeoContentArticleOpinionApi({
-                                  itemId: article.itemId,
-                                  opinion: text,
-                                });
-                                replaceArticle(next);
-                                setOpinion('');
-                                message.success('已记录意见');
-                              } catch (e) {
-                                message.error(e instanceof Error ? e.message : '保存意见失败');
-                              } finally {
-                                setActing(false);
-                              }
-                            })();
-                          }}
-                        >
-                          提交意见
-                        </Button>
-                      </Space.Compact>
-                    </div>
-                  ) : null}
-                </aside>
+                )}
               </div>
-            )}
-            {reviewingLive ? (
-              <div className='border-t border-neutral-100 px-4 py-2'>
-                <div className='mb-1 text-xs text-neutral-500'>
-                  总意见
-                  {opinion.trim() || liveAnnotations.length > 0 ? '' : '（退回时必填；或先在原文划词批注）'}
-                  {liveAnnotations.length > 0 ? ` · 已批注 ${liveAnnotations.length} 处` : ''}
-                </div>
-                <Input.TextArea
-                  rows={2}
-                  placeholder='可写总意见；退回时也可只靠划词批注'
-                  value={opinion}
-                  onChange={(e) => setOpinion(e.target.value)}
+              {reviewingLive && reviewPane === 'body' && versionPair ? (
+                <GeoArticleVersionDiff
+                  leftLabel={roundLabel(versionPair.left, versionPair.latestRoundNo)}
+                  rightLabel={roundLabel(versionPair.right, versionPair.latestRoundNo)}
+                  leftTitle={versionPair.left.contentTitle}
+                  rightTitle={versionPair.right.contentTitle}
+                  leftBody={versionPair.left.contentBody}
+                  rightBody={versionPair.right.contentBody}
                 />
-              </div>
-            ) : null}
-          </section>
-        </div>
-      )}
-      <Modal
-        title='添加划词批注'
-        open={annoDraft != null}
-        confirmLoading={annoSaving}
-        onCancel={() => {
-          setAnnoDraft(null);
-          setAnnoComment('');
-        }}
-        onOk={() => {
-          void (async () => {
-            if (reviewId == null || !annoDraft) return;
-            const text = annoComment.trim();
-            if (!text) {
-              message.warning('请填写批注内容');
-              return;
-            }
-            setAnnoSaving(true);
-            try {
-              const created = await addGeoContentReviewAnnotationApi({
-                reviewId,
-                quoteText: annoDraft.quoteText,
-                commentText: text,
-                quotePrefix: annoDraft.quotePrefix,
-                quoteSuffix: annoDraft.quoteSuffix,
-                startOffset: annoDraft.startOffset,
-                endOffset: annoDraft.endOffset,
-              });
-              setLiveAnnotations((prev) => [...prev, created]);
-              setAnnoDraft(null);
-              setAnnoComment('');
-              message.success('已添加划词批注');
-            } catch (e) {
-              message.error(e instanceof Error ? e.message : '添加批注失败');
-            } finally {
-              setAnnoSaving(false);
-            }
-          })();
-        }}
-        okText='保存批注'
-        destroyOnHidden
-      >
-        {annoDraft ? (
-          <Space
-            direction='vertical'
-            className='w-full'
-            size={12}
-          >
-            <blockquote className='mb-0 border-l-2 border-amber-300 bg-amber-50/60 px-3 py-2 text-sm text-neutral-700'>
-              「{annoDraft.quoteText}」
-            </blockquote>
-            <Input.TextArea
-              rows={3}
-              value={annoComment}
-              placeholder='说明这里要怎么改'
-              onChange={(e) => setAnnoComment(e.target.value)}
-              maxLength={2000}
-              showCount
-            />
-          </Space>
-        ) : null}
-      </Modal>
-      <Modal
-        title='AI 一键生成'
-        open={aiOpen}
-        onCancel={() => {
-          if (aiGenerating) return;
-          stopAiPoll();
-          setAiOpen(false);
-        }}
-        onOk={() => void runAiGenerate()}
-        okText={aiGenerating ? '生成中…' : '开始生成'}
-        confirmLoading={aiGenerating}
-        okButtonProps={{ disabled: aiGenerating }}
-        cancelButtonProps={{ disabled: aiGenerating }}
-        destroyOnHidden
-        width={640}
-      >
-        <p className='mb-3 text-sm text-neutral-500'>
-          外网模式：一次写完正文（沿用系统卖点、素材库与下方自定义提示词），再智能插图。写入
-          {active !== 'shared' && article?.contentMode === 'custom' ? '当前独立稿' : '统一稿'}。
-        </p>
-        <div className='mb-3 rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600'>
-          <div>
-            <span className='text-neutral-400'>话题：</span>
-            {bundle?.topicName || '-'}
-          </div>
-          <div className='mt-1'>
-            <span className='text-neutral-400'>目标问题：</span>
-            {bundle?.targetQuestion || '-'}
-          </div>
-        </div>
-        {(aiGenerating || aiStages.length > 0) && (
-          <div className='mb-4 rounded-lg border border-neutral-100 bg-gradient-to-b from-sky-50/80 to-white px-3 py-3'>
-            {aiCurrentMessage ? (
-              <div className='mb-3 flex items-start gap-2 rounded border border-sky-100 bg-white px-2.5 py-2 text-sm text-sky-800'>
-                {aiGenerating ? (
-                  <Spin
-                    size='small'
-                    className='mt-0.5'
+              ) : reviewingLive ? (
+                <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]'>
+                  <div className='min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
+                    {annotateBody ? (
+                      <SelectableReviewBody
+                        contentKey={`review-${reviewId}-${annotateBody.length}`}
+                        contentBody={annotateBody}
+                        enabled
+                        annotations={liveAnnotations}
+                        editableReviewId={reviewId}
+                        onAnnotationsChange={setLiveAnnotations}
+                        onAdd={(d) => {
+                          setAnnoDraft(d);
+                          setAnnoComment('');
+                        }}
+                      />
+                    ) : (
+                      <div className='p-4 text-sm text-amber-700'>暂无原文快照，无法划词（请确认已提审并保存正文）</div>
+                    )}
+                  </div>
+                  <aside className='flex min-h-0 flex-col overflow-auto px-3 py-2'>
+                    <div className='mb-2 text-xs text-neutral-500'>
+                      批注列表{liveAnnotations.length > 0 ? `（${liveAnnotations.length}）` : ''}
+                      ；左侧 Lake 原文可划选，高亮处点数字查看
+                      {!versionPair ? ' · 首次提审暂无上一轮可对照' : ''}
+                    </div>
+                    <ReviewAnnotationList
+                      annotations={liveAnnotations}
+                      editableReviewId={reviewId}
+                      onDelete={(id) => {
+                        void (async () => {
+                          try {
+                            await deleteGeoContentReviewAnnotationApi(id);
+                            setLiveAnnotations((prev) => prev.filter((a) => a.id !== id));
+                            message.success('已删除');
+                          } catch (e) {
+                            message.error(e instanceof Error ? e.message : '删除失败');
+                          }
+                        })();
+                      }}
+                      variant='panel'
+                    />
+                  </aside>
+                </div>
+              ) : (
+                <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px]'>
+                  <div className='relative min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
+                    {!editorReady && (
+                      <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70'>
+                        <Spin tip='加载编辑器…' />
+                      </div>
+                    )}
+                    <LakexEditorHost
+                      ref={editorHostRef}
+                      key={`${placementId}-${active}-${usingShared ? 'shared' : 'custom'}-${readOnly && !sharedEditable ? 'ro' : 'rw'}-${editorEpoch}`}
+                      value={body}
+                      readOnly={readOnly && !sharedEditable}
+                      onChange={(lake) => {
+                        setBody(lake);
+                        bodyRef.current = lake;
+                        scheduleSave();
+                      }}
+                      onReady={() => setEditorReady(true)}
+                      onError={(err) => message.error(err.message)}
+                      uploadImage={async (file) => {
+                        const res = await uploadGeoScreenshotApi(file);
+                        return res.url;
+                      }}
+                    />
+                  </div>
+                  <aside className='flex min-h-0 flex-col overflow-auto bg-neutral-50/60 px-3 py-2'>
+                    {reviewHints &&
+                    ((reviewHints.annotations?.length ?? 0) > 0 ||
+                      (reviewHints.reviewers ?? []).some((r) => r.comment?.trim())) ? (
+                      <div className='mb-3'>
+                        <div className='mb-2 text-xs font-medium text-amber-800'>
+                          {reviewHints.roundLabel} 审核反馈
+                          {mode === 'write' ? '（改稿请对照）' : ''}
+                        </div>
+                        {(reviewHints.reviewers ?? [])
+                          .filter((r) => r.comment?.trim())
+                          .map((r) => (
+                            <div
+                              key={`${r.userId}-${r.actedAt || r.comment}`}
+                              className='mb-2 rounded border border-neutral-100 bg-white px-3 py-2 text-sm'
+                            >
+                              <span className='text-xs text-neutral-400'>{r.userName || r.userId} · 总意见</span>
+                              <div className='text-neutral-800'>{r.comment}</div>
+                            </div>
+                          ))}
+                        {(reviewHints.annotations?.length ?? 0) > 0 ? (
+                          <div className='mt-1'>
+                            <div className='mb-1 text-xs font-medium text-amber-800'>划词批注</div>
+                            <GeoReviewAnnotationReadonly
+                              annotations={reviewHints.annotations}
+                              contentBody={reviewHints.contentBody}
+                              showOriginal={false}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className='mb-3 text-xs text-neutral-400'>暂无审核/批注记录</p>
+                    )}
+                    {article ? (
+                      <div className='mt-auto border-t border-neutral-100 pt-2'>
+                        <div className='mb-1 text-xs font-medium text-neutral-500'>内部意见</div>
+                        {(article.opinions ?? []).length === 0 ? (
+                          <p className='mb-2 text-xs text-neutral-400'>还没有意见</p>
+                        ) : (
+                          <ul className='mb-2 max-h-40 space-y-1 overflow-auto'>
+                            {(article.opinions ?? []).map((note) => (
+                              <li
+                                key={note.id}
+                                className='text-xs text-neutral-700'
+                              >
+                                <span className='text-neutral-400'>
+                                  {note.authorName || '内部'} {note.createTime || ''}
+                                </span>
+                                <span className='ml-2'>{note.opinion}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <Space.Compact className='w-full'>
+                          <Input
+                            placeholder='填写内部意见'
+                            value={opinion}
+                            onChange={(e) => setOpinion(e.target.value)}
+                          />
+                          <Button
+                            loading={acting}
+                            onClick={() => {
+                              const text = opinion.trim();
+                              if (!text) {
+                                message.warning('请填写意见');
+                                return;
+                              }
+                              void (async () => {
+                                setActing(true);
+                                try {
+                                  const next = await addGeoContentArticleOpinionApi({
+                                    itemId: article.itemId,
+                                    opinion: text,
+                                  });
+                                  replaceArticle(next);
+                                  setOpinion('');
+                                  message.success('已记录意见');
+                                } catch (e) {
+                                  message.error(e instanceof Error ? e.message : '保存意见失败');
+                                } finally {
+                                  setActing(false);
+                                }
+                              })();
+                            }}
+                          >
+                            提交意见
+                          </Button>
+                        </Space.Compact>
+                      </div>
+                    ) : null}
+                  </aside>
+                </div>
+              )}
+              {reviewingLive ? (
+                <div className='border-t border-neutral-100 px-4 py-2'>
+                  <div className='mb-1 text-xs text-neutral-500'>
+                    总意见
+                    {opinion.trim() || liveAnnotations.length > 0 ? '' : '（退回时必填；或先在原文划词批注）'}
+                    {liveAnnotations.length > 0 ? ` · 已批注 ${liveAnnotations.length} 处` : ''}
+                  </div>
+                  <Input.TextArea
+                    rows={2}
+                    placeholder='可写总意见；退回时也可只靠划词批注'
+                    value={opinion}
+                    onChange={(e) => setOpinion(e.target.value)}
                   />
-                ) : null}
-                <span className='min-w-0 leading-5'>{aiCurrentMessage}</span>
-              </div>
-            ) : null}
-            <Steps
-              direction='vertical'
-              size='small'
-              current={aiStepIndex}
-              status={aiGenerating ? 'process' : 'finish'}
-              items={AI_PIPELINE_STEPS.map((s, idx) => {
-                const real = aiStages.find((x) => x.code === s.key);
-                const isCurrent = aiGenerating && idx === aiStepIndex;
-                return {
-                  title: s.title,
-                  description: real?.message || (isCurrent ? aiCurrentMessage || '进行中…' : undefined),
-                };
-              })}
-            />
+                </div>
+              ) : null}
+            </section>
           </div>
         )}
-        <div className='mb-1 text-xs text-neutral-500'>选择模型</div>
-        <Select
-          className='mb-3 w-full'
-          placeholder='请选择已配置的 AI 模型'
-          value={aiProvider}
-          disabled={aiGenerating}
-          options={aiProviders.map((p) => ({
-            value: p.provider,
-            label: p.model ? `${p.label}（${p.model}）` : p.label,
-          }))}
-          onChange={setAiProvider}
-        />
-        {aiProviders.length === 0 ? (
-          <p className='mb-3 text-xs text-amber-600'>暂无可用云厂商，请到「系统管理 → AI模型配置」填写 API Key。</p>
-        ) : null}
-        <div className='mb-1 text-xs text-neutral-500'>写作提示词（可选）</div>
-        <Input.TextArea
-          value={aiUserPrompt}
-          onChange={(e) => setAiUserPrompt(e.target.value)}
-          placeholder='例如：偏科普口吻，突出有机双认证与牧场自有；约 1000 字；开头先回答目标问题'
-          autoSize={{ minRows: 3, maxRows: 8 }}
-          maxLength={2000}
-          showCount
-          disabled={aiGenerating}
-        />
-      </Modal>
-    </Drawer>
+        <Modal
+          title='添加划词批注'
+          open={annoDraft != null}
+          confirmLoading={annoSaving}
+          onCancel={() => {
+            setAnnoDraft(null);
+            setAnnoComment('');
+          }}
+          onOk={() => {
+            void (async () => {
+              if (reviewId == null || !annoDraft) return;
+              const text = annoComment.trim();
+              if (!text) {
+                message.warning('请填写批注内容');
+                return;
+              }
+              setAnnoSaving(true);
+              try {
+                const created = await addGeoContentReviewAnnotationApi({
+                  reviewId,
+                  quoteText: annoDraft.quoteText,
+                  commentText: text,
+                  quotePrefix: annoDraft.quotePrefix,
+                  quoteSuffix: annoDraft.quoteSuffix,
+                  startOffset: annoDraft.startOffset,
+                  endOffset: annoDraft.endOffset,
+                });
+                setLiveAnnotations((prev) => [...prev, created]);
+                setAnnoDraft(null);
+                setAnnoComment('');
+                message.success('已添加划词批注');
+              } catch (e) {
+                message.error(e instanceof Error ? e.message : '添加批注失败');
+              } finally {
+                setAnnoSaving(false);
+              }
+            })();
+          }}
+          okText='保存批注'
+          destroyOnHidden
+        >
+          {annoDraft ? (
+            <Space
+              direction='vertical'
+              className='w-full'
+              size={12}
+            >
+              <blockquote className='mb-0 border-l-2 border-amber-300 bg-amber-50/60 px-3 py-2 text-sm text-neutral-700'>
+                「{annoDraft.quoteText}」
+              </blockquote>
+              <Input.TextArea
+                rows={3}
+                value={annoComment}
+                placeholder='说明这里要怎么改'
+                onChange={(e) => setAnnoComment(e.target.value)}
+                maxLength={2000}
+                showCount
+              />
+            </Space>
+          ) : null}
+        </Modal>
+        <Modal
+          title='AI 一键生成'
+          open={aiOpen}
+          onCancel={() => {
+            if (aiGenerating) return;
+            stopAiPoll();
+            setAiOpen(false);
+          }}
+          onOk={() => void runAiGenerate()}
+          okText={aiGenerating ? '生成中…' : '开始生成'}
+          confirmLoading={aiGenerating}
+          okButtonProps={{ disabled: aiGenerating }}
+          cancelButtonProps={{ disabled: aiGenerating }}
+          destroyOnHidden
+          width={640}
+        >
+          <p className='mb-3 text-sm text-neutral-500'>
+            外网模式：一次写完正文（沿用系统卖点、素材库与下方自定义提示词），再智能插图。写入
+            {active !== 'shared' && article?.contentMode === 'custom' ? '当前独立稿' : '统一稿'}。
+          </p>
+          <div className='mb-3 rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600'>
+            <div>
+              <span className='text-neutral-400'>话题：</span>
+              {bundle?.topicName || '-'}
+            </div>
+            <div className='mt-1'>
+              <span className='text-neutral-400'>目标问题：</span>
+              {bundle?.targetQuestion || '-'}
+            </div>
+          </div>
+          {(aiGenerating || aiStages.length > 0) && (
+            <div className='mb-4 rounded-lg border border-neutral-100 bg-gradient-to-b from-sky-50/80 to-white px-3 py-3'>
+              {aiCurrentMessage ? (
+                <div className='mb-3 flex items-start gap-2 rounded border border-sky-100 bg-white px-2.5 py-2 text-sm text-sky-800'>
+                  {aiGenerating ? (
+                    <Spin
+                      size='small'
+                      className='mt-0.5'
+                    />
+                  ) : null}
+                  <span className='min-w-0 leading-5'>{aiCurrentMessage}</span>
+                </div>
+              ) : null}
+              <Steps
+                direction='vertical'
+                size='small'
+                current={aiStepIndex}
+                status={aiGenerating ? 'process' : 'finish'}
+                items={AI_PIPELINE_STEPS.map((s, idx) => {
+                  const real = aiStages.find((x) => x.code === s.key);
+                  const isCurrent = aiGenerating && idx === aiStepIndex;
+                  return {
+                    title: s.title,
+                    description: real?.message || (isCurrent ? aiCurrentMessage || '进行中…' : undefined),
+                  };
+                })}
+              />
+            </div>
+          )}
+          <div className='mb-1 text-xs text-neutral-500'>选择模型</div>
+          <Select
+            className='mb-3 w-full'
+            placeholder='请选择已配置的 AI 模型'
+            value={aiProvider}
+            disabled={aiGenerating}
+            options={aiProviders.map((p) => ({
+              value: p.provider,
+              label: p.model ? `${p.label}（${p.model}）` : p.label,
+            }))}
+            onChange={setAiProvider}
+          />
+          {aiProviders.length === 0 ? (
+            <p className='mb-3 text-xs text-amber-600'>暂无可用云厂商，请到「系统管理 → AI模型配置」填写 API Key。</p>
+          ) : null}
+          <div className='mb-1 text-xs text-neutral-500'>写作提示词（可选）</div>
+          <Input.TextArea
+            value={aiUserPrompt}
+            onChange={(e) => setAiUserPrompt(e.target.value)}
+            placeholder='例如：偏科普口吻，突出有机双认证与牧场自有；约 1000 字；开头先回答目标问题'
+            autoSize={{ minRows: 3, maxRows: 8 }}
+            maxLength={2000}
+            showCount
+            disabled={aiGenerating}
+          />
+        </Modal>
+      </Drawer>
+
+      <GeoContentReviewCompareDrawer
+        open={versionCompareOpen}
+        placementId={placementId}
+        focusReviewId={reviewId}
+        onClose={() => setVersionCompareOpen(false)}
+      />
+    </>
   );
 }

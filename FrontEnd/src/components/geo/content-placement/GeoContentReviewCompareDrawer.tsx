@@ -13,7 +13,16 @@ import {
   getGeoContentReviewCompareApi,
 } from '@/api/geo';
 import type { GeoContentReviewAnnotation, GeoContentReviewCompare, GeoContentReviewRound } from '@/types/geo';
-import { diffAnnotationQuotes, titleDiff, type DiffBlock, type QuoteDiffItem } from '@/utils/articleDiff';
+import {
+  diffAnnotationQuotes,
+  diffArticleBody,
+  diffChars,
+  titleDiff,
+  type DiffBlock,
+  type InlinePart,
+  type QuoteDiffItem,
+  type RefinedDiffBlock,
+} from '@/utils/articleDiff';
 
 const STATUS_META: Record<string, { text: string; color: string }> = {
   pending: { text: '审核中', color: 'processing' },
@@ -29,7 +38,7 @@ const RESULT_META: Record<string, { text: string; color: string }> = {
 
 type VersionKey = `review:${number}`;
 
-type ViewMode = 'diff' | 'side' | 'annotate';
+type ViewMode = 'body' | 'quotes' | 'side' | 'annotate';
 
 type Props = {
   open: boolean;
@@ -93,6 +102,36 @@ function withLatestAsCurrent(
   });
 }
 
+function InlineDiffText({ parts }: { parts: InlinePart[] }) {
+  return (
+    <p className='mb-0 text-sm leading-relaxed text-neutral-800'>
+      {parts.map((p, i) => {
+        if (p.type === 'equal') {
+          return <span key={i}>{p.text}</span>;
+        }
+        if (p.type === 'remove') {
+          return (
+            <span
+              key={i}
+              className='rounded-sm bg-red-100 px-0.5 text-red-800 line-through decoration-red-400'
+            >
+              {p.text}
+            </span>
+          );
+        }
+        return (
+          <span
+            key={i}
+            className='rounded-sm bg-emerald-100 px-0.5 font-medium text-emerald-900'
+          >
+            {p.text}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
+
 function DiffBlockCard({ block }: { block: DiffBlock }) {
   if (block.type === 'equal') {
     return (
@@ -102,7 +141,7 @@ function DiffBlockCard({ block }: { block: DiffBlock }) {
   if (block.type === 'remove') {
     return (
       <div className='rounded border border-red-200 bg-red-50 px-3 py-2'>
-        <div className='mb-1 text-xs font-medium text-red-600'>旧稿有 / 新稿无</div>
+        <div className='mb-1 text-xs font-medium text-red-600'>整段删除</div>
         <div className='text-sm text-red-800 line-through'>{block.text}</div>
       </div>
     );
@@ -110,16 +149,48 @@ function DiffBlockCard({ block }: { block: DiffBlock }) {
   if (block.type === 'add') {
     return (
       <div className='rounded border border-emerald-200 bg-emerald-50 px-3 py-2'>
-        <div className='mb-1 text-xs font-medium text-emerald-700'>旧稿无 / 新稿有</div>
+        <div className='mb-1 text-xs font-medium text-emerald-700'>整段新增</div>
+        <div className='text-sm text-emerald-900'>{block.text}</div>
+      </div>
+    );
+  }
+  const parts = diffChars(block.before, block.after);
+  return (
+    <div className='rounded border border-amber-200 bg-amber-50/60 px-3 py-2'>
+      <div className='mb-1 text-xs font-medium text-amber-700'>段内改字（红删 / 绿增）</div>
+      <InlineDiffText parts={parts} />
+    </div>
+  );
+}
+
+function BodyDiffCard({ block }: { block: RefinedDiffBlock }) {
+  if (block.type === 'equal') {
+    return (
+      <div className='rounded border border-dashed border-neutral-100 px-3 py-1.5 text-xs text-neutral-400'>
+        未改：{block.text.length > 100 ? `${block.text.slice(0, 100)}…` : block.text}
+      </div>
+    );
+  }
+  if (block.type === 'remove') {
+    return (
+      <div className='rounded border border-red-200 bg-red-50 px-3 py-2'>
+        <div className='mb-1 text-xs font-medium text-red-600'>整段删除</div>
+        <div className='text-sm text-red-800 line-through'>{block.text}</div>
+      </div>
+    );
+  }
+  if (block.type === 'add') {
+    return (
+      <div className='rounded border border-emerald-200 bg-emerald-50 px-3 py-2'>
+        <div className='mb-1 text-xs font-medium text-emerald-700'>整段新增</div>
         <div className='text-sm text-emerald-900'>{block.text}</div>
       </div>
     );
   }
   return (
-    <div className='rounded border border-amber-200 bg-amber-50 px-3 py-2'>
-      <div className='mb-1 text-xs font-medium text-amber-700'>有改动</div>
-      <div className='mb-2 text-sm text-red-700/90 line-through'>{block.before}</div>
-      <div className='text-sm text-emerald-900'>{block.after}</div>
+    <div className='rounded border border-amber-200 bg-white px-3 py-2 shadow-sm'>
+      <div className='mb-1 text-xs font-medium text-amber-700'>段内改字 · 红=删 · 绿=增</div>
+      <InlineDiffText parts={block.parts} />
     </div>
   );
 }
@@ -342,7 +413,8 @@ export function GeoContentReviewCompareDrawer({
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<GeoContentReviewCompare | null>(null);
   const [checked, setChecked] = useState<VersionKey[]>([]);
-  const [view, setView] = useState<ViewMode>('diff');
+  const [view, setView] = useState<ViewMode>('body');
+  const [showUnchanged, setShowUnchanged] = useState(false);
   const [opinion, setOpinion] = useState('');
   const [acting, setActing] = useState(false);
   const [annoDraft, setAnnoDraft] = useState<{
@@ -377,7 +449,8 @@ export function GeoContentReviewCompareDrawer({
     if (!open || placementId == null) {
       setData(null);
       setChecked([]);
-      setView('diff');
+      setView('body');
+      setShowUnchanged(false);
       setOpinion('');
       setActing(false);
       setAnnoDraft(null);
@@ -419,7 +492,17 @@ export function GeoContentReviewCompareDrawer({
         } else {
           setChecked([]);
         }
-        setView(reviewing ? 'annotate' : 'diff');
+        // 审核默认进「版本对照」看改了哪些字；无上一轮时再回划词审核
+        const hasPrev =
+          focus != null &&
+          rounds.some(
+            (r) => r.reviewId != null && r.reviewId !== focus.reviewId && (r.roundNo ?? 0) < (focus.roundNo ?? 0),
+          );
+        if (reviewing) {
+          setView(hasPrev || rounds.length >= 2 ? 'body' : 'annotate');
+        } else {
+          setView('body');
+        }
       })
       .catch((e) => {
         message.error(e instanceof Error ? e.message : '加载对照数据失败');
@@ -437,14 +520,20 @@ export function GeoContentReviewCompareDrawer({
     return { leftKey, rightKey, left, right };
   }, [checked, byKey]);
 
-  const diffResult = useMemo(() => {
+  const bodyDiffResult = useMemo(() => {
     if (!pair) return null;
     const title = titleDiff(pair.left.contentTitle, pair.right.contentTitle);
-    // 只针对两轮上的划词批注做对照，不做整篇段落 diff
+    const blocks = diffArticleBody(pair.left.contentBody, pair.right.contentBody);
+    const changed = blocks.filter((b) => b.type !== 'equal');
+    return { title, blocks, changedCount: changed.length, total: blocks.length };
+  }, [pair]);
+
+  const quoteDiffResult = useMemo(() => {
+    if (!pair) return null;
     const annos = [...(pair.left.annotations ?? []), ...(pair.right.annotations ?? [])];
     const quotes = diffAnnotationQuotes(pair.left.contentBody, pair.right.contentBody, annos);
     const changedCount = quotes.filter((q) => q.block.type !== 'equal').length;
-    return { title, quotes, changedCount };
+    return { quotes, changedCount };
   }, [pair]);
 
   const singleRound = useMemo(() => {
@@ -596,8 +685,9 @@ export function GeoContentReviewCompareDrawer({
             onChange={(v) => setView(v as ViewMode)}
             options={[
               ...(reviewing ? [{ label: '划词审核', value: 'annotate' as const }] : []),
-              { label: '划词对照', value: 'diff' },
-              { label: '左右原文', value: 'side' },
+              { label: '版本对照', value: 'body' as const },
+              { label: '划词对照', value: 'quotes' as const },
+              { label: '左右原文', value: 'side' as const },
             ]}
           />
         </div>
@@ -757,26 +847,31 @@ export function GeoContentReviewCompareDrawer({
                     />
                   </aside>
                 </div>
-              ) : pair && view === 'diff' ? (
+              ) : pair && view === 'body' ? (
                 <div className='min-h-0 flex-1 overflow-auto px-4 py-3'>
                   <div className='mb-3 flex flex-wrap items-center gap-2 text-sm'>
                     <Tag color='default'>{labelOf(pair.left, latestRoundNo)}</Tag>
                     <span className='text-neutral-400'>→</span>
                     <Tag color='processing'>{labelOf(pair.right, latestRoundNo)}</Tag>
                     <span className='text-neutral-500'>
-                      {(diffResult?.quotes ?? []).length === 0
-                        ? '两轮均无划词批注'
-                        : diffResult?.changedCount === 0
-                          ? `划词 ${diffResult.quotes.length} 处均仍在两稿中`
-                          : `划词变动 ${diffResult?.changedCount ?? 0} / ${diffResult?.quotes.length ?? 0}`}
+                      {bodyDiffResult?.changedCount === 0
+                        ? '正文无差异'
+                        : `改动段落 ${bodyDiffResult?.changedCount ?? 0} / ${bodyDiffResult?.total ?? 0}`}
                     </span>
-                    <span className='text-xs text-neutral-400'>仅对照划词片段，不做整篇 diff</span>
+                    <span className='text-xs text-neutral-400'>段内只标改到的字（红删 / 绿增）</span>
+                    <Checkbox
+                      checked={showUnchanged}
+                      onChange={(e) => setShowUnchanged(e.target.checked)}
+                      className='ml-auto text-xs'
+                    >
+                      显示未改段落
+                    </Checkbox>
                   </div>
 
-                  {diffResult?.title && diffResult.title.type !== 'equal' ? (
+                  {bodyDiffResult?.title && bodyDiffResult.title.type !== 'equal' ? (
                     <div className='mb-4'>
                       <div className='mb-1 text-xs font-medium text-neutral-500'>标题</div>
-                      <DiffBlockCard block={diffResult.title} />
+                      <DiffBlockCard block={bodyDiffResult.title} />
                     </div>
                   ) : (
                     <div className='mb-4 rounded border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm'>
@@ -793,14 +888,47 @@ export function GeoContentReviewCompareDrawer({
                     </div>
                   )}
 
-                  <div className='mb-1 text-xs font-medium text-neutral-500'>划词对照</div>
-                  {(diffResult?.quotes ?? []).length === 0 ? (
+                  <div className='mb-1 text-xs font-medium text-neutral-500'>正文版本对照</div>
+                  {(bodyDiffResult?.blocks ?? []).length === 0 ? (
+                    <div className='text-sm text-neutral-400'>两边都没有可解析正文</div>
+                  ) : bodyDiffResult?.changedCount === 0 ? (
+                    <div className='rounded border border-dashed border-emerald-200 bg-emerald-50/50 px-3 py-6 text-center text-sm text-emerald-800'>
+                      两轮正文一致，无字级改动
+                    </div>
+                  ) : (
+                    <div className='space-y-2'>
+                      {(bodyDiffResult?.blocks ?? [])
+                        .filter((b) => showUnchanged || b.type !== 'equal')
+                        .map((block, idx) => (
+                          <BodyDiffCard
+                            key={idx}
+                            block={block}
+                          />
+                        ))}
+                    </div>
+                  )}
+                </div>
+              ) : pair && view === 'quotes' ? (
+                <div className='min-h-0 flex-1 overflow-auto px-4 py-3'>
+                  <div className='mb-3 flex flex-wrap items-center gap-2 text-sm'>
+                    <Tag color='default'>{labelOf(pair.left, latestRoundNo)}</Tag>
+                    <span className='text-neutral-400'>→</span>
+                    <Tag color='processing'>{labelOf(pair.right, latestRoundNo)}</Tag>
+                    <span className='text-neutral-500'>
+                      {(quoteDiffResult?.quotes ?? []).length === 0
+                        ? '两轮均无划词批注'
+                        : quoteDiffResult?.changedCount === 0
+                          ? `划词 ${quoteDiffResult.quotes.length} 处均仍在两稿中`
+                          : `划词变动 ${quoteDiffResult?.changedCount ?? 0} / ${quoteDiffResult?.quotes.length ?? 0}`}
+                    </span>
+                  </div>
+                  {(quoteDiffResult?.quotes ?? []).length === 0 ? (
                     <div className='rounded border border-dashed border-neutral-200 bg-neutral-50 px-3 py-6 text-center text-sm text-neutral-400'>
-                      所选两轮没有划词批注。请先在「划词审核」里批注，或切换「左右原文」查看全文。
+                      所选两轮没有划词批注。可先看「版本对照」，或切回「划词审核」批注。
                     </div>
                   ) : (
                     <div className='space-y-3'>
-                      {(diffResult?.quotes ?? []).map((item, idx) => (
+                      {(quoteDiffResult?.quotes ?? []).map((item, idx) => (
                         <QuoteDiffCard
                           key={`${item.quote}-${idx}`}
                           item={item}
