@@ -116,6 +116,44 @@ public class GeoContentReviewRuleServiceImpl implements GeoContentReviewRuleServ
         return !writerIdsSkippingStage1(List.of(writerUserId)).isEmpty();
     }
 
+    @Override
+    public GeoContentReviewRule findByWriter(Long writerUserId) {
+        if (writerUserId == null) {
+            return null;
+        }
+        return ruleMapper.selectOne(new LambdaQueryWrapper<GeoContentReviewRule>()
+                .eq(GeoContentReviewRule::getWriterUserId, writerUserId)
+                .last("LIMIT 1"));
+    }
+
+    @Override
+    public boolean aiPreReviewEnabled(Long writerUserId) {
+        GeoContentReviewRule rule = findByWriter(writerUserId);
+        if (rule == null) {
+            return true;
+        }
+        return rule.getAiPreReview() == null || rule.getAiPreReview() != 0;
+    }
+
+    @Override
+    public String aiMode(Long writerUserId) {
+        GeoContentReviewRule rule = findByWriter(writerUserId);
+        if (rule == null || !StringUtils.hasText(rule.getAiMode())) {
+            return "assist";
+        }
+        String mode = rule.getAiMode().trim();
+        if ("skip_stage1_on_pass".equals(mode)) {
+            return mode;
+        }
+        return "assist";
+    }
+
+    @Override
+    public boolean aiBlockApprove(Long writerUserId) {
+        GeoContentReviewRule rule = findByWriter(writerUserId);
+        return rule != null && rule.getAiBlockApprove() != null && rule.getAiBlockApprove() != 0;
+    }
+
     private void assertWriterUnique(Long writerUserId, Long excludeId) {
         long count = ruleMapper.selectCount(new LambdaQueryWrapper<GeoContentReviewRule>()
                 .eq(GeoContentReviewRule::getWriterUserId, writerUserId)
@@ -133,6 +171,10 @@ public class GeoContentReviewRuleServiceImpl implements GeoContentReviewRuleServ
         rule.setWriterUserId(dto.getWriterUserId());
         rule.setWriterName(displayName(user));
         rule.setSkipStage1(dto.getSkipStage1() != null && dto.getSkipStage1() != 0 ? 1 : 0);
+        rule.setAiPreReview(dto.getAiPreReview() == null || dto.getAiPreReview() != 0 ? 1 : 0);
+        String mode = dto.getAiMode() == null ? "assist" : dto.getAiMode().trim();
+        rule.setAiMode("skip_stage1_on_pass".equals(mode) ? "skip_stage1_on_pass" : "assist");
+        rule.setAiBlockApprove(dto.getAiBlockApprove() != null && dto.getAiBlockApprove() != 0 ? 1 : 0);
         rule.setRemark(dto.getRemark() == null ? "" : dto.getRemark().trim());
     }
 

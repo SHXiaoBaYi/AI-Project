@@ -12,7 +12,13 @@ import {
   deleteGeoContentReviewAnnotationApi,
   getGeoContentReviewCompareApi,
 } from '@/api/geo';
-import type { GeoContentReviewAnnotation, GeoContentReviewCompare, GeoContentReviewRound } from '@/types/geo';
+import { GeoReviewAiPanel, aiRiskClearedLabel, aiStatusTag } from '@/components/geo/content-placement/GeoReviewAiPanel';
+import type {
+  GeoContentReviewAi,
+  GeoContentReviewAnnotation,
+  GeoContentReviewCompare,
+  GeoContentReviewRound,
+} from '@/types/geo';
 import {
   diffAnnotationQuotes,
   diffArticleBody,
@@ -294,6 +300,15 @@ function ReviewHistoryList({
               {round.submitRemark ? (
                 <p className='mb-2 text-xs text-neutral-500'>提审说明：{round.submitRemark}</p>
               ) : null}
+              {round.ai && round.ai.status && round.ai.status !== 'none' ? (
+                <div className='mb-2 rounded border border-dashed border-violet-200 bg-violet-50/40 px-2 py-1.5 text-xs'>
+                  <div className='mb-0.5 flex flex-wrap items-center gap-1'>
+                    <span className='font-medium text-violet-800'>AI 预审</span>
+                    {aiStatusTag(round.ai)}
+                  </div>
+                  {round.ai.summary ? <div className='text-neutral-700'>{round.ai.summary}</div> : null}
+                </div>
+              ) : null}
               {(round.reviewers ?? []).length === 0 ? (
                 <p className='mb-0 text-sm text-neutral-400'>暂无整篇审核意见</p>
               ) : (
@@ -426,6 +441,7 @@ export function GeoContentReviewCompareDrawer({
   } | null>(null);
   const [annoComment, setAnnoComment] = useState('');
   const [annoSaving, setAnnoSaving] = useState(false);
+  const [liveAi, setLiveAi] = useState<GeoContentReviewAi | null>(null);
   const reviewing = reviewId != null;
   const highlightReviewId = focusReviewId ?? reviewId;
 
@@ -455,12 +471,14 @@ export function GeoContentReviewCompareDrawer({
       setActing(false);
       setAnnoDraft(null);
       setAnnoComment('');
+      setLiveAi(null);
       return;
     }
     setLoading(true);
     setOpinion('');
     setAnnoDraft(null);
     setAnnoComment('');
+    setLiveAi(null);
     void prefetchLakexAssets();
     void getGeoContentReviewCompareApi(placementId)
       .then((res) => {
@@ -563,6 +581,25 @@ export function GeoContentReviewCompareDrawer({
   }, [versions, reviewId]);
 
   const focusAnnotations = focusRound?.annotations ?? [];
+  const focusAi = liveAi ?? focusRound?.ai ?? null;
+  const approveBlocked =
+    reviewing &&
+    !!focusAi?.aiBlockApprove &&
+    focusAi.aiPreReview !== false &&
+    (focusAi.status === 'pending' ||
+      focusAi.status === 'running' ||
+      focusAi.status === 'failed' ||
+      focusAi.status === 'none');
+  const aiHint =
+    focusAi?.status === 'done'
+      ? focusAi.suggestion === 'reject'
+        ? 'AI 建议退回'
+        : focusAi.suggestion === 'approve'
+          ? 'AI 建议通过'
+          : ''
+      : focusAi?.status === 'running' || focusAi?.status === 'pending'
+        ? 'AI 预审中'
+        : '';
 
   const patchRoundAnnotations = (reviewKey: number, next: GeoContentReviewAnnotation[]) => {
     setData((prev) => {
@@ -654,9 +691,12 @@ export function GeoContentReviewCompareDrawer({
       extra={
         reviewing ? (
           <Space>
+            {aiHint ? <span className='text-xs text-neutral-400'>{aiHint}</span> : null}
             <Button
               type='primary'
               loading={acting}
+              disabled={approveBlocked}
+              title={approveBlocked ? '按规则需等待 AI 预审完成后再通过' : undefined}
               onClick={() => void decide('approve')}
             >
               通过
@@ -779,7 +819,7 @@ export function GeoContentReviewCompareDrawer({
 
             <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
               {view === 'annotate' && reviewing && focusRound ? (
-                <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]'>
+                <div className='grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]'>
                   <section className='flex min-h-0 flex-col border-b border-neutral-100 lg:border-r lg:border-b-0'>
                     <div className='shrink-0 border-b border-neutral-100 px-3 py-2'>
                       <div className='mb-1 flex flex-wrap items-center gap-2'>
@@ -790,6 +830,7 @@ export function GeoContentReviewCompareDrawer({
                         >
                           原文划词
                         </Tag>
+                        {aiStatusTag(focusAi)}
                         {focusAnnotations.length > 0 ? (
                           <Tag
                             color='gold'
@@ -835,9 +876,33 @@ export function GeoContentReviewCompareDrawer({
                     </div>
                   </section>
                   <aside className='flex min-h-0 flex-col overflow-auto px-3 py-2'>
+                    <div className='mb-3 border-b border-neutral-100 pb-3'>
+                      <GeoReviewAiPanel
+                        reviewId={reviewId}
+                        initialAi={focusRound.ai}
+                        canAct
+                        onAiChange={(next) => {
+                          setLiveAi(next);
+                          if (reviewId == null) return;
+                          setData((prev) => {
+                            if (!prev) return prev;
+                            return {
+                              ...prev,
+                              rounds: (prev.rounds ?? []).map((r) =>
+                                r.reviewId === reviewId ? { ...r, ai: next } : r,
+                              ),
+                            };
+                          });
+                        }}
+                        onAdopted={(created) => {
+                          if (reviewId == null) return;
+                          patchRoundAnnotations(reviewId, [...focusAnnotations, ...created]);
+                        }}
+                      />
+                    </div>
                     <div className='mb-2 text-xs text-neutral-500'>
-                      批注列表{focusAnnotations.length > 0 ? `（${focusAnnotations.length}）` : ''}
-                      。左侧为撰写排版原文，划选添加；点数字可看批注。
+                      —— 人工意见 ——
+                      {focusAnnotations.length > 0 ? `（批注 ${focusAnnotations.length}）` : ''}
                     </div>
                     <ReviewAnnotationList
                       annotations={focusAnnotations}
@@ -858,6 +923,17 @@ export function GeoContentReviewCompareDrawer({
                         ? '正文无差异'
                         : `改动段落 ${bodyDiffResult?.changedCount ?? 0} / ${bodyDiffResult?.total ?? 0}`}
                     </span>
+                    {(() => {
+                      const risk = aiRiskClearedLabel(pair.left.ai, pair.right.contentBody);
+                      return risk ? (
+                        <Tag
+                          color={risk.color}
+                          className='mr-0'
+                        >
+                          {risk.text}
+                        </Tag>
+                      ) : null;
+                    })()}
                     <span className='text-xs text-neutral-400'>段内只标改到的字（红删 / 绿增）</span>
                     <Checkbox
                       checked={showUnchanged}

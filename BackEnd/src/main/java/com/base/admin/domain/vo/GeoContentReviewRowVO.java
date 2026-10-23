@@ -53,4 +53,7 @@ public class GeoContentReviewRowVO {
     @Schema(description = "提审时间")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
+
+    @Schema(description = "AI 预审摘要（列表用）")
+    private GeoContentReviewAiVO ai;
 }

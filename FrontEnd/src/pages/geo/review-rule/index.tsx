@@ -48,7 +48,7 @@ const ReviewRulePage = memo(function ReviewRulePage() {
     {
       title: '跳过一审',
       dataIndex: 'skipStage1',
-      width: 120,
+      width: 100,
       valueType: 'switch',
       fieldProps: { checkedChildren: '是', unCheckedChildren: '否' },
       valueEnum: {
@@ -57,6 +57,38 @@ const ReviewRulePage = memo(function ReviewRulePage() {
       },
       formItemProps: { rules: [{ required: true, message: '请选择是否跳过一审' }] },
       render: (_, record) => (Number(record.skipStage1) === 1 ? '是' : '否'),
+    },
+    {
+      title: 'AI预审',
+      dataIndex: 'aiPreReview',
+      width: 100,
+      valueType: 'switch',
+      fieldProps: { checkedChildren: '开', unCheckedChildren: '关' },
+      search: false,
+      render: (_, record) => (Number(record.aiPreReview ?? 1) === 1 ? '开' : '关'),
+    },
+    {
+      title: 'AI模式',
+      dataIndex: 'aiMode',
+      width: 180,
+      valueType: 'select',
+      search: false,
+      fieldProps: {
+        options: [
+          { label: '仅辅助', value: 'assist' },
+          { label: 'AI通过可跳过一审', value: 'skip_stage1_on_pass' },
+        ],
+      },
+      render: (_, record) => (record.aiMode === 'skip_stage1_on_pass' ? 'AI通过可跳过一审' : '仅辅助'),
+    },
+    {
+      title: '通过前等AI',
+      dataIndex: 'aiBlockApprove',
+      width: 120,
+      valueType: 'switch',
+      fieldProps: { checkedChildren: '是', unCheckedChildren: '否' },
+      search: false,
+      render: (_, record) => (Number(record.aiBlockApprove) === 1 ? '是' : '否'),
     },
     { title: '备注', dataIndex: 'remark', search: false, ellipsis: true },
     createTimeRangeColumn<GeoContentReviewRule>(),
@@ -101,7 +133,7 @@ const ReviewRulePage = memo(function ReviewRulePage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='文章审核规则'
-        scroll={{ x: 800 }}
+        scroll={{ x: 1100 }}
         request={async (params) => {
           const skip =
             params.skipStage1 === true || params.skipStage1 === 1 || params.skipStage1 === '1'
@@ -182,11 +214,24 @@ const ReviewRulePage = memo(function ReviewRulePage() {
         columns={columns as any}
         open={open}
         onOpenChange={setOpen}
-        initialValues={editing ? { ...editing, skipStage1: Number(editing.skipStage1) === 1 } : { skipStage1: true }}
+        initialValues={
+          editing
+            ? {
+                ...editing,
+                skipStage1: Number(editing.skipStage1) === 1,
+                aiPreReview: Number(editing.aiPreReview ?? 1) === 1,
+                aiMode: editing.aiMode || 'assist',
+                aiBlockApprove: Number(editing.aiBlockApprove) === 1,
+              }
+            : { skipStage1: true, aiPreReview: true, aiMode: 'assist', aiBlockApprove: false }
+        }
         onFinish={async (values) => {
           const payload = {
             writerUserId: values.writerUserId,
             skipStage1: values.skipStage1 === true || values.skipStage1 === 1 ? 1 : 0,
+            aiPreReview: values.aiPreReview === true || values.aiPreReview === 1 ? 1 : 0,
+            aiMode: values.aiMode === 'skip_stage1_on_pass' ? 'skip_stage1_on_pass' : 'assist',
+            aiBlockApprove: values.aiBlockApprove === true || values.aiBlockApprove === 1 ? 1 : 0,
             remark: values.remark,
           };
           if (editing) {

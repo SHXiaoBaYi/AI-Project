@@ -10,8 +10,75 @@ export interface GeoContentReviewRule {
   writerUserId: number;
   writerName?: string;
   skipStage1: number;
+  /** 1=启用 AI 预审 */
+  aiPreReview?: number;
+  /** assist | skip_stage1_on_pass */
+  aiMode?: string;
+  /** 1=AI 未完成前禁止通过 */
+  aiBlockApprove?: number;
   remark?: string;
   createTime?: string;
+}
+
+export interface GeoReviewKbCategory {
+  code: string;
+  name: string;
+  /** atomic=单条规则/实体；doc=成篇文档 */
+  shape?: 'atomic' | 'doc' | string;
+}
+
+export interface GeoReviewKbStoreAttrs {
+  openHours?: string;
+  address?: string;
+  landline?: string;
+  mobile?: string;
+  coverage?: string;
+}
+
+export interface GeoReviewKb {
+  id: number;
+  category: string;
+  code?: string;
+  title: string;
+  content?: string;
+  attrs?: string;
+  storeAttrs?: GeoReviewKbStoreAttrs;
+  sortOrder?: number;
+  enabled?: number;
+  sourceFile?: string;
+  remark?: string;
+  createTime?: string;
+}
+
+export interface GeoContentReviewAiIssue {
+  quoteText?: string;
+  commentText?: string;
+  level?: 'high' | 'mid' | 'low' | string;
+  quotePrefix?: string;
+  quoteSuffix?: string;
+}
+
+export interface GeoContentReviewAi {
+  id?: number;
+  reviewId?: number | null;
+  placementId?: number | null;
+  /** none/pending/running/done/failed */
+  status?: string;
+  suggestion?: string;
+  score?: number | null;
+  summary?: string;
+  issues?: GeoContentReviewAiIssue[];
+  provider?: string;
+  modelName?: string;
+  errorMsg?: string;
+  adopted?: boolean;
+  feedback?: string;
+  feedbackRemark?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  aiPreReview?: boolean;
+  aiMode?: string;
+  aiBlockApprove?: boolean;
 }
 
 export interface GeoContentPublisherRule {
@@ -594,6 +661,7 @@ export interface GeoContentWritingRow {
   reviewers?: GeoContentReviewerItem[];
   contentUpdatedAt?: string;
   createTime?: string;
+  ai?: GeoContentReviewAi | null;
 }
 
 export interface GeoContentReviewerItem {
@@ -634,6 +702,7 @@ export interface GeoContentReviewRow {
   reviewerSummary?: string;
   reviewers?: GeoContentReviewerItem[];
   createTime?: string;
+  ai?: GeoContentReviewAi | null;
 }
 
 export interface GeoContentReviewRound {
@@ -654,6 +723,7 @@ export interface GeoContentReviewRound {
   reviewerSummary?: string;
   annotations?: GeoContentReviewAnnotation[];
   createTime?: string;
+  ai?: GeoContentReviewAi | null;
 }
 
 export interface GeoContentReviewCompare {

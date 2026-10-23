@@ -25,4 +25,15 @@ public interface GeoContentReviewRuleService {
     Set<Long> writerIdsSkippingStage1(Collection<Long> writerUserIds);
 
     boolean skipStage1(Long writerUserId);
+
+    /** 无专属规则时默认开启 AI 预审；有规则则看 ai_pre_review */
+    boolean aiPreReviewEnabled(Long writerUserId);
+
+    /** assist / skip_stage1_on_pass；无规则默认 assist */
+    String aiMode(Long writerUserId);
+
+    /** AI 未完成前是否禁止人工「通过」 */
+    boolean aiBlockApprove(Long writerUserId);
+
+    GeoContentReviewRule findByWriter(Long writerUserId);
 }

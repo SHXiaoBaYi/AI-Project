@@ -76,9 +76,12 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureGeoStaffRoles(connection);
             retireLegacyGeoRoles(connection);
             ensureContentReviewRule(connection);
+            ensureContentReviewAiPreReview(connection);
+            ensureContentReviewKb(connection);
             ensureContentPublisherRule(connection);
             ensureSellPointLibrary(connection);
             ensureArticleAiPipeline(connection);
+            ensureGeoKnowledgeMenuTree(connection);
             if (cleanupEmptyDaily) {
                 cleanupEmptyUninspectedDailyBeforeToday(connection);
             }
@@ -1379,6 +1382,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                           writer_user_id BIGINT        NOT NULL                COMMENT '撰写人用户ID',
                           writer_name    VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '撰写人展示名',
                           skip_stage1    TINYINT       NOT NULL DEFAULT 1      COMMENT '是否跳过一审 1=是 0=否',
+                          ai_pre_review  TINYINT       NOT NULL DEFAULT 1      COMMENT '是否启用AI预审 1=是 0=否',
                           remark         VARCHAR(500)  NOT NULL DEFAULT ''     COMMENT '备注',
                           create_by      VARCHAR(64)   DEFAULT ''              COMMENT '创建者',
                           create_time    DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -1435,6 +1439,268 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             }
         }
         log.info("已同步文章审核规则菜单 menu_id=178 path=geo/review-rule");
+    }
+
+    /** AI 预审：规则开关 + 结果表 + 反馈表 */
+    private void ensureContentReviewAiPreReview(Connection connection) throws Exception {
+        if (tableExists(connection, "geo_content_review_rule")
+                && !columnExists(connection, "geo_content_review_rule", "ai_pre_review")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_review_rule
+                          ADD COLUMN ai_pre_review TINYINT NOT NULL DEFAULT 1
+                            COMMENT '是否启用AI预审 1=是 0=否' AFTER skip_stage1
+                        """);
+                statement.execute("""
+                        ALTER TABLE geo_content_review_rule
+                          ADD COLUMN ai_mode VARCHAR(32) NOT NULL DEFAULT 'assist'
+                            COMMENT 'assist=仅辅助 skip_stage1_on_pass=AI通过可跳过本阶段人工' AFTER ai_pre_review
+                        """);
+                statement.execute("""
+                        ALTER TABLE geo_content_review_rule
+                          ADD COLUMN ai_block_approve TINYINT NOT NULL DEFAULT 0
+                            COMMENT 'AI未完成前禁止人工通过 1=是 0=否' AFTER ai_mode
+                        """);
+            }
+            log.info("已为 geo_content_review_rule 增加 AI 预审字段");
+        }
+        if (tableExists(connection, "geo_content_review_rule")
+                && columnExists(connection, "geo_content_review_rule", "ai_pre_review")
+                && !columnExists(connection, "geo_content_review_rule", "ai_mode")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_content_review_rule
+                          ADD COLUMN ai_mode VARCHAR(32) NOT NULL DEFAULT 'assist'
+                            COMMENT 'assist=仅辅助 skip_stage1_on_pass=AI通过可跳过本阶段人工' AFTER ai_pre_review
+                        """);
+                statement.execute("""
+                        ALTER TABLE geo_content_review_rule
+                          ADD COLUMN ai_block_approve TINYINT NOT NULL DEFAULT 0
+                            COMMENT 'AI未完成前禁止人工通过 1=是 0=否' AFTER ai_mode
+                        """);
+            }
+            log.info("已为 geo_content_review_rule 补齐 ai_mode/ai_block_approve");
+        }
+        if (!tableExists(connection, "geo_content_review_ai")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_content_review_ai (
+                          id              BIGINT         NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          review_id       BIGINT         NOT NULL                COMMENT '审核轮次ID',
+                          placement_id    BIGINT         NOT NULL                COMMENT '投放主表ID',
+                          status          VARCHAR(20)    NOT NULL DEFAULT 'pending'
+                            COMMENT 'pending/running/done/failed',
+                          suggestion      VARCHAR(20)    NOT NULL DEFAULT ''
+                            COMMENT 'approve/reject/空',
+                          score           INT            NULL                     COMMENT '0-100',
+                          summary         VARCHAR(2000)  NOT NULL DEFAULT ''     COMMENT '风险摘要',
+                          issues_json     MEDIUMTEXT     NULL                     COMMENT '划词建议JSON',
+                          provider        VARCHAR(64)    NOT NULL DEFAULT ''     COMMENT 'AI厂商',
+                          model_name      VARCHAR(128)   NOT NULL DEFAULT ''     COMMENT '模型名',
+                          error_msg       VARCHAR(500)   NOT NULL DEFAULT ''     COMMENT '失败原因',
+                          adopted         TINYINT        NOT NULL DEFAULT 0      COMMENT '是否已采纳划词',
+                          feedback        VARCHAR(20)    NOT NULL DEFAULT ''
+                            COMMENT 'accurate/inaccurate/空',
+                          feedback_remark VARCHAR(500)   NOT NULL DEFAULT ''     COMMENT '反馈说明',
+                          feedback_by     VARCHAR(64)    NOT NULL DEFAULT ''     COMMENT '反馈人',
+                          started_at      DATETIME       NULL                     COMMENT '开始时间',
+                          finished_at     DATETIME       NULL                     COMMENT '结束时间',
+                          create_by       VARCHAR(64)    DEFAULT ''              COMMENT '创建者',
+                          create_time     DATETIME       DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                          update_by       VARCHAR(64)    DEFAULT ''              COMMENT '更新者',
+                          update_time     DATETIME       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                          is_active       TINYINT        NOT NULL DEFAULT 1      COMMENT '是否有效',
+                          PRIMARY KEY (id),
+                          UNIQUE KEY uk_review_ai_review (review_id),
+                          KEY idx_review_ai_placement (placement_id),
+                          KEY idx_review_ai_status (status)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO文章审核AI预审结果'
+                        """);
+            }
+            log.info("已创建 geo_content_review_ai");
+        }
+    }
+
+    /** 内容审核知识库：线上维护，供 AI 预审引用 */
+    private void ensureContentReviewKb(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_review_kb")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_review_kb (
+                          id           BIGINT         NOT NULL AUTO_INCREMENT COMMENT '主键',
+                          category     VARCHAR(32)    NOT NULL                COMMENT '分类',
+                          code         VARCHAR(64)    NOT NULL                COMMENT '稳定编码',
+                          title        VARCHAR(200)   NOT NULL DEFAULT ''     COMMENT '标题',
+                          content      MEDIUMTEXT     NOT NULL                COMMENT '正文Markdown',
+                          attrs        JSON           NULL                    COMMENT '分类扩展(门店结构化等)',
+                          sort_order   INT            NOT NULL DEFAULT 100    COMMENT '排序',
+                          enabled      TINYINT        NOT NULL DEFAULT 1      COMMENT '是否启用',
+                          source_file  VARCHAR(255)   NOT NULL DEFAULT ''     COMMENT '来源文件',
+                          remark       VARCHAR(500)   NOT NULL DEFAULT ''     COMMENT '备注',
+                          create_by    VARCHAR(64)    DEFAULT ''              COMMENT '创建者',
+                          create_time  DATETIME       DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                          update_by    VARCHAR(64)    DEFAULT ''              COMMENT '更新者',
+                          update_time  DATETIME       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                          is_active    TINYINT        NOT NULL DEFAULT 1      COMMENT '是否有效',
+                          PRIMARY KEY (id),
+                          UNIQUE KEY uk_review_kb_code (code),
+                          KEY idx_review_kb_cat (category, enabled, sort_order)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO内容审核知识库'
+                        """);
+            }
+            log.info("已创建 geo_review_kb");
+        }
+        if (tableExists(connection, "geo_review_kb") && !columnExists(connection, "geo_review_kb", "attrs")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_review_kb
+                          ADD COLUMN attrs JSON NULL COMMENT '分类扩展(门店结构化等)' AFTER content
+                        """);
+            }
+            log.info("已为 geo_review_kb 增加 attrs 列");
+        }
+        // 菜单 ID 必须避开招聘占用的 200–230；审稿知识库统一用 311–314
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (311, '审稿知识库', 130, 7, 'geo/review-kb', '', 'C', 'geo:reviewKb:list', 'BookOutlined', 0, 0,
+                     '内容审核智能体口径，可线上改', 1),
+                    (312, '知识新增', 311, 1, '', '', 'F', 'geo:reviewKb:add', '#', 0, 0, '', 1),
+                    (313, '知识修改', 311, 2, '', '', 'F', 'geo:reviewKb:edit', '#', 0, 0, '', 1),
+                    (314, '知识删除', 311, 3, '', '', 'F', 'geo:reviewKb:delete', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      parent_id = VALUES(parent_id),
+                      sort_order = VALUES(sort_order),
+                      path = VALUES(path),
+                      component = VALUES(component),
+                      menu_type = VALUES(menu_type),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      is_active = 1,
+                      visible = 0,
+                      status = 0
+                    """);
+            grantGeoKnowledgeMenus(statement, "311,312,313,314");
+        }
+        log.info("已同步审稿知识库菜单 menu_id=311 path=geo/review-kb");
+    }
+
+    /**
+     * 基础配置下知识库分组（ID 避开招聘 200–230）：
+     * - 310 文章生成知识库：卖点182 / 素材192 / 风格196 / 骨架315
+     * - 311 审稿知识库
+     */
+    private void ensureGeoKnowledgeMenuTree(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
+                    VALUES
+                    (310, '文章生成知识库', 130, 6, 'geo/gen-kb', '', 'M', '', 'ReadOutlined', 0, 0,
+                     '卖点/素材/风格/骨架，供 AI 成文引用', 1),
+                    (311, '审稿知识库', 130, 7, 'geo/review-kb', '', 'C', 'geo:reviewKb:list', 'BookOutlined', 0, 0,
+                     '内容审核智能体口径，可线上改', 1),
+                    (312, '知识新增', 311, 1, '', '', 'F', 'geo:reviewKb:add', '#', 0, 0, '', 1),
+                    (313, '知识修改', 311, 2, '', '', 'F', 'geo:reviewKb:edit', '#', 0, 0, '', 1),
+                    (314, '知识删除', 311, 3, '', '', 'F', 'geo:reviewKb:delete', '#', 0, 0, '', 1),
+                    (315, '文章骨架', 310, 4, 'geo/skeleton', '', 'C', 'geo:skeleton:list', 'PartitionOutlined', 0, 0,
+                     'AI成文章节骨架维护', 1),
+                    (316, '骨架新增', 315, 1, '', '', 'F', 'geo:skeleton:add', '#', 0, 0, '', 1),
+                    (317, '骨架修改', 315, 2, '', '', 'F', 'geo:skeleton:edit', '#', 0, 0, '', 1),
+                    (318, '骨架删除', 315, 3, '', '', 'F', 'geo:skeleton:delete', '#', 0, 0, '', 1)
+                    ON DUPLICATE KEY UPDATE
+                      menu_name = VALUES(menu_name),
+                      parent_id = VALUES(parent_id),
+                      sort_order = VALUES(sort_order),
+                      path = VALUES(path),
+                      component = VALUES(component),
+                      menu_type = VALUES(menu_type),
+                      perms = VALUES(perms),
+                      icon = VALUES(icon),
+                      remark = VALUES(remark),
+                      is_active = 1,
+                      visible = 0,
+                      status = 0
+                    """);
+
+            // 基础配置排序
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 4, is_active = 1, visible = 0, status = 0 WHERE menu_id = 178");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 5, is_active = 1, visible = 0, status = 0 WHERE menu_id = 187");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 6, is_active = 1, visible = 0, status = 0 WHERE menu_id = 310");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 130, sort_order = 7, is_active = 1, visible = 0, status = 0 WHERE menu_id = 311");
+
+            // 卖点/素材/风格 挂到「文章生成知识库」下（切勿再挂 209，那是招聘按钮）
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 310, sort_order = 1, menu_name = '卖点库',
+                      path = 'geo/sell-point', perms = 'geo:sellPoint:list', menu_type = 'C',
+                      is_active = 1, visible = 0, status = 0
+                    WHERE menu_id = 182
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 310, sort_order = 2, menu_name = '素材库',
+                      path = 'geo/media', perms = 'geo:media:list', menu_type = 'C',
+                      is_active = 1, visible = 0, status = 0
+                    WHERE menu_id = 192
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 310, sort_order = 3, menu_name = '风格包',
+                      path = 'geo/style-pack', perms = 'geo:stylePack:list', menu_type = 'C',
+                      is_active = 1, visible = 0, status = 0
+                    WHERE menu_id = 196
+                    """);
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 310, sort_order = 4, menu_name = '文章骨架',
+                      path = 'geo/skeleton', perms = 'geo:skeleton:list', menu_type = 'C',
+                      is_active = 1, visible = 0, status = 0
+                    WHERE menu_id = 315
+                    """);
+
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 182, is_active = 1, visible = 0, status = 0 WHERE menu_id BETWEEN 183 AND 186");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 192, is_active = 1, visible = 0, status = 0 WHERE menu_id BETWEEN 193 AND 195");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 196, is_active = 1, visible = 0, status = 0 WHERE menu_id BETWEEN 197 AND 199");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 315, is_active = 1, visible = 0, status = 0 WHERE menu_id BETWEEN 316 AND 318");
+            statement.executeUpdate("UPDATE sys_menu SET parent_id = 311, is_active = 1, visible = 0, status = 0 WHERE menu_id BETWEEN 312 AND 314");
+
+            // 若误把招聘菜单改成 GEO，这里按 path 纠正挂载（招聘迁移也会再写回）
+            statement.executeUpdate("""
+                    UPDATE sys_menu SET parent_id = 310
+                    WHERE path IN ('geo/sell-point','geo/media','geo/style-pack','geo/skeleton')
+                      AND menu_type = 'C' AND is_active = 1
+                    """);
+
+            grantGeoKnowledgeMenus(statement,
+                    "310,311,312,313,314,315,316,317,318,182,183,184,185,186,192,193,194,195,196,197,198,199");
+        }
+        log.info("已重组 GEO 知识库菜单：基础配置 → 文章生成知识库(310) / 审稿知识库(311)");
+    }
+
+    /** 给超管（role_key=admin）、拥有话题/基础配置等权限的角色挂上知识库菜单 */
+    private void grantGeoKnowledgeMenus(Statement statement, String menuIdCsv) throws Exception {
+        statement.execute("""
+                INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                SELECT r.role_id, m.menu_id, 1
+                FROM sys_role r
+                CROSS JOIN sys_menu m
+                WHERE r.role_key = 'admin' AND r.is_active = 1
+                  AND m.menu_id IN (%s)
+                """.formatted(menuIdCsv));
+        statement.execute("""
+                INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                SELECT DISTINCT rm.role_id, m.menu_id, 1
+                FROM sys_role_menu rm
+                CROSS JOIN sys_menu m
+                WHERE rm.is_active = 1
+                  AND rm.menu_id IN (1, 100, 101, 113, 130, 178, 182, 187, 192, 196, 310, 311)
+                  AND m.menu_id IN (%s)
+                """.formatted(menuIdCsv));
+        statement.execute("""
+                UPDATE sys_role_menu rm
+                INNER JOIN sys_role r ON r.role_id = rm.role_id
+                SET rm.is_active = 1
+                WHERE rm.menu_id IN (%s) AND r.role_key = 'admin'
+                """.formatted(menuIdCsv));
     }
 
     /** 默认发布人规则：未指定发布人时自动套用（种子：小穆） */
@@ -1641,7 +1907,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             statement.execute("""
                     INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
                     VALUES
-                    (182, '卖点库', 132, 5, 'geo/sell-point', '', 'C', 'geo:sellPoint:list', 'BulbOutlined', 0, 0,
+                    (182, '卖点库', 310, 1, 'geo/sell-point', '', 'C', 'geo:sellPoint:list', 'BulbOutlined', 0, 0,
                      '品牌卖点维护，供AI生成/审核引用', 1),
                     (183, '卖点新增', 182, 1, '', '', 'F', 'geo:sellPoint:add', '#', 0, 0, '', 1),
                     (184, '卖点修改', 182, 2, '', '', 'F', 'geo:sellPoint:edit', '#', 0, 0, '', 1),
@@ -1857,21 +2123,21 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     (188, '发布人规则新增', 187, 1, '', '', 'F', 'geo:publisherRule:add', '#', 0, 0, '', 1),
                     (189, '发布人规则修改', 187, 2, '', '', 'F', 'geo:publisherRule:edit', '#', 0, 0, '', 1),
                     (190, '发布人规则删除', 187, 3, '', '', 'F', 'geo:publisherRule:delete', '#', 0, 0, '', 1),
-                    (192, '素材库', 132, 6, 'geo/media', '', 'C', 'geo:media:list', 'PictureOutlined', 0, 0,
+                    (192, '素材库', 310, 2, 'geo/media', '', 'C', 'geo:media:list', 'PictureOutlined', 0, 0,
                      '文章插图素材；按用途/标签语义召回，话题可选', 1),
                     (193, '素材新增', 192, 1, '', '', 'F', 'geo:media:add', '#', 0, 0, '', 1),
                     (194, '素材修改', 192, 2, '', '', 'F', 'geo:media:edit', '#', 0, 0, '', 1),
                     (195, '素材删除', 192, 3, '', '', 'F', 'geo:media:delete', '#', 0, 0, '', 1),
-                    (196, '风格包', 132, 7, 'geo/style-pack', '', 'C', 'geo:stylePack:list', 'SkinOutlined', 0, 0,
+                    (196, '风格包', 310, 3, 'geo/style-pack', '', 'C', 'geo:stylePack:list', 'SkinOutlined', 0, 0,
                      'AI成文语气/结构/可摘句式维护', 1),
                     (197, '风格包新增', 196, 1, '', '', 'F', 'geo:stylePack:add', '#', 0, 0, '', 1),
                     (198, '风格包修改', 196, 2, '', '', 'F', 'geo:stylePack:edit', '#', 0, 0, '', 1),
                     (199, '风格包删除', 196, 3, '', '', 'F', 'geo:stylePack:delete', '#', 0, 0, '', 1),
-                    (200, '文章骨架', 132, 8, 'geo/skeleton', '', 'C', 'geo:skeleton:list', 'PartitionOutlined', 0, 0,
+                    (315, '文章骨架', 310, 4, 'geo/skeleton', '', 'C', 'geo:skeleton:list', 'PartitionOutlined', 0, 0,
                      'AI成文章节骨架维护', 1),
-                    (201, '骨架新增', 200, 1, '', '', 'F', 'geo:skeleton:add', '#', 0, 0, '', 1),
-                    (202, '骨架修改', 200, 2, '', '', 'F', 'geo:skeleton:edit', '#', 0, 0, '', 1),
-                    (203, '骨架删除', 200, 3, '', '', 'F', 'geo:skeleton:delete', '#', 0, 0, '', 1)
+                    (316, '骨架新增', 315, 1, '', '', 'F', 'geo:skeleton:add', '#', 0, 0, '', 1),
+                    (317, '骨架修改', 315, 2, '', '', 'F', 'geo:skeleton:edit', '#', 0, 0, '', 1),
+                    (318, '骨架删除', 315, 3, '', '', 'F', 'geo:skeleton:delete', '#', 0, 0, '', 1)
                     ON DUPLICATE KEY UPDATE
                       menu_name = VALUES(menu_name),
                       parent_id = VALUES(parent_id),
@@ -1883,14 +2149,15 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                       icon = VALUES(icon),
                       remark = VALUES(remark),
                       is_active = 1,
-                      visible = VALUES(visible)
+                      visible = 0,
+                      status = 0
                     """);
             // 若曾把 191 建成「素材删除」且挂在错误父级，停用以免脏菜单
             statement.execute("""
                     UPDATE sys_menu SET is_active = 0
                     WHERE menu_id = 191 AND perms = 'geo:media:delete' AND parent_id = 188
                     """);
-            String menuIds = "188,189,190,192,193,194,195,196,197,198,199,200,201,202,203";
+            String menuIds = "188,189,190,192,193,194,195,196,197,198,199,315,316,317,318";
             statement.execute("""
                     INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                     SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (%s)
@@ -1918,7 +2185,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                         """.formatted(opsId, menuIds));
             }
         }
-        log.info("已同步素材库/风格包/骨架菜单 menu_id=192,196,200");
+        log.info("已同步素材库/风格包/骨架菜单 menu_id=192,196,315");
     }
 
     private void seedStylePacksAndSkeletons(Connection connection) throws Exception {

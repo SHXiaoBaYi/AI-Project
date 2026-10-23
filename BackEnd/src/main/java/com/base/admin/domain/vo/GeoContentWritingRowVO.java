@@ -87,4 +87,7 @@ public class GeoContentWritingRowVO {
     @Schema(description = "创建时间")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
+
+    @Schema(description = "当前/最近一轮 AI 预审摘要")
+    private GeoContentReviewAiVO ai;
 }

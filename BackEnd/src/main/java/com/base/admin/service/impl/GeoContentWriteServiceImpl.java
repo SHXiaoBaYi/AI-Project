@@ -15,6 +15,7 @@ import com.base.admin.domain.entity.GeoContentReviewAnnotation;
 import com.base.admin.domain.entity.GeoContentReviewer;
 import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysUser;
+import com.base.admin.domain.vo.GeoContentReviewAiVO;
 import com.base.admin.domain.vo.GeoContentReviewAnnotationVO;
 import com.base.admin.domain.vo.GeoContentReviewCompareVO;
 import com.base.admin.domain.vo.GeoContentReviewRoundVO;
@@ -28,6 +29,7 @@ import com.base.admin.mapper.GeoContentReviewerMapper;
 import com.base.admin.mapper.SysTaskMapper;
 import com.base.admin.mapper.SysUserMapper;
 import com.base.admin.service.GeoContentPlacementService;
+import com.base.admin.service.GeoContentReviewAiService;
 import com.base.admin.service.GeoContentReviewRuleService;
 import com.base.admin.service.GeoContentWriteService;
 import com.base.admin.service.SysTaskService;
@@ -61,6 +63,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
     private final SysTaskService taskService;
     private final GeoContentPlacementService placementService;
     private final GeoContentReviewRuleService reviewRuleService;
+    private final GeoContentReviewAiService reviewAiService;
 
     @Override
     public List<GeoContentWritingRowVO> listMyWritings(GeoContentWritingQueryDTO query) {
@@ -120,6 +123,8 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         Map<Long, GeoContentReview> pendingByPlacement = latestPendingByPlacement(placementIds);
         Map<Long, GeoContentReview> latestByPlacement = latestReviewByPlacement(placementIds);
         Map<Long, List<GeoContentReviewer>> reviewersByReview = loadReviewersByReviewIds(
+                allReviews.stream().map(GeoContentReview::getId).toList());
+        Map<Long, GeoContentReviewAiVO> aiByReview = reviewAiService.mapByReviewIds(
                 allReviews.stream().map(GeoContentReview::getId).toList());
         Set<Long> skipStage1Writers = reviewRuleService.writerIdsSkippingStage1(
                 rows.stream().map(GeoContentPlacement::getOwnerUserId).filter(Objects::nonNull).collect(Collectors.toSet()));
@@ -214,6 +219,10 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                 vo.setReviewers(items);
                 vo.setReviewerSummary(summary.toString());
                 vo.setRejectSummary(reject.toString());
+            }
+            Long aiReviewId = pending != null ? pending.getId() : (latest != null ? latest.getId() : null);
+            if (aiReviewId != null) {
+                vo.setAi(aiByReview.get(aiReviewId));
             }
             result.add(vo);
         }
@@ -346,6 +355,8 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                 reviews.stream().map(GeoContentReview::getId).toList());
         Map<Long, List<GeoContentReviewAnnotation>> annotationsByReview = loadAnnotationsByReviewIds(
                 reviews.stream().map(GeoContentReview::getId).toList());
+        Map<Long, GeoContentReviewAiVO> aiByReview = reviewAiService.mapByReviewIds(
+                reviews.stream().map(GeoContentReview::getId).toList());
 
         Long currentReviewId = null;
         List<GeoContentReviewRoundVO> rounds = new ArrayList<>();
@@ -353,10 +364,12 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             if ("pending".equals(review.getStatus())) {
                 currentReviewId = review.getId();
             }
-            rounds.add(toRoundVo(
+            GeoContentReviewRoundVO roundVo = toRoundVo(
                     review,
                     reviewersByReview.getOrDefault(review.getId(), List.of()),
-                    annotationsByReview.getOrDefault(review.getId(), List.of())));
+                    annotationsByReview.getOrDefault(review.getId(), List.of()));
+            roundVo.setAi(aiByReview.get(review.getId()));
+            rounds.add(roundVo);
         }
 
         GeoContentReviewCompareVO vo = new GeoContentReviewCompareVO();
@@ -473,6 +486,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                 : nz(placement.getTargetQuestion());
         taskService.createGeoReviewTasks(review.getId(), placement.getId(), bizTitle, List.of(reviewerId), stageNo,
                 placement.getOwnerUserId());
+        reviewAiService.enqueueAfterSubmit(review.getId());
         return review.getId();
     }
 
@@ -510,6 +524,10 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         }
         if ("reject".equals(action) && !StringUtils.hasText(comment) && annotationCount > 0) {
             comment = "已划词批注 " + annotationCount + " 处，请按批注修改";
+        }
+        if ("approve".equals(action)) {
+            GeoContentPlacement forRule = requirePlacement(review.getPlacementId());
+            reviewAiService.assertApproveAllowed(review.getId(), forRule.getOwnerUserId());
         }
 
         mine.setResult("approve".equals(action) ? "approved" : "rejected");
@@ -777,6 +795,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                                 .orderByAsc(GeoContentReviewer::getId))
                 .stream()
                 .collect(Collectors.groupingBy(GeoContentReviewer::getReviewId));
+        Map<Long, GeoContentReviewAiVO> aiByReview = reviewAiService.mapByReviewIds(reviewIds);
 
         List<GeoContentReviewRowVO> result = new ArrayList<>();
         for (GeoContentReview review : reviews) {
@@ -814,6 +833,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             }
             vo.setReviewers(items);
             vo.setReviewerSummary(summary.toString());
+            vo.setAi(aiByReview.get(review.getId()));
             result.add(vo);
         }
         return result;

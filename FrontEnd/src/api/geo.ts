@@ -35,10 +35,13 @@ import type {
   GeoContentPlacementListItem,
   GeoContentPlacementArticle,
   GeoContentPlacementProofFile,
+  GeoContentReviewAi,
   GeoContentReviewAnnotation,
   GeoContentReviewCompare,
   GeoContentReviewRow,
   GeoContentReviewRule,
+  GeoReviewKb,
+  GeoReviewKbCategory,
   GeoContentPublisherRule,
   GeoContentWritingRow,
   GeoContentAiGenerateResult,
@@ -94,6 +97,34 @@ export function deleteGeoReviewRuleApi(id: number) {
 
 export function deleteGeoReviewRuleBatchApi(ids: number[]) {
   return request.delete('/geo/review-rule/batch', { data: ids });
+}
+
+export function getGeoReviewKbCategoriesApi() {
+  return request.get<unknown, GeoReviewKbCategory[]>('/geo/review-kb/categories');
+}
+
+export function getGeoReviewKbListApi(data: PageQuery & { category?: string; title?: string; enabled?: number }) {
+  return request.post<unknown, PageResult<GeoReviewKb>>('/geo/review-kb/list', data);
+}
+
+export function createGeoReviewKbApi(data: Partial<GeoReviewKb>) {
+  return request.post('/geo/review-kb', data);
+}
+
+export function updateGeoReviewKbApi(data: Partial<GeoReviewKb>) {
+  return request.put('/geo/review-kb', data);
+}
+
+export function deleteGeoReviewKbApi(id: number) {
+  return request.delete(`/geo/review-kb/${id}`);
+}
+
+export function deleteGeoReviewKbBatchApi(ids: number[]) {
+  return request.delete('/geo/review-kb/batch', { data: ids });
+}
+
+export function seedGeoReviewKbApi(force = false) {
+  return request.post<unknown, number>(`/geo/review-kb/seed?force=${force ? 'true' : 'false'}`);
 }
 
 export function getGeoPublisherRuleListApi(data: PageQuery & { publisherUserId?: number; isDefault?: number }) {
@@ -519,6 +550,30 @@ export function updateGeoContentReviewAnnotationApi(data: { id: number; commentT
 
 export function deleteGeoContentReviewAnnotationApi(id: number) {
   return request.delete(`/geo/content-write/annotation/${id}`);
+}
+
+export function getGeoContentReviewAiApi(reviewId: number) {
+  return request.get<unknown, GeoContentReviewAi>(`/geo/content-write/review/${reviewId}/ai`);
+}
+
+export function rerunGeoContentReviewAiApi(reviewId: number) {
+  return request.post<unknown, GeoContentReviewAi>(`/geo/content-write/review/${reviewId}/ai/rerun`);
+}
+
+export function adoptGeoContentReviewAiApi(reviewId: number) {
+  return request.post<unknown, GeoContentReviewAnnotation[]>(`/geo/content-write/review/${reviewId}/ai/adopt`);
+}
+
+export function feedbackGeoContentReviewAiApi(data: {
+  reviewId: number;
+  feedback: 'accurate' | 'inaccurate';
+  remark?: string;
+}) {
+  return request.post('/geo/content-write/review/ai/feedback', data);
+}
+
+export function batchGeoContentReviewAiApi(data: { reviewIds: number[] }) {
+  return request.post<unknown, number>('/geo/content-write/review/ai/batch', data);
 }
 
 export function getGeoContentReviewCompareApi(placementId: number) {

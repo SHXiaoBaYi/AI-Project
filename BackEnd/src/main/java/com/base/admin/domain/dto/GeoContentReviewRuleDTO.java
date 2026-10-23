@@ -19,6 +19,15 @@ public class GeoContentReviewRuleDTO {
     @Schema(description = "是否跳过一审 1=是 0=否", requiredMode = Schema.RequiredMode.REQUIRED, example = "1")
     private Integer skipStage1;
 
+    @Schema(description = "是否启用AI预审 1=是 0=否（默认1）", example = "1")
+    private Integer aiPreReview;
+
+    @Schema(description = "assist=仅辅助 skip_stage1_on_pass=AI通过可跳过本阶段人工", example = "assist")
+    private String aiMode;
+
+    @Schema(description = "AI未完成前禁止人工通过 1=是 0=否", example = "0")
+    private Integer aiBlockApprove;
+
     @Schema(description = "备注")
     private String remark;
 }

@@ -3,16 +3,20 @@ package com.base.admin.controller;
 import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.GeoContentReviewAiBatchDTO;
+import com.base.admin.domain.dto.GeoContentReviewAiFeedbackDTO;
 import com.base.admin.domain.dto.GeoContentReviewAnnotationSaveDTO;
 import com.base.admin.domain.dto.GeoContentReviewAnnotationUpdateDTO;
 import com.base.admin.domain.dto.GeoContentReviewDecideDTO;
 import com.base.admin.domain.dto.GeoContentReviewQueryDTO;
 import com.base.admin.domain.dto.GeoContentSubmitReviewDTO;
 import com.base.admin.domain.dto.GeoContentWritingQueryDTO;
+import com.base.admin.domain.vo.GeoContentReviewAiVO;
 import com.base.admin.domain.vo.GeoContentReviewAnnotationVO;
 import com.base.admin.domain.vo.GeoContentReviewCompareVO;
 import com.base.admin.domain.vo.GeoContentReviewRowVO;
 import com.base.admin.domain.vo.GeoContentWritingRowVO;
+import com.base.admin.service.GeoContentReviewAiService;
 import com.base.admin.service.GeoContentWriteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -36,6 +40,7 @@ import java.util.List;
 public class GeoContentWriteController {
 
     private final GeoContentWriteService writeService;
+    private final GeoContentReviewAiService reviewAiService;
 
     @Operation(summary = "我的撰写记录")
     @GetMapping("/mine")
@@ -105,5 +110,45 @@ public class GeoContentWriteController {
     public Result<Void> deleteAnnotation(@PathVariable Long id) {
         writeService.deleteAnnotation(id);
         return Result.ok();
+    }
+
+    @Operation(summary = "查询本轮 AI 预审结果")
+    @GetMapping("/review/{reviewId:\\d+}/ai")
+    @RequiresPermission({"geo:write:review", "geo:write:mine"})
+    public Result<GeoContentReviewAiVO> reviewAi(@PathVariable Long reviewId) {
+        return Result.ok(reviewAiService.getByReviewId(reviewId));
+    }
+
+    @Operation(summary = "重新跑本轮 AI 预审")
+    @PostMapping("/review/{reviewId:\\d+}/ai/rerun")
+    @RequiresPermission("geo:write:review")
+    @Log(title = "GEO文章AI预审重跑", businessType = 2)
+    public Result<GeoContentReviewAiVO> rerunReviewAi(@PathVariable Long reviewId) {
+        return Result.ok(reviewAiService.rerun(reviewId));
+    }
+
+    @Operation(summary = "一键采纳 AI 划词为批注")
+    @PostMapping("/review/{reviewId:\\d+}/ai/adopt")
+    @RequiresPermission("geo:write:review")
+    @Log(title = "GEO文章采纳AI划词", businessType = 1)
+    public Result<List<GeoContentReviewAnnotationVO>> adoptReviewAi(@PathVariable Long reviewId) {
+        return Result.ok(reviewAiService.adopt(reviewId));
+    }
+
+    @Operation(summary = "对 AI 预审反馈准/不准")
+    @PostMapping("/review/ai/feedback")
+    @RequiresPermission("geo:write:review")
+    @Log(title = "GEO文章AI预审反馈", businessType = 2)
+    public Result<Void> feedbackReviewAi(@Valid @RequestBody GeoContentReviewAiFeedbackDTO dto) {
+        reviewAiService.feedback(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量触发 AI 预审")
+    @PostMapping("/review/ai/batch")
+    @RequiresPermission("geo:write:review")
+    @Log(title = "GEO文章批量AI预审", businessType = 2)
+    public Result<Integer> batchReviewAi(@Valid @RequestBody GeoContentReviewAiBatchDTO dto) {
+        return Result.ok(reviewAiService.batchEnqueue(dto));
     }
 }

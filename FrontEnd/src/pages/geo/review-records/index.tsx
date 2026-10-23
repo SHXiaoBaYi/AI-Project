@@ -1,12 +1,19 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { Tag } from 'antd';
+import { App, Modal, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
+import PermissionButton from '@/components/Buttons/PermissionButton';
 import { GeoContentReviewCompareDrawer } from '@/components/geo/content-placement/GeoContentReviewCompareDrawer';
 import { GeoContentWriteDrawer } from '@/components/geo/content-placement/GeoContentWriteDrawer';
+import { aiStatusTag } from '@/components/geo/content-placement/GeoReviewAiPanel';
 import { warmLakexAssetsOnIdle } from '@/components/lakex/loadLakexAssets';
-import { getGeoOwnerOptionsApi, getGeoReviewRecordsApi, getGeoTopicOptionsApi } from '@/api/geo';
+import {
+  batchGeoContentReviewAiApi,
+  getGeoOwnerOptionsApi,
+  getGeoReviewRecordsApi,
+  getGeoTopicOptionsApi,
+} from '@/api/geo';
 import type { GeoContentReviewRow, GeoOwnerOption, GeoTopic } from '@/types/geo';
 
 const STATUS_META: Record<string, { text: string; color: string }> = {
@@ -16,7 +23,10 @@ const STATUS_META: Record<string, { text: string; color: string }> = {
 };
 
 const ReviewRecordsPage = memo(function ReviewRecordsPage() {
+  const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
+  const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [topics, setTopics] = useState<GeoTopic[]>([]);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
   const [viewOpen, setViewOpen] = useState(false);
@@ -110,6 +120,13 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
       },
     },
     {
+      title: 'AI预审',
+      dataIndex: 'ai',
+      width: 140,
+      search: false,
+      render: (_, r) => aiStatusTag(r.ai) || <span className='text-neutral-400'>-</span>,
+    },
+    {
       title: '发起人',
       dataIndex: 'submitterUserId',
       width: 120,
@@ -177,7 +194,44 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
         actionRef={actionRef}
         columns={columns}
         headerTitle='审核记录'
-        scroll={{ x: 1400 }}
+        scroll={{ x: 1540 }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys, _rows, { type }) => {
+            if (type === 'none') {
+              return setSelectedRowKeys([]);
+            }
+            setSelectedRowKeys((prev) => {
+              const global = new Set(prev as number[]);
+              currentPageKeysRef.current.forEach((k) => global.delete(k));
+              (keys as number[]).forEach((k) => global.add(k));
+              return [...global];
+            });
+          },
+        }}
+        toolBarRender={() => [
+          <PermissionButton
+            key='ai-batch'
+            perm='geo:write:review'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先勾选待审轮次');
+                return;
+              }
+              Modal.confirm({
+                title: '批量跑 AI 预审',
+                content: `将对选中的 ${selectedRowKeys.length} 条中、你作为审核人且仍待审的轮次触发 AI 预审。`,
+                onOk: async () => {
+                  const n = await batchGeoContentReviewAiApi({ reviewIds: selectedRowKeys as number[] });
+                  message.success(n > 0 ? `已排队 ${n} 条` : '没有可触发的轮次（需待审且你是审核人）');
+                  actionRef.current?.reload();
+                },
+              });
+            }}
+          >
+            批量AI预审
+          </PermissionButton>,
+        ]}
         request={async (params) => {
           const rows = await getGeoReviewRecordsApi({
             status: (params.status as string) || undefined,
@@ -187,6 +241,7 @@ const ReviewRecordsPage = memo(function ReviewRecordsPage() {
             submitterUserId: params.submitterUserId != null ? Number(params.submitterUserId) : undefined,
             reviewerUserId: params.reviewerUserId != null ? Number(params.reviewerUserId) : undefined,
           });
+          currentPageKeysRef.current = new Set((rows ?? []).map((r) => r.reviewId));
           return { data: rows ?? [], success: true, total: rows?.length ?? 0 };
         }}
       />

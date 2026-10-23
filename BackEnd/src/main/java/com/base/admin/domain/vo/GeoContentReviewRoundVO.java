@@ -59,4 +59,7 @@ public class GeoContentReviewRoundVO {
     @Schema(description = "提审时间")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
+
+    @Schema(description = "本轮 AI 预审结果")
+    private GeoContentReviewAiVO ai;
 }
