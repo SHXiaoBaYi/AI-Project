@@ -160,11 +160,16 @@ if [[ "$ENV_NAME" == "prod" ]]; then
       READY=1
       break
     fi
-    logs="$(ssh_run "journalctl -u xby-admin --since '3 min ago' --no-pager -o cat" 2>/dev/null || true)"
+    # 只看本轮重启后的日志，避免崩溃重试留下的旧 "schema migrate failed" 误判
+    logs="$(ssh_run "journalctl -u xby-admin --since '45 sec ago' --no-pager -o cat" 2>/dev/null || true)"
     if printf '%s\n' "$logs" | grep -q 'schema migrate failed'; then
-      echo "SchemaMigrator 失败，见 journalctl -u xby-admin" >&2
-      printf '%s\n' "$logs" | grep -E 'schema migrate failed|ERROR' | tail -n 20 >&2
-      exit 1
+      # 若随后已出现成功标记或 READY，说明新进程已修好，不立刻失败
+      if ! ssh_run "test -f '$ECS_DIR/.schema-migrate-ok'" >/dev/null 2>&1 \
+        && ! printf '%s\n' "$logs" | grep -q 'PROD_RELEASE_READY'; then
+        echo "SchemaMigrator 失败，见 journalctl -u xby-admin" >&2
+        printf '%s\n' "$logs" | grep -E 'schema migrate failed|ERROR' | tail -n 20 >&2
+        exit 1
+      fi
     fi
     if printf '%s\n' "$logs" | grep -q 'PROD_RELEASE_READY'; then
       echo "日志已出现 PROD_RELEASE_READY"

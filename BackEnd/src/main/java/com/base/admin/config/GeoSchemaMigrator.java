@@ -494,13 +494,13 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                 String urls = row[1].replace("'", "''");
                 String notes = sharedNotes.replace("'", "''");
                 int sort = Integer.parseInt(row[2]);
-                // 不存在则插入内容发布平台；已存在且审核字段为空则回填
+                // 按 uk_platform_name_type 判重（含软删），避免 is_active=0 旧行导致重复插入
                 statement.executeUpdate("""
                         INSERT INTO geo_platform (platform_name, platform_type, login_url, content_audit_urls, content_audit_notes, sort_order, is_active)
                         SELECT '%s', '内容发布平台', '', '%s', '%s', %d, 1 FROM DUAL
                         WHERE NOT EXISTS (
                           SELECT 1 FROM geo_platform
-                          WHERE platform_name = '%s' AND platform_type = '内容发布平台' AND is_active = 1
+                          WHERE platform_name = '%s' AND platform_type = '内容发布平台'
                         )
                         """.formatted(name, urls, notes, sort, name));
                 statement.executeUpdate("""
@@ -511,7 +511,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                             content_audit_notes = CASE
                               WHEN content_audit_notes IS NULL OR content_audit_notes = '' THEN '%s'
                               ELSE content_audit_notes END
-                        WHERE platform_name = '%s' AND platform_type = '内容发布平台' AND is_active = 1
+                        WHERE platform_name = '%s' AND platform_type = '内容发布平台'
                         """.formatted(urls, notes, name));
             }
         }
