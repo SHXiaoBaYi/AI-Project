@@ -373,9 +373,10 @@ public class LinkMonitorService {
         return new ProbeBatchSummary(active.size(), okCount, failures.size(), failures);
     }
 
-    public void softDelete(long id, String operatorStaffId, boolean fromGroup) {
+    /** @return 被停用的链接，便于回复时对上用户刚看到的那一条 */
+    public String softDelete(long id, String operatorStaffId, boolean fromGroup) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT id, open_conversation_id, conversation_type, creator_staff_id, status
+                SELECT id, url, open_conversation_id, conversation_type, creator_staff_id, status
                 FROM ops_link_monitor WHERE id = ? AND is_active = 1 LIMIT 1
                 """, id);
         if (rows.isEmpty()) {
@@ -396,6 +397,8 @@ public class LinkMonitorService {
                 UPDATE ops_link_monitor SET status = 'DELETED', is_active = 0, update_time = NOW()
                 WHERE id = ?
                 """, id);
+        Object url = row.get("url");
+        return url == null ? "" : String.valueOf(url);
     }
 
     public void pause(long id) {

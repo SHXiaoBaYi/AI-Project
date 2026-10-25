@@ -228,15 +228,14 @@ public class LinkMonitorRobotHandler {
             String url = String.valueOf(row.get("url"));
             String cid = row.get("open_conversation_id") == null ? "" : String.valueOf(row.get("open_conversation_id"));
             String ctype = row.get("conversation_type") == null ? "" : String.valueOf(row.get("conversation_type"));
-            md.append(i++).append(". ").append(url);
+            int no = i++;
+            md.append(no).append(". ").append(url);
             if ("2".equals(ctype) && StringUtils.hasText(cid)) {
                 md.append("（告警群已绑定）");
             }
             md.append("\n");
-            String title = "删除#" + id;
-            if (title.length() > 20) {
-                title = "删" + id;
-            }
+            // 按钮序号与上方列表一致；指令仍带数据库 id，避免删错行
+            String title = "删除#" + no;
             String cmd = RobotProductRules.CMD_LM_DEL_PREFIX + id;
             String urlEnc = "dtmd://dingtalkclient/sendMessage?content="
                     + URLEncoder.encode(cmd, StandardCharsets.UTF_8);
@@ -264,8 +263,12 @@ public class LinkMonitorRobotHandler {
             return RobotReply.text("删除指令无效。");
         }
         try {
-            linkMonitorService.softDelete(id, staffId, true);
-            return RobotReply.text("已停止监控 #" + id + "。");
+            String url = linkMonitorService.softDelete(id, staffId, true);
+            String shown = url == null ? "" : url.trim();
+            if (shown.length() > 80) {
+                shown = shown.substring(0, 80) + "…";
+            }
+            return RobotReply.text(shown.isEmpty() ? "已停止监控这条链接。" : "已停止监控：\n" + shown);
         } catch (BusinessException ex) {
             return RobotReply.text(ex.getMessage());
         }
