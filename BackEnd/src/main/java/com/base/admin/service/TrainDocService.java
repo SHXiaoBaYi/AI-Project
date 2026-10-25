@@ -399,6 +399,7 @@ public class TrainDocService {
         if (doc == null) {
             return List.of();
         }
+        doc.forceReindex = true;
         return draftsFrom(doc);
     }
 
@@ -412,6 +413,7 @@ public class TrainDocService {
             return List.of();
         }
         boolean primary = StringUtils.hasText(doc.filePath) && doc.filePath.equals(filePath);
+        doc.forceReindex = true;
         if (!primary) {
             doc.filePath = filePath;
             doc.fileName = fileName;
@@ -438,6 +440,8 @@ public class TrainDocService {
 
     private List<TrainQaDraft> draftsFrom(DocBundle doc) {
         IndexedDoc indexed = prepareIndexedDoc(doc);
+        long slot = doc.indexSlot > 0 ? doc.indexSlot : doc.versionId;
+        ensureServedImages(indexed, slot);
         List<QaBlock> blocks = buildQaBlocks(indexed, doc.text);
         List<TrainQaDraft> out = new ArrayList<>();
         int sort = 1;
@@ -1802,10 +1806,12 @@ public class TrainDocService {
         }
         try {
             long slot = doc.indexSlot > 0 ? doc.indexSlot : doc.versionId;
-            IndexedDoc cached = loadCachedIndexedFromDisk(slot);
-            if (cached != null && !cached.images.isEmpty()) {
-                preferStructuredPlainText(cached, doc.text);
-                return cached;
+            if (!doc.forceReindex) {
+                IndexedDoc cached = loadCachedIndexedFromDisk(slot);
+                if (cached != null && !cached.images.isEmpty()) {
+                    preferStructuredPlainText(cached, doc.text);
+                    return cached;
+                }
             }
             byte[] bytes = readDocBytes(doc);
             if (bytes != null && bytes.length > 0) {
@@ -2042,6 +2048,123 @@ public class TrainDocService {
             }
         }
         return false;
+    }
+
+    /**
+     * 拆题配图必须落在当前这台机器的上传目录。
+     * 测试环境拆题，图就在测试机；生产环境拆题，图就在生产机。
+     * 文档链接上的原文件会先拉到本机，再把每张图写成 /uploads/train/img/...。
+     */
+    private void ensureServedImages(IndexedDoc indexed, long slot) {
+        if (indexed == null || indexed.images == null || indexed.images.isEmpty()) {
+            return;
+        }
+        int served = 0;
+        for (int i = 0; i < indexed.images.size(); i++) {
+            String src = indexed.images.get(i);
+            if (servedFileExists(src)) {
+                String rel = uploadsRelative(src);
+                if (StringUtils.hasText(rel)) {
+                    indexed.images.set(i, rel);
+                }
+                served++;
+                continue;
+            }
+            byte[] bytes = imageBytes(src);
+            if (bytes == null || bytes.length == 0) {
+                log.warn("拆题配图没有落到本环境 slot={} no={} src={}", slot, i + 1, brief(src));
+                continue;
+            }
+            String saved = fileStorage.saveTrainVersionImage(slot, i + 1, bytes, "fig" + sniffImageExt(bytes, src));
+            if (StringUtils.hasText(saved)) {
+                indexed.images.set(i, saved);
+                served++;
+            }
+        }
+        log.info("拆题配图已写入本环境上传目录 slot={} served={}/{}", slot, served, indexed.images.size());
+    }
+
+    private boolean servedFileExists(String src) {
+        String rel = uploadsRelative(src);
+        if (!StringUtils.hasText(rel)) {
+            return false;
+        }
+        Path path = fileStorage.resolveUploadPath(rel);
+        return path != null && Files.isRegularFile(path);
+    }
+
+    private static String uploadsRelative(String src) {
+        if (!StringUtils.hasText(src) || src.startsWith("data:")) {
+            return null;
+        }
+        int idx = src.indexOf("/uploads/");
+        if (idx < 0) {
+            return null;
+        }
+        String rel = src.substring(idx);
+        int q = rel.indexOf('?');
+        if (q >= 0) {
+            rel = rel.substring(0, q);
+        }
+        return rel;
+    }
+
+    private byte[] imageBytes(String src) {
+        if (!StringUtils.hasText(src)) {
+            return null;
+        }
+        if (src.startsWith("data:")) {
+            int comma = src.indexOf(',');
+            if (comma > 0 && src.substring(0, comma).toLowerCase(Locale.ROOT).contains(";base64")) {
+                try {
+                    return Base64.getDecoder().decode(src.substring(comma + 1).replaceAll("\\s", ""));
+                } catch (Exception e) {
+                    log.warn("拆题 data 配图解码失败: {}", e.getMessage());
+                    return null;
+                }
+            }
+            return null;
+        }
+        String rel = uploadsRelative(src);
+        if (StringUtils.hasText(rel)) {
+            String pub = fileStorage.toPublicUrl(rel);
+            return readPublicDocBytes(pub);
+        }
+        if (src.startsWith("http://") || src.startsWith("https://")) {
+            return readPublicDocBytes(src);
+        }
+        return null;
+    }
+
+    private static String sniffImageExt(byte[] bytes, String src) {
+        if (bytes != null && bytes.length >= 8
+                && bytes[0] == (byte) 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G') {
+            return ".png";
+        }
+        if (bytes != null && bytes.length >= 3 && (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8) {
+            return ".jpg";
+        }
+        if (bytes != null && bytes.length >= 6 && bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F') {
+            return ".gif";
+        }
+        String lower = src == null ? "" : src.toLowerCase(Locale.ROOT);
+        if (lower.contains(".jpg") || lower.contains(".jpeg")) {
+            return ".jpg";
+        }
+        if (lower.contains(".gif")) {
+            return ".gif";
+        }
+        if (lower.contains(".webp")) {
+            return ".webp";
+        }
+        return ".png";
+    }
+
+    private static String brief(String src) {
+        if (!StringUtils.hasText(src)) {
+            return "";
+        }
+        return src.length() <= 80 ? src : src.substring(0, 80);
     }
 
     /** 读取带正确 [图N] 位置的磁盘缓存（_index.txt + 配图文件）。 */
@@ -3384,6 +3507,8 @@ public class TrainDocService {
         boolean hasOlder;
         /** 大于 0 时配图目录用这个槽位，避免同一版本里多份收银文档共用一份索引。 */
         long indexSlot;
+        /** 拆题时不走旧缓存，按文档链接在本机上传目录重新抽出配图。 */
+        boolean forceReindex;
     }
 
     private static class IndexedDoc {

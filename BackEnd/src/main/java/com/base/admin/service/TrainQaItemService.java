@@ -301,10 +301,21 @@ public class TrainQaItemService {
         }
         long versionId = ((Number) rows.get(0).get("version_id")).longValue();
         String answer = dto.getAnswer();
+        boolean changeHtml = dto.getAnswerHtml() != null;
         boolean changeAnswer = StringUtils.hasText(answer);
         List<String> aliases = parseAliasText(dto.getAliases());
         aliases.removeIf(a -> a.equals(question));
-        if (changeAnswer) {
+        if (changeHtml) {
+            String html = toStorageHtml(dto.getAnswerHtml());
+            List<String> images = imageSrcs(html);
+            String text = StringUtils.hasText(answer) ? answer.trim() : stripTags(html);
+            jdbc.update("""
+                    UPDATE train_qa_item
+                    SET question = ?, aliases_json = ?, answer_text = ?, answer_html = ?, images_json = ?,
+                        content_hash = NULL, embedding = NULL
+                    WHERE id = ? AND is_active = 1
+                    """, question, writeJson(aliases), text, html, writeJson(images), itemId);
+        } else if (changeAnswer) {
             List<String> images = readStringList(str(rows.get(0).get("images_json")));
             String html = answerHtmlKeepingImages(answer.trim(), str(rows.get(0).get("answer_html")), images);
             jdbc.update("""
@@ -357,6 +368,55 @@ public class TrainQaItemService {
 
     private static String escapeHtml(String text) {
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    /** 详情里改过的富文本，配图只保留 /uploads/ 相对路径。 */
+    private static String toStorageHtml(String html) {
+        if (!StringUtils.hasText(html)) {
+            return "";
+        }
+        Matcher matcher = Pattern.compile("(?i)(\\bsrc=[\"'])([^\"']+)([\"'])").matcher(html);
+        StringBuilder sb = new StringBuilder();
+        while (matcher.find()) {
+            String src = matcher.group(2);
+            int idx = src.indexOf("/uploads/");
+            String stored = idx >= 0 ? src.substring(idx) : src;
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(matcher.group(1) + stored + matcher.group(3)));
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
+    }
+
+    private static List<String> imageSrcs(String html) {
+        List<String> srcs = new ArrayList<>();
+        if (!StringUtils.hasText(html)) {
+            return srcs;
+        }
+        Matcher matcher = Pattern.compile("(?i)<img\\b[^>]*\\bsrc=[\"']([^\"']+)[\"']").matcher(html);
+        while (matcher.find()) {
+            String src = matcher.group(1);
+            int idx = src.indexOf("/uploads/");
+            String stored = idx >= 0 ? src.substring(idx) : src;
+            if (StringUtils.hasText(stored) && !srcs.contains(stored)) {
+                srcs.add(stored);
+            }
+        }
+        return srcs;
+    }
+
+    private static String stripTags(String html) {
+        if (!StringUtils.hasText(html)) {
+            return "";
+        }
+        return html.replaceAll("(?i)<br\\s*/?>", "\n")
+                .replaceAll("(?i)</p>", "\n")
+                .replaceAll("<[^>]+>", "")
+                .replace("&nbsp;", " ")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .trim();
     }
 
     /** 用户标记「准确」后，把原问法记到这道题上，下次怪问法能对上。 */

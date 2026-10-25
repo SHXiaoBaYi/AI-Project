@@ -17,4 +17,7 @@ public class TrainQaItemSaveDTO {
 
     @Schema(description = "答文。留空则不改原答案")
     private String answer;
+
+    @Schema(description = "答文富文本。传入后按这份 HTML 保存，并保留其中的配图")
+    private String answerHtml;
 }

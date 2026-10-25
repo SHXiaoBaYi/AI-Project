@@ -1,7 +1,7 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Form, Image, Input, Modal, Tag } from 'antd';
+import { App, Button, Drawer, Form, Input, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import {
@@ -11,75 +11,52 @@ import {
   updateTrainQaItemApi,
   type TrainQaLibraryItem,
 } from '@/api/train';
-import { isLocalhostHost } from '@/utils/localhostAccess';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
 
 function trainImageUrl(url?: string) {
   if (!url) return '';
   if (/^(data|blob):/i.test(url)) return url;
-  const path = url.startsWith('/uploads/') ? url : url.includes('/uploads/') ? url.slice(url.indexOf('/uploads/')) : '';
-  if (path && isLocalhostHost()) return path;
   return resolveUploadUrl(url);
 }
 
-function answerImageUrls(record: TrainQaLibraryItem) {
-  const fromHtml = Array.from(record.answerHtml?.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi) || []).map(
-    (m) => m[1],
-  );
-  const raw = fromHtml.length ? fromHtml : record.images || [];
-  return raw.map((u) => trainImageUrl(u)).filter(Boolean);
+function rewriteAnswerHtml(record: TrainQaLibraryItem) {
+  const source =
+    record.answerHtml && record.answerHtml.trim()
+      ? record.answerHtml
+      : `<div class="train-qa-answer">${(record.answer || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</div>`;
+  let html = source.replace(/(<img\b[^>]*\bsrc=["'])([^"']+)(["'])/gi, (_all, pre, src, post) => {
+    return `${pre}${trainImageUrl(src)}${post}`;
+  });
+  if (!/<img\b/i.test(html) && record.images?.length) {
+    html += record.images
+      .map(
+        (src) =>
+          `<img src="${trainImageUrl(src)}" alt="培训配图" style="max-width:100%;height:auto;display:block;margin:10px 0;" />`,
+      )
+      .join('');
+  }
+  return html;
 }
 
-function AnswerWithImages({ record, imagesOnly = false }: { record: TrainQaLibraryItem; imagesOnly?: boolean }) {
-  const html = record.answerHtml || '';
-  const urls = answerImageUrls(record);
-  const htmlHasImg = /<img\b/i.test(html);
-  if (imagesOnly) {
-    if (!urls.length) return null;
-    return (
-      <Image.PreviewGroup>
-        <div className='space-y-2'>
-          {urls.map((src) => (
-            <Image
-              key={src}
-              src={src}
-              alt='培训配图'
-              className='block h-auto max-w-full cursor-zoom-in rounded-md border border-neutral-200'
-            />
-          ))}
-        </div>
-      </Image.PreviewGroup>
-    );
-  }
+function htmlToPlain(html: string) {
+  const el = document.createElement('div');
+  el.innerHTML = html;
+  return (el.innerText || '').replace(/\u00a0/g, ' ').trim();
+}
+
+function RichAnswer({ initialHtml, onChange }: { initialHtml: string; onChange: (html: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.innerHTML = initialHtml;
+  }, [initialHtml]);
   return (
-    <div className='min-w-0'>
-      {htmlHasImg ? (
-        <div
-          className='break-words text-neutral-700 [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md'
-          dangerouslySetInnerHTML={{
-            __html: html.replace(/(<img\b[^>]*\bsrc=["'])([^"']+)(["'])/gi, (_all, pre, src, post) => {
-              return `${pre}${trainImageUrl(src)}${post}`;
-            }),
-          }}
-        />
-      ) : (
-        <div className='break-words whitespace-pre-wrap'>{record.answer || '—'}</div>
-      )}
-      {!htmlHasImg && urls.length ? (
-        <Image.PreviewGroup>
-          <div className='mt-2 space-y-2'>
-            {urls.map((src) => (
-              <Image
-                key={src}
-                src={src}
-                alt='培训配图'
-                className='block h-auto max-h-40 w-auto max-w-full cursor-zoom-in rounded-md border border-neutral-200'
-              />
-            ))}
-          </div>
-        </Image.PreviewGroup>
-      ) : null}
-    </div>
+    <div
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      className='min-h-72 rounded-md border border-neutral-200 bg-white p-3 text-sm leading-7 break-words outline-none [&_img]:my-2.5 [&_img]:block [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_img]:border [&_img]:border-neutral-200'
+      onInput={() => onChange(ref.current?.innerHTML || '')}
+    />
   );
 }
 
@@ -93,14 +70,15 @@ const TrainItemPage = memo(function TrainItemPage() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<TrainQaLibraryItem | null>(null);
+  const [answerHtml, setAnswerHtml] = useState('');
   const [form] = Form.useForm();
 
-  const openEdit = (record: TrainQaLibraryItem) => {
+  const openDetail = (record: TrainQaLibraryItem) => {
     setEditing(record);
+    setAnswerHtml(rewriteAnswerHtml(record));
     form.setFieldsValue({
       question: record.question || '',
       aliases: record.aliases || '',
-      answer: record.answer || '',
     });
     setOpen(true);
   };
@@ -113,9 +91,10 @@ const TrainItemPage = memo(function TrainItemPage() {
       await updateTrainQaItemApi(editing.id, {
         question: String(values.question).trim(),
         aliases: values.aliases ? String(values.aliases) : '',
-        answer: values.answer ? String(values.answer) : undefined,
+        answer: htmlToPlain(answerHtml),
+        answerHtml,
       });
-      message.success('题目已保存，向量会随后更新');
+      message.success('题目已保存');
       setOpen(false);
       actionRef.current?.reload();
     } finally {
@@ -133,9 +112,9 @@ const TrainItemPage = memo(function TrainItemPage() {
           items={[
             {
               key: 'edit',
-              label: '编辑',
+              label: '详情',
               perm: 'train:doc:edit',
-              onClick: () => openEdit(record),
+              onClick: () => openDetail(record),
             },
           ]}
         />
@@ -239,13 +218,6 @@ const TrainItemPage = memo(function TrainItemPage() {
       render: (_, record) => record.aliases || '—',
     },
     {
-      title: '答文',
-      dataIndex: 'answer',
-      search: false,
-      width: 360,
-      render: (_, record) => <AnswerWithImages record={record} />,
-    },
-    {
       title: '向量',
       dataIndex: 'embedded',
       width: 100,
@@ -263,7 +235,7 @@ const TrainItemPage = memo(function TrainItemPage() {
         actionRef={actionRef}
         headerTitle='题目'
         columns={columns}
-        scroll={{ x: 1500 }}
+        scroll={{ x: 1100 }}
         form={{
           initialValues: {
             docId: presetDocId,
@@ -286,18 +258,23 @@ const TrainItemPage = memo(function TrainItemPage() {
           return { data: res.rows || [], total: res.total || 0, success: true };
         }}
       />
-      <Modal
+      <Drawer
         title={
-          editing
-            ? `编辑题目 · ${editing.docTitle || '文档'} / ${editing.versionLabel || (editing.versionNo ? `v${editing.versionNo}` : '版本')}`
-            : '编辑题目'
+          editing ? `题目详情 · ${editing.fileTitle || editing.fileName || editing.docTitle || '文档'}` : '题目详情'
         }
         open={open}
-        confirmLoading={saving}
-        onCancel={() => setOpen(false)}
-        onOk={() => void handleSave()}
-        width={640}
+        onClose={() => setOpen(false)}
+        width={760}
         destroyOnHidden
+        extra={
+          <Button
+            type='primary'
+            loading={saving}
+            onClick={() => void handleSave()}
+          >
+            保存
+          </Button>
+        }
       >
         <Form
           form={form}
@@ -316,28 +293,24 @@ const TrainItemPage = memo(function TrainItemPage() {
           <Form.Item
             name='aliases'
             label='同义问法'
-            extra='一行一条。保存后只重算这一道题的向量。'
+            extra='一行一条。'
           >
             <Input.TextArea
-              rows={4}
+              rows={3}
               placeholder={'找厂子订货\n怎么给厂家下单'}
             />
           </Form.Item>
-          <Form.Item
-            name='answer'
-            label='答文'
-            extra='配图跟在答文后面，改文字不会去掉图。'
-          >
-            <Input.TextArea rows={6} />
+          <Form.Item label='答文'>
+            {editing ? (
+              <RichAnswer
+                key={editing.id}
+                initialHtml={rewriteAnswerHtml(editing)}
+                onChange={setAnswerHtml}
+              />
+            ) : null}
           </Form.Item>
-          {editing ? (
-            <AnswerWithImages
-              record={editing}
-              imagesOnly
-            />
-          ) : null}
         </Form>
-      </Modal>
+      </Drawer>
     </>
   );
 });

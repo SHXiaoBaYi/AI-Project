@@ -429,6 +429,9 @@ export function rebuildTrainVersionQaApi(docId: number, versionId: number) {
   return request.post(`/train/doc/${docId}/version/${versionId}/qa-items/rebuild`, {}, { timeout: 180000 });
 }
 
-export function updateTrainQaItemApi(itemId: number, data: { question: string; aliases?: string; answer?: string }) {
+export function updateTrainQaItemApi(
+  itemId: number,
+  data: { question: string; aliases?: string; answer?: string; answerHtml?: string },
+) {
   return request.put(`/train/doc/qa-item/${itemId}`, data);
 }
