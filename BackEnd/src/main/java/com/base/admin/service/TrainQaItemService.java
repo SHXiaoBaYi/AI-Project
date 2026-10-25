@@ -27,6 +27,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 一问一答落库。原文件仍在 train_doc_version，这里只是可检索的题目副本。
@@ -207,6 +209,22 @@ public class TrainQaItemService {
             where.append(" AND i.doc_id = ? ");
             args.add(query.getDocId());
         }
+        if (query.getFileId() != null) {
+            where.append("""
+                     AND (
+                       i.file_id = ?
+                       OR (
+                         i.file_id IS NULL
+                         AND EXISTS (
+                           SELECT 1 FROM train_doc_file pf
+                           WHERE pf.id = ? AND pf.is_active = 1 AND pf.sort_no = 1 AND pf.version_id = i.version_id
+                         )
+                       )
+                     )
+                    """);
+            args.add(query.getFileId());
+            args.add(query.getFileId());
+        }
         if (query.getVersionId() != null) {
             where.append(" AND i.version_id = ? ");
             args.add(query.getVersionId());
@@ -235,7 +253,7 @@ public class TrainQaItemService {
                 SELECT i.id, i.doc_id, d.title doc_title, i.version_id, i.file_id, v.version_no, v.version_label,
                        COALESCE(f.file_name, v.file_name) file_name,
                        COALESCE(NULLIF(f.title, ''), f.file_name, v.file_name) file_title,
-                       i.sort_no, i.question, i.aliases_json, i.answer_text,
+                       i.sort_no, i.question, i.aliases_json, i.answer_text, i.answer_html, i.images_json,
                        CASE WHEN i.embedding IS NULL THEN 0 ELSE 1 END embedded,
                        CASE WHEN i.version_id = d.latest_version_id THEN 1 ELSE 0 END latest
                 """ + from + where + """
@@ -262,6 +280,8 @@ public class TrainQaItemService {
         vo.setQuestion(rs.getString("question"));
         vo.setAliases(joinAliases(readStringList(rs.getString("aliases_json"))));
         vo.setAnswer(rs.getString("answer_text"));
+        vo.setAnswerHtml(rs.getString("answer_html"));
+        vo.setImages(readStringList(rs.getString("images_json")));
         vo.setEmbedded(rs.getInt("embedded") == 1);
         vo.setLatest(rs.getInt("latest") == 1);
         return vo;
@@ -274,7 +294,7 @@ public class TrainQaItemService {
             throw new com.base.admin.exception.BusinessException("题干不能为空");
         }
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT version_id, answer_text FROM train_qa_item WHERE id = ? AND is_active = 1
+                SELECT version_id, answer_html, images_json FROM train_qa_item WHERE id = ? AND is_active = 1
                 """, itemId);
         if (rows.isEmpty()) {
             throw new com.base.admin.exception.BusinessException("题目不存在");
@@ -285,12 +305,14 @@ public class TrainQaItemService {
         List<String> aliases = parseAliasText(dto.getAliases());
         aliases.removeIf(a -> a.equals(question));
         if (changeAnswer) {
+            List<String> images = readStringList(str(rows.get(0).get("images_json")));
+            String html = answerHtmlKeepingImages(answer.trim(), str(rows.get(0).get("answer_html")), images);
             jdbc.update("""
                     UPDATE train_qa_item
-                    SET question = ?, aliases_json = ?, answer_text = ?, answer_html = NULL,
+                    SET question = ?, aliases_json = ?, answer_text = ?, answer_html = ?,
                         content_hash = NULL, embedding = NULL
                     WHERE id = ? AND is_active = 1
-                    """, question, writeJson(aliases), answer.trim(), itemId);
+                    """, question, writeJson(aliases), answer.trim(), html, itemId);
         } else {
             jdbc.update("""
                     UPDATE train_qa_item
@@ -300,6 +322,41 @@ public class TrainQaItemService {
         }
         vectorIndex.reload();
         scheduleEmbed(versionId);
+    }
+
+    /** 改答文时配图仍留在答文末尾，不把图文 HTML 清掉。 */
+    private static String answerHtmlKeepingImages(String answer, String oldHtml, List<String> images) {
+        List<String> srcs = new ArrayList<>();
+        if (images != null) {
+            for (String img : images) {
+                if (StringUtils.hasText(img) && !srcs.contains(img.trim())) {
+                    srcs.add(img.trim());
+                }
+            }
+        }
+        if (srcs.isEmpty() && StringUtils.hasText(oldHtml)) {
+            Matcher matcher = Pattern.compile("(?i)<img\\b[^>]*\\bsrc=[\"']([^\"']+)[\"']").matcher(oldHtml);
+            while (matcher.find()) {
+                if (!srcs.contains(matcher.group(1))) {
+                    srcs.add(matcher.group(1));
+                }
+            }
+        }
+        StringBuilder html = new StringBuilder();
+        html.append("<div class=\"train-qa-answer\" style=\"line-height:1.7;\">");
+        if (StringUtils.hasText(answer)) {
+            html.append(escapeHtml(answer).replace("\n", "<br/>"));
+        }
+        for (String src : srcs) {
+            html.append("<img src=\"").append(escapeHtml(src))
+                    .append("\" alt=\"培训配图\" style=\"max-width:100%;height:auto;display:block;margin:10px 0;border-radius:6px;\" />");
+        }
+        html.append("</div>");
+        return html.toString();
+    }
+
+    private static String escapeHtml(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
     }
 
     /** 用户标记「准确」后，把原问法记到这道题上，下次怪问法能对上。 */

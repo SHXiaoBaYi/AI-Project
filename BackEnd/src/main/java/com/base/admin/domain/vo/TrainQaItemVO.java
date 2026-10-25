@@ -3,6 +3,8 @@ package com.base.admin.domain.vo;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Schema(description = "培训文档拆出的问答")
 public class TrainQaItemVO {
@@ -48,6 +50,12 @@ public class TrainQaItemVO {
 
     @Schema(description = "答文")
     private String answer;
+
+    @Schema(description = "带配图位置的答文 HTML")
+    private String answerHtml;
+
+    @Schema(description = "答文配图")
+    private List<String> images;
 
     @Schema(description = "是否已写入向量")
     private Boolean embedded;

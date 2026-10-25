@@ -344,7 +344,10 @@ public class TrainDocService {
         return jdbc.query("""
                 SELECT f.id, f.doc_id, f.version_id, v.version_label, f.title, f.file_name, f.file_size,
                        (SELECT COUNT(1) FROM train_qa_item i
-                         WHERE i.file_id = f.id AND i.is_active = 1) question_count
+                         WHERE i.is_active = 1 AND (
+                           i.file_id = f.id
+                           OR (f.sort_no = 1 AND i.file_id IS NULL AND i.version_id = f.version_id)
+                         )) question_count
                 FROM train_doc_file f
                 LEFT JOIN train_doc_version v ON v.id = f.version_id
                 WHERE f.version_id = ? AND f.is_active = 1

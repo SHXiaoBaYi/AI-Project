@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Card, Drawer, Form, Input, Modal, QRCode, Select, Space, Tag, Typography, Upload } from 'antd';
+import { App, Card, Drawer, Form, Input, Modal, QRCode, Tag, Typography, Upload } from 'antd';
 import { CopyOutlined, UploadOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
@@ -16,6 +16,7 @@ import {
   listTrainFilesApi,
   listTrainVersionsApi,
   pickUploadFile,
+  rebuildTrainVersionQaApi,
   saveTrainDocApi,
   uploadTrainVersionApi,
   type TrainAssistantEntry,
@@ -43,6 +44,8 @@ const TrainDocPage = memo(function TrainDocPage() {
   const [fileVersionId, setFileVersionId] = useState<number>();
   const [uploading, setUploading] = useState(false);
   const [addingFile, setAddingFile] = useState(false);
+  const [structuring, setStructuring] = useState(false);
+  const [newVersionOpen, setNewVersionOpen] = useState(false);
   const [uploadForm] = Form.useForm();
   const [fileForm] = Form.useForm();
 
@@ -160,8 +163,12 @@ const TrainDocPage = memo(function TrainDocPage() {
       setFiles([]);
       return;
     }
-    const docs = await listTrainFilesApi(versionId);
-    setFiles(docs || []);
+    try {
+      const docs = await listTrainFilesApi(versionId);
+      setFiles(docs || []);
+    } catch {
+      setFiles([]);
+    }
   };
 
   const handleUpload = async () => {
@@ -174,8 +181,9 @@ const TrainDocPage = memo(function TrainDocPage() {
     setUploading(true);
     try {
       await uploadTrainVersionApi(versionDoc.id, file, values.versionLabel, values.remark);
-      message.success('版本已上传，并设为最新版');
+      message.success('新版本已建好，第一份文档的题目会拆出来');
       uploadForm.resetFields();
+      setNewVersionOpen(false);
       await reloadVersions();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '上传失败');
@@ -194,7 +202,7 @@ const TrainDocPage = memo(function TrainDocPage() {
     setAddingFile(true);
     try {
       await addTrainFileApi(versionDoc.id, fileVersionId, file, values.title ? String(values.title).trim() : undefined);
-      message.success('已挂到当前版本，题目会从这份文档拆出');
+      message.success('文档已挂到这个版本，题目会从这份文档拆出');
       fileForm.resetFields();
       await loadFiles(fileVersionId);
       actionRef.current?.reload();
@@ -203,6 +211,45 @@ const TrainDocPage = memo(function TrainDocPage() {
     } finally {
       setAddingFile(false);
     }
+  };
+
+  const handleStructure = async () => {
+    if (!versionDoc || !fileVersionId) return;
+    setStructuring(true);
+    try {
+      await rebuildTrainVersionQaApi(versionDoc.id, fileVersionId);
+      message.success('这一版里每份文档的题目都已拆出');
+      await loadFiles(fileVersionId);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '拆题失败');
+    } finally {
+      setStructuring(false);
+    }
+  };
+
+  const currentVersion = versions.find((v) => v.id === fileVersionId);
+  const versionName = currentVersion?.versionLabel || (currentVersion ? `v${currentVersion.versionNo}` : '');
+  const documents: TrainDocFile[] = files.length
+    ? files
+    : currentVersion?.fileName
+      ? [
+          {
+            id: -currentVersion.id,
+            docId: versionDoc?.id,
+            versionId: currentVersion.id,
+            title: currentVersion.fileName,
+            fileName: currentVersion.fileName,
+          },
+        ]
+      : [];
+
+  const openQuestions = (row: TrainDocFile) => {
+    const docId = row.docId || versionDoc?.id;
+    if (!docId) return;
+    const params = new URLSearchParams({ docId: String(docId) });
+    if (row.versionId) params.set('versionId', String(row.versionId));
+    if (row.id > 0) params.set('fileId', String(row.id));
+    navigate(`/train/item?${params.toString()}`);
   };
 
   const columns: ProColumnType<TrainDoc>[] = [
@@ -221,14 +268,8 @@ const TrainDocPage = memo(function TrainDocPage() {
               onClick: () => navigate(`/train/item?docId=${record.id}`),
             },
             {
-              key: 'upload',
-              label: '上传版本',
-              perm: 'train:doc:upload',
-              onClick: () => void openVersions(record),
-            },
-            {
               key: 'version',
-              label: '版本',
+              label: '文档',
               perm: 'train:doc:list',
               onClick: () => void openVersions(record),
             },
@@ -456,23 +497,163 @@ const TrainDocPage = memo(function TrainDocPage() {
       </Modal>
 
       <Drawer
-        title={versionDoc ? `版本管理 · ${versionDoc.title}` : '版本管理'}
+        title={versionDoc ? `${versionDoc.title}` : '收银文档'}
         open={versionOpen}
         onClose={() => setVersionOpen(false)}
-        width={720}
+        width={760}
+      >
+        <div className='mb-3 text-sm text-neutral-500'>一个版本下面挂多份收银文档。每份文档单独拆成题目。</div>
+        <div className='mb-4 flex flex-wrap gap-2'>
+          {versions.map((v) => {
+            const name = v.versionLabel || `v${v.versionNo}`;
+            const active = v.id === fileVersionId;
+            return (
+              <button
+                key={v.id}
+                type='button'
+                className={`rounded-md border px-3 py-1 text-sm ${active ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-neutral-200 bg-white text-neutral-700'}`}
+                onClick={() => {
+                  setFileVersionId(v.id);
+                  void loadFiles(v.id);
+                }}
+              >
+                {name}
+                {v.latest ? ' · 最新' : ''}
+              </button>
+            );
+          })}
+          <PermissionButton
+            perm='train:doc:upload'
+            onClick={() => {
+              uploadForm.resetFields();
+              setNewVersionOpen(true);
+            }}
+          >
+            新建版本
+          </PermissionButton>
+        </div>
+
+        <div className='mb-2 flex items-center justify-between'>
+          <div className='text-base font-medium'>{versionName || '当前版本'} 的文档</div>
+          <PermissionButton
+            perm='train:doc:upload'
+            loading={structuring}
+            disabled={!fileVersionId}
+            onClick={() => void handleStructure()}
+          >
+            拆出全部题目
+          </PermissionButton>
+        </div>
+
+        <BaseProTable<TrainDocFile>
+          rowKey='id'
+          search={false}
+          pagination={false}
+          toolBarRender={false}
+          dataSource={documents}
+          columns={[
+            {
+              title: '操作',
+              valueType: 'option',
+              width: 100,
+              render: (_, row) => (
+                <PermissionButton
+                  type='link'
+                  size='small'
+                  perm='train:doc:list'
+                  onClick={() => openQuestions(row)}
+                >
+                  查看题目
+                </PermissionButton>
+              ),
+            },
+            {
+              title: '收银文档',
+              dataIndex: 'title',
+              ellipsis: true,
+              render: (_, row) => row.title || row.fileName || '—',
+            },
+            { title: '文件', dataIndex: 'fileName', ellipsis: true },
+            {
+              title: '题目',
+              dataIndex: 'questionCount',
+              width: 90,
+              render: (_, row) =>
+                row.questionCount == null ? '—' : row.questionCount === 0 ? '未拆题' : row.questionCount,
+            },
+          ]}
+        />
+
+        <Form
+          form={fileForm}
+          layout='vertical'
+          className='mt-4'
+        >
+          <div className='mb-2 text-base font-medium'>往 {versionName || '当前版本'} 再加一份文档</div>
+          <Form.Item
+            name='title'
+            label='文档名称'
+          >
+            <Input
+              maxLength={128}
+              placeholder='不填就用文件名'
+            />
+          </Form.Item>
+          <Form.Item
+            name='file'
+            label='文件'
+            valuePropName='fileList'
+            getValueFromEvent={(e) => (Array.isArray(e) ? e : e?.fileList)}
+            rules={[{ required: true, message: '请选择文件' }]}
+          >
+            <Upload
+              beforeUpload={() => false}
+              maxCount={1}
+              accept={TRAIN_ACCEPT}
+            >
+              <PermissionButton
+                icon={<UploadOutlined />}
+                perm='train:doc:upload'
+              >
+                选择文件
+              </PermissionButton>
+              <p className='ant-upload-hint'>按「问：」「答：」书写，单份不超过 10MB。加上后会拆出这份额文档的题目。</p>
+            </Upload>
+          </Form.Item>
+          <PermissionButton
+            type='primary'
+            loading={addingFile}
+            perm='train:doc:upload'
+            disabled={!fileVersionId}
+            onClick={() => void handleAddFile()}
+          >
+            加到 {versionName || '当前版本'}
+          </PermissionButton>
+        </Form>
+      </Drawer>
+
+      <Modal
+        title={
+          versionName
+            ? `新建版本（当前最新是 ${versions.find((v) => v.latest)?.versionLabel || versionName}）`
+            : '新建版本'
+        }
+        open={newVersionOpen}
+        onCancel={() => setNewVersionOpen(false)}
+        footer={null}
+        destroyOnHidden
       >
         <Form
           form={uploadForm}
           layout='vertical'
-          className='mb-4'
         >
           <Form.Item
             name='versionLabel'
-            label='新版本号'
+            label='版本号'
           >
             <Input
               maxLength={32}
-              placeholder='如 v2（可空，自动递增）'
+              placeholder='如 v4，不填就自动递增'
             />
           </Form.Item>
           <Form.Item
@@ -486,7 +667,7 @@ const TrainDocPage = memo(function TrainDocPage() {
           </Form.Item>
           <Form.Item
             name='file'
-            label='本地文件'
+            label='这一版的第一份文档'
             valuePropName='fileList'
             getValueFromEvent={(e) => (Array.isArray(e) ? e : e?.fileList)}
             rules={[{ required: true, message: '请选择文件' }]}
@@ -502,7 +683,6 @@ const TrainDocPage = memo(function TrainDocPage() {
               >
                 选择文件
               </PermissionButton>
-              <p className='ant-upload-hint'>支持 .doc / .docx / pdf / txt，按「问：」「答：」书写，单份不超过 10MB</p>
             </Upload>
           </Form.Item>
           <PermissionButton
@@ -511,150 +691,10 @@ const TrainDocPage = memo(function TrainDocPage() {
             perm='train:doc:upload'
             onClick={() => void handleUpload()}
           >
-            上传并设为最新
+            创建并设为最新
           </PermissionButton>
         </Form>
-
-        <Typography.Paragraph
-          type='secondary'
-          className='mb-2'
-        >
-          同一版本可以挂多份收银文档，每份不超过 10MB。换整本手册时再用上面的「上传并设为最新」。
-        </Typography.Paragraph>
-        <Form
-          form={fileForm}
-          layout='vertical'
-          className='mb-4'
-        >
-          <Form.Item label='挂到哪个版本'>
-            <Select
-              value={fileVersionId}
-              placeholder='选择版本'
-              options={versions.map((v) => ({
-                value: v.id,
-                label: `${v.versionLabel || `v${v.versionNo}`}${v.latest ? ' · 最新' : ''}`,
-              }))}
-              onChange={(value) => {
-                setFileVersionId(value);
-                void loadFiles(value);
-              }}
-            />
-          </Form.Item>
-          <Form.Item
-            name='title'
-            label='收银文档名称'
-          >
-            <Input
-              maxLength={128}
-              placeholder='默认同文件名'
-            />
-          </Form.Item>
-          <Form.Item
-            name='file'
-            label='再添加一份文档'
-            valuePropName='fileList'
-            getValueFromEvent={(e) => (Array.isArray(e) ? e : e?.fileList)}
-            rules={[{ required: true, message: '请选择文件' }]}
-          >
-            <Upload
-              beforeUpload={() => false}
-              maxCount={1}
-              accept={TRAIN_ACCEPT}
-            >
-              <PermissionButton
-                icon={<UploadOutlined />}
-                perm='train:doc:upload'
-              >
-                选择文件
-              </PermissionButton>
-            </Upload>
-          </Form.Item>
-          <PermissionButton
-            type='primary'
-            loading={addingFile}
-            perm='train:doc:upload'
-            onClick={() => void handleAddFile()}
-          >
-            添加到此版本
-          </PermissionButton>
-        </Form>
-
-        <BaseProTable<TrainDocFile>
-          rowKey='id'
-          search={false}
-          pagination={false}
-          toolBarRender={false}
-          headerTitle='此版本下的收银文档'
-          dataSource={files}
-          columns={[
-            {
-              title: '操作',
-              valueType: 'option',
-              width: 90,
-              render: (_, row) => (
-                <PermissionButton
-                  type='link'
-                  size='small'
-                  perm='train:doc:list'
-                  onClick={() => navigate(`/train/item?docId=${row.docId || versionDoc?.id || ''}`)}
-                >
-                  题目
-                </PermissionButton>
-              ),
-            },
-            { title: '收银文档', dataIndex: 'title', ellipsis: true },
-            { title: '文件', dataIndex: 'fileName', ellipsis: true },
-            { title: '题目数', dataIndex: 'questionCount', width: 80 },
-          ]}
-        />
-
-        <BaseProTable<TrainDocVersion>
-          rowKey='id'
-          search={false}
-          pagination={false}
-          toolBarRender={false}
-          headerTitle='版本记录'
-          dataSource={versions}
-          columns={[
-            {
-              title: '操作',
-              valueType: 'option',
-              width: 90,
-              render: (_, row) => (
-                <PermissionButton
-                  type='link'
-                  size='small'
-                  perm='train:doc:list'
-                  onClick={() => {
-                    if (row.fileUrl) {
-                      window.open(row.fileUrl, '_blank', 'noopener,noreferrer');
-                      return;
-                    }
-                    void downloadTrainVersionApi(row.id, row.fileName, row.filePath).catch(() =>
-                      message.error('下载失败'),
-                    );
-                  }}
-                >
-                  下载
-                </PermissionButton>
-              ),
-            },
-            {
-              title: '版本',
-              dataIndex: 'versionLabel',
-              width: 100,
-              render: (_, r) => (
-                <Space size={4}>
-                  <span>{r.versionLabel || `v${r.versionNo}`}</span>
-                  {r.latest ? <Tag color='green'>最新</Tag> : null}
-                </Space>
-              ),
-            },
-            { title: '文件', dataIndex: 'fileName', ellipsis: true },
-            { title: '上传时间', dataIndex: 'createTime', width: 170 },
-          ]}
-        />
-      </Drawer>
+      </Modal>
     </div>
   );
 });

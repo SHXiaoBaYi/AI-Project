@@ -1,7 +1,7 @@
 import { memo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Form, Input, Modal, Tag } from 'antd';
+import { App, Form, Image, Input, Modal, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import {
@@ -11,12 +11,85 @@ import {
   updateTrainQaItemApi,
   type TrainQaLibraryItem,
 } from '@/api/train';
+import { isLocalhostHost } from '@/utils/localhostAccess';
+import { resolveUploadUrl } from '@/utils/uploadUrl';
+
+function trainImageUrl(url?: string) {
+  if (!url) return '';
+  if (/^(data|blob):/i.test(url)) return url;
+  const path = url.startsWith('/uploads/') ? url : url.includes('/uploads/') ? url.slice(url.indexOf('/uploads/')) : '';
+  if (path && isLocalhostHost()) return path;
+  return resolveUploadUrl(url);
+}
+
+function answerImageUrls(record: TrainQaLibraryItem) {
+  const fromHtml = Array.from(record.answerHtml?.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi) || []).map(
+    (m) => m[1],
+  );
+  const raw = fromHtml.length ? fromHtml : record.images || [];
+  return raw.map((u) => trainImageUrl(u)).filter(Boolean);
+}
+
+function AnswerWithImages({ record, imagesOnly = false }: { record: TrainQaLibraryItem; imagesOnly?: boolean }) {
+  const html = record.answerHtml || '';
+  const urls = answerImageUrls(record);
+  const htmlHasImg = /<img\b/i.test(html);
+  if (imagesOnly) {
+    if (!urls.length) return null;
+    return (
+      <Image.PreviewGroup>
+        <div className='space-y-2'>
+          {urls.map((src) => (
+            <Image
+              key={src}
+              src={src}
+              alt='培训配图'
+              className='block h-auto max-w-full cursor-zoom-in rounded-md border border-neutral-200'
+            />
+          ))}
+        </div>
+      </Image.PreviewGroup>
+    );
+  }
+  return (
+    <div className='min-w-0'>
+      {htmlHasImg ? (
+        <div
+          className='break-words text-neutral-700 [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md'
+          dangerouslySetInnerHTML={{
+            __html: html.replace(/(<img\b[^>]*\bsrc=["'])([^"']+)(["'])/gi, (_all, pre, src, post) => {
+              return `${pre}${trainImageUrl(src)}${post}`;
+            }),
+          }}
+        />
+      ) : (
+        <div className='break-words whitespace-pre-wrap'>{record.answer || '—'}</div>
+      )}
+      {!htmlHasImg && urls.length ? (
+        <Image.PreviewGroup>
+          <div className='mt-2 space-y-2'>
+            {urls.map((src) => (
+              <Image
+                key={src}
+                src={src}
+                alt='培训配图'
+                className='block h-auto max-h-40 w-auto max-w-full cursor-zoom-in rounded-md border border-neutral-200'
+              />
+            ))}
+          </div>
+        </Image.PreviewGroup>
+      ) : null}
+    </div>
+  );
+}
 
 const TrainItemPage = memo(function TrainItemPage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
   const [searchParams] = useSearchParams();
   const presetDocId = Number(searchParams.get('docId') || '') || undefined;
+  const presetVersionId = Number(searchParams.get('versionId') || '') || undefined;
+  const presetFileId = Number(searchParams.get('fileId') || '') || undefined;
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<TrainQaLibraryItem | null>(null);
@@ -168,9 +241,9 @@ const TrainItemPage = memo(function TrainItemPage() {
     {
       title: '答文',
       dataIndex: 'answer',
-      ellipsis: true,
       search: false,
-      width: 280,
+      width: 360,
+      render: (_, record) => <AnswerWithImages record={record} />,
     },
     {
       title: '向量',
@@ -185,21 +258,28 @@ const TrainItemPage = memo(function TrainItemPage() {
   return (
     <>
       <BaseProTable<TrainQaLibraryItem>
-        key={String(presetDocId ?? 'all')}
+        key={`${presetDocId ?? 'all'}-${presetVersionId ?? ''}-${presetFileId ?? ''}`}
         rowKey='id'
         actionRef={actionRef}
         headerTitle='题目'
         columns={columns}
         scroll={{ x: 1500 }}
-        form={{ initialValues: { docId: presetDocId, scope: 'latest' } }}
+        form={{
+          initialValues: {
+            docId: presetDocId,
+            versionId: presetVersionId,
+            scope: presetVersionId ? 'all' : 'latest',
+          },
+        }}
         request={async (params) => {
-          const docId = params.docId ? Number(params.docId) : undefined;
-          const versionId = params.versionId ? Number(params.versionId) : undefined;
+          const docId = params.docId ? Number(params.docId) : presetDocId;
+          const versionId = params.versionId ? Number(params.versionId) : presetVersionId;
           const res = await pageTrainQaItemsApi({
             pageNum: params.current,
             pageSize: params.pageSize,
             docId,
             versionId,
+            fileId: presetFileId,
             onlyLatest: versionId ? false : params.scope !== 'all',
             keyword: params.keyword ? String(params.keyword) : undefined,
           });
@@ -246,9 +326,16 @@ const TrainItemPage = memo(function TrainItemPage() {
           <Form.Item
             name='answer'
             label='答文'
+            extra='配图跟在答文后面，改文字不会去掉图。'
           >
             <Input.TextArea rows={6} />
           </Form.Item>
+          {editing ? (
+            <AnswerWithImages
+              record={editing}
+              imagesOnly
+            />
+          ) : null}
         </Form>
       </Modal>
     </>

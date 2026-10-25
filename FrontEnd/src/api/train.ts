@@ -398,6 +398,8 @@ export type TrainQaLibraryItem = {
   question?: string;
   aliases?: string;
   answer?: string;
+  answerHtml?: string;
+  images?: string[];
   embedded?: boolean;
 };
 
@@ -410,6 +412,7 @@ export function pageTrainQaItemsApi(params: {
   pageSize?: number;
   docId?: number;
   versionId?: number;
+  fileId?: number;
   onlyLatest?: boolean;
   keyword?: string;
 }) {
@@ -420,6 +423,10 @@ export function pageTrainQaItemsApi(params: {
 
 export function rebuildTrainQaItemsApi(docId: number) {
   return request.post(`/train/doc/${docId}/qa-items/rebuild`, {}, { timeout: 180000 });
+}
+
+export function rebuildTrainVersionQaApi(docId: number, versionId: number) {
+  return request.post(`/train/doc/${docId}/version/${versionId}/qa-items/rebuild`, {}, { timeout: 180000 });
 }
 
 export function updateTrainQaItemApi(itemId: number, data: { question: string; aliases?: string; answer?: string }) {

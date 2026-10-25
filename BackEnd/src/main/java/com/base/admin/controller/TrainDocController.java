@@ -116,6 +116,14 @@ public class TrainDocController {
         return Result.ok(trainDocService.addFileToVersion(id, versionId, file, title));
     }
 
+    @Operation(summary = "把某一版本下每份收银文档拆成题目")
+    @PostMapping("/{id}/version/{versionId}/qa-items/rebuild")
+    @RequiresPermission("train:doc:upload")
+    public Result<Void> rebuildVersionQa(@PathVariable Long id, @PathVariable Long versionId) {
+        trainQaItemService.rebuildVersion(id, versionId);
+        return Result.ok();
+    }
+
     @Operation(summary = "预览版本（抽取文本 HTML）")
     @GetMapping("/version/{versionId}/preview")
     @RequiresPermission("train:doc:list")

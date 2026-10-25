@@ -19,6 +19,9 @@ public class TrainQaItemQueryDTO extends PageQuery {
     @Schema(description = "版本ID。传入后只看该版本", example = "4", nullable = true)
     private Long versionId;
 
+    @Schema(description = "收银文档文件ID。传入后只看这份文档的题目", example = "3", nullable = true)
+    private Long fileId;
+
     @Schema(description = "仅看各文档最新版。指定版本时忽略", example = "true")
     private Boolean onlyLatest;
 
