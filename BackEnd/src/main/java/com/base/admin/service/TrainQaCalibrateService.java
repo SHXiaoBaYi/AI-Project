@@ -44,11 +44,15 @@ public class TrainQaCalibrateService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final TrainDocService trainDocService;
+    private final TrainQaItemService trainQaItemService;
 
-    public TrainQaCalibrateService(JdbcTemplate jdbc, ObjectMapper objectMapper, @Lazy TrainDocService trainDocService) {
+    public TrainQaCalibrateService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                   @Lazy TrainDocService trainDocService,
+                                   @Lazy TrainQaItemService trainQaItemService) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.trainDocService = trainDocService;
+        this.trainQaItemService = trainQaItemService;
     }
 
     /**
@@ -143,6 +147,7 @@ public class TrainQaCalibrateService {
                     """,
                     userQ, norm, nz(dto.getTopicTitle()), nz(dto.getAnswer()), nz(dto.getAnswerHtml()),
                     imagesJson, status, operator, id);
+            syncAccurateWording(dto);
             return id;
         }
         KeyHolder kh = new GeneratedKeyHolder();
@@ -170,7 +175,19 @@ public class TrainQaCalibrateService {
             return ps;
         }, kh);
         Number key = kh.getKey();
+        syncAccurateWording(dto);
         return key == null ? null : key.longValue();
+    }
+
+    private void syncAccurateWording(TrainQaFeedbackDTO dto) {
+        if (!Boolean.TRUE.equals(dto.getAccurate()) || dto.getQaItemId() == null) {
+            return;
+        }
+        try {
+            trainQaItemService.rememberUserWording(dto.getQaItemId(), dto.getUserQuestion());
+        } catch (Exception e) {
+            log.warn("记入同义问法失败 itemId={}: {}", dto.getQaItemId(), e.getMessage());
+        }
     }
 
     public PageResult<TrainQaCalibrateVO> page(TrainQaCalibrateQueryDTO query) {

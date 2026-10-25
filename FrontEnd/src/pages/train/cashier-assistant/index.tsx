@@ -198,6 +198,8 @@ type ChatMessage = {
   /** 精确到秒，如 12:44:08 */
   time: string;
   items?: TrainQaItem[];
+  /** 向量不够确定时给出的原题，点一下再问 */
+  suggestions?: string[];
   needOld?: boolean;
   /** 对应的用户原问题（反馈用） */
   userQuestion?: string;
@@ -538,6 +540,12 @@ export default function CashierAssistantPage() {
           docId: res.docId,
           versionId: res.versionId,
         });
+      } else if (res.status === 'SUGGEST' && items.length) {
+        push({
+          role: 'assistant',
+          text: res.message || '没有直接对上，可以点下面的原题查看。',
+          suggestions: items.map((it) => it.question).filter((t): t is string => !!t?.trim()),
+        });
       } else if (res.status === 'NEED_OLD' || (res.status === 'HIT' && !items.length && res.hasOlderVersions)) {
         push({
           role: 'assistant',
@@ -568,6 +576,7 @@ export default function CashierAssistantPage() {
         docId: msg.docId,
         versionId: msg.versionId,
         calibrateId: item.calibrateId,
+        qaItemId: item.qaItemId,
         topicTitle: item.question,
         answer: item.answer,
         answerHtml: item.answerHtml,
@@ -857,6 +866,21 @@ export default function CashierAssistantPage() {
                           )}
                         </div>
                       ) : null}
+                    </div>
+                  ) : null}
+                  {msg.suggestions?.length ? (
+                    <div className='mt-2 flex flex-col items-stretch gap-2'>
+                      {msg.suggestions.map((q) => (
+                        <Button
+                          key={q}
+                          size='small'
+                          disabled={sending}
+                          className='!h-auto !text-left !whitespace-normal'
+                          onClick={() => void ask(q)}
+                        >
+                          {q}
+                        </Button>
+                      ))}
                     </div>
                   ) : null}
                   {msg.needOld ? (

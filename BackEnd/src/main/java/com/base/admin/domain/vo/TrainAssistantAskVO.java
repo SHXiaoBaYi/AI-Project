@@ -37,6 +37,9 @@ public class TrainAssistantAskVO {
         @Schema(description = "问法")
         private String question;
 
+        @Schema(description = "落库题目ID", example = "12", nullable = true)
+        private Long qaItemId;
+
         @Schema(description = "答法（纯文本）")
         private String answer;
 

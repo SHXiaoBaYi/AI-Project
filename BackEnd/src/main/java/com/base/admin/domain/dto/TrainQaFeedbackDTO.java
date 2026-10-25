@@ -32,6 +32,9 @@ public class TrainQaFeedbackDTO {
     @Schema(description = "已有校准记录ID（再次标记时传）", example = "1", nullable = true)
     private Long calibrateId;
 
+    @Schema(description = "命中的题目ID。标记准确时把用户原问记为同义问法", example = "12", nullable = true)
+    private Long qaItemId;
+
     @Schema(description = "文档话题/问法标题", example = "问：前台寄存产品怎么操作？")
     private String topicTitle;
 

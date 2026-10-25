@@ -112,6 +112,28 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                   KEY idx_train_qa_miss_user (user_id, create_time)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='培训答疑未命中提问'
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS train_qa_item (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  doc_id BIGINT NOT NULL,
+                  version_id BIGINT NOT NULL,
+                  category VARCHAR(64) NOT NULL DEFAULT 'cashier',
+                  sort_no INT NOT NULL DEFAULT 0,
+                  question VARCHAR(512) NOT NULL COMMENT '题干',
+                  aliases_json TEXT NULL COMMENT '同义问法 JSON 数组',
+                  answer_text MEDIUMTEXT NULL,
+                  answer_html MEDIUMTEXT NULL,
+                  images_json TEXT NULL,
+                  embedding MEDIUMBLOB NULL COMMENT 'L2 归一后的题干向量',
+                  embed_model VARCHAR(64) NULL,
+                  content_hash CHAR(64) NULL,
+                  is_active TINYINT NOT NULL DEFAULT 1,
+                  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  KEY idx_train_qa_item_ver (version_id, is_active),
+                  KEY idx_train_qa_item_doc (doc_id, is_active)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='培训文档拆出的问答'
+                """);
     }
 
     private void seedMenus() {
@@ -121,18 +143,20 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         menu(303, "文档编辑", 301, 2, "", "", "F", "train:doc:edit", "#", "");
         menu(304, "版本上传", 301, 3, "", "", "F", "train:doc:upload", "#", "");
         menu(305, "文档删除", 301, 4, "", "", "F", "train:doc:delete", "#", "");
-        menu(306, "答疑校准", 300, 2, "train/qa", "train/qa/index", "C", "train:qa:list", "CheckCircleOutlined", "人工校准准/不准答案");
+        menu(310, "题目", 300, 2, "train/item", "train/item/index", "C", "train:doc:list", "ProfileOutlined", "文档每个版本拆出的问答，对应文档与版本");
+        menu(311, "题目编辑", 310, 1, "", "", "F", "train:doc:edit", "#", "");
+        menu(306, "答疑校准", 300, 3, "train/qa", "train/qa/index", "C", "train:qa:list", "CheckCircleOutlined", "人工校准准/不准答案");
         menu(307, "校准编辑", 306, 1, "", "", "F", "train:qa:edit", "#", "");
         menu(308, "重新识别", 306, 2, "", "", "F", "train:qa:recognize", "#", "");
-        menu(309, "未命中提问", 300, 3, "train/miss", "train/miss/index", "C", "train:qa:list", "QuestionCircleOutlined", "没有找到答案的用户提问");
+        menu(309, "未命中提问", 300, 4, "train/miss", "train/miss/index", "C", "train:qa:list", "QuestionCircleOutlined", "没有找到答案的用户提问");
 
         Long admin = roleId("admin");
         if (admin != null) {
-            grant(admin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309);
+            grant(admin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311);
         }
         Long hrAdmin = roleId("hr_admin");
         if (hrAdmin != null) {
-            grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309);
+            grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311);
         }
     }
 

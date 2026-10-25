@@ -73,13 +73,15 @@ export type TrainQaItem = {
   images?: string[];
   versionLabel?: string;
   calibrateId?: number;
+  /** 落库题目，标记准确时回写同义问法 */
+  qaItemId?: number;
   fromCalibrate?: boolean;
   /** 校准答案绑定旧版时的参考说明 */
   referenceNote?: string;
 };
 
 export type TrainAssistantAskResult = {
-  status: 'HIT' | 'NEED_OLD' | 'NOT_FOUND' | string;
+  status: 'HIT' | 'NEED_OLD' | 'NOT_FOUND' | 'SUGGEST' | string;
   message?: string;
   items?: TrainQaItem[];
   versionLabel?: string;
@@ -274,6 +276,7 @@ export function feedbackTrainAssistantApi(data: {
   docId?: number;
   versionId?: number;
   calibrateId?: number;
+  qaItemId?: number;
   topicTitle?: string;
   answer?: string;
   answerHtml?: string;
@@ -353,4 +356,45 @@ export function deleteTrainQaCalibrateApi(id: number) {
 
 export function rerecognizeTrainQaCalibrateApi(id: number) {
   return request.post<unknown, TrainQaCalibrate>(`/train/qa/${id}/rerecognize`);
+}
+
+export type TrainQaLibraryItem = {
+  id: number;
+  docId?: number;
+  docTitle?: string;
+  versionId?: number;
+  versionNo?: number;
+  versionLabel?: string;
+  fileName?: string;
+  latest?: boolean;
+  sortNo?: number;
+  question?: string;
+  aliases?: string;
+  answer?: string;
+  embedded?: boolean;
+};
+
+export function listTrainQaItemsApi(docId: number) {
+  return request.get<unknown, TrainQaLibraryItem[]>(`/train/doc/${docId}/qa-items`);
+}
+
+export function pageTrainQaItemsApi(params: {
+  pageNum?: number;
+  pageSize?: number;
+  docId?: number;
+  versionId?: number;
+  onlyLatest?: boolean;
+  keyword?: string;
+}) {
+  return request.get<unknown, { total: number; rows: TrainQaLibraryItem[] }>('/train/doc/qa-item/page', {
+    params: { category: 'cashier', ...params },
+  });
+}
+
+export function rebuildTrainQaItemsApi(docId: number) {
+  return request.post(`/train/doc/${docId}/qa-items/rebuild`, {}, { timeout: 180000 });
+}
+
+export function updateTrainQaItemApi(itemId: number, data: { question: string; aliases?: string; answer?: string }) {
+  return request.put(`/train/doc/qa-item/${itemId}`, data);
 }

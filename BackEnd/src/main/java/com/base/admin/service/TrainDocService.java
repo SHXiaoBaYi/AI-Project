@@ -65,6 +65,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -85,6 +86,8 @@ public class TrainDocService {
     private final DingTalkProperties dingTalkProperties;
     private final TrainQaCalibrateService trainQaCalibrateService;
     private final TrainQaMissService trainQaMissService;
+    private final TrainQaItemService trainQaItemService;
+    private final TrainQaSearchService trainQaSearchService;
 
     @Value("${xby.upload-public-base:}")
     private String uploadPublicBase;
@@ -96,7 +99,9 @@ public class TrainDocService {
                            DingTalkAppService dingTalkAppService,
                            DingTalkProperties dingTalkProperties,
                            @Lazy TrainQaCalibrateService trainQaCalibrateService,
-                           TrainQaMissService trainQaMissService) {
+                           TrainQaMissService trainQaMissService,
+                           @Lazy TrainQaItemService trainQaItemService,
+                           @Lazy TrainQaSearchService trainQaSearchService) {
         this.jdbc = jdbc;
         this.fileStorage = fileStorage;
         this.aiChatService = aiChatService;
@@ -105,6 +110,8 @@ public class TrainDocService {
         this.dingTalkProperties = dingTalkProperties;
         this.trainQaCalibrateService = trainQaCalibrateService;
         this.trainQaMissService = trainQaMissService;
+        this.trainQaItemService = trainQaItemService;
+        this.trainQaSearchService = trainQaSearchService;
     }
 
     public List<TrainDocVO> list(String category) {
@@ -173,6 +180,16 @@ public class TrainDocService {
             throw new BusinessException("文档不存在");
         }
         jdbc.update("UPDATE train_doc_version SET is_active = 0 WHERE doc_id = ?", id);
+        trainQaItemService.deactivateDoc(id);
+    }
+
+    public Long latestVersionId(Long docId) {
+        if (docId == null || !docExists(docId)) {
+            throw new BusinessException("文档不存在");
+        }
+        return jdbc.query("""
+                SELECT latest_version_id FROM train_doc WHERE id = ? AND is_active = 1
+                """, rs -> rs.next() && rs.getObject(1) != null ? rs.getLong(1) : null, docId);
     }
 
     public List<TrainDocVersionVO> versions(Long docId) {
@@ -276,8 +293,63 @@ public class TrainDocService {
             } catch (Exception e) {
                 log.warn("上传后预抽答疑配图失败 versionId={}: {}", versionId, e.getMessage());
             }
+            try {
+                trainQaItemService.rebuildVersion(docId, versionId);
+            } catch (Exception e) {
+                log.warn("上传后拆题入库失败，原文件已保存 versionId={}: {}", versionId, e.getMessage());
+            }
         }
         return versionId;
+    }
+
+    /** 按现有一问一答切块导出题目。不删除原文件。拆不出题目时返回空列表。 */
+    public List<TrainQaDraft> exportStructuredQa(long docId, long versionId) {
+        DocBundle doc = loadDocVersion(docId, versionId);
+        if (doc == null) {
+            return List.of();
+        }
+        IndexedDoc indexed = prepareIndexedDoc(doc);
+        List<QaBlock> blocks = buildQaBlocks(indexed, doc.text);
+        List<TrainQaDraft> out = new ArrayList<>();
+        int sort = 1;
+        for (QaBlock block : blocks) {
+            TrainAssistantAskVO.QaItem item = materializeFromBlock(block, indexed);
+            if (item == null || !StringUtils.hasText(item.getQuestion())) {
+                continue;
+            }
+            TrainQaDraft draft = new TrainQaDraft();
+            draft.setSortNo(sort++);
+            draft.setDocId(docId);
+            draft.setVersionId(versionId);
+            draft.setVersionLabel(doc.versionLabel);
+            String question = item.getQuestion().trim();
+            draft.setQuestion(question.length() <= 500 ? question : question.substring(0, 500));
+            draft.setAnswer(item.getAnswer());
+            draft.setAnswerHtml(item.getAnswerHtml());
+            draft.setImages(item.getImages() == null ? List.of() : item.getImages());
+            out.add(draft);
+        }
+        return out;
+    }
+
+    public void applyPublicImages(TrainAssistantAskVO vo) {
+        if (vo != null) {
+            vo.setItems(withPublicImages(vo.getItems()));
+        }
+    }
+
+    private static boolean confidentAsk(TrainAssistantAskVO vo) {
+        if (vo == null || vo.getStatus() == null) {
+            return false;
+        }
+        return "HIT".equals(vo.getStatus()) || "SUGGEST".equals(vo.getStatus());
+    }
+
+    private TrainAssistantAskVO recordStructuredMiss(TrainAssistantAskVO vo, String question, String cat) {
+        if (vo != null && ("NOT_FOUND".equals(vo.getStatus()) || "NEED_OLD".equals(vo.getStatus()))) {
+            trainQaMissService.record(question, cat, vo.getStatus(), vo.getDocId(), vo.getVersionId());
+        }
+        return vo;
     }
 
     /** 后台「重新识别」：按指定文档版本跑答疑抽段（不走校准库）。 */
@@ -605,7 +677,21 @@ public class TrainDocService {
                 return vo;
             }
 
-            List<TrainAssistantAskVO.QaItem> latestHits = aiExtractQa(question, latest);
+            List<TrainAssistantAskVO.QaItem> latestHits;
+            Optional<TrainAssistantAskVO> vectorHit = trainQaSearchService.trySearch(question, cat, false);
+            if (vectorHit.isPresent() && (confidentAsk(vectorHit.get()) || !trainQaSearchService.hasUnindexedLatest(cat))) {
+                TrainAssistantAskVO vectorVo = vectorHit.get();
+                applyPublicImages(vectorVo);
+                if (confidentAsk(vectorVo)) {
+                    return vectorVo;
+                }
+                if (calibrated == null) {
+                    return recordStructuredMiss(vectorVo, question, cat);
+                }
+                latestHits = List.of();
+            } else {
+                latestHits = aiExtractQa(question, latest);
+            }
 
             // 二：旧版校准存在
             if (calibrated != null) {
@@ -674,6 +760,12 @@ public class TrainDocService {
             vo.setVersionLabel(latest.versionLabel);
             trainQaMissService.record(question, cat, "NOT_FOUND", latest.docId, latest.versionId);
             return vo;
+        }
+        Optional<TrainAssistantAskVO> oldVector = trainQaSearchService.trySearch(question, cat, true);
+        if (oldVector.isPresent() && confidentAsk(oldVector.get())) {
+            TrainAssistantAskVO vectorVo = oldVector.get();
+            applyPublicImages(vectorVo);
+            return vectorVo;
         }
         List<TrainAssistantAskVO.QaItem> all = new ArrayList<>();
         for (DocBundle old : older) {

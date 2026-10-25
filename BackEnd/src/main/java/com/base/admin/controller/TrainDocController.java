@@ -1,11 +1,16 @@
 package com.base.admin.controller;
 
 import com.base.admin.annotation.RequiresPermission;
+import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.TrainDocSaveDTO;
+import com.base.admin.domain.dto.TrainQaItemQueryDTO;
+import com.base.admin.domain.dto.TrainQaItemSaveDTO;
 import com.base.admin.domain.vo.TrainDocVO;
 import com.base.admin.domain.vo.TrainDocVersionVO;
+import com.base.admin.domain.vo.TrainQaItemVO;
 import com.base.admin.service.TrainDocService;
+import com.base.admin.service.TrainQaItemService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -33,6 +38,7 @@ import java.util.Map;
 public class TrainDocController {
 
     private final TrainDocService trainDocService;
+    private final TrainQaItemService trainQaItemService;
 
     @Operation(summary = "文档列表")
     @GetMapping("/list")
@@ -126,5 +132,39 @@ public class TrainDocController {
         return ResponseEntity.status(302)
                 .header(HttpHeaders.LOCATION, publicUrl)
                 .build();
+    }
+
+    @Operation(summary = "题目分页，带所属文档与版本")
+    @GetMapping("/qa-item/page")
+    @RequiresPermission("train:doc:list")
+    public Result<PageResult<TrainQaItemVO>> pageQaItems(TrainQaItemQueryDTO query) {
+        return Result.ok(trainQaItemService.page(query));
+    }
+
+    @Operation(summary = "最新版拆出的问答")
+    @GetMapping("/{id}/qa-items")
+    @RequiresPermission("train:doc:list")
+    public Result<List<TrainQaItemVO>> qaItems(@PathVariable Long id) {
+        return Result.ok(trainQaItemService.listLatest(id));
+    }
+
+    @Operation(summary = "按原文件重新拆题")
+    @PostMapping("/{id}/qa-items/rebuild")
+    @RequiresPermission("train:doc:upload")
+    public Result<Void> rebuildQaItems(@PathVariable Long id) {
+        Long versionId = trainDocService.latestVersionId(id);
+        if (versionId == null) {
+            return Result.fail("请先上传培训文档");
+        }
+        trainQaItemService.rebuildVersion(id, versionId);
+        return Result.ok();
+    }
+
+    @Operation(summary = "修改题干、同义问法或答文")
+    @PutMapping("/qa-item/{itemId}")
+    @RequiresPermission("train:doc:edit")
+    public Result<Void> updateQaItem(@PathVariable Long itemId, @Valid @RequestBody TrainQaItemSaveDTO dto) {
+        trainQaItemService.update(itemId, dto);
+        return Result.ok();
     }
 }

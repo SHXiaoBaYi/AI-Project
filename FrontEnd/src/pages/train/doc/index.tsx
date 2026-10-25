@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Card, Drawer, Form, Input, Modal, QRCode, Space, Tag, Typography, Upload } from 'antd';
 import { CopyOutlined, UploadOutlined } from '@ant-design/icons';
@@ -24,6 +25,7 @@ const TRAIN_ACCEPT = '.doc,.docx,.pdf,.txt,.md';
 
 const TrainDocPage = memo(function TrainDocPage() {
   const { message } = App.useApp();
+  const navigate = useNavigate();
   const actionRef = useRef<ActionType>(null);
   const [entry, setEntry] = useState<TrainAssistantEntry | null>(null);
   const [docOpen, setDocOpen] = useState(false);
@@ -153,10 +155,17 @@ const TrainDocPage = memo(function TrainDocPage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 220,
+      width: 280,
       render: (_, record) => (
         <ActionButtons
           items={[
+            {
+              key: 'qa',
+              label: '题目',
+              perm: 'train:doc:list',
+              disabled: !record.latestVersionId,
+              onClick: () => navigate(`/train/item?docId=${record.id}`),
+            },
             {
               key: 'upload',
               label: '上传版本',
@@ -382,7 +391,9 @@ const TrainDocPage = memo(function TrainDocPage() {
                   >
                     选择文件
                   </PermissionButton>
-                  <p className='ant-upload-hint'>支持 .doc / .docx / pdf / txt，上传后作为首个版本</p>
+                  <p className='ant-upload-hint'>
+                    支持 .doc / .docx / pdf / txt，按「问：」「答：」书写，单份不超过 10MB
+                  </p>
                 </Upload>
               </Form.Item>
             </>
@@ -437,7 +448,7 @@ const TrainDocPage = memo(function TrainDocPage() {
               >
                 选择文件
               </PermissionButton>
-              <p className='ant-upload-hint'>支持 .doc / .docx / pdf / txt</p>
+              <p className='ant-upload-hint'>支持 .doc / .docx / pdf / txt，按「问：」「答：」书写，单份不超过 10MB</p>
             </Upload>
           </Form.Item>
           <PermissionButton
