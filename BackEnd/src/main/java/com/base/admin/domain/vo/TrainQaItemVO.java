@@ -28,6 +28,12 @@ public class TrainQaItemVO {
     @Schema(description = "该版本上传的文件名")
     private String fileName;
 
+    @Schema(description = "所属收银文档文件ID", example = "3", nullable = true)
+    private Long fileId;
+
+    @Schema(description = "收银文档名称")
+    private String fileTitle;
+
     @Schema(description = "是否为文档当前最新版")
     private Boolean latest;
 

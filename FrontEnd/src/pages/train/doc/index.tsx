@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Card, Drawer, Form, Input, Modal, QRCode, Space, Tag, Typography, Upload } from 'antd';
+import { App, Card, Drawer, Form, Input, Modal, QRCode, Select, Space, Tag, Typography, Upload } from 'antd';
 import { CopyOutlined, UploadOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
@@ -11,13 +11,16 @@ import {
   deleteTrainDocApi,
   downloadTrainVersionApi,
   getTrainAssistantEntryApi,
+  addTrainFileApi,
   listTrainDocsApi,
+  listTrainFilesApi,
   listTrainVersionsApi,
   pickUploadFile,
   saveTrainDocApi,
   uploadTrainVersionApi,
   type TrainAssistantEntry,
   type TrainDoc,
+  type TrainDocFile,
   type TrainDocVersion,
 } from '@/api/train';
 
@@ -36,8 +39,12 @@ const TrainDocPage = memo(function TrainDocPage() {
   const [versionOpen, setVersionOpen] = useState(false);
   const [versionDoc, setVersionDoc] = useState<TrainDoc | null>(null);
   const [versions, setVersions] = useState<TrainDocVersion[]>([]);
+  const [files, setFiles] = useState<TrainDocFile[]>([]);
+  const [fileVersionId, setFileVersionId] = useState<number>();
   const [uploading, setUploading] = useState(false);
+  const [addingFile, setAddingFile] = useState(false);
   const [uploadForm] = Form.useForm();
+  const [fileForm] = Form.useForm();
 
   useEffect(() => {
     void getTrainAssistantEntryApi()
@@ -119,16 +126,42 @@ const TrainDocPage = memo(function TrainDocPage() {
   const openVersions = async (record: TrainDoc) => {
     setVersionDoc(record);
     uploadForm.resetFields();
+    fileForm.resetFields();
     setVersionOpen(true);
     const rows = await listTrainVersionsApi(record.id);
     setVersions(rows || []);
+    const latest = (rows || []).find((v) => v.latest) || rows?.[0];
+    setFileVersionId(latest?.id);
+    if (latest?.id) {
+      const docs = await listTrainFilesApi(latest.id);
+      setFiles(docs || []);
+    } else {
+      setFiles([]);
+    }
   };
 
   const reloadVersions = async () => {
     if (!versionDoc) return;
     const rows = await listTrainVersionsApi(versionDoc.id);
     setVersions(rows || []);
+    const current = (rows || []).find((v) => v.id === fileVersionId) || (rows || []).find((v) => v.latest) || rows?.[0];
+    setFileVersionId(current?.id);
+    if (current?.id) {
+      const docs = await listTrainFilesApi(current.id);
+      setFiles(docs || []);
+    } else {
+      setFiles([]);
+    }
     actionRef.current?.reload();
+  };
+
+  const loadFiles = async (versionId?: number) => {
+    if (!versionId) {
+      setFiles([]);
+      return;
+    }
+    const docs = await listTrainFilesApi(versionId);
+    setFiles(docs || []);
   };
 
   const handleUpload = async () => {
@@ -148,6 +181,27 @@ const TrainDocPage = memo(function TrainDocPage() {
       message.error(e instanceof Error ? e.message : '上传失败');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleAddFile = async () => {
+    const values = await fileForm.validateFields();
+    const file = pickUploadFile(values.file);
+    if (!file || !versionDoc || !fileVersionId) {
+      message.warning('请选择版本和本地文件');
+      return;
+    }
+    setAddingFile(true);
+    try {
+      await addTrainFileApi(versionDoc.id, fileVersionId, file, values.title ? String(values.title).trim() : undefined);
+      message.success('已挂到当前版本，题目会从这份文档拆出');
+      fileForm.resetFields();
+      await loadFiles(fileVersionId);
+      actionRef.current?.reload();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '添加失败');
+    } finally {
+      setAddingFile(false);
     }
   };
 
@@ -461,11 +515,105 @@ const TrainDocPage = memo(function TrainDocPage() {
           </PermissionButton>
         </Form>
 
+        <Typography.Paragraph
+          type='secondary'
+          className='mb-2'
+        >
+          同一版本可以挂多份收银文档，每份不超过 10MB。换整本手册时再用上面的「上传并设为最新」。
+        </Typography.Paragraph>
+        <Form
+          form={fileForm}
+          layout='vertical'
+          className='mb-4'
+        >
+          <Form.Item label='挂到哪个版本'>
+            <Select
+              value={fileVersionId}
+              placeholder='选择版本'
+              options={versions.map((v) => ({
+                value: v.id,
+                label: `${v.versionLabel || `v${v.versionNo}`}${v.latest ? ' · 最新' : ''}`,
+              }))}
+              onChange={(value) => {
+                setFileVersionId(value);
+                void loadFiles(value);
+              }}
+            />
+          </Form.Item>
+          <Form.Item
+            name='title'
+            label='收银文档名称'
+          >
+            <Input
+              maxLength={128}
+              placeholder='默认同文件名'
+            />
+          </Form.Item>
+          <Form.Item
+            name='file'
+            label='再添加一份文档'
+            valuePropName='fileList'
+            getValueFromEvent={(e) => (Array.isArray(e) ? e : e?.fileList)}
+            rules={[{ required: true, message: '请选择文件' }]}
+          >
+            <Upload
+              beforeUpload={() => false}
+              maxCount={1}
+              accept={TRAIN_ACCEPT}
+            >
+              <PermissionButton
+                icon={<UploadOutlined />}
+                perm='train:doc:upload'
+              >
+                选择文件
+              </PermissionButton>
+            </Upload>
+          </Form.Item>
+          <PermissionButton
+            type='primary'
+            loading={addingFile}
+            perm='train:doc:upload'
+            onClick={() => void handleAddFile()}
+          >
+            添加到此版本
+          </PermissionButton>
+        </Form>
+
+        <BaseProTable<TrainDocFile>
+          rowKey='id'
+          search={false}
+          pagination={false}
+          toolBarRender={false}
+          headerTitle='此版本下的收银文档'
+          dataSource={files}
+          columns={[
+            {
+              title: '操作',
+              valueType: 'option',
+              width: 90,
+              render: (_, row) => (
+                <PermissionButton
+                  type='link'
+                  size='small'
+                  perm='train:doc:list'
+                  onClick={() => navigate(`/train/item?docId=${row.docId || versionDoc?.id || ''}`)}
+                >
+                  题目
+                </PermissionButton>
+              ),
+            },
+            { title: '收银文档', dataIndex: 'title', ellipsis: true },
+            { title: '文件', dataIndex: 'fileName', ellipsis: true },
+            { title: '题目数', dataIndex: 'questionCount', width: 80 },
+          ]}
+        />
+
         <BaseProTable<TrainDocVersion>
           rowKey='id'
           search={false}
           pagination={false}
           toolBarRender={false}
+          headerTitle='版本记录'
           dataSource={versions}
           columns={[
             {

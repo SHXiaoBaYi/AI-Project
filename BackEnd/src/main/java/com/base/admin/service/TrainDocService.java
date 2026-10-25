@@ -293,13 +293,101 @@ public class TrainDocService {
             } catch (Exception e) {
                 log.warn("上传后预抽答疑配图失败 versionId={}: {}", versionId, e.getMessage());
             }
+            Long fileId = insertDocFile(docId, versionId, original, relative, bytes.length, original);
             try {
-                trainQaItemService.rebuildVersion(docId, versionId);
+                if (fileId != null) {
+                    trainQaItemService.rebuildFile(docId, versionId, fileId);
+                }
             } catch (Exception e) {
                 log.warn("上传后拆题入库失败，原文件已保存 versionId={}: {}", versionId, e.getMessage());
             }
         }
         return versionId;
+    }
+
+    /** 往已有版本再挂一份收银文档，不升版本号。单份仍不超过上传大小限制。 */
+    @Transactional
+    public Long addFileToVersion(Long docId, Long versionId, MultipartFile file, String title) {
+        if (!versionBelongsToDoc(docId, versionId)) {
+            throw new BusinessException("版本不存在");
+        }
+        Path abs = fileStorage.saveTrainDoc(file);
+        String relative = fileStorage.toRelativeUploadPath(abs);
+        String original = file.getOriginalFilename() == null ? "train.doc" : file.getOriginalFilename();
+        byte[] bytes;
+        try {
+            bytes = Files.readAllBytes(abs);
+        } catch (Exception e) {
+            throw new BusinessException("读取上传文件失败");
+        }
+        String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')).toLowerCase(Locale.ROOT) : "";
+        String text;
+        try {
+            text = extractText(bytes, ext);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("无法解析文档内容，请确认是可用的 doc/docx/pdf/txt");
+        }
+        if (!StringUtils.hasText(text)) {
+            throw new BusinessException("文档内容为空，无法拆题");
+        }
+        Long fileId = insertDocFile(docId, versionId, original, relative, bytes.length,
+                StringUtils.hasText(title) ? title.trim() : original);
+        if (fileId != null) {
+            trainQaItemService.rebuildFile(docId, versionId, fileId);
+        }
+        return fileId;
+    }
+
+    public List<com.base.admin.domain.vo.TrainDocFileVO> listFiles(Long versionId) {
+        return jdbc.query("""
+                SELECT f.id, f.doc_id, f.version_id, v.version_label, f.title, f.file_name, f.file_size,
+                       (SELECT COUNT(1) FROM train_qa_item i
+                         WHERE i.file_id = f.id AND i.is_active = 1) question_count
+                FROM train_doc_file f
+                LEFT JOIN train_doc_version v ON v.id = f.version_id
+                WHERE f.version_id = ? AND f.is_active = 1
+                ORDER BY f.sort_no ASC, f.id ASC
+                """, (rs, n) -> {
+            com.base.admin.domain.vo.TrainDocFileVO vo = new com.base.admin.domain.vo.TrainDocFileVO();
+            vo.setId(rs.getLong("id"));
+            vo.setDocId(rs.getLong("doc_id"));
+            vo.setVersionId(rs.getLong("version_id"));
+            vo.setVersionLabel(rs.getString("version_label"));
+            vo.setTitle(rs.getString("title"));
+            vo.setFileName(rs.getString("file_name"));
+            vo.setFileSize(rs.getObject("file_size") == null ? null : rs.getLong("file_size"));
+            vo.setQuestionCount(rs.getInt("question_count"));
+            return vo;
+        }, versionId);
+    }
+
+    private boolean versionBelongsToDoc(Long docId, Long versionId) {
+        if (docId == null || versionId == null) {
+            return false;
+        }
+        Integer n = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM train_doc_version
+                WHERE id = ? AND doc_id = ? AND is_active = 1
+                """, Integer.class, versionId, docId);
+        return n != null && n > 0;
+    }
+
+    private Long insertDocFile(long docId, long versionId, String fileName, String relative, long size, String title) {
+        Integer max = jdbc.queryForObject("""
+                SELECT COALESCE(MAX(sort_no), 0) FROM train_doc_file WHERE version_id = ? AND is_active = 1
+                """, Integer.class, versionId);
+        int sort = (max == null ? 0 : max) + 1;
+        String name = StringUtils.hasText(title) ? title.trim() : fileName;
+        if (name.length() > 128) {
+            name = name.substring(0, 128);
+        }
+        jdbc.update("""
+                INSERT INTO train_doc_file (doc_id, version_id, title, file_name, file_path, file_size, sort_no, create_by, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """, docId, versionId, name, fileName, relative, size, sort, SecurityUtils.getCurrentUsername());
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     }
 
     /** 按现有一问一答切块导出题目。不删除原文件。拆不出题目时返回空列表。 */
@@ -308,6 +396,44 @@ public class TrainDocService {
         if (doc == null) {
             return List.of();
         }
+        return draftsFrom(doc);
+    }
+
+    /**
+     * 拆指定收银文档。和版本主文件不是同一份时，配图单独落目录，避免盖掉主文件索引。
+     */
+    public List<TrainQaDraft> exportStructuredQaFile(long docId, long versionId, long fileId,
+                                                     String filePath, String fileName) {
+        DocBundle doc = loadDocVersion(docId, versionId);
+        if (doc == null) {
+            return List.of();
+        }
+        boolean primary = StringUtils.hasText(doc.filePath) && doc.filePath.equals(filePath);
+        if (!primary) {
+            doc.filePath = filePath;
+            doc.fileName = fileName;
+            doc.text = "";
+            doc.html = "";
+            doc.indexSlot = versionId * 1_000_000L + fileId;
+            byte[] bytes = readDocBytes(doc);
+            if (bytes != null && bytes.length > 0) {
+                String lower = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+                String ext = lower.contains(".") ? lower.substring(lower.lastIndexOf('.')) : "";
+                try {
+                    doc.text = extractText(bytes, ext);
+                } catch (Exception e) {
+                    log.warn("收银文档抽文本失败 fileId={}: {}", fileId, e.getMessage());
+                }
+            }
+        }
+        List<TrainQaDraft> drafts = draftsFrom(doc);
+        for (TrainQaDraft draft : drafts) {
+            draft.setFileId(fileId);
+        }
+        return drafts;
+    }
+
+    private List<TrainQaDraft> draftsFrom(DocBundle doc) {
         IndexedDoc indexed = prepareIndexedDoc(doc);
         List<QaBlock> blocks = buildQaBlocks(indexed, doc.text);
         List<TrainQaDraft> out = new ArrayList<>();
@@ -319,8 +445,8 @@ public class TrainDocService {
             }
             TrainQaDraft draft = new TrainQaDraft();
             draft.setSortNo(sort++);
-            draft.setDocId(docId);
-            draft.setVersionId(versionId);
+            draft.setDocId(doc.docId);
+            draft.setVersionId(doc.versionId);
             draft.setVersionLabel(doc.versionLabel);
             String question = item.getQuestion().trim();
             draft.setQuestion(question.length() <= 500 ? question : question.substring(0, 500));
@@ -1672,7 +1798,8 @@ public class TrainDocService {
             return empty;
         }
         try {
-            IndexedDoc cached = loadCachedIndexedFromDisk(doc.versionId);
+            long slot = doc.indexSlot > 0 ? doc.indexSlot : doc.versionId;
+            IndexedDoc cached = loadCachedIndexedFromDisk(slot);
             if (cached != null && !cached.images.isEmpty()) {
                 preferStructuredPlainText(cached, doc.text);
                 return cached;
@@ -1682,14 +1809,16 @@ public class TrainDocService {
                 IndexedDoc indexed = indexOriginalBytes(bytes, doc);
                 if (indexed != null && !indexed.images.isEmpty()) {
                     preferStructuredPlainText(indexed, doc.text);
-                    saveIndexedText(doc.versionId, indexed.textForAi);
-                    String rich = buildUrlPreviewHtml(indexed);
-                    if (StringUtils.hasText(rich)) {
-                        doc.html = rich;
-                        jdbc.update("UPDATE train_doc_version SET content_html = ? WHERE id = ?", rich, doc.versionId);
+                    saveIndexedText(slot, indexed.textForAi);
+                    if (doc.indexSlot <= 0) {
+                        String rich = buildUrlPreviewHtml(indexed);
+                        if (StringUtils.hasText(rich)) {
+                            doc.html = rich;
+                            jdbc.update("UPDATE train_doc_version SET content_html = ? WHERE id = ?", rich, doc.versionId);
+                        }
                     }
-                    log.info("答疑原文件索引完成 versionId={} images={} textLen={} hasMarkers={}",
-                            doc.versionId, indexed.images.size(),
+                    log.info("答疑原文件索引完成 versionId={} slot={} images={} textLen={} hasMarkers={}",
+                            doc.versionId, slot, indexed.images.size(),
                             indexed.textForAi == null ? 0 : indexed.textForAi.length(),
                             indexed.textForAi != null && indexed.textForAi.contains("[图"));
                     return indexed;
@@ -1768,12 +1897,13 @@ public class TrainDocService {
     private IndexedDoc indexOriginalBytes(byte[] bytes, DocBundle doc) throws Exception {
         String lower = doc.fileName == null ? "" : doc.fileName.toLowerCase(Locale.ROOT);
         String pathLower = doc.filePath == null ? "" : doc.filePath.toLowerCase(Locale.ROOT);
+        long slot = doc.indexSlot > 0 ? doc.indexSlot : doc.versionId;
         boolean zip = bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K';
         if (lower.endsWith(".docx") || pathLower.endsWith(".docx") || zip) {
-            return indexDocxPackage(bytes, doc.versionId, doc.text);
+            return indexDocxPackage(bytes, slot, doc.text);
         }
         if (lower.endsWith(".doc") || pathLower.endsWith(".doc")) {
-            return indexDocHwpf(bytes, doc.versionId, doc.text);
+            return indexDocHwpf(bytes, slot, doc.text);
         }
         return null;
     }
@@ -3249,6 +3379,8 @@ public class TrainDocService {
         String filePath;
         String fileName;
         boolean hasOlder;
+        /** 大于 0 时配图目录用这个槽位，避免同一版本里多份收银文档共用一份索引。 */
+        long indexSlot;
     }
 
     private static class IndexedDoc {

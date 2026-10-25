@@ -162,6 +162,31 @@ export function uploadTrainVersionApi(docId: number, file: File, versionLabel?: 
   });
 }
 
+export type TrainDocFile = {
+  id: number;
+  docId?: number;
+  versionId?: number;
+  versionLabel?: string;
+  title?: string;
+  fileName?: string;
+  fileSize?: number;
+  questionCount?: number;
+};
+
+export function listTrainFilesApi(versionId: number) {
+  return request.get<unknown, TrainDocFile[]>(`/train/doc/version/${versionId}/files`);
+}
+
+export function addTrainFileApi(docId: number, versionId: number, file: File, title?: string) {
+  const form = new FormData();
+  form.append('file', file);
+  if (title) form.append('title', title);
+  return request.post<unknown, number>(`/train/doc/${docId}/version/${versionId}/file`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+  });
+}
+
 export function pickUploadFile(fileList: unknown): File | undefined {
   const list = Array.isArray(fileList) ? fileList : [];
   const first = list[0] as { originFileObj?: File; raw?: File } | File | undefined;
@@ -366,6 +391,8 @@ export type TrainQaLibraryItem = {
   versionNo?: number;
   versionLabel?: string;
   fileName?: string;
+  fileId?: number;
+  fileTitle?: string;
   latest?: boolean;
   sortNo?: number;
   question?: string;

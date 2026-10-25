@@ -12,6 +12,7 @@ public class TrainQaDraft {
     private int sortNo;
     private long docId;
     private long versionId;
+    private Long fileId;
     private String versionLabel;
     private String question;
     private String answer;

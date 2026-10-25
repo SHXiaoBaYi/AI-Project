@@ -134,6 +134,59 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                   KEY idx_train_qa_item_doc (doc_id, is_active)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='培训文档拆出的问答'
                 """);
+        ensureColumn("train_qa_item", "file_id", """
+                ALTER TABLE train_qa_item
+                  ADD COLUMN file_id BIGINT NULL COMMENT '所属收银文档文件' AFTER version_id,
+                  ADD KEY idx_train_qa_item_file (file_id, is_active)
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS train_doc_file (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  doc_id BIGINT NOT NULL,
+                  version_id BIGINT NOT NULL COMMENT '所属版本',
+                  title VARCHAR(128) NULL COMMENT '收银文档名称',
+                  file_name VARCHAR(255) NOT NULL,
+                  file_path VARCHAR(512) NOT NULL,
+                  file_size BIGINT NULL,
+                  sort_no INT NOT NULL DEFAULT 0,
+                  remark VARCHAR(512) NULL,
+                  create_by VARCHAR(64) NULL,
+                  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  is_active TINYINT NOT NULL DEFAULT 1,
+                  KEY idx_train_doc_file_ver (version_id, is_active),
+                  KEY idx_train_doc_file_doc (doc_id, is_active)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='版本下的收银文档文件'
+                """);
+        backfillVersionFiles();
+    }
+
+    /** 已有版本各有一份原文件，补成「版本 → 收银文档」；题目挂到这份文档上。 */
+    private void backfillVersionFiles() {
+        jdbc.update("""
+                INSERT INTO train_doc_file (doc_id, version_id, title, file_name, file_path, file_size, sort_no, create_by, is_active)
+                SELECT v.doc_id, v.id, v.file_name, v.file_name, v.file_path, v.file_size, 1, v.create_by, 1
+                FROM train_doc_version v
+                WHERE v.is_active = 1
+                  AND NOT EXISTS (
+                    SELECT 1 FROM train_doc_file f WHERE f.version_id = v.id AND f.is_active = 1
+                  )
+                """);
+        jdbc.update("""
+                UPDATE train_qa_item i
+                JOIN train_doc_file f ON f.version_id = i.version_id AND f.is_active = 1 AND f.sort_no = 1
+                SET i.file_id = f.id
+                WHERE i.is_active = 1 AND i.file_id IS NULL
+                """);
+    }
+
+    private void ensureColumn(String table, String column, String ddl) {
+        Integer cnt = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+                """, Integer.class, table, column);
+        if (cnt == null || cnt == 0) {
+            jdbc.execute(ddl);
+        }
     }
 
     private void seedMenus() {
@@ -143,8 +196,9 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         menu(303, "文档编辑", 301, 2, "", "", "F", "train:doc:edit", "#", "");
         menu(304, "版本上传", 301, 3, "", "", "F", "train:doc:upload", "#", "");
         menu(305, "文档删除", 301, 4, "", "", "F", "train:doc:delete", "#", "");
-        menu(310, "题目", 300, 2, "train/item", "train/item/index", "C", "train:doc:list", "ProfileOutlined", "文档每个版本拆出的问答，对应文档与版本");
-        menu(311, "题目编辑", 310, 1, "", "", "F", "train:doc:edit", "#", "");
+        // 320/321：310 是文章生成知识库，311 是审稿知识库，不能占用
+        menu(320, "题目", 300, 2, "train/item", "train/item/index", "C", "train:doc:list", "ProfileOutlined", "版本下的收银文档拆出的问答");
+        menu(321, "题目编辑", 320, 1, "", "", "F", "train:doc:edit", "#", "");
         menu(306, "答疑校准", 300, 3, "train/qa", "train/qa/index", "C", "train:qa:list", "CheckCircleOutlined", "人工校准准/不准答案");
         menu(307, "校准编辑", 306, 1, "", "", "F", "train:qa:edit", "#", "");
         menu(308, "重新识别", 306, 2, "", "", "F", "train:qa:recognize", "#", "");
@@ -152,11 +206,11 @@ public class TrainSchemaMigrator implements ApplicationRunner {
 
         Long admin = roleId("admin");
         if (admin != null) {
-            grant(admin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311);
+            grant(admin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 320, 321);
         }
         Long hrAdmin = roleId("hr_admin");
         if (hrAdmin != null) {
-            grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311);
+            grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 320, 321);
         }
     }
 

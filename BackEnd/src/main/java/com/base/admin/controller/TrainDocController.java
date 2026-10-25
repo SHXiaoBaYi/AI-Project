@@ -6,6 +6,7 @@ import com.base.admin.common.Result;
 import com.base.admin.domain.dto.TrainDocSaveDTO;
 import com.base.admin.domain.dto.TrainQaItemQueryDTO;
 import com.base.admin.domain.dto.TrainQaItemSaveDTO;
+import com.base.admin.domain.vo.TrainDocFileVO;
 import com.base.admin.domain.vo.TrainDocVO;
 import com.base.admin.domain.vo.TrainDocVersionVO;
 import com.base.admin.domain.vo.TrainQaItemVO;
@@ -96,6 +97,23 @@ public class TrainDocController {
                                       @RequestParam(required = false) String versionLabel,
                                       @RequestParam(required = false) String remark) {
         return Result.ok(trainDocService.uploadVersion(id, file, versionLabel, remark));
+    }
+
+    @Operation(summary = "某版本下的收银文档")
+    @GetMapping("/version/{versionId}/files")
+    @RequiresPermission("train:doc:list")
+    public Result<List<TrainDocFileVO>> files(@PathVariable Long versionId) {
+        return Result.ok(trainDocService.listFiles(versionId));
+    }
+
+    @Operation(summary = "往已有版本追加一份收银文档，不升版本")
+    @PostMapping(value = "/{id}/version/{versionId}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @RequiresPermission("train:doc:upload")
+    public Result<Long> addFile(@PathVariable Long id,
+                                @PathVariable Long versionId,
+                                @RequestParam("file") MultipartFile file,
+                                @RequestParam(required = false) String title) {
+        return Result.ok(trainDocService.addFileToVersion(id, versionId, file, title));
     }
 
     @Operation(summary = "预览版本（抽取文本 HTML）")

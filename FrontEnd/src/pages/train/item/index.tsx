@@ -92,7 +92,7 @@ const TrainItemPage = memo(function TrainItemPage() {
         if (!docId) return [];
         const rows = await listTrainVersionsApi(docId);
         return (rows || []).map((v) => ({
-          label: `${v.versionLabel || `v${v.versionNo}`}${v.latest ? ' · 最新' : ''}${v.fileName ? ` · ${v.fileName}` : ''}`,
+          label: `${v.versionLabel || `v${v.versionNo}`}${v.latest ? ' · 最新' : ''}`,
           value: v.id,
         }));
       },
@@ -119,12 +119,12 @@ const TrainItemPage = memo(function TrainItemPage() {
       ),
     },
     {
-      title: '文件',
-      dataIndex: 'fileName',
+      title: '收银文档',
+      dataIndex: 'fileTitle',
       width: 180,
       ellipsis: true,
       search: false,
-      render: (_, record) => record.fileName || '—',
+      render: (_, record) => record.fileTitle || record.fileName || '—',
     },
     {
       title: '范围',

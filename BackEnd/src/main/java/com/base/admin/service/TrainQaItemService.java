@@ -65,6 +65,54 @@ public class TrainQaItemService {
     }
 
     public void rebuildVersion(long docId, long versionId) {
+        List<Map<String, Object>> files = jdbc.queryForList("""
+                SELECT id FROM train_doc_file
+                WHERE version_id = ? AND doc_id = ? AND is_active = 1
+                ORDER BY sort_no ASC, id ASC
+                """, versionId, docId);
+        if (files.isEmpty()) {
+            rebuildLegacyVersion(docId, versionId);
+            return;
+        }
+        for (Map<String, Object> file : files) {
+            Number id = (Number) file.get("id");
+            if (id != null) {
+                rebuildFile(docId, versionId, id.longValue());
+            }
+        }
+    }
+
+    public void rebuildFile(long docId, long versionId, long fileId) {
+        List<Map<String, Object>> files = jdbc.queryForList("""
+                SELECT file_path, file_name FROM train_doc_file
+                WHERE id = ? AND doc_id = ? AND version_id = ? AND is_active = 1
+                """, fileId, docId, versionId);
+        if (files.isEmpty()) {
+            log.warn("收银文档不存在 fileId={}", fileId);
+            return;
+        }
+        String filePath = str(files.get(0).get("file_path"));
+        String fileName = str(files.get(0).get("file_name"));
+        List<TrainQaDraft> drafts;
+        try {
+            drafts = trainDocService.exportStructuredQaFile(docId, versionId, fileId, filePath, fileName);
+        } catch (Exception e) {
+            log.warn("拆题失败，保留原文件 fileId={}: {}", fileId, e.getMessage());
+            return;
+        }
+        if (drafts == null || drafts.isEmpty()) {
+            log.warn("未拆出问答，保留原文件与已有题目 fileId={}", fileId);
+            return;
+        }
+        String versionPath = jdbc.query("""
+                SELECT file_path FROM train_doc_version WHERE id = ?
+                """, rs -> rs.next() ? rs.getString(1) : "", versionId);
+        boolean primary = !StringUtils.hasText(versionPath) || versionPath.equals(filePath);
+        replaceRows(docId, versionId, fileId, primary, drafts);
+        scheduleEmbed(versionId);
+    }
+
+    private void rebuildLegacyVersion(long docId, long versionId) {
         List<TrainQaDraft> drafts;
         try {
             drafts = trainDocService.exportStructuredQa(docId, versionId);
@@ -76,16 +124,7 @@ public class TrainQaItemService {
             log.warn("未拆出问答，保留原文件与已有题目 versionId={}", versionId);
             return;
         }
-        replaceRows(docId, versionId, drafts);
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    scheduleEmbed(versionId);
-                }
-            });
-            return;
-        }
+        replaceRows(docId, versionId, null, true, drafts);
         scheduleEmbed(versionId);
     }
 
@@ -127,18 +166,24 @@ public class TrainQaItemService {
 
     public List<TrainQaItemVO> listLatest(long docId) {
         return jdbc.query("""
-                SELECT i.id, i.doc_id, i.version_id, i.sort_no, i.question, i.aliases_json, i.answer_text,
-                       v.version_label, CASE WHEN i.embedding IS NULL THEN 0 ELSE 1 END embedded
+                SELECT i.id, i.doc_id, i.version_id, i.file_id, i.sort_no, i.question, i.aliases_json, i.answer_text,
+                       v.version_label, COALESCE(NULLIF(f.title, ''), f.file_name) file_title,
+                       CASE WHEN i.embedding IS NULL THEN 0 ELSE 1 END embedded
                 FROM train_qa_item i
                 JOIN train_doc d ON d.id = i.doc_id AND d.latest_version_id = i.version_id
                 LEFT JOIN train_doc_version v ON v.id = i.version_id
+                LEFT JOIN train_doc_file f ON f.id = i.file_id
                 WHERE i.doc_id = ? AND i.is_active = 1
-                ORDER BY i.sort_no ASC, i.id ASC
+                ORDER BY i.file_id ASC, i.sort_no ASC, i.id ASC
                 """, (rs, n) -> {
             TrainQaItemVO vo = new TrainQaItemVO();
             vo.setId(rs.getLong("id"));
             vo.setDocId(rs.getLong("doc_id"));
             vo.setVersionId(rs.getLong("version_id"));
+            if (rs.getObject("file_id") != null) {
+                vo.setFileId(rs.getLong("file_id"));
+            }
+            vo.setFileTitle(rs.getString("file_title"));
             vo.setSortNo(rs.getInt("sort_no"));
             vo.setQuestion(rs.getString("question"));
             vo.setAliases(joinAliases(readStringList(rs.getString("aliases_json"))));
@@ -179,6 +224,7 @@ public class TrainQaItemService {
                 FROM train_qa_item i
                 JOIN train_doc d ON d.id = i.doc_id
                 JOIN train_doc_version v ON v.id = i.version_id
+                LEFT JOIN train_doc_file f ON f.id = i.file_id
                 """;
         Integer total = jdbc.queryForObject("SELECT COUNT(1) " + from + where, Integer.class, args.toArray());
         int offset = (pageNum - 1) * pageSize;
@@ -186,12 +232,14 @@ public class TrainQaItemService {
         listArgs.add(pageSize);
         listArgs.add(offset);
         List<TrainQaItemVO> rows = jdbc.query("""
-                SELECT i.id, i.doc_id, d.title doc_title, i.version_id, v.version_no, v.version_label, v.file_name,
+                SELECT i.id, i.doc_id, d.title doc_title, i.version_id, i.file_id, v.version_no, v.version_label,
+                       COALESCE(f.file_name, v.file_name) file_name,
+                       COALESCE(NULLIF(f.title, ''), f.file_name, v.file_name) file_title,
                        i.sort_no, i.question, i.aliases_json, i.answer_text,
                        CASE WHEN i.embedding IS NULL THEN 0 ELSE 1 END embedded,
                        CASE WHEN i.version_id = d.latest_version_id THEN 1 ELSE 0 END latest
                 """ + from + where + """
-                 ORDER BY d.title ASC, v.version_no DESC, i.sort_no ASC, i.id ASC
+                 ORDER BY d.title ASC, v.version_no DESC, f.sort_no ASC, i.sort_no ASC, i.id ASC
                  LIMIT ? OFFSET ?
                 """, (rs, n) -> mapItem(rs), listArgs.toArray());
         return new PageResult<>(total == null ? 0 : total, rows);
@@ -206,6 +254,10 @@ public class TrainQaItemService {
         vo.setVersionNo(rs.getInt("version_no"));
         vo.setVersionLabel(rs.getString("version_label"));
         vo.setFileName(rs.getString("file_name"));
+        if (rs.getObject("file_id") != null) {
+            vo.setFileId(rs.getLong("file_id"));
+        }
+        vo.setFileTitle(rs.getString("file_title"));
         vo.setSortNo(rs.getInt("sort_no"));
         vo.setQuestion(rs.getString("question"));
         vo.setAliases(joinAliases(readStringList(rs.getString("aliases_json"))));
@@ -366,12 +418,12 @@ public class TrainQaItemService {
         log.info("题目向量已更新 versionId={} count={}", versionId, ids.size());
     }
 
-    private void replaceRows(long docId, long versionId, List<TrainQaDraft> drafts) {
-        tx.executeWithoutResult(status -> insertRows(docId, versionId, drafts));
+    private void replaceRows(long docId, long versionId, Long fileId, boolean primary, List<TrainQaDraft> drafts) {
+        tx.executeWithoutResult(status -> insertRows(docId, versionId, fileId, primary, drafts));
         vectorIndex.reload();
     }
 
-    private void insertRows(long docId, long versionId, List<TrainQaDraft> drafts) {
+    private void insertRows(long docId, long versionId, Long fileId, boolean primary, List<TrainQaDraft> drafts) {
         String category = jdbc.query("""
                 SELECT category FROM train_doc WHERE id = ?
                 """, rs -> rs.next() ? rs.getString(1) : "cashier", docId);
@@ -379,9 +431,22 @@ public class TrainQaItemService {
             category = "cashier";
         }
         Map<String, String> keptAliases = new java.util.HashMap<>();
-        List<Map<String, Object>> old = jdbc.queryForList("""
-                SELECT question, aliases_json FROM train_qa_item WHERE version_id = ? AND is_active = 1
-                """, versionId);
+        List<Map<String, Object>> old;
+        if (fileId == null) {
+            old = jdbc.queryForList("""
+                    SELECT question, aliases_json FROM train_qa_item WHERE version_id = ? AND is_active = 1
+                    """, versionId);
+        } else if (primary) {
+            old = jdbc.queryForList("""
+                    SELECT question, aliases_json FROM train_qa_item
+                    WHERE version_id = ? AND is_active = 1 AND (file_id = ? OR file_id IS NULL)
+                    """, versionId, fileId);
+        } else {
+            old = jdbc.queryForList("""
+                    SELECT question, aliases_json FROM train_qa_item
+                    WHERE version_id = ? AND is_active = 1 AND file_id = ?
+                    """, versionId, fileId);
+        }
         for (Map<String, Object> row : old) {
             String q = str(row.get("question"));
             String aliases = str(row.get("aliases_json"));
@@ -389,23 +454,36 @@ public class TrainQaItemService {
                 keptAliases.put(normKey(q), aliases);
             }
         }
-        jdbc.update("UPDATE train_qa_item SET is_active = 0 WHERE version_id = ? AND is_active = 1", versionId);
+        if (fileId == null) {
+            jdbc.update("UPDATE train_qa_item SET is_active = 0 WHERE version_id = ? AND is_active = 1", versionId);
+        } else if (primary) {
+            jdbc.update("""
+                    UPDATE train_qa_item SET is_active = 0
+                    WHERE version_id = ? AND is_active = 1 AND (file_id = ? OR file_id IS NULL)
+                    """, versionId, fileId);
+        } else {
+            jdbc.update("""
+                    UPDATE train_qa_item SET is_active = 0
+                    WHERE version_id = ? AND is_active = 1 AND file_id = ?
+                    """, versionId, fileId);
+        }
         for (TrainQaDraft draft : drafts) {
             String question = trimQuestion(draft.getQuestion());
             if (!StringUtils.hasText(question)) {
                 continue;
             }
             String aliases = keptAliases.getOrDefault(normKey(question), "[]");
+            Long rowFileId = draft.getFileId() != null ? draft.getFileId() : fileId;
             jdbc.update("""
                     INSERT INTO train_qa_item
-                      (doc_id, version_id, category, sort_no, question, aliases_json, answer_text, answer_html, images_json, is_active)
-                    VALUES (?,?,?,?,?,?,?,?,?,1)
+                      (doc_id, version_id, file_id, category, sort_no, question, aliases_json, answer_text, answer_html, images_json, is_active)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,1)
                     """,
-                    docId, versionId, category.trim().toLowerCase(Locale.ROOT), draft.getSortNo(),
+                    docId, versionId, rowFileId, category.trim().toLowerCase(Locale.ROOT), draft.getSortNo(),
                     question, aliases, nullToEmpty(draft.getAnswer()), nullToEmpty(draft.getAnswerHtml()),
                     writeJson(draft.getImages() == null ? List.of() : draft.getImages()));
         }
-        log.info("培训文档已拆题入库 docId={} versionId={} count={}", docId, versionId, drafts.size());
+        log.info("培训文档已拆题入库 docId={} versionId={} fileId={} count={}", docId, versionId, fileId, drafts.size());
     }
 
     static String embedText(String question, List<String> aliases) {
