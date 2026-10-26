@@ -243,7 +243,7 @@ public class HrMasterService {
                        ) today_interview_pass_count,
                        (SELECT COUNT(1) FROM hr_application a
                         WHERE a.requisition_id = r.id AND a.is_active = 1
-                          AND a.current_stage = 'BG_CHECK') bg_check_count,
+                          AND a.current_stage IN ('BG_COLLECT', 'BG_CHECK')) bg_check_count,
                        (SELECT COUNT(1) FROM hr_application a
                         WHERE a.requisition_id = r.id AND a.is_active = 1
                           AND a.current_stage = 'PENDING_ONBOARD') pending_onboard_count
@@ -735,7 +735,7 @@ public class HrMasterService {
             case "PENDING" -> "ENTERED".equalsIgnoreCase(stage);
             case "INTERVIEWING" -> JOB_FUNNEL_INTERVIEWING.contains(stage.toUpperCase(Locale.ROOT));
             case "ONBOARDED" -> "ONBOARDED".equalsIgnoreCase(stage);
-            case "BG_CHECK" -> "BG_CHECK".equalsIgnoreCase(stage);
+            case "BG_CHECK" -> "BG_CHECK".equalsIgnoreCase(stage) || "BG_COLLECT".equalsIgnoreCase(stage);
             case "PENDING_ONBOARD" -> "PENDING_ONBOARD".equalsIgnoreCase(stage);
             default -> true;
         };

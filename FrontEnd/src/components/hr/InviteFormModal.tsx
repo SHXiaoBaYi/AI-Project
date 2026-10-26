@@ -34,26 +34,9 @@ const ROUNDS = [
   { value: 5, label: '五面' },
 ];
 
-/** 面试开始：每天 09:30～17:30，半小时一档 */
-const INTERVIEW_START_MIN = 9 * 60 + 30;
-const INTERVIEW_END_MIN = 17 * 60 + 30;
-
+/** 面试开始：全天可约，半小时一档 */
 function interviewAtDisabledTime(selected?: Dayjs | null) {
-  const past = interviewPastDisabledTime(selected);
-  return {
-    disabledHours: () => {
-      const hours = new Set<number>(past.disabledHours());
-      for (let h = 0; h < 24; h++) {
-        if (h < 9 || h > 17) hours.add(h);
-      }
-      return [...hours];
-    },
-    disabledMinutes: (hour: number) => {
-      const blocked = new Set<number>(past.disabledMinutes(hour));
-      if (hour === 9) blocked.add(0);
-      return [...blocked];
-    },
-  };
+  return interviewPastDisabledTime(selected);
 }
 
 function validateInterviewAt(_: unknown, value: Dayjs | null | undefined) {
@@ -62,10 +45,6 @@ function validateInterviewAt(_: unknown, value: Dayjs | null | undefined) {
   }
   if (value.minute() % 30 !== 0) {
     return Promise.reject(new Error('开始时间须为半小时整点（如 09:30、10:00）'));
-  }
-  const mins = value.hour() * 60 + value.minute();
-  if (mins < INTERVIEW_START_MIN || mins > INTERVIEW_END_MIN) {
-    return Promise.reject(new Error('开始时间须在每天 09:30～17:30 之间'));
   }
   const bookingErr = bookingDateTimeError(value);
   if (bookingErr) return Promise.reject(new Error(bookingErr));
@@ -414,7 +393,7 @@ export default function InviteFormModal({
           extra={
             useSlots
               ? '来自机器人推荐，默认第一项'
-              : `每天 09:30～17:30，半小时一档；不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`
+              : `全天可约，半小时一档；不可选过去、法定节假日，最多未来 ${BOOKING_MAX_DAYS} 天`
           }
           rules={
             useSlots

@@ -42,9 +42,7 @@ public class HrInviteService {
      */
     private static final boolean AUTO_CREATE_DINGTALK_CALENDAR = false;
     private static final Map<Integer, String> ROUND_NAME = Map.of(1, "一面", 2, "二面", 3, "三面", 4, "四面", 5, "五面");
-    /** 面试开始时间：每天 09:30～17:30，半小时整点 */
-    private static final LocalTime INTERVIEW_START = LocalTime.of(9, 30);
-    private static final LocalTime INTERVIEW_END = LocalTime.of(17, 30);
+    /** 面试开始时间：全天可约，半小时整点 */
 
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalk;
@@ -1564,9 +1562,6 @@ public class HrInviteService {
         LocalTime time = interviewAt.toLocalTime().withSecond(0).withNano(0);
         if (interviewAt.getSecond() != 0 || interviewAt.getNano() != 0 || time.getMinute() % 30 != 0) {
             throw new BusinessException("面试开始时间须为半小时整点（如 09:30、10:00）");
-        }
-        if (time.isBefore(INTERVIEW_START) || time.isAfter(INTERVIEW_END)) {
-            throw new BusinessException("面试开始时间须在每天 09:30～17:30 之间");
         }
     }
 

@@ -421,7 +421,10 @@ CREATE TABLE IF NOT EXISTS hr_board_view (
 INSERT INTO hr_channel (channel_code, channel_name, is_active) VALUES
 ('BOSS', 'BOSS', 1),
 ('LIEPIN', '猎聘', 1),
-('HEADHUNTER', '猎头', 1)
+('HEADHUNTER', '猎头', 1),
+('ZHILIAN', '智联', 1),
+('WUBA', '58', 1),
+('OTHER', '其他', 1)
 ON DUPLICATE KEY UPDATE channel_name = VALUES(channel_name);
 
 INSERT INTO hr_reject_reason (reason_code, reason_name, sort_no, is_active) VALUES
