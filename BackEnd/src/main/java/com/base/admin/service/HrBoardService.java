@@ -1164,8 +1164,11 @@ public class HrBoardService {
     }
 
     /**
-     * 区间漏斗：筛选期内「首次到达该层」的人数（可跨层；一人可出现在多层）。
-     * 到达时间取阶段事件/邀约/面试等真实时间，无时间则该层不计。
+     * 区间漏斗：筛选期内各层到达人数（可跨层；一人可出现在多层）。
+     * <ul>
+     *   <li>HR初筛通过：期内新增投递（submitted_at）且申请仍有效、已初筛通过</li>
+     *   <li>其余层：期内首次到达该层的事件/邀约/面试时间</li>
+     * </ul>
      */
     private List<HrBoardVO.FunnelNode> buildPeriodFunnel(List<Milestone> rows, HrBoardQueryDTO q) {
         List<HrStageCatalog.FunnelBucketDef> funnel = stageCatalog.funnelBuckets();
@@ -1209,6 +1212,10 @@ public class HrBoardService {
     }
 
     private boolean periodFunnelHit(Milestone m, int index, LocalDate start, LocalDate end) {
+        // HR初筛通过：区间内新增进来、申请仍有效、且已初筛通过（不是「仅有 SCREEN_PASS 事件」）
+        if (index == 0) {
+            return periodScreenPassHit(m, start, end);
+        }
         LocalDateTime at = funnelReachedAtStrict(m, index);
         if (at == null) {
             return false;
@@ -1217,12 +1224,34 @@ public class HrBoardService {
     }
 
     /**
-     * 区间漏斗用的「首次到达」时间：只认可核对事件，没有则返回 null（不靠 current_stage 猜）。
-     * 下标与 {@link HrStageCatalog#funnelBuckets()} 一致。
+     * 区间「HR初筛通过」：投递日落在筛选区间内，申请仍有效（load 已限 is_active=1），且已初筛通过。
+     */
+    private static boolean periodScreenPassHit(Milestone m, LocalDate start, LocalDate end) {
+        if (!inWindow(m.submittedAt(), start, end)) {
+            return false;
+        }
+        return hasScreenPassed(m);
+    }
+
+    private static boolean hasScreenPassed(Milestone m) {
+        if (isPass(m.screenResult()) || isPass(m.resumeStatus()) || m.screenAt() != null) {
+            return true;
+        }
+        String stage = m.currentStage() == null ? "" : m.currentStage().trim().toUpperCase(Locale.ROOT);
+        if (!StringUtils.hasText(stage) || "ENTERED".equals(stage) || "SCREEN_FAIL".equals(stage)) {
+            return false;
+        }
+        // 已离开待初筛/初筛不合适，视为状态仍有效且已通过初筛
+        return true;
+    }
+
+    /**
+     * 区间漏斗其余层的「首次到达」时间：只认可核对事件，没有则返回 null。
+     * 下标与 {@link HrStageCatalog#funnelBuckets()} 一致（0=初筛，由 {@link #periodScreenPassHit} 单独处理）。
      */
     private static LocalDateTime funnelReachedAtStrict(Milestone m, int index) {
         return switch (index) {
-            case 0 -> m.screenAt();
+            case 0 -> m.submittedAt() == null ? null : m.submittedAt().atStartOfDay();
             case 1 -> m.phoneAt();
             case 2 -> m.inviteAt();
             case 3 -> firstNonNull(m.firstDoneAt(), m.showAt());
@@ -1361,7 +1390,7 @@ public class HrBoardService {
     /** 下钻展示用：优先该层首次事件日，否则投递日（下标与 catalog 漏斗一致） */
     private static LocalDate funnelReachedDate(Milestone milestone, int index) {
         return switch (index) {
-            case 0 -> firstNonNullDate(toDate(milestone.screenAt), milestone.submittedAt);
+            case 0 -> firstNonNullDate(milestone.submittedAt, toDate(milestone.screenAt));
             case 1 -> firstNonNullDate(toDate(milestone.phoneAt), toDate(milestone.screenAt), milestone.submittedAt);
             case 2 -> firstNonNullDate(toDate(milestone.inviteAt), milestone.submittedAt);
             case 3 -> firstNonNullDate(toDate(firstNonNull(milestone.firstDoneAt, milestone.showAt)), milestone.submittedAt);

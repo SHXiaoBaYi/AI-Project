@@ -568,7 +568,7 @@ export default function BoardAnalyticsPanel({ initialOwnerUserIds }: BoardAnalyt
       <ChartExportCard
         title='招聘漏斗'
         filename='招聘漏斗'
-        hint='按上方日期：期内首次到达该层的人数（可跨层，一人可出现在多层）。邀约成功≈期内有邀约记录的人。点击可下钻。'
+        hint='按上方日期统计（可跨层）。HR初筛通过=期内新增投递且仍有效、已初筛通过；其后各层=期内首次到达。点击可下钻。'
       >
         <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
           {periodFunnelChart.length ? (
