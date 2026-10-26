@@ -975,7 +975,12 @@ public class LinkMonitorService {
     }
 
     /**
-     * 笔记深链：URL 仍带原 id，但 SSR 未下发笔记正文（失效常见表现）。
+     * 笔记深链：URL 仍带原 id，但 SSR 明确未下发该笔记（失效常见表现）。
+     * <p>
+     * 注意：小红书 SSR 里同一 noteId 会先出现在路由态，真正笔记载荷在 {@code noteDetailMap}；
+     * {@code comments} 也可能很长。旧逻辑对「全文第一次出现 id 后 2500 字」抠 title/desc，
+     * 会把仍有效的笔记误判成「笔记内容字段缺失」（生产已实锤）。
+     * 只在有「note 为空 / 无 map 且无有效标题」等硬证据时判失效；结构吃不准时放行。
      */
     static String detectMissingNotePayload(String body, String contentId) {
         if (!StringUtils.hasText(body) || !StringUtils.hasText(contentId)) {
@@ -984,45 +989,110 @@ public class LinkMonitorService {
         String raw = unescapeJsonUnicode(body);
         boolean hasInitial = body.contains("__INITIAL_STATE__") || raw.contains("__INITIAL_STATE__");
         boolean hasNoteMap = body.contains("noteDetailMap") || raw.contains("noteDetailMap");
+        boolean specificTitle = hasSpecificNoteHtmlTitle(body);
         if (hasNoteMap) {
-            Matcher empty = Pattern.compile(
-                    "\"" + Pattern.quote(contentId) + "\"\\s*:\\s*(null|\\{\\s*\\}|\\{\\s*\"note\"\\s*:\\s*null)")
-                    .matcher(raw);
-            if (empty.find()) {
-                return "笔记数据为空或不存在";
+            int mapIdx = indexOfNoteDetailMap(raw);
+            int idInMap = mapIdx >= 0 ? raw.indexOf("\"" + contentId + "\"", mapIdx) : -1;
+            if (idInMap < 0) {
+                // map 在，但没有本条 id：若浏览器标题已是具体笔记名，仍视为可读
+                return specificTitle ? "" : "页面未包含原笔记数据";
             }
-            if (!raw.contains("\"" + contentId + "\"")) {
-                return "页面未包含原笔记数据";
-            }
-            // 有 id 条目时，至少应有 title / desc / noteId 等字段之一
-            int idx = raw.indexOf("\"" + contentId + "\"");
-            if (idx >= 0) {
-                String window = raw.substring(idx, Math.min(raw.length(), idx + 2500));
-                boolean hasNoteFields = window.contains("\"title\"")
-                        || window.contains("\"displayTitle\"")
-                        || window.contains("\"desc\"")
-                        || window.contains("\"name\"")
-                        || window.contains("\"noteId\"");
-                if (!hasNoteFields) {
-                    return "笔记内容字段缺失";
+            String mapEntryWindow = raw.substring(idInMap, Math.min(raw.length(), idInMap + 12000));
+            int noteKey = mapEntryWindow.indexOf("\"note\"");
+            if (noteKey >= 0) {
+                String afterNote = mapEntryWindow.substring(noteKey);
+                if (Pattern.compile("^\"note\"\\s*:\\s*(null|\\{\\s*\\})").matcher(afterNote).find()) {
+                    return specificTitle ? "" : "笔记数据为空或不存在";
+                }
+                if (looksLikeNoteObject(afterNote)) {
+                    return "";
                 }
             }
+            // map 里有本条 id、结构吃不准（如 comments 很大 / 字段改名）：宁可放行，避免误杀
             return "";
         }
         if (hasInitial) {
-            // 登录壳 / 失效空壳常见：有 INITIAL_STATE 但无 noteDetailMap
-            return "页面未返回笔记内容";
+            // 登录壳 / 风控空壳常见：有 INITIAL_STATE 但无 noteDetailMap
+            // 若 <title> 已是具体笔记名，说明仍可读，不判死
+            return specificTitle ? "" : "页面未返回笔记内容";
+        }
+        if (specificTitle) {
+            return "";
         }
         Matcher titleM = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
         if (titleM.find()) {
             String title = titleM.group(1).replaceAll("\\s+", " ").trim();
-            if ("小红书".equals(title)
-                    || "小红书 - 你的生活兴趣社区".equals(title)
-                    || "xiaohongshu".equalsIgnoreCase(title)) {
+            if (isGenericXhsTitle(title)) {
                 return "页面无有效笔记标题";
             }
         }
         return "";
+    }
+
+    /** {@code noteDetailMap} 在 SSR JSON 中的位置；找不到返回 -1。 */
+    static int indexOfNoteDetailMap(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return -1;
+        }
+        int i = raw.indexOf("\"noteDetailMap\"");
+        if (i < 0) {
+            i = raw.indexOf("noteDetailMap");
+        }
+        return i;
+    }
+
+    /** 「听劝！… - 小红书」这类具体标题，不是站点壳标题。 */
+    static boolean hasSpecificNoteHtmlTitle(String body) {
+        if (!StringUtils.hasText(body)) {
+            return false;
+        }
+        Matcher titleM = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
+        if (!titleM.find()) {
+            return false;
+        }
+        String title = titleM.group(1).replaceAll("\\s+", " ").trim();
+        if (!StringUtils.hasText(title) || isGenericXhsTitle(title)) {
+            return false;
+        }
+        // 小红书笔记页标题常见后缀
+        return title.contains("小红书") || title.length() >= 8;
+    }
+
+    static boolean isGenericXhsTitle(String title) {
+        if (!StringUtils.hasText(title)) {
+            return true;
+        }
+        String t = title.replaceAll("\\s+", " ").trim();
+        return "小红书".equals(t)
+                || "小红书 - 你的生活兴趣社区".equals(t)
+                || "xiaohongshu".equalsIgnoreCase(t);
+    }
+
+    /** {@code "note":{...}} 片段里是否像真实笔记载荷（而非 null/空对象）。 */
+    static boolean looksLikeNoteObject(String afterNoteKey) {
+        if (!StringUtils.hasText(afterNoteKey)) {
+            return false;
+        }
+        Matcher m = Pattern.compile("^\"note\"\\s*:\\s*").matcher(afterNoteKey);
+        if (!m.find()) {
+            return false;
+        }
+        String rest = afterNoteKey.substring(m.end()).stripLeading();
+        if (rest.startsWith("null") || rest.startsWith("{}")) {
+            return false;
+        }
+        if (!rest.startsWith("{")) {
+            return false;
+        }
+        // 真实笔记常见字段；有其一即可
+        return rest.contains("\"noteId\"")
+                || rest.contains("\"title\"")
+                || rest.contains("\"displayTitle\"")
+                || rest.contains("\"desc\"")
+                || rest.contains("\"xsecToken\"")
+                || rest.contains("\"type\"")
+                || rest.contains("\"imageList\"")
+                || rest.contains("\"video\"");
     }
 
     static String unescapeJsonUnicode(String s) {
