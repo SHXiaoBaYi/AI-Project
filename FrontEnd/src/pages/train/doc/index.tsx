@@ -9,6 +9,7 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import {
   createTrainDocWithFileApi,
   deleteTrainDocApi,
+  deleteTrainFileApi,
   downloadTrainVersionApi,
   getTrainAssistantEntryApi,
   addTrainFileApi,
@@ -555,16 +556,33 @@ const TrainDocPage = memo(function TrainDocPage() {
             {
               title: '操作',
               valueType: 'option',
-              width: 100,
+              width: 160,
               render: (_, row) => (
-                <PermissionButton
-                  type='link'
-                  size='small'
-                  perm='train:doc:list'
-                  onClick={() => openQuestions(row)}
-                >
-                  查看题目
-                </PermissionButton>
+                <ActionButtons
+                  items={[
+                    {
+                      key: 'questions',
+                      label: '查看题目',
+                      perm: 'train:doc:list',
+                      onClick: () => openQuestions(row),
+                    },
+                    ...(row.id > 0 && versionDoc?.id && row.versionId
+                      ? [
+                          {
+                            key: 'delete',
+                            label: '删除',
+                            perm: 'train:doc:delete',
+                            confirmTitle: `确认删除「${row.title || row.fileName || '该文档'}」？将同时删除其题目与对应答疑校准。`,
+                            onClick: async () => {
+                              await deleteTrainFileApi(versionDoc.id, row.versionId!, row.id);
+                              message.success('已删除');
+                              if (fileVersionId) await loadFiles(fileVersionId);
+                            },
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
               ),
             },
             {

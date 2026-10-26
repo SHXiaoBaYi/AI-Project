@@ -166,6 +166,44 @@ public class TrainQaItemService {
         vectorIndex.reload();
     }
 
+    /**
+     * 软删某份收银文档下的题目；主文档（primary）同时清掉 file_id 为空的遗留题。
+     * @return 被删题干（供级联清理答疑校准）
+     */
+    public List<String> deactivateFile(long docId, long versionId, long fileId, boolean primary) {
+        List<Map<String, Object>> rows;
+        if (primary) {
+            rows = jdbc.queryForList("""
+                    SELECT question FROM train_qa_item
+                    WHERE doc_id = ? AND version_id = ? AND is_active = 1
+                      AND (file_id = ? OR file_id IS NULL)
+                    """, docId, versionId, fileId);
+            jdbc.update("""
+                    UPDATE train_qa_item SET is_active = 0
+                    WHERE doc_id = ? AND version_id = ? AND is_active = 1
+                      AND (file_id = ? OR file_id IS NULL)
+                    """, docId, versionId, fileId);
+        } else {
+            rows = jdbc.queryForList("""
+                    SELECT question FROM train_qa_item
+                    WHERE doc_id = ? AND version_id = ? AND is_active = 1 AND file_id = ?
+                    """, docId, versionId, fileId);
+            jdbc.update("""
+                    UPDATE train_qa_item SET is_active = 0
+                    WHERE doc_id = ? AND version_id = ? AND is_active = 1 AND file_id = ?
+                    """, docId, versionId, fileId);
+        }
+        vectorIndex.reload();
+        List<String> questions = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            String q = str(row.get("question"));
+            if (StringUtils.hasText(q)) {
+                questions.add(q.trim());
+            }
+        }
+        return questions;
+    }
+
     public List<TrainQaItemVO> listLatest(long docId) {
         return jdbc.query("""
                 SELECT i.id, i.doc_id, i.version_id, i.file_id, i.sort_no, i.question, i.aliases_json, i.answer_text,

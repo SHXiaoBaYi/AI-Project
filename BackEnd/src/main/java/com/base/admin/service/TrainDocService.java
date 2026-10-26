@@ -366,6 +366,47 @@ public class TrainDocService {
         }, versionId);
     }
 
+    /**
+     * 删除版本下某一份收银文档：软删文档行，并级联软删其题目与对应答疑校准。
+     */
+    @Transactional
+    public void deleteFileFromVersion(Long docId, Long versionId, Long fileId) {
+        if (docId == null || versionId == null || fileId == null) {
+            throw new BusinessException("参数不完整");
+        }
+        if (!versionBelongsToDoc(docId, versionId)) {
+            throw new BusinessException("版本不存在");
+        }
+        List<Map<String, Object>> files = jdbc.queryForList("""
+                SELECT id, file_path, sort_no FROM train_doc_file
+                WHERE id = ? AND doc_id = ? AND version_id = ? AND is_active = 1
+                """, fileId, docId, versionId);
+        if (files.isEmpty()) {
+            throw new BusinessException("收银文档不存在或已删除");
+        }
+        Map<String, Object> file = files.get(0);
+        String filePath = file.get("file_path") == null ? "" : String.valueOf(file.get("file_path"));
+        int sortNo = file.get("sort_no") instanceof Number n ? n.intValue() : 0;
+        String versionPath = jdbc.query("""
+                SELECT file_path FROM train_doc_version WHERE id = ? AND is_active = 1
+                """, rs -> rs.next() ? rs.getString(1) : "", versionId);
+        boolean primary = sortNo == 1
+                || (StringUtils.hasText(versionPath) && versionPath.equals(filePath));
+
+        List<String> questions = trainQaItemService.deactivateFile(docId, versionId, fileId, primary);
+        trainQaCalibrateService.deactivateMatchingQuestions(docId, versionId, questions);
+
+        int n = jdbc.update("""
+                UPDATE train_doc_file SET is_active = 0
+                WHERE id = ? AND doc_id = ? AND version_id = ? AND is_active = 1
+                """, fileId, docId, versionId);
+        if (n <= 0) {
+            throw new BusinessException("收银文档不存在或已删除");
+        }
+        log.info("已删除收银文档 fileId={} docId={} versionId={} primary={} questions={}",
+                fileId, docId, versionId, primary, questions.size());
+    }
+
     private boolean versionBelongsToDoc(Long docId, Long versionId) {
         if (docId == null || versionId == null) {
             return false;

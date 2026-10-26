@@ -191,6 +191,10 @@ export function addTrainFileApi(docId: number, versionId: number, file: File, ti
   });
 }
 
+export function deleteTrainFileApi(docId: number, versionId: number, fileId: number) {
+  return request.delete(`/train/doc/${docId}/version/${versionId}/file/${fileId}`);
+}
+
 export function pickUploadFile(fileList: unknown): File | undefined {
   const list = Array.isArray(fileList) ? fileList : [];
   const first = list[0] as { originFileObj?: File; raw?: File } | File | undefined;

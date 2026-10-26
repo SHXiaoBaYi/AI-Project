@@ -116,6 +116,16 @@ public class TrainDocController {
         return Result.ok(trainDocService.addFileToVersion(id, versionId, file, title));
     }
 
+    @Operation(summary = "删除版本下某一份收银文档（级联软删题目与对应答疑校准）")
+    @DeleteMapping("/{id}/version/{versionId}/file/{fileId}")
+    @RequiresPermission("train:doc:delete")
+    public Result<Void> deleteFile(@PathVariable Long id,
+                                   @PathVariable Long versionId,
+                                   @PathVariable Long fileId) {
+        trainDocService.deleteFileFromVersion(id, versionId, fileId);
+        return Result.ok();
+    }
+
     @Operation(summary = "把某一版本下每份收银文档拆成题目")
     @PostMapping("/{id}/version/{versionId}/qa-items/rebuild")
     @RequiresPermission("train:doc:upload")

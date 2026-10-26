@@ -26,9 +26,11 @@ import org.springframework.util.StringUtils;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 培训答疑人工校准库：准的答案绑定文档版本。
@@ -431,6 +433,63 @@ public class TrainQaCalibrateService {
         if (n > 0) {
             log.info("文档换版，已将旧校准标为 STALE docId={} keepVersionId={} count={}", docId, keepVersionId, n);
         }
+    }
+
+    /**
+     * 删除某份收银文档时：同文档同版本下，问法/话题/意图键落在被删题干上的校准一并软删。
+     */
+    public int deactivateMatchingQuestions(long docId, long versionId, List<String> questions) {
+        if (questions == null || questions.isEmpty()) {
+            return 0;
+        }
+        Set<String> exact = new LinkedHashSet<>();
+        Set<String> norms = new LinkedHashSet<>();
+        for (String q : questions) {
+            if (!StringUtils.hasText(q)) {
+                continue;
+            }
+            String trimmed = q.trim();
+            exact.add(trimmed);
+            String norm = normalizeIntent(trimmed);
+            if (StringUtils.hasText(norm)) {
+                norms.add(norm);
+            }
+        }
+        if (exact.isEmpty() && norms.isEmpty()) {
+            return 0;
+        }
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT id, user_question, topic_title, intent_norm
+                FROM train_qa_calibrate
+                WHERE is_active = 1 AND doc_id = ? AND version_id = ?
+                """, docId, versionId);
+        List<Long> ids = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            String userQ = str(row.get("user_question"));
+            String topic = str(row.get("topic_title"));
+            String intent = str(row.get("intent_norm"));
+            boolean hit = exact.contains(userQ) || exact.contains(topic)
+                    || (StringUtils.hasText(intent) && norms.contains(intent))
+                    || norms.contains(normalizeIntent(userQ))
+                    || norms.contains(normalizeIntent(topic));
+            if (hit) {
+                Number id = (Number) row.get("id");
+                if (id != null) {
+                    ids.add(id.longValue());
+                }
+            }
+        }
+        if (ids.isEmpty()) {
+            return 0;
+        }
+        int n = 0;
+        for (Long id : ids) {
+            n += jdbc.update("UPDATE train_qa_calibrate SET is_active = 0 WHERE id = ? AND is_active = 1", id);
+        }
+        if (n > 0) {
+            log.info("删除收银文档后级联软删校准 docId={} versionId={} count={}", docId, versionId, n);
+        }
+        return n;
     }
 
     private boolean matchesIntent(String norm, Map<String, Object> row) {
