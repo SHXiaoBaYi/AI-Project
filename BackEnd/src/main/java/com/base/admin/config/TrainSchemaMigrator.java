@@ -85,7 +85,7 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                   hit_count INT NOT NULL DEFAULT 0 COMMENT '校准命中次数',
                   source VARCHAR(32) NULL COMMENT 'ASSISTANT_MARK/ADMIN_EDIT/RE_RECOGNIZE',
                   remark VARCHAR(512) NULL,
-                  handle_status VARCHAR(32) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN未处理 INTENT_BAD用户意图不准 IGNORE忽略 DOC_MISSING培训文档缺失',
+                  handle_status VARCHAR(32) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN未处理 INTENT_BAD用户意图不准 IGNORE忽略 DOC_MISSING培训文档缺失 DOC_DONE培训文档处理完毕 AI_INTENT_DONE=AI意图处理完毕',
                   handle_by VARCHAR(64) NULL COMMENT '处理人',
                   handle_time DATETIME NULL COMMENT '处理时间',
                   create_by VARCHAR(64) NULL,
@@ -110,7 +110,7 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                   status VARCHAR(16) NOT NULL DEFAULT 'NOT_FOUND' COMMENT 'NEED_OLD/NOT_FOUND',
                   doc_id BIGINT NULL,
                   version_id BIGINT NULL,
-                  handle_status VARCHAR(32) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN未处理 INTENT_BAD用户意图不准 IGNORE忽略 DOC_MISSING培训文档缺失',
+                  handle_status VARCHAR(32) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN未处理 INTENT_BAD用户意图不准 IGNORE忽略 DOC_MISSING培训文档缺失 DOC_DONE培训文档处理完毕 AI_INTENT_DONE=AI意图处理完毕',
                   handle_by VARCHAR(64) NULL COMMENT '处理人',
                   handle_time DATETIME NULL COMMENT '处理时间',
                   create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -123,7 +123,7 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         ensureColumn("train_qa_calibrate", "handle_status", """
                 ALTER TABLE train_qa_calibrate
                   ADD COLUMN handle_status VARCHAR(32) NOT NULL DEFAULT 'OPEN'
-                    COMMENT 'OPEN未处理 INTENT_BAD用户意图不准 IGNORE忽略 DOC_MISSING培训文档缺失' AFTER remark,
+                    COMMENT 'OPEN未处理 INTENT_BAD用户意图不准 IGNORE忽略 DOC_MISSING培训文档缺失 DOC_DONE培训文档处理完毕 AI_INTENT_DONE=AI意图处理完毕' AFTER remark,
                   ADD COLUMN handle_by VARCHAR(64) NULL COMMENT '处理人' AFTER handle_status,
                   ADD COLUMN handle_time DATETIME NULL COMMENT '处理时间' AFTER handle_by,
                   ADD KEY idx_train_qa_handle (handle_status, is_active)
@@ -131,7 +131,7 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         ensureColumn("train_qa_miss", "handle_status", """
                 ALTER TABLE train_qa_miss
                   ADD COLUMN handle_status VARCHAR(32) NOT NULL DEFAULT 'OPEN'
-                    COMMENT 'OPEN未处理 INTENT_BAD用户意图不准 IGNORE忽略 DOC_MISSING培训文档缺失' AFTER version_id,
+                    COMMENT 'OPEN未处理 INTENT_BAD用户意图不准 IGNORE忽略 DOC_MISSING培训文档缺失 DOC_DONE培训文档处理完毕 AI_INTENT_DONE=AI意图处理完毕' AFTER version_id,
                   ADD COLUMN handle_by VARCHAR(64) NULL COMMENT '处理人' AFTER handle_status,
                   ADD COLUMN handle_time DATETIME NULL COMMENT '处理时间' AFTER handle_by,
                   ADD KEY idx_train_qa_miss_handle (handle_status, is_active)

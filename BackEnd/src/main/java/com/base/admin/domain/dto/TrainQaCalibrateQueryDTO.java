@@ -28,6 +28,6 @@ public class TrainQaCalibrateQueryDTO extends PageQuery {
     @Schema(description = "是否已处理（true=已处理 false=未处理）", example = "false", nullable = true)
     private Boolean handled;
 
-    @Schema(description = "处理状态 OPEN/INTENT_BAD/IGNORE/DOC_MISSING", example = "OPEN", nullable = true)
+    @Schema(description = "处理状态 OPEN/INTENT_BAD/IGNORE/DOC_MISSING/DOC_DONE/AI_INTENT_DONE", example = "OPEN", nullable = true)
     private String handleStatus;
 }

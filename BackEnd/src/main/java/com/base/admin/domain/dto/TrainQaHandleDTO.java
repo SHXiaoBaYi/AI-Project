@@ -15,7 +15,7 @@ public class TrainQaHandleDTO {
 
     @NotBlank
     @Schema(
-            description = "处理状态 OPEN=未处理 INTENT_BAD=用户意图不准 IGNORE=忽略这样的问题 DOC_MISSING=培训文档缺失",
+            description = "处理状态 OPEN=未处理 INTENT_BAD=用户意图不准 IGNORE=忽略 DOC_MISSING=培训文档缺失 DOC_DONE=培训文档处理完毕 AI_INTENT_DONE=AI意图处理完毕",
             requiredMode = Schema.RequiredMode.REQUIRED,
             example = "INTENT_BAD")
     private String handleStatus;

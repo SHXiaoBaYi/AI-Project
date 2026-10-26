@@ -37,7 +37,7 @@ public class TrainQaMissVO {
     @Schema(description = "是否已处理", example = "false")
     private Boolean handled;
 
-    @Schema(description = "处理状态 OPEN/INTENT_BAD/IGNORE/DOC_MISSING", example = "OPEN")
+    @Schema(description = "处理状态 OPEN/INTENT_BAD/IGNORE/DOC_MISSING/DOC_DONE/AI_INTENT_DONE", example = "OPEN")
     private String handleStatus;
 
     @Schema(description = "处理人")

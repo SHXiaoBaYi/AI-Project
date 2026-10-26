@@ -340,7 +340,7 @@ export type TrainQaMissPage = {
 };
 
 /** OPEN=未处理；其余为已处理原因 */
-export type TrainQaHandleStatus = 'OPEN' | 'INTENT_BAD' | 'IGNORE' | 'DOC_MISSING';
+export type TrainQaHandleStatus = 'OPEN' | 'INTENT_BAD' | 'IGNORE' | 'DOC_MISSING' | 'DOC_DONE' | 'AI_INTENT_DONE';
 
 export function listTrainQaMissApi(params: {
   pageNum?: number;

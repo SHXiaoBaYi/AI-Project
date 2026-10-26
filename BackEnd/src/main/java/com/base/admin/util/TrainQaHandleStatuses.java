@@ -13,8 +13,11 @@ public final class TrainQaHandleStatuses {
     public static final String INTENT_BAD = "INTENT_BAD";
     public static final String IGNORE = "IGNORE";
     public static final String DOC_MISSING = "DOC_MISSING";
+    public static final String DOC_DONE = "DOC_DONE";
+    public static final String AI_INTENT_DONE = "AI_INTENT_DONE";
 
-    private static final Set<String> ALL = Set.of(OPEN, INTENT_BAD, IGNORE, DOC_MISSING);
+    private static final Set<String> ALL = Set.of(
+            OPEN, INTENT_BAD, IGNORE, DOC_MISSING, DOC_DONE, AI_INTENT_DONE);
 
     private TrainQaHandleStatuses() {
     }
@@ -39,6 +42,8 @@ public final class TrainQaHandleStatuses {
             case INTENT_BAD -> "用户意图不准";
             case IGNORE -> "忽略这样的问题";
             case DOC_MISSING -> "培训文档缺失";
+            case DOC_DONE -> "培训文档处理完毕";
+            case AI_INTENT_DONE -> "AI意图处理完毕";
             case OPEN -> "未处理";
             default -> status;
         };
