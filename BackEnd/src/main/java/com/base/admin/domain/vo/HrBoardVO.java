@@ -12,8 +12,11 @@ import java.util.List;
 @Schema(description = "招聘看板")
 public class HrBoardVO {
 
-    @Schema(description = "漏斗")
+    @Schema(description = "存量漏斗：按候选人当前阶段，一人只落一层；不受日期窗影响")
     private List<FunnelNode> funnel = new ArrayList<>();
+
+    @Schema(description = "区间漏斗：筛选期内首次到达该层的人数（可跨层累计）；跟日周月窗")
+    private List<FunnelNode> periodFunnel = new ArrayList<>();
 
     @Schema(description = "待面试存量：待初试/待复试/待终试")
     private List<FunnelNode> pendingInterview = new ArrayList<>();

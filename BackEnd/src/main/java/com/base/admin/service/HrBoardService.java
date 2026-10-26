@@ -81,6 +81,7 @@ public class HrBoardService {
         List<HrBoardVO.ProgressRow> progress = loadProgress(q);
         HrBoardVO vo = new HrBoardVO();
         vo.setFunnel(buildFunnel(rows, q));
+        vo.setPeriodFunnel(buildPeriodFunnel(rows, q));
         vo.setPendingInterview(buildPendingInterview(q));
         String cycleJob = blankToNull(q.getCycleJob());
         vo.setCycleJob(cycleJob);
@@ -130,10 +131,15 @@ public class HrBoardService {
         if (index < 0) {
             return List.of();
         }
+        boolean period = "PERIOD".equalsIgnoreCase(blankToNull(q.getFunnelMode()));
         List<HrStageCatalog.FunnelBucketDef> funnel = stageCatalog.funnelBuckets();
         List<HrBoardVO.DrillRow> rows = new ArrayList<>();
         for (Milestone milestone : loadMilestones(q)) {
-            if (!funnelHit(milestone, index)) {
+            if (period) {
+                if (!periodFunnelHit(milestone, index, q.getStartDate(), q.getEndDate())) {
+                    continue;
+                }
+            } else if (!funnelHit(milestone, index)) {
                 continue;
             }
             rows.add(toDrill(milestone, funnel.get(index).name(), funnelReachedDate(milestone, index)));
@@ -1066,6 +1072,8 @@ public class HrBoardService {
                        (SELECT MIN(e.event_at) FROM hr_stage_event e
                           WHERE e.application_id = a.id AND e.is_active = 1 AND e.stage_code = 'OFFER_PENDING') offer_pending_at,
                        (SELECT MIN(e.event_at) FROM hr_stage_event e
+                          WHERE e.application_id = a.id AND e.is_active = 1 AND e.stage_code = 'PENDING_ONBOARD') pending_onboard_at,
+                       (SELECT MIN(e.event_at) FROM hr_stage_event e
                           WHERE e.application_id = a.id AND e.is_active = 1
                             AND e.stage_code IN ('OFFER_ACCEPTED', 'ACCEPTED')) accept_at,
                        off.offered_at,
@@ -1126,6 +1134,7 @@ public class HrBoardService {
                 timeOf(rs, "bg_check_at"),
                 timeOf(rs, "medical_at"),
                 timeOf(rs, "offer_pending_at"),
+                timeOf(rs, "pending_onboard_at"),
                 timeOf(rs, "offered_at"),
                 timeOf(rs, "accept_at"),
                 rs.getString("offer_status"),
@@ -1152,6 +1161,85 @@ public class HrBoardService {
             nodes.add(node);
         }
         return nodes;
+    }
+
+    /**
+     * 区间漏斗：筛选期内「首次到达该层」的人数（可跨层；一人可出现在多层）。
+     * 到达时间取阶段事件/邀约/面试等真实时间，无时间则该层不计。
+     */
+    private List<HrBoardVO.FunnelNode> buildPeriodFunnel(List<Milestone> rows, HrBoardQueryDTO q) {
+        List<HrStageCatalog.FunnelBucketDef> funnel = stageCatalog.funnelBuckets();
+        Period previous = shift(q.getStartDate(), q.getEndDate(), false);
+        Period year = shift(q.getStartDate(), q.getEndDate(), true);
+        long[] current = countPeriodFunnel(rows, q.getStartDate(), q.getEndDate());
+        long[] mom = countPeriodFunnel(rows, previous.start(), previous.end());
+        long[] yoy = countPeriodFunnel(rows, year.start(), year.end());
+        List<HrBoardVO.FunnelNode> nodes = new ArrayList<>();
+        for (int i = 0; i < funnel.size(); i++) {
+            HrStageCatalog.FunnelBucketDef bucket = funnel.get(i);
+            HrBoardVO.FunnelNode node = new HrBoardVO.FunnelNode();
+            node.setStageCode(bucket.code());
+            node.setStageName(bucket.name());
+            node.setCount(current[i]);
+            node.setConversionLabel(bucket.conversionLabel());
+            if (i > 0 && current[i - 1] > 0) {
+                node.setConversion(current[i] * 1.0 / current[i - 1]);
+            }
+            node.setMom(rateDelta(current[i], mom[i]));
+            node.setYoy(rateDelta(current[i], yoy[i]));
+            nodes.add(node);
+        }
+        return nodes;
+    }
+
+    private long[] countPeriodFunnel(List<Milestone> rows, LocalDate start, LocalDate end) {
+        int size = stageCatalog.funnelBuckets().size();
+        long[] counts = new long[size];
+        if (start == null || end == null) {
+            return counts;
+        }
+        for (Milestone milestone : rows) {
+            for (int i = 0; i < size; i++) {
+                if (periodFunnelHit(milestone, i, start, end)) {
+                    counts[i]++;
+                }
+            }
+        }
+        return counts;
+    }
+
+    private boolean periodFunnelHit(Milestone m, int index, LocalDate start, LocalDate end) {
+        LocalDateTime at = funnelReachedAtStrict(m, index);
+        if (at == null) {
+            return false;
+        }
+        return inWindow(at.toLocalDate(), start, end);
+    }
+
+    /**
+     * 区间漏斗用的「首次到达」时间：只认可核对事件，没有则返回 null（不靠 current_stage 猜）。
+     * 下标与 {@link HrStageCatalog#funnelBuckets()} 一致。
+     */
+    private static LocalDateTime funnelReachedAtStrict(Milestone m, int index) {
+        return switch (index) {
+            case 0 -> m.screenAt();
+            case 1 -> m.phoneAt();
+            case 2 -> m.inviteAt();
+            case 3 -> firstNonNull(m.firstDoneAt(), m.showAt());
+            case 4 -> firstNonNull(m.secondDoneAt(), m.retestAt());
+            case 5 -> firstNonNull(m.finalDoneAt(), m.finalScheduledAt());
+            case 6 -> m.finalEventAt();
+            case 7 -> m.salaryAt();
+            case 8 -> m.bgCollectAt();
+            case 9 -> m.bgCheckAt();
+            case 10 -> m.medicalAt();
+            case 11 -> m.offerPendingAt();
+            case 12 -> m.pendingOnboardAt();
+            case 13 -> m.offerAt();
+            case 14 -> m.acceptAt();
+            case 15 -> m.onboardDate() == null ? null : m.onboardDate().atStartOfDay();
+            default -> null;
+        };
     }
 
     private List<HrBoardVO.FunnelNode> buildPendingInterview(HrBoardQueryDTO q) {
@@ -1285,7 +1373,7 @@ public class HrBoardService {
             case 9 -> firstNonNullDate(toDate(milestone.bgCheckAt), milestone.submittedAt);
             case 10 -> firstNonNullDate(toDate(milestone.medicalAt), milestone.submittedAt);
             case 11 -> firstNonNullDate(toDate(milestone.offerPendingAt), milestone.submittedAt);
-            case 12 -> milestone.submittedAt;
+            case 12 -> firstNonNullDate(toDate(milestone.pendingOnboardAt), milestone.submittedAt);
             case 13 -> firstNonNullDate(toDate(milestone.offerAt), milestone.submittedAt);
             case 14 -> firstNonNullDate(toDate(milestone.acceptAt), toDate(milestone.offerAt), milestone.submittedAt);
             case 15 -> firstNonNullDate(milestone.onboardDate, milestone.submittedAt);
@@ -1749,6 +1837,7 @@ public class HrBoardService {
             LocalDateTime bgCheckAt,
             LocalDateTime medicalAt,
             LocalDateTime offerPendingAt,
+            LocalDateTime pendingOnboardAt,
             LocalDateTime offerAt,
             LocalDateTime acceptAt,
             String offerStatus,

@@ -409,14 +409,18 @@ export default function BoardAnalyticsPanel({ initialOwnerUserIds }: BoardAnalyt
           ? { picker: 'year' as const }
           : { picker: 'date' as const };
 
-  const funnelNodes = useMemo(() => (board?.funnel || []).filter((node) => !isPendingInterviewNode(node)), [board]);
+  /** 页面只展示区间漏斗（接口字段 periodFunnel）；存量 funnel 暂隐藏 */
+  const periodFunnelNodes = useMemo(
+    () => (board?.periodFunnel || []).filter((node) => !isPendingInterviewNode(node)),
+    [board],
+  );
 
-  const funnelChart = useMemo(
+  const periodFunnelChart = useMemo(
     () =>
-      funnelNodes
+      periodFunnelNodes
         .filter((node) => node.count > 0)
         .map((node) => ({ stage: node.stageName, count: node.count, stageCode: node.stageCode })),
-    [funnelNodes],
+    [periodFunnelNodes],
   );
 
   const pendingInterviewNodes = useMemo(() => {
@@ -448,8 +452,12 @@ export default function BoardAnalyticsPanel({ initialOwnerUserIds }: BoardAnalyt
     setDrillOpen(true);
   };
 
-  const openFunnel = (node: HrFunnelNode) =>
-    openDrill('funnel', node.stageName, { drillKind: 'STAGE', stageCode: node.stageCode });
+  const openFunnel = (node: HrFunnelNode, mode: 'STOCK' | 'PERIOD' = 'PERIOD') =>
+    openDrill('funnel', node.stageName, {
+      drillKind: 'STAGE',
+      stageCode: node.stageCode,
+      funnelMode: mode,
+    });
 
   const openHc = (metric: NonNullable<HrBoardQuery['hcMetric']>, title: string) =>
     openDrill('hc', title, { drillKind: 'HC', hcMetric: metric });
@@ -553,21 +561,21 @@ export default function BoardAnalyticsPanel({ initialOwnerUserIds }: BoardAnalyt
               clearCycle();
             }}
           />
-          <span className='text-xs text-neutral-400'>筛选同时作用于下方全部图表</span>
+          <span className='text-xs text-neutral-400'>日期作用于招聘漏斗、待面试、周期与面试图表</span>
         </Space>
       </Card>
 
       <ChartExportCard
         title='招聘漏斗'
         filename='招聘漏斗'
-        hint='按候选人当前阶段统计存量（一人只落一层）。点击某一层可下钻明细。相对上一层 = 本层人数 ÷ 上一层人数。日期筛选不作用于漏斗。'
+        hint='按上方日期：期内首次到达该层的人数（可跨层，一人可出现在多层）。邀约成功≈期内有邀约记录的人。点击可下钻。'
       >
         <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
-          {funnelChart.length ? (
+          {periodFunnelChart.length ? (
             <Suspense fallback={<ChartFallback height={420} />}>
               <Funnel
-                key={funnelChart.map((item) => `${item.stageCode}:${item.count}`).join('|')}
-                data={funnelChart}
+                key={periodFunnelChart.map((item) => `${item.stageCode}:${item.count}`).join('|')}
+                data={periodFunnelChart}
                 xField='stage'
                 yField='count'
                 height={420}
@@ -582,24 +590,24 @@ export default function BoardAnalyticsPanel({ initialOwnerUserIds }: BoardAnalyt
                 }) => {
                   plot.chart?.on('element:click', (evt) => {
                     const stage = evt?.data?.data?.stage;
-                    const node = funnelNodes.find((item) => item.stageName === stage);
-                    if (node) void openFunnel(node);
+                    const node = periodFunnelNodes.find((item) => item.stageName === stage);
+                    if (node) void openFunnel(node, 'PERIOD');
                   });
                 }}
               />
             </Suspense>
           ) : (
             <div className='flex h-[420px] items-center justify-center text-sm text-neutral-400'>
-              当前范围内暂无漏斗数据
+              当前日期范围内暂无招聘漏斗数据
             </div>
           )}
           <Table
             rowKey='stageCode'
             size='small'
             pagination={false}
-            dataSource={funnelNodes}
+            dataSource={periodFunnelNodes}
             onRow={(record) => ({
-              onClick: () => void openFunnel(record),
+              onClick: () => void openFunnel(record, 'PERIOD'),
               className: 'cursor-pointer',
             })}
             columns={[

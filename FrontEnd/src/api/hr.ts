@@ -23,6 +23,8 @@ export interface HrBoardQuery {
   submitterName?: string;
   submitterUserId?: number;
   drillKind?: 'STAGE' | 'HC' | 'INTERVIEW' | 'INTERVIEWER' | 'FAIL_REASON' | 'VOLUME' | 'PROGRESS';
+  /** 漏斗下钻：STOCK=存量（默认） PERIOD=区间到达 */
+  funnelMode?: 'STOCK' | 'PERIOD';
   hcMetric?: 'DEMAND' | 'ARRIVED' | 'GAP' | 'CLOSED' | 'FROZEN' | 'RATE';
   interviewMetric?:
     | 'PENDING_INVITE'
@@ -96,6 +98,8 @@ export interface HrInterviewStats {
 
 export interface HrBoard {
   funnel: HrFunnelNode[];
+  /** 区间漏斗：期内首次到达各层人数 */
+  periodFunnel?: HrFunnelNode[];
   pendingInterview?: HrFunnelNode[];
   cycleJob?: string | null;
   jobCycle: HrChartPoint[];

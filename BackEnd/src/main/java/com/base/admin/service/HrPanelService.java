@@ -53,14 +53,15 @@ public class HrPanelService {
 
         DateWindow window = resolveWindow(q);
         log.info("hr panel stats window {} ~ {} grain={}", window.start(), window.end(), q.getGrain());
-        // 7 个活动指标只按时间窗统计；岗位列表另按区间活动/接收日过滤
+        // 在招岗位：当前 OPEN，跟部门/负责人等筛选项，不跟日周月窗；
+        // 其余活动指标 + 下方岗位列表：仍按区间（接收日/活动）过滤
         FilterSql baseFilter = buildFilter(q, null);
         FilterSql jobFilter = buildFilter(q, window);
         LocalDate today = LocalDate.now();
         long total = countLong("SELECT COUNT(1) " + jobFilter.fromWhere, jobFilter.args);
         List<HrPanelJobVO> rows = queryJobs(jobFilter, today, pageNum, pageSize, true, window);
         HrPanelVO vo = new HrPanelVO();
-        vo.setStats(loadStats(baseFilter, jobFilter, window));
+        vo.setStats(loadStats(baseFilter, window));
         vo.setTotal(total);
         vo.setRows(rows);
         return vo;
@@ -73,14 +74,14 @@ public class HrPanelService {
         int pageSize = q.getPageSize() == null || q.getPageSize() < 1 ? 10 : Math.min(q.getPageSize(), 100);
         DateWindow window = resolveWindow(q);
         FilterSql baseFilter = buildFilter(q, null);
-        FilterSql jobFilter = buildFilter(q, window);
         LocalDate today = LocalDate.now();
         LocalDateTime from = window.from();
         LocalDateTime to = window.toExclusive();
         String baseReqIds = "SELECT r.id " + baseFilter.fromWhere;
         return switch (metric) {
+            // 在招下钻与豆腐块一致：不受日周月窗限制（列表区间进展仍用 window 填）
             case "OPEN_JOB" -> jobDetail("目前在招岗位", metric,
-                    new FilterSql(jobFilter.fromWhere() + " AND r.status = 'OPEN' ", jobFilter.args()),
+                    new FilterSql(baseFilter.fromWhere() + " AND r.status = 'OPEN' ", baseFilter.args()),
                     pageNum, pageSize, today, window);
             case "BG_CHECK" -> stageReachedDetail("背调中", metric, baseFilter, baseReqIds, "BG_CHECK", from, to, pageNum, pageSize);
             case "PENDING_ONBOARD" -> stageReachedDetail("待入职", metric, baseFilter, baseReqIds, "PENDING_ONBOARD", from, to, pageNum, pageSize);
@@ -323,13 +324,14 @@ public class HrPanelService {
         return rows;
     }
 
-    private HrPanelStatsVO loadStats(FilterSql baseFilter, FilterSql jobFilter, DateWindow window) {
+    private HrPanelStatsVO loadStats(FilterSql baseFilter, DateWindow window) {
         LocalDateTime from = window.from();
         LocalDateTime to = window.toExclusive();
         String reqIds = "SELECT r.id " + baseFilter.fromWhere;
         HrPanelStatsVO stats = new HrPanelStatsVO();
+        // 目前在招 = 当前 OPEN 需求条数（部门/负责人等筛选生效，不绑日期窗）
         stats.setOpenJobCount(countInt(
-                "SELECT COUNT(1) " + jobFilter.fromWhere + " AND r.status = 'OPEN'", jobFilter.args));
+                "SELECT COUNT(1) " + baseFilter.fromWhere + " AND r.status = 'OPEN'", baseFilter.args));
         stats.setBgCheckCount(countStageReached(baseFilter.args, reqIds, "BG_CHECK", from, to));
         stats.setPendingOnboardCount(countStageReached(baseFilter.args, reqIds, "PENDING_ONBOARD", from, to));
         // 区间内筛选简历 = 区间内新增候选人（投递记录）
@@ -503,7 +505,8 @@ public class HrPanelService {
     }
 
     /**
-     * @param window 非空时按岗位接收日（无则创建日）限制在区间内，用于岗位列表/在招岗位
+     * @param window 非空时按岗位接收日（无则创建日）或区间内招聘活动限制，用于下方岗位列表；
+     *               目前在招岗位统计传 null，不套日期窗
      */
     private FilterSql buildFilter(HrPanelQueryDTO q, DateWindow window) {
         StringBuilder sql = new StringBuilder("""

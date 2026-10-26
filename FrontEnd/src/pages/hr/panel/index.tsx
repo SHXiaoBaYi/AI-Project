@@ -372,7 +372,7 @@ const HrPanelPage = memo(function HrPanelPage() {
           />
           <span className='text-xs text-neutral-500'>
             当前统计：{dateQuery.startDate} ~ {dateQuery.endDate}
-            （进入背调/待入职、筛选简历、电话、约面、面试均按该区间）
+            （「目前在招岗位」为当前招聘中需求条数，不受日期影响；进入背调/待入职、筛选简历、电话、约面、面试及下方列表按该区间）
           </span>
         </Space>
       </Card>

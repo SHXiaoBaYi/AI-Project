@@ -73,6 +73,9 @@ public class HrBoardQueryDTO {
     @Schema(description = "下钻类型 STAGE/HC/INTERVIEW/INTERVIEWER/FAIL_REASON/VOLUME")
     private String drillKind;
 
+    @Schema(description = "漏斗下钻模式 STOCK=存量（默认） PERIOD=区间到达")
+    private String funnelMode;
+
     @Schema(description = "HC指标 DEMAND/ARRIVED/GAP/CLOSED/FROZEN/RATE")
     private String hcMetric;
 
