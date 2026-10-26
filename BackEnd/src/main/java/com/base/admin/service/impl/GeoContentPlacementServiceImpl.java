@@ -447,8 +447,8 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 throw new BusinessException("正文保存失败，请重试");
             }
         }
-        // 沿用统一稿的平台行标题同步为正文标题，避免「我的投放」维护里看到旧标题
-        syncSharedItemTitles(placement.getId(), nextTitle);
+        // 统一稿：仅把「仍为空 / 仍等于旧正文标题」的平台行标题跟上，不覆盖维护投放手填标题
+        syncSharedItemTitles(placement.getId(), nextTitle, prevTitle);
         if (changed) {
             markSharedArticlesNeedRevision(placement.getId());
         }
@@ -718,17 +718,26 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         reviewNoteMapper.insert(note);
     }
 
-    /** 统一稿平台行的「标题」字段与 contentTitle 对齐，供投放维护列表展示 */
-    private void syncSharedItemTitles(Long placementId, String contentTitle) {
+    /**
+     * 统一稿平台行标题：仅在为空，或仍等于旧正文标题时同步为新正文标题。
+     * 维护投放已改过的平台标题不覆盖，保证文章列表与维护投放一致。
+     */
+    private void syncSharedItemTitles(Long placementId, String contentTitle, String previousContentTitle) {
         String title = contentTitle == null ? "" : contentTitle.trim();
         if (!StringUtils.hasText(title)) {
             return;
         }
+        String prev = previousContentTitle == null ? "" : previousContentTitle.trim();
         for (GeoContentPlacementItem item : listPlacementItems(placementId)) {
             if (!Constants.CONTENT_MODE_SHARED.equals(normalizeContentMode(item.getContentMode()))) {
                 continue;
             }
-            if (title.equals(item.getTitle())) {
+            String current = item.getTitle() == null ? "" : item.getTitle().trim();
+            if (title.equals(current)) {
+                continue;
+            }
+            // 已有手填/发布标题且不等于旧正文标题 → 视为维护投放口径，保留
+            if (StringUtils.hasText(current) && !current.equals(prev)) {
                 continue;
             }
             item.setTitle(title);
@@ -2283,24 +2292,19 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
     }
 
     /**
-     * 投放维护里看到的标题与撰写记录 contentTitle 对齐：
-     * 独立稿优先 contentTitle/title；统一稿优先投放 contentTitle。
+     * 文章列表标题与维护投放一致：优先平台行 title（发布详情手填），
+     * 再回退独立稿 contentTitle / 统一稿投放 contentTitle / 投放 title。
      */
     private static String resolveItemDisplayTitle(GeoContentPlacementItem item, GeoContentPlacement placement) {
+        if (item != null && StringUtils.hasText(item.getTitle())) {
+            return item.getTitle().trim();
+        }
         boolean custom = item != null && Constants.CONTENT_MODE_CUSTOM.equals(normalizeContentMode(item.getContentMode()));
-        if (custom) {
-            if (StringUtils.hasText(item.getContentTitle())) {
-                return item.getContentTitle().trim();
-            }
-            if (StringUtils.hasText(item.getTitle())) {
-                return item.getTitle().trim();
-            }
+        if (custom && StringUtils.hasText(item.getContentTitle())) {
+            return item.getContentTitle().trim();
         }
         if (placement != null && StringUtils.hasText(placement.getContentTitle())) {
             return placement.getContentTitle().trim();
-        }
-        if (item != null && StringUtils.hasText(item.getTitle())) {
-            return item.getTitle().trim();
         }
         if (placement != null && StringUtils.hasText(placement.getTitle())) {
             return placement.getTitle().trim();
