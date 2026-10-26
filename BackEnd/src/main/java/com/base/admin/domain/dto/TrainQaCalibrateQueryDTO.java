@@ -24,4 +24,10 @@ public class TrainQaCalibrateQueryDTO extends PageQuery {
 
     @Schema(description = "是否仅看当前最新版", example = "true")
     private Boolean onlyLatest;
+
+    @Schema(description = "是否已处理（true=已处理 false=未处理）", example = "false", nullable = true)
+    private Boolean handled;
+
+    @Schema(description = "处理状态 OPEN/INTENT_BAD/IGNORE/DOC_MISSING", example = "OPEN", nullable = true)
+    private String handleStatus;
 }

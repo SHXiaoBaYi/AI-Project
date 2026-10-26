@@ -5,6 +5,7 @@ import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.TrainQaCalibrateQueryDTO;
 import com.base.admin.domain.dto.TrainQaCalibrateSaveDTO;
+import com.base.admin.domain.dto.TrainQaHandleDTO;
 import com.base.admin.domain.dto.TrainQaMissQueryDTO;
 import com.base.admin.domain.vo.TrainQaCalibrateVO;
 import com.base.admin.domain.vo.TrainQaMissVO;
@@ -59,5 +60,21 @@ public class TrainQaCalibrateController {
     @RequiresPermission("train:qa:recognize")
     public Result<TrainQaCalibrateVO> rerecognize(@PathVariable Long id) {
         return Result.ok(trainQaCalibrateService.rerecognize(id));
+    }
+
+    @Operation(summary = "标记校准记录处理状态")
+    @PutMapping("/handle")
+    @RequiresPermission("train:qa:edit")
+    public Result<Void> markCalibrateHandled(@Valid @RequestBody TrainQaHandleDTO dto) {
+        trainQaCalibrateService.markHandled(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "标记未命中提问处理状态")
+    @PutMapping("/miss/handle")
+    @RequiresPermission("train:qa:edit")
+    public Result<Void> markMissHandled(@Valid @RequestBody TrainQaHandleDTO dto) {
+        trainQaMissService.markHandled(dto);
+        return Result.ok();
     }
 }

@@ -34,6 +34,18 @@ public class TrainQaMissVO {
     @Schema(description = "文档版本ID", example = "4", nullable = true)
     private Long versionId;
 
+    @Schema(description = "是否已处理", example = "false")
+    private Boolean handled;
+
+    @Schema(description = "处理状态 OPEN/INTENT_BAD/IGNORE/DOC_MISSING", example = "OPEN")
+    private String handleStatus;
+
+    @Schema(description = "处理人")
+    private String handleBy;
+
+    @Schema(description = "处理时间")
+    private String handleTime;
+
     @Schema(description = "提问时间")
     private String createTime;
 }

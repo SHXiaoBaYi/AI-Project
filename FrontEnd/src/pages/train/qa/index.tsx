@@ -7,10 +7,20 @@ import PermissionButton from '@/components/Buttons/PermissionButton';
 import {
   deleteTrainQaCalibrateApi,
   listTrainQaCalibrateApi,
+  markTrainQaCalibrateHandledApi,
   rerecognizeTrainQaCalibrateApi,
   saveTrainQaCalibrateApi,
   type TrainQaCalibrate,
+  type TrainQaHandleStatus,
 } from '@/api/train';
+import {
+  HANDLE_REASON_OPTIONS,
+  HANDLED_FILTER_OPTIONS,
+  HANDLE_STATUS_OPTIONS,
+  handleStatusColor,
+  handleStatusLabel,
+  parseHandledFilter,
+} from '@/pages/train/qaHandle';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
 import { isLocalhostHost } from '@/utils/localhostAccess';
 
@@ -51,6 +61,35 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<TrainQaCalibrate | null>(null);
   const [form] = Form.useForm();
+  const [handleOpen, setHandleOpen] = useState(false);
+  const [handling, setHandling] = useState(false);
+  const [handleTarget, setHandleTarget] = useState<TrainQaCalibrate | null>(null);
+  const [handleForm] = Form.useForm<{ handleStatus: TrainQaHandleStatus }>();
+
+  const openHandle = (record: TrainQaCalibrate) => {
+    setHandleTarget(record);
+    handleForm.setFieldsValue({
+      handleStatus:
+        record.handleStatus && record.handleStatus !== 'OPEN'
+          ? (record.handleStatus as TrainQaHandleStatus)
+          : 'INTENT_BAD',
+    });
+    setHandleOpen(true);
+  };
+
+  const submitHandle = async () => {
+    if (!handleTarget) return;
+    const values = await handleForm.validateFields();
+    setHandling(true);
+    try {
+      await markTrainQaCalibrateHandledApi({ id: handleTarget.id, handleStatus: values.handleStatus });
+      message.success('已标记处理');
+      setHandleOpen(false);
+      actionRef.current?.reload();
+    } finally {
+      setHandling(false);
+    }
+  };
 
   const openEdit = (record?: TrainQaCalibrate) => {
     setEditing(record ?? null);
@@ -97,7 +136,7 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 220,
+      width: 260,
       fixed: 'left',
       render: (_, record) => (
         <ActionButtons
@@ -107,6 +146,12 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
               label: '校准',
               perm: 'train:qa:edit',
               onClick: () => openEdit(record),
+            },
+            {
+              key: 'handle',
+              label: record.handled ? '改处理' : '标记处理',
+              perm: 'train:qa:edit',
+              onClick: () => openHandle(record),
             },
             {
               key: 'rerecognize',
@@ -145,6 +190,21 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
                     },
                   },
                 ]),
+            ...(record.handled
+              ? [
+                  {
+                    key: 'reopen',
+                    label: '重开',
+                    perm: 'train:qa:edit',
+                    confirmTitle: '确认恢复为未处理？',
+                    onClick: async () => {
+                      await markTrainQaCalibrateHandledApi({ id: record.id, handleStatus: 'OPEN' });
+                      message.success('已恢复为未处理');
+                      actionRef.current?.reload();
+                    },
+                  },
+                ]
+              : []),
             {
               key: 'delete',
               label: '删除',
@@ -159,6 +219,29 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
           ]}
         />
       ),
+    },
+    {
+      title: '处理情况',
+      dataIndex: 'handled',
+      width: 120,
+      valueType: 'select',
+      fieldProps: { options: HANDLED_FILTER_OPTIONS, allowClear: true },
+      render: (_, r) =>
+        r.handled ? (
+          <Tag color={handleStatusColor(r.handleStatus)}>{handleStatusLabel(r.handleStatus)}</Tag>
+        ) : (
+          <Tag color='processing'>未处理</Tag>
+        ),
+    },
+    {
+      title: '处理原因',
+      dataIndex: 'handleStatus',
+      hideInTable: true,
+      valueType: 'select',
+      fieldProps: {
+        options: HANDLE_STATUS_OPTIONS.filter((item) => item.value !== 'OPEN'),
+        allowClear: true,
+      },
     },
     {
       title: '状态',
@@ -209,6 +292,20 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
       ),
     },
     { title: '命中', dataIndex: 'hitCount', search: false, width: 70 },
+    {
+      title: '处理人',
+      dataIndex: 'handleBy',
+      search: false,
+      width: 90,
+      render: (_, r) => r.handleBy || '-',
+    },
+    {
+      title: '处理时间',
+      dataIndex: 'handleTime',
+      search: false,
+      width: 170,
+      render: (_, r) => r.handleTime || '-',
+    },
     { title: '更新人', dataIndex: 'updateBy', search: false, width: 90 },
     { title: '更新时间', dataIndex: 'updateTime', search: false, width: 170 },
   ];
@@ -220,7 +317,7 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
         actionRef={actionRef}
         headerTitle='答疑校准'
         columns={columns}
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1500 }}
         request={async (params) => {
           const res = await listTrainQaCalibrateApi({
             pageNum: params.current,
@@ -228,6 +325,8 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
             status: params.status ? String(params.status) : undefined,
             keyword: params.keyword ? String(params.keyword) : undefined,
             onlyLatest: params.onlyLatest === true || params.onlyLatest === 'true' ? true : undefined,
+            handled: parseHandledFilter(params.handled),
+            handleStatus: params.handleStatus ? String(params.handleStatus) : undefined,
           });
           return { data: res.rows || [], total: res.total || 0, success: true };
         }}
@@ -242,6 +341,29 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
           </PermissionButton>,
         ]}
       />
+
+      <Modal
+        title='标记处理'
+        open={handleOpen}
+        onCancel={() => setHandleOpen(false)}
+        onOk={() => void submitHandle()}
+        confirmLoading={handling}
+        destroyOnHidden
+      >
+        <div className='mb-3 text-sm text-neutral-500'>问法：{handleTarget?.userQuestion || '-'}</div>
+        <Form
+          form={handleForm}
+          layout='vertical'
+        >
+          <Form.Item
+            name='handleStatus'
+            label='处理原因'
+            rules={[{ required: true, message: '请选择处理原因' }]}
+          >
+            <Select options={HANDLE_REASON_OPTIONS} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={editing ? '校准答案' : '手工新增校准'}

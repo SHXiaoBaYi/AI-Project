@@ -61,6 +61,18 @@ public class TrainQaCalibrateVO {
     @Schema(description = "备注")
     private String remark;
 
+    @Schema(description = "是否已处理", example = "false")
+    private Boolean handled;
+
+    @Schema(description = "处理状态 OPEN/INTENT_BAD/IGNORE/DOC_MISSING", example = "OPEN")
+    private String handleStatus;
+
+    @Schema(description = "处理人")
+    private String handleBy;
+
+    @Schema(description = "处理时间")
+    private String handleTime;
+
     @Schema(description = "更新人")
     private String updateBy;
 

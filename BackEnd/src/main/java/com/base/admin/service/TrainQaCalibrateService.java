@@ -4,11 +4,13 @@ import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.TrainQaCalibrateQueryDTO;
 import com.base.admin.domain.dto.TrainQaCalibrateSaveDTO;
 import com.base.admin.domain.dto.TrainQaFeedbackDTO;
+import com.base.admin.domain.dto.TrainQaHandleDTO;
 import com.base.admin.domain.vo.TrainAssistantAskVO;
 import com.base.admin.domain.vo.TrainQaCalibrateVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
 import com.base.admin.util.TrainQaAnswerSanitizer;
+import com.base.admin.util.TrainQaHandleStatuses;
 import com.base.admin.util.TrainQaIntentMatcher;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -216,6 +218,17 @@ public class TrainQaCalibrateService {
         if (Boolean.TRUE.equals(query.getOnlyLatest())) {
             where.append(" AND c.version_id = d.latest_version_id ");
         }
+        if (StringUtils.hasText(query.getHandleStatus())) {
+            where.append(" AND c.handle_status = ? ");
+            args.add(query.getHandleStatus().trim().toUpperCase(Locale.ROOT));
+        } else if (query.getHandled() != null) {
+            if (Boolean.TRUE.equals(query.getHandled())) {
+                where.append(" AND c.handle_status <> ? ");
+            } else {
+                where.append(" AND c.handle_status = ? ");
+            }
+            args.add(TrainQaHandleStatuses.OPEN);
+        }
         String countSql = "SELECT COUNT(1) FROM train_qa_calibrate c JOIN train_doc d ON d.id = c.doc_id " + where;
         Integer total = jdbc.queryForObject(countSql, Integer.class, args.toArray());
         int t = total == null ? 0 : total;
@@ -224,7 +237,7 @@ public class TrainQaCalibrateService {
                 SELECT c.id, c.doc_id, d.title doc_title, c.version_id, v.version_label,
                        d.latest_version_id, c.category, c.user_question, c.aliases_json, c.topic_title,
                        c.answer_text, c.answer_html, c.images_json, c.status, c.hit_count, c.source,
-                       c.remark, c.update_by, c.update_time
+                       c.remark, c.handle_status, c.handle_by, c.handle_time, c.update_by, c.update_time
                 FROM train_qa_calibrate c
                 JOIN train_doc d ON d.id = c.doc_id
                 LEFT JOIN train_doc_version v ON v.id = c.version_id
@@ -252,11 +265,45 @@ public class TrainQaCalibrateService {
             vo.setHitCount(rs.getInt("hit_count"));
             vo.setSource(rs.getString("source"));
             vo.setRemark(rs.getString("remark"));
+            String handleStatus = rs.getString("handle_status");
+            if (!StringUtils.hasText(handleStatus)) {
+                handleStatus = TrainQaHandleStatuses.OPEN;
+            }
+            vo.setHandleStatus(handleStatus);
+            vo.setHandled(TrainQaHandleStatuses.isHandled(handleStatus));
+            vo.setHandleBy(rs.getString("handle_by"));
+            vo.setHandleTime(rs.getString("handle_time"));
             vo.setUpdateBy(rs.getString("update_by"));
             vo.setUpdateTime(rs.getString("update_time"));
             return vo;
         }, listArgs.toArray());
         return new PageResult<>(t, rows);
+    }
+
+    @Transactional
+    public void markHandled(TrainQaHandleDTO dto) {
+        if (dto == null || dto.getId() == null) {
+            throw new BusinessException("记录ID不能为空");
+        }
+        String handleStatus = TrainQaHandleStatuses.normalize(dto.getHandleStatus());
+        String operator = SecurityUtils.getCurrentUsername();
+        int n;
+        if (TrainQaHandleStatuses.OPEN.equals(handleStatus)) {
+            n = jdbc.update("""
+                    UPDATE train_qa_calibrate
+                    SET handle_status = ?, handle_by = NULL, handle_time = NULL, update_by = ?
+                    WHERE id = ? AND is_active = 1
+                    """, handleStatus, operator, dto.getId());
+        } else {
+            n = jdbc.update("""
+                    UPDATE train_qa_calibrate
+                    SET handle_status = ?, handle_by = ?, handle_time = NOW(), update_by = ?
+                    WHERE id = ? AND is_active = 1
+                    """, handleStatus, operator, operator, dto.getId());
+        }
+        if (n <= 0) {
+            throw new BusinessException("记录不存在");
+        }
     }
 
     @Transactional

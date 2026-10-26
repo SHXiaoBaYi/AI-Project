@@ -108,6 +108,10 @@ export type TrainQaCalibrate = {
   hitCount?: number;
   source?: string;
   remark?: string;
+  handled?: boolean;
+  handleStatus?: string;
+  handleBy?: string;
+  handleTime?: string;
   updateBy?: string;
   updateTime?: string;
 };
@@ -323,6 +327,10 @@ export type TrainQaMiss = {
   nickname?: string;
   status?: string;
   versionId?: number;
+  handled?: boolean;
+  handleStatus?: string;
+  handleBy?: string;
+  handleTime?: string;
   createTime?: string;
 };
 
@@ -331,6 +339,9 @@ export type TrainQaMissPage = {
   total: number;
 };
 
+/** OPEN=未处理；其余为已处理原因 */
+export type TrainQaHandleStatus = 'OPEN' | 'INTENT_BAD' | 'IGNORE' | 'DOC_MISSING';
+
 export function listTrainQaMissApi(params: {
   pageNum?: number;
   pageSize?: number;
@@ -338,10 +349,16 @@ export function listTrainQaMissApi(params: {
   keyword?: string;
   createTimeStart?: string;
   createTimeEnd?: string;
+  handled?: boolean;
+  handleStatus?: string;
 }) {
   return request.get<unknown, TrainQaMissPage>('/train/qa/miss/list', {
     params: { category: 'cashier', ...params },
   });
+}
+
+export function markTrainQaMissHandledApi(data: { id: number; handleStatus: TrainQaHandleStatus }) {
+  return request.put('/train/qa/miss/handle', data);
 }
 
 export function listTrainQaCalibrateApi(params: {
@@ -352,10 +369,16 @@ export function listTrainQaCalibrateApi(params: {
   status?: string;
   keyword?: string;
   onlyLatest?: boolean;
+  handled?: boolean;
+  handleStatus?: string;
 }) {
   return request.get<unknown, TrainQaCalibratePage>('/train/qa/list', {
     params: { category: 'cashier', ...params },
   });
+}
+
+export function markTrainQaCalibrateHandledApi(data: { id: number; handleStatus: TrainQaHandleStatus }) {
+  return request.put('/train/qa/handle', data);
 }
 
 export function saveTrainQaCalibrateApi(data: {
