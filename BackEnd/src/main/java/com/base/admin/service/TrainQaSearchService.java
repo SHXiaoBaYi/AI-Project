@@ -98,10 +98,15 @@ public class TrainQaSearchService {
             return java.util.Optional.of(hit(best.entry, MSG_HIT));
         }
         if (score >= NEAR) {
-            return java.util.Optional.of(suggest(pool, MSG_NEAR, NEAR));
+            return java.util.Optional.of(suggestByIntent(pool, MSG_NEAR, NEAR));
         }
         if (score >= SUGGEST) {
-            return java.util.Optional.of(suggest(pool, MSG_SUGGEST, SUGGEST));
+            return java.util.Optional.of(suggestByIntent(pool, MSG_SUGGEST, SUGGEST));
+        }
+        // 意图分不够也不直接放弃：按向量相近给出原题，避免「只有搜旧版、没有推荐」
+        TrainAssistantAskVO related = suggestByVector(ranked, MSG_NEAR);
+        if (related.getItems() != null && !related.getItems().isEmpty()) {
+            return java.util.Optional.of(related);
         }
         return java.util.Optional.of(miss(cat, oldVersions));
     }
@@ -295,7 +300,7 @@ public class TrainQaSearchService {
         vo.setDocId(e.docId);
         vo.setVersionId(e.versionId);
         vo.setVersionLabel(e.versionLabel);
-        vo.setHasOlderVersions(hasOlder(e.category));
+        vo.setHasOlderVersions(hasOlderWithContent(e.category));
         TrainAssistantAskVO.QaItem item = new TrainAssistantAskVO.QaItem();
         item.setQaItemId(e.id);
         item.setQuestion(e.question);
@@ -308,13 +313,45 @@ public class TrainQaSearchService {
         return vo;
     }
 
-    private TrainAssistantAskVO suggest(List<Scored> ranked, String message, float minScore) {
+    /** 按意图分筛选建议题（0.75/0.8 档） */
+    private TrainAssistantAskVO suggestByIntent(List<Scored> ranked, String message, float minScore) {
+        List<Scored> filtered = new ArrayList<>();
+        for (Scored s : ranked) {
+            if (s.intent >= minScore) {
+                filtered.add(s);
+            }
+        }
+        return buildSuggest(filtered, message);
+    }
+
+    /**
+     * 意图未达门槛时：按向量相近给出 Top 原题（不返回答案正文，避免错答）。
+     * 解决「库里有支付相关题，却只提示搜旧版、没有任何推荐」的问题。
+     */
+    private TrainAssistantAskVO suggestByVector(List<Scored> vectorRanked, String message) {
+        List<Scored> ordered = new ArrayList<>(vectorRanked);
+        ordered.sort(Comparator.comparingDouble((Scored s) -> s.raw).reversed());
+        List<Scored> top = new ArrayList<>();
+        for (Scored s : ordered) {
+            if (top.size() >= SUGGEST_LIMIT) {
+                break;
+            }
+            // 向量过低的不推，避免完全无关噪声；0.35 仅作弱相关地板
+            if (s.raw < 0.35f) {
+                break;
+            }
+            top.add(s);
+        }
+        return buildSuggest(top, message);
+    }
+
+    private TrainAssistantAskVO buildSuggest(List<Scored> ranked, String message) {
         TrainAssistantAskVO vo = new TrainAssistantAskVO();
         vo.setStatus("SUGGEST");
         vo.setMessage(message);
         List<TrainAssistantAskVO.QaItem> items = new ArrayList<>();
         for (Scored s : ranked) {
-            if (s.intent < minScore || items.size() >= SUGGEST_LIMIT) {
+            if (items.size() >= SUGGEST_LIMIT) {
                 break;
             }
             TrainAssistantAskVO.QaItem item = new TrainAssistantAskVO.QaItem();
@@ -328,7 +365,8 @@ public class TrainQaSearchService {
             vo.setDocId(top.entry.docId);
             vo.setVersionId(top.entry.versionId);
             vo.setVersionLabel(top.entry.versionLabel);
-            vo.setHasOlderVersions(hasOlder(top.entry.category));
+            // 有相近题可点时，不抢成「先搜旧版」；仅标记是否还有旧版可查
+            vo.setHasOlderVersions(hasOlderWithContent(top.entry.category));
         }
         vo.setItems(items);
         if (items.isEmpty()) {
@@ -340,7 +378,8 @@ public class TrainQaSearchService {
 
     private TrainAssistantAskVO miss(String category, boolean oldVersions) {
         TrainAssistantAskVO vo = new TrainAssistantAskVO();
-        boolean older = !oldVersions && hasOlder(category);
+        // 仅当旧版确有正文可检索时才提示「是否检索旧版」，避免空壳版本误导
+        boolean older = !oldVersions && hasOlderWithContent(category);
         vo.setHasOlderVersions(older);
         if (older) {
             vo.setStatus("NEED_OLD");
@@ -373,11 +412,13 @@ public class TrainQaSearchService {
         }, category);
     }
 
-    private boolean hasOlder(String category) {
+    /** 旧版是否有可检索正文（与 loadOlderDocs 条件一致；空壳版本不算） */
+    private boolean hasOlderWithContent(String category) {
         Integer n = jdbc.queryForObject("""
                 SELECT COUNT(1) FROM train_doc d
                 JOIN train_doc_version v ON v.doc_id = d.id AND v.is_active = 1
                   AND v.id <> IFNULL(d.latest_version_id, 0)
+                  AND v.content_text IS NOT NULL AND TRIM(v.content_text) <> ''
                 WHERE d.is_active = 1 AND d.status = 0 AND d.category = ?
                 """, Integer.class, normalize(category));
         return n != null && n > 0;

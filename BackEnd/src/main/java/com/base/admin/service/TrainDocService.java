@@ -3261,7 +3261,8 @@ public class TrainDocService {
                 SELECT d.id doc_id, d.latest_version_id, v.version_label, v.content_text, v.content_html,
                        v.file_path, v.file_name,
                        (SELECT COUNT(1) FROM train_doc_version x
-                        WHERE x.doc_id = d.id AND x.is_active = 1 AND x.id <> IFNULL(d.latest_version_id, 0)) old_cnt
+                        WHERE x.doc_id = d.id AND x.is_active = 1 AND x.id <> IFNULL(d.latest_version_id, 0)
+                          AND x.content_text IS NOT NULL AND TRIM(x.content_text) <> '') old_cnt
                 FROM train_doc d
                 JOIN train_doc_version v ON v.id = d.latest_version_id AND v.is_active = 1
                 WHERE d.is_active = 1 AND d.category = ? AND d.status = 0
