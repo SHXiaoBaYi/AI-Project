@@ -543,7 +543,7 @@ export default function CashierAssistantPage() {
       } else if (res.status === 'SUGGEST' && items.length) {
         push({
           role: 'assistant',
-          text: res.message || '没有直接对上，可以点下面的原题查看。',
+          text: res.message || '没有找到与该问题匹配的培训说明，请换个问法，或从下面相近原题里选一条。',
           suggestions: items.map((it) => it.question).filter((t): t is string => !!t?.trim()),
         });
       } else if (res.status === 'NEED_OLD' || (res.status === 'HIT' && !items.length && res.hasOlderVersions)) {
@@ -556,7 +556,10 @@ export default function CashierAssistantPage() {
           versionId: res.versionId,
         });
       } else {
-        push({ role: 'assistant', text: res.status === 'HIT' ? '没有找到答案' : res.message || '没有找到答案' });
+        push({
+          role: 'assistant',
+          text: res.message || '没有找到与该问题匹配的培训说明，请换个问法后再试。',
+        });
       }
     } catch (err) {
       message.error(err instanceof Error ? err.message : '提问失败');

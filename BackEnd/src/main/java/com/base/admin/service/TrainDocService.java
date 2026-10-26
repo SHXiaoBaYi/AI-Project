@@ -919,7 +919,7 @@ public class TrainDocService {
                 vo.setMessage("暂时没有找到答案，是否检索旧版？");
             } else {
                 vo.setStatus("NOT_FOUND");
-                vo.setMessage("没有找到答案");
+                vo.setMessage("没有找到与该问题匹配的培训说明，请换个问法后再试。");
             }
             trainQaMissService.record(question, cat, vo.getStatus(), latest.docId, latest.versionId);
             return vo;
@@ -929,7 +929,7 @@ public class TrainDocService {
         if (older.isEmpty()) {
             TrainAssistantAskVO vo = new TrainAssistantAskVO();
             vo.setStatus("NOT_FOUND");
-            vo.setMessage("没有找到答案");
+            vo.setMessage("没有找到与该问题匹配的培训说明，请换个问法后再试。");
             vo.setHasOlderVersions(false);
             vo.setVersionLabel(latest.versionLabel);
             trainQaMissService.record(question, cat, "NOT_FOUND", latest.docId, latest.versionId);
@@ -949,7 +949,7 @@ public class TrainDocService {
         vo.setHasOlderVersions(false);
         if (all.isEmpty()) {
             vo.setStatus("NOT_FOUND");
-            vo.setMessage("没有找到答案");
+            vo.setMessage("没有找到与该问题匹配的培训说明，请换个问法后再试。");
             trainQaMissService.record(question, cat, "NOT_FOUND", latest.docId, latest.versionId);
         } else {
             vo.setStatus("HIT");

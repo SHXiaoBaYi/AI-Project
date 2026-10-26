@@ -2,6 +2,8 @@ package com.base.admin.service;
 
 import com.base.admin.domain.vo.TrainAssistantAskVO;
 import com.base.admin.util.TrainQaIntentMatcher;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -16,34 +18,54 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 扫码提问：内存里对全部已发布题干做精确向量检索。
- * 高置信直接返回原文；几道题太接近时才让模型选题干；都不像则给出可点的原题或未命中。
+ * 扫码提问：向量只负责召回；意图吻合度决定是否直出答案。
+ * <ul>
+ *   <li>≥0.9：命中，直接返回答案</li>
+ *   <li>[0.8, 0.9)：未确定命中，给出相近原题供点选</li>
+ *   <li>[0.75, 0.8)：建议原题，请用户点选</li>
+ *   <li>&lt;0.75：未命中（宁缺毋滥，不出错答）</li>
+ * </ul>
  */
 @Slf4j
 @Service
 public class TrainQaSearchService {
 
-    private static final float DIRECT = 0.82f;
-    private static final float DIRECT_GAP = 0.04f;
-    private static final float KEYWORD_DIRECT = 0.74f;
-    private static final float RERANK = 0.62f;
-    private static final float SUGGEST = 0.55f;
+    /** 意图吻合度：达到才算命中并直接返回答案 */
+    private static final float HIT = 0.90f;
+    /** [NEAR, HIT)：未命中文案 + 相近原题 */
+    private static final float NEAR = 0.80f;
+    /** [SUGGEST, NEAR)：不确定建议 */
+    private static final float SUGGEST = 0.75f;
+    private static final int RERANK_POOL = 12;
+    private static final int SUGGEST_LIMIT = 3;
+
+    private static final String MSG_HIT = "已根据培训文档找到相关问答";
+    private static final String MSG_NEAR =
+            "没有找到与该问题匹配的培训说明，请换个问法，或从下面相近原题里选一条。";
+    private static final String MSG_SUGGEST = "没有十分确定的答案，这些原题可能相关，请点选查看。";
+    private static final String MSG_MISS = "没有找到与该问题匹配的培训说明，请换个问法后再试。";
+
     private static final Pattern INDEX_JSON = Pattern.compile("\"index\"\\s*:\\s*(-?\\d+)");
+    private static final Pattern SCORE_PAIR =
+            Pattern.compile("\"index\"\\s*:\\s*(\\d+)\\s*,\\s*\"score\"\\s*:\\s*([0-9]*\\.?[0-9]+)");
 
     private final TrainQaVectorIndex vectorIndex;
     private final TrainQaEmbeddingClient embeddingClient;
     private final AiChatService aiChatService;
     private final JdbcTemplate jdbc;
+    private final ObjectMapper objectMapper;
     private final ConcurrentHashMap<String, float[]> queryCache = new ConcurrentHashMap<>();
 
     public TrainQaSearchService(TrainQaVectorIndex vectorIndex,
                                 TrainQaEmbeddingClient embeddingClient,
                                 AiChatService aiChatService,
-                                JdbcTemplate jdbc) {
+                                JdbcTemplate jdbc,
+                                ObjectMapper objectMapper) {
         this.vectorIndex = vectorIndex;
         this.embeddingClient = embeddingClient;
         this.aiChatService = aiChatService;
         this.jdbc = jdbc;
+        this.objectMapper = objectMapper;
     }
 
     /** 没有任何已嵌入题目时返回 empty，调用方走原来的全文检索。 */
@@ -57,23 +79,29 @@ public class TrainQaSearchService {
         if (ranked.isEmpty()) {
             return java.util.Optional.of(miss(cat, oldVersions));
         }
-        Scored best = ranked.get(0);
-        Scored second = ranked.size() > 1 ? ranked.get(1) : null;
-        float gap = second == null ? 1f : best.raw - second.raw;
-        if (best.raw >= DIRECT && gap >= DIRECT_GAP) {
-            return java.util.Optional.of(hit(best.entry, "已根据培训文档找到相关问答"));
-        }
-        if (best.raw >= KEYWORD_DIRECT && gap >= 0.05f && matchesWording(question, best.entry)) {
-            return java.util.Optional.of(hit(best.entry, "已根据培训文档找到相关问答"));
-        }
-        if (best.raw >= RERANK && aiChatService.isEnabled()) {
-            int pick = pickWithModel(question, ranked.subList(0, Math.min(12, ranked.size())));
-            if (pick > 0 && pick <= Math.min(12, ranked.size())) {
-                return java.util.Optional.of(hit(ranked.get(pick - 1).entry, "已根据培训文档找到相关问答"));
+
+        List<Scored> pool = ranked.subList(0, Math.min(RERANK_POOL, ranked.size()));
+        // 有 AI 时用意图吻合度覆盖排序；否则退回向量分（同一套严格门槛，宁缺毋滥）
+        if (aiChatService.isEnabled()) {
+            applyIntentScores(question, pool);
+            pool = new ArrayList<>(pool);
+            pool.sort(Comparator.comparingDouble((Scored s) -> s.intent).reversed());
+        } else {
+            for (Scored s : pool) {
+                s.intent = clamp01(s.raw);
             }
         }
-        if (best.raw >= SUGGEST) {
-            return java.util.Optional.of(suggest(ranked));
+
+        Scored best = pool.get(0);
+        float score = best.intent;
+        if (score >= HIT) {
+            return java.util.Optional.of(hit(best.entry, MSG_HIT));
+        }
+        if (score >= NEAR) {
+            return java.util.Optional.of(suggest(pool, MSG_NEAR, NEAR));
+        }
+        if (score >= SUGGEST) {
+            return java.util.Optional.of(suggest(pool, MSG_SUGGEST, SUGGEST));
         }
         return java.util.Optional.of(miss(cat, oldVersions));
     }
@@ -109,11 +137,12 @@ public class TrainQaSearchService {
                 continue;
             }
             float raw = TrainQaVectors.dot(query, e.vector);
-            float bonus = matchesWording(question, e) ? 0.05f : 0f;
+            float bonus = matchesWording(question, e) ? 0.03f : 0f;
             Scored s = new Scored();
             s.entry = e;
             s.raw = raw;
             s.rank = raw + bonus;
+            s.intent = 0f;
             ranked.add(s);
         }
         ranked.sort(Comparator.comparingDouble((Scored s) -> s.rank).reversed());
@@ -141,31 +170,122 @@ public class TrainQaSearchService {
         return vec;
     }
 
-    private int pickWithModel(String question, List<Scored> pool) {
+    /**
+     * 让模型给每个候选题干打「用户意图吻合度」0～1。
+     * 解析失败时保留向量分作为 intent，避免整条链路不可用。
+     */
+    private void applyIntentScores(String question, List<Scored> pool) {
+        if (pool == null || pool.isEmpty()) {
+            return;
+        }
+        for (Scored s : pool) {
+            s.intent = clamp01(s.raw);
+        }
         StringBuilder catalog = new StringBuilder();
         for (int i = 0; i < pool.size(); i++) {
             catalog.append(i + 1).append(". ").append(pool.get(i).entry.question).append('\n');
         }
         String system = """
-                你是收银操作帮助的选题助手。
-                根据用户原话，从候选题干中选出最贴近的一条。
-                按语义判断，近义、口语、倒装都算同一件事。
-                只能从候选里选，禁止编造。
-                只输出 JSON：{"index":1}
-                index 从 1 开始；若都不相关则 {"index":0}。
+                你是收银操作培训答疑的意图匹配助手。
+                根据「用户原话」与每条「候选题干」是否在问同一件事，给出吻合度 score（0~1）。
+                规则：
+                - 0.9 及以上：同一操作问题（允许口语、同义、倒装）
+                - 0.8~0.9：相关但不确定是否同一题
+                - 0.75~0.8：勉强相关
+                - 低于 0.75：不相关或答非所问
+                只输出 JSON，不要其它文字：
+                {"scores":[{"index":1,"score":0.92},{"index":2,"score":0.41}]}
+                index 从 1 开始，必须覆盖全部候选。
                 """;
         String user = "用户原话：\n" + question + "\n\n候选题干：\n" + catalog;
         try {
             String raw = aiChatService.chat(system, user, null, 0.1);
-            Matcher m = INDEX_JSON.matcher(raw == null ? "" : raw);
-            if (!m.find()) {
-                return -1;
+            if (!applyScoreJson(raw, pool)) {
+                // 兼容旧格式：只回了 index，则仅抬高该条，其余保持向量分
+                int pick = parseIndexOnly(raw);
+                if (pick > 0 && pick <= pool.size()) {
+                    pool.get(pick - 1).intent = Math.max(pool.get(pick - 1).intent, 0.91f);
+                }
             }
-            return Integer.parseInt(m.group(1));
         } catch (Exception e) {
-            log.warn("答疑模型选题失败，改给出相近原题: {}", e.getMessage());
+            log.warn("答疑意图打分失败，退回向量分: {}", e.getMessage());
+        }
+    }
+
+    private boolean applyScoreJson(String raw, List<Scored> pool) {
+        if (!StringUtils.hasText(raw)) {
+            return false;
+        }
+        try {
+            String json = extractJsonObject(raw);
+            JsonNode root = objectMapper.readTree(json);
+            JsonNode scores = root.get("scores");
+            if (scores == null || !scores.isArray() || scores.isEmpty()) {
+                return applyScorePairs(raw, pool);
+            }
+            boolean any = false;
+            for (JsonNode row : scores) {
+                if (row == null || !row.has("index") || !row.has("score")) {
+                    continue;
+                }
+                int index = row.get("index").asInt(-1);
+                float score = (float) row.get("score").asDouble(-1);
+                if (index < 1 || index > pool.size() || score < 0) {
+                    continue;
+                }
+                pool.get(index - 1).intent = clamp01(score);
+                any = true;
+            }
+            return any;
+        } catch (Exception e) {
+            return applyScorePairs(raw, pool);
+        }
+    }
+
+    private boolean applyScorePairs(String raw, List<Scored> pool) {
+        Matcher m = SCORE_PAIR.matcher(raw == null ? "" : raw);
+        boolean any = false;
+        while (m.find()) {
+            int index = Integer.parseInt(m.group(1));
+            float score = Float.parseFloat(m.group(2));
+            if (index >= 1 && index <= pool.size() && score >= 0) {
+                pool.get(index - 1).intent = clamp01(score);
+                any = true;
+            }
+        }
+        return any;
+    }
+
+    private int parseIndexOnly(String raw) {
+        Matcher m = INDEX_JSON.matcher(raw == null ? "" : raw);
+        if (!m.find()) {
             return -1;
         }
+        try {
+            return Integer.parseInt(m.group(1));
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static String extractJsonObject(String raw) {
+        String text = raw.trim();
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return text.substring(start, end + 1);
+        }
+        return text;
+    }
+
+    private static float clamp01(float v) {
+        if (v < 0f) {
+            return 0f;
+        }
+        if (v > 1f) {
+            return 1f;
+        }
+        return v;
     }
 
     private TrainAssistantAskVO hit(TrainQaVectorIndex.Entry e, String message) {
@@ -188,13 +308,13 @@ public class TrainQaSearchService {
         return vo;
     }
 
-    private TrainAssistantAskVO suggest(List<Scored> ranked) {
+    private TrainAssistantAskVO suggest(List<Scored> ranked, String message, float minScore) {
         TrainAssistantAskVO vo = new TrainAssistantAskVO();
         vo.setStatus("SUGGEST");
-        vo.setMessage("没有直接对上，可以点下面的原题查看。");
+        vo.setMessage(message);
         List<TrainAssistantAskVO.QaItem> items = new ArrayList<>();
         for (Scored s : ranked) {
-            if (s.raw < 0.50f || items.size() >= 3) {
+            if (s.intent < minScore || items.size() >= SUGGEST_LIMIT) {
                 break;
             }
             TrainAssistantAskVO.QaItem item = new TrainAssistantAskVO.QaItem();
@@ -213,7 +333,7 @@ public class TrainQaSearchService {
         vo.setItems(items);
         if (items.isEmpty()) {
             vo.setStatus("NOT_FOUND");
-            vo.setMessage("没有找到答案");
+            vo.setMessage(MSG_MISS);
         }
         return vo;
     }
@@ -227,7 +347,7 @@ public class TrainQaSearchService {
             vo.setMessage("暂时没有找到答案，是否检索旧版？");
         } else {
             vo.setStatus("NOT_FOUND");
-            vo.setMessage("没有找到答案");
+            vo.setMessage(MSG_MISS);
         }
         fillLatestDoc(vo, category);
         return vo;
@@ -289,5 +409,7 @@ public class TrainQaSearchService {
         TrainQaVectorIndex.Entry entry;
         float raw;
         float rank;
+        /** 用户意图与题干吻合度（优先 AI，否则为向量分） */
+        float intent;
     }
 }
