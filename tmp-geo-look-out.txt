@@ -1,0 +1,35 @@
+=== placement 1605 ===
+id=1605 topic=吃羊场景 q=适合秋冬季节的滋补美食有哪些 ct=2026-10-26 09:58:07 ut=2026-10-26 10:02:16
+
+=== items for 1605 ===
+
+=== dump bodies ===
+
+=== reviews for 1605 ===
+
+=== trace 6 full stages ===
+[{"code":"style","name":"加载风格","status":"done","message":"头条叙事体"},{"code":"sell","name":"召回卖点","status":"done","message":"卖点 12 条"},{"code":"media","name":"召回素材","status":"done","message":"候选 24 张"},{"code":"guard","name":"加载审稿口径","status":"done","message":"已注入审稿口径"},{"code":"write","name":"撰写正文","status":"done","message":"标题：未命名文章"},{"code":"illustrate","name":"智能插图","status":"done","message":"插入 2 张"}]
+
+=== sell points sample (enabled) count by domain ===
+ERR Unknown column 'p.enabled' in 'where clause'
+
+=== sell_point columns ===
+id bigint
+domain_id bigint
+kind varchar(32)
+title varchar(200)
+claim varchar(500)
+evidence mediumtext
+tags_json varchar(1000)
+keywords_json varchar(1000)
+evidence_level varchar(16)
+source_sheet varchar(128)
+source_row int
+status varchar(16)
+sort_order int
+version_no int
+create_by varchar(64)
+create_time datetime
+update_by varchar(64)
+update_time datetime
+is_active tinyint

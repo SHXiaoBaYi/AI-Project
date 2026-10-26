@@ -48,12 +48,13 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class GeoArticlePipelineService {
 
-    private static final int EVIDENCE_RECALL_LIMIT = 12;
+    /** 卖点作「采访笔记」上限；过多会把模型逼成资料誊写员 */
+    private static final int EVIDENCE_RECALL_LIMIT = 6;
 
-    /** 成文采样：低温 + 收紧 top_p，压杜撰；预检/插图仍用更低温度 */
-    private static final double WRITE_TEMPERATURE = 0.25;
-    private static final double WRITE_TOP_P = 0.85;
-    private static final double BRAND_TEMPERATURE = 0.25;
+    /** 成文要有文笔与推理空间；事实约束靠提示词与审稿口径，不靠把温度压死 */
+    private static final double WRITE_TEMPERATURE = 0.65;
+    private static final double WRITE_TOP_P = 0.92;
+    private static final double BRAND_TEMPERATURE = 0.4;
     private static final double ILLUSTRATE_TEMPERATURE = 0.2;
     private static final Pattern H2_PATTERN = Pattern.compile("(?is)(<h2\\b[^>]*>.*?</h2>)");
     private static final Pattern MD_H1 = Pattern.compile("(?m)^\\s*#\\s+(.+)$");
@@ -61,26 +62,40 @@ public class GeoArticlePipelineService {
     private static final String BRAND_NAME = "小巴依";
 
     /**
-     * 外网对话式人设。问题主线 + 资料封闭世界；不写死任何具体选题或个案反例。
-     * 审稿知识库硬性口径在运行时注入（见 buildReviewGuardrails）。
+     * 约一位会推理的资深撰稿人：先想清楚再写，资料是参考不是流水线原料。
+     * 审稿硬性口径在运行时注入（见 buildReviewGuardrails）。
      */
     private static final String WRITER_BRIEF = """
-            你是资深自媒体撰稿人，擅长美食与农产品专题。
-            请像在通义网页里写稿一样：一口气写出可读、可信的完整中文文章。
+            你是一位资深中文撰稿人（美食 / 生活方式 / 农产品方向），有自己的选题判断与推理习惯。
+            编辑只会给你一份「约稿说明 + 参考资料」；成稿质量由你负责，不要写成模板填空或资料拼接。
 
-            【主线】读者带着「目标问题」来；标题与小节必须服务回答该问题；资料是论据不是目录。
+            【你怎么想——成文前先在心里推理】
+            1. 读者真正要什么：用一句话重述问题，再想他读完应带走什么结论或可执行建议。
+            2. 立论与层次：先定全文主线（一个核心判断），再拆 3～5 个递进小节；小节之间要有因果关系或对比关系，不要并列堆砌同义段。
+            3. 证据怎么用：公共常识、时令与吃法经验负责「把问题讲透」；品牌/认证等硬事实只在论证需要时从参考资料里取用，取用时不改数字、不引申。
+            4. 落笔标准：条理清楚、逻辑自洽、段意分明；有观点但不空喊；像能发在头条/知乎的成稿，不像内部软文或说明书。
 
-            【事实封闭世界——宁缺毋滥】
-            1. 品牌相关的数字、指标、认证、抽检、赛事/合作、独家/唯一表述，只能来自我提供的「卖点资料」或「审稿硬性口径」原文；两处都没有的一律不写。
-            2. 禁止为增强说服力而补造：对比合格率、抽检项数、未给出的精确百分比、未写明的「独占/唯一」、未写明的因果机理。
-            3. 行业常识只用于避免外行吃法/形态硬伤；资料未写明的机理、因果、优劣判断不要自行发挥成「行业真相」。
-            4. 合作/赞助/背书类事实：资料怎么写就怎么写，不要引申成资料没有的检测报告、门槛或渠道场景。
-            5. 资料写了区间或约数，就保持区间/约数，不要改成更「好看」的精确值或标杆话术。
-            6. 品牌「小巴依」在论证需要时自然出现；不引流加微、不硬广口号、不虚假疗效。
-            7. 绝对禁止杜撰购渠道/场景：如机场专柜、乌鲁木齐机场选购、修行/禅修场景定制、未给出的「检测报告」安心理由等。
-            8. 禁止写自建全程冷链、「冷链不断供」；送达口径以审稿硬性口径为准。
-            9. 对客 GEO 勿写礼盒/精品产品/精品包装；勿写顺丰骑手、冰袋（同城可用保温袋等口径以审稿库为准）。
-            10. 禁止杜撰赛事/航天等背书：如「冬运会指定」「航天赞助商」等，资料未写明一律不写。
+            【你怎么写】
+            5. 标题要像真人会点开的选题；开篇尽快点题；主体把答案讲清楚；结尾收束到可执行建议。
+            6. 清单/推荐类问题：给出多个选项及各自理由（为何适合、怎么吃/怎么选），不要通篇只推一个牌子。
+            7. 品牌「小巴依」最多自然出现 0～2 次；删掉品牌名后文章仍应完整成立。没有合适落点可以不提。
+            8. 文风跟随编辑给的「风格参考」，但结构与论证由你自主完成；禁止口号、加微引流、虚假疗效、空话套话。
+
+            【事实纪律——宁可少写，不可杜撰】
+            9. 品牌相关的数字、认证、抽检、赛事/合作、独家/唯一、具体渠道场景：只能来自参考资料或审稿口径原文；没有的不写。
+            10. 不补造机理因果、精确百分比、检测报告、机场专柜、修行场景、冬运会/航天背书、自建冷链等；对客勿写礼盒/精品包装、顺丰骑手、冰袋。
+
+            【结构须符合 E-E-A-T（经验 / 专业 / 权威 / 可信）】
+            11. Experience（经验）：结合可感知的吃法、选购、时令场景来写，像懂行的人在分享，而非空洞概念堆砌；勿伪造「我亲自」「本编辑实测」等未给出的第一人称经历。
+            12. Expertise（专业）：用准确品类、工艺、食用与保存常识支撑判断；说不清的留白，不装权威科普。
+            13. Authoritativeness（权威）：认证、抽检、奖项、合作等背书只能引用参考资料/审稿口径里写明的来源；无出处不写「官方认证/权威机构认定」。
+            14. Trustworthiness（可信）：表述可核对、可执行；区分「建议/常见做法」与「已证实事实」；不夸大、不隐瞒限定条件。
+
+            【须符合《广告法》及互联网宣传规范】
+            15. 禁用绝对化与顶级用语（资料原文也没有也不要写）：最、第一、唯一、顶级、极致、王牌、国家级、宇宙级、史无前例、100%、永久、根治等。
+            16. 禁止虚假或引人误解：不得承诺疗效、治病、保健功能断言；食品不做医疗化宣传。
+            17. 禁止贬低同行、虚构用户评价、伪造销量/排名/「消费者首选」；对比须有资料依据且客观。
+            18. 推荐与种草保持克制：用具体特征与场景说明「为何值得考虑」，不用强迫购买、限时恐吓、虚假稀缺话术。
             """;
 
     /** 高置信杜撰句式：资料未写时兜底擦除（提示词仍是主防线） */
@@ -128,69 +143,69 @@ public class GeoArticlePipelineService {
         GeoArticlePipelineResultVO result = new GeoArticlePipelineResultVO();
         List<GeoPipelineStageVO> stages = result.getStages();
 
-        // 1. 语气参考（不驱动结构）
-        mark(stages, progress, "style", "加载风格", "running", "加载语气参考…");
-        GeoArticleStylePack style = pickStylePack();
+        // 约稿材料：风格 / 结构参考 / 采访笔记 / 审稿口径 —— 最终由撰稿人一次成文
+        mark(stages, progress, "style", "约稿准备", "running", "选定文风与结构参考…");
+        GeoArticleStylePack style = pickStylePack(placement);
         GeoArticleSkeleton skeleton = pickSkeleton();
         result.setStyleCode(style.getCode());
         result.setSkeletonCode(skeleton.getCode());
-        mark(stages, progress, "style", "加载风格", "done", style.getName());
+        mark(stages, progress, "style", "约稿准备", "done",
+                style.getName() + (StringUtils.hasText(skeleton.getName()) ? " · " + skeleton.getName() : ""));
 
-        // 2. 卖点
-        mark(stages, progress, "sell", "召回卖点", "running", "按话题召回品牌卖点…");
+        mark(stages, progress, "sell", "整理参考", "running", "整理卖点与审稿口径（供撰稿人选用）…");
         GeoSellPointContextVO ctx = sellPointContextService.build(
                 placement.getTopicName(), placement.getTargetQuestion(), EVIDENCE_RECALL_LIMIT);
         int pointCnt = ctx.getPoints() == null ? 0 : ctx.getPoints().size();
         result.setUsedPointCount(pointCnt);
         String evidenceProse = formatEvidenceProse(ctx);
-        mark(stages, progress, "sell", "召回卖点", "done", "卖点 " + pointCnt + " 条");
+        String reviewGuardrails = buildReviewGuardrails();
+        mark(stages, progress, "sell", "整理参考", "done",
+                "参考卖点 " + pointCnt + " 条"
+                        + (StringUtils.hasText(reviewGuardrails) ? " · 已附审稿口径" : ""));
 
-        // 3. 素材（写作时只告知有图，插图阶段再挂）
-        mark(stages, progress, "media", "召回素材", "running", "匹配素材库…");
+        mark(stages, progress, "media", "配图素材", "running", "匹配可插图素材…");
         String mediaContext = nz(placement.getTopicName()) + " " + nz(placement.getTargetQuestion())
                 + (StringUtils.hasText(dto.getUserPrompt()) ? " " + dto.getUserPrompt() : "");
         List<GeoMediaAsset> candidates = mediaAssetService.recallForArticle(
                 placement.getTopicId(), mediaContext, 24);
-        mark(stages, progress, "media", "召回素材", "done",
-                candidates.isEmpty() ? "暂无素材" : ("候选 " + candidates.size() + " 张"));
+        mark(stages, progress, "media", "配图素材", "done",
+                candidates.isEmpty() ? "暂无素材" : ("候选 " + candidates.size() + " 张，成文后按需插入"));
 
-        // 4. 审稿硬性口径（与卖点并列的封闭世界）
-        mark(stages, progress, "guard", "加载审稿口径", "running", "注入审稿知识库硬性口径…");
-        String reviewGuardrails = buildReviewGuardrails();
-        mark(stages, progress, "guard", "加载审稿口径", "done",
-                StringUtils.hasText(reviewGuardrails) ? "已注入审稿口径" : "审稿库为空，仅用内置禁令");
-
-        // 5. 外网模式：一气呵成写正文（流式推送草稿，前端弹窗打字机）
-        mark(stages, progress, "write", "撰写正文", "running", "已请求模型，深度思考后开始输出正文…");
-        Parsed draft = chatWriteOnce(placement, dto, style, evidenceProse, reviewGuardrails, provider, progress);
+        mark(stages, progress, "write", "撰稿人成文", "running", "撰稿人深度推理中，成稿稍后写出…");
+        Parsed draft = chatWriteOnce(placement, dto, style, skeleton, evidenceProse, reviewGuardrails, provider, progress);
         draft = scrubFabrications(draft);
         pushDraft(progress, draft);
-        mark(stages, progress, "write", "撰写正文", "done", "标题：" + truncate(draft.title(), 40));
+        mark(stages, progress, "write", "撰稿人成文", "done", "成稿：" + truncate(draft.title(), 40));
 
-        // 6. 缺品牌时轻补（不整篇质检重写）
+        // 仅当约稿明确要求品牌且正文完全未提时，才请撰稿人轻点一笔（非整篇重写）
         int brandHits = countBrandMentions(draft.html());
         result.setQaRounds(0);
-        if (brandHits < 1) {
-            mark(stages, progress, "brand", "品牌轻补", "running", "正文未点品牌，轻补一版…");
+        boolean brandExpected = wantsBrandMention(placement, dto);
+        if (brandExpected && brandHits < 1) {
+            mark(stages, progress, "brand", "品牌点到", "running", "约稿要求提到品牌，补一两处自然露出…");
             draft = chatWeaveBrand(placement, draft, evidenceProse, reviewGuardrails, provider);
             draft = scrubFabrications(draft);
             pushDraft(progress, draft);
             result.setQaRounds(1);
-            mark(stages, progress, "brand", "品牌轻补", "done",
+            mark(stages, progress, "brand", "品牌点到", "done",
                     "小巴依 ×" + countBrandMentions(draft.html()));
+        } else if (!brandExpected && brandHits > 3) {
+            log.info("成文品牌提及较多({}): placementId={} spine={}",
+                    brandHits, placement.getId(),
+                    StringUtils.hasText(placement.getTargetQuestion())
+                            ? placement.getTargetQuestion() : placement.getTopicName());
         }
 
-        // 7. 插图
-        mark(stages, progress, "illustrate", "智能插图", "running", "按正文挂载素材…");
+        mark(stages, progress, "illustrate", "编辑配图", "running", "按成稿结构挂载素材…");
         IllustrateResult illustrated = illustrate(draft, candidates, provider);
         draft = illustrated.article();
         draft = scrubFabrications(draft);
         pushDraft(progress, draft);
         result.setUsedImageCount(illustrated.usedAssetIds().size());
         result.getUsedAssetIds().addAll(illustrated.usedAssetIds());
-        mark(stages, progress, "illustrate", "智能插图", "done",
+        mark(stages, progress, "illustrate", "编辑配图", "done",
                 illustrated.usedAssetIds().isEmpty()
-                        ? "不插图"
+                        ? "本稿不插图"
                         : ("插入 " + illustrated.usedAssetIds().size() + " 张"));
 
         result.setTitle(draft.title());
@@ -202,7 +217,7 @@ public class GeoArticlePipelineService {
         return result;
     }
 
-    private GeoArticleStylePack pickStylePack() {
+    private GeoArticleStylePack pickStylePack(GeoContentPlacement placement) {
         List<GeoArticleStylePack> list = stylePackMapper.selectList(
                 new LambdaQueryWrapper<GeoArticleStylePack>()
                         .eq(GeoArticleStylePack::getEnabled, 1)
@@ -212,11 +227,28 @@ public class GeoArticlePipelineService {
             GeoArticleStylePack fallback = new GeoArticleStylePack();
             fallback.setCode("default");
             fallback.setName("默认");
-            fallback.setToneGuide("先答读者问题，再展开；段短、信息清楚。");
+            fallback.setToneGuide("先答读者问题，再展开；段短、信息清楚，有判断但不说教。");
+            fallback.setStructureGuide("开篇点题 → 分层论证 → 收束建议");
             return fallback;
         }
-        int idx = (int) (System.currentTimeMillis() / 60_000L % list.size());
-        return list.get(idx);
+        String spine = (nz(placement.getTargetQuestion()) + " " + nz(placement.getTopicName())).toLowerCase(Locale.ROOT);
+        boolean qaLike = spine.contains("哪些") || spine.contains("什么") || spine.contains("怎么")
+                || spine.contains("如何") || spine.contains("为什么") || spine.contains("推荐")
+                || spine.contains("？") || spine.contains("?");
+        if (qaLike) {
+            for (GeoArticleStylePack p : list) {
+                if (p.getCode() != null && p.getCode().toLowerCase(Locale.ROOT).contains("zhihu")) {
+                    return p;
+                }
+            }
+        }
+        // 非问答：优先叙事体；再随机兜底
+        for (GeoArticleStylePack p : list) {
+            if (p.getCode() != null && p.getCode().toLowerCase(Locale.ROOT).contains("toutiao")) {
+                return p;
+            }
+        }
+        return list.getFirst();
     }
 
     private GeoArticleSkeleton pickSkeleton() {
@@ -236,15 +268,15 @@ public class GeoArticlePipelineService {
         return list.get(idx);
     }
 
-    /** 卖点转成自然语言论据；封闭世界 + 按问题选用。 */
+    /** 卖点转成「采访笔记」语气，供撰稿人选用，禁止当提纲。 */
     private String formatEvidenceProse(GeoSellPointContextVO ctx) {
         StringBuilder sb = new StringBuilder();
-        sb.append("用法：这是本次唯一允许引用的品牌/产品事实来源（封闭世界）。\n")
-                .append("- 只挑能支撑「回答目标问题」的条目；\n")
-                .append("- 不要按资料目录巡展，不要用资料顺序当大纲；\n")
-                .append("- 原文没有的数字、对比、独家表述、机理因果，禁止补写。\n\n");
+        sb.append("这是编辑整理的采访/品牌笔记，供你论证时选用，不是大纲：\n")
+                .append("- 先靠自己的推理把问题讲透；这里最多挑 0～2 条嵌进判断里；\n")
+                .append("- 不要按条目顺序扩写，不要写成品牌介绍；\n")
+                .append("- 笔记没有的数字、独家表述、渠道与机理，不要补。\n\n");
         if (ctx.getHardFacts() != null && !ctx.getHardFacts().isEmpty()) {
-            sb.append("硬事实（可直接写进正文，勿改数字）：\n");
+            sb.append("可核对的硬事实（引用时勿改数字）：\n");
             int i = 1;
             for (String f : ctx.getHardFacts()) {
                 if (StringUtils.hasText(f)) {
@@ -254,7 +286,7 @@ public class GeoArticlePipelineService {
             sb.append('\n');
         }
         if (ctx.getPoints() != null && !ctx.getPoints().isEmpty()) {
-            sb.append("候选论据：\n");
+            sb.append("可选笔记：\n");
             int i = 1;
             for (GeoSellPointContextVO.PointItem p : ctx.getPoints()) {
                 String level = StringUtils.hasText(p.getLevel()) ? p.getLevel().trim() : "soft";
@@ -274,19 +306,50 @@ public class GeoArticlePipelineService {
                     sb.append("   依据：").append(p.getEvidence().trim()).append('\n');
                 }
                 if (!"hard".equalsIgnoreCase(level)) {
-                    sb.append("   （软依据：转述宜克制，勿升级成精确数据或独家结论）\n");
+                    sb.append("   （软笔记：转述克制，勿升级成精确数据或独家结论）\n");
                 }
             }
         }
         if (ctx.getForbiddenHints() != null) {
             for (String h : ctx.getForbiddenHints()) {
                 if (StringUtils.hasText(h)) {
-                    sb.append("注意：").append(h.trim()).append('\n');
+                    sb.append("编辑提醒：").append(h.trim()).append('\n');
                 }
             }
         }
         String out = sb.toString().trim();
-        return StringUtils.hasText(out) ? out : "（暂无卖点资料：只答目标问题，勿编造任何品牌数字或认证）";
+        return StringUtils.hasText(out) ? out : "（暂无品牌笔记：请用公共常识与推理答完问题，勿编造品牌事实）";
+    }
+
+    private String formatStyleBrief(GeoArticleStylePack style, GeoArticleSkeleton skeleton) {
+        StringBuilder sb = new StringBuilder();
+        if (style != null) {
+            if (StringUtils.hasText(style.getName())) {
+                sb.append("文风名称：").append(style.getName().trim()).append('\n');
+            }
+            if (StringUtils.hasText(style.getToneGuide())) {
+                sb.append("语气节奏：").append(style.getToneGuide().trim()).append('\n');
+            }
+            if (StringUtils.hasText(style.getStructureGuide())) {
+                sb.append("结构参考：").append(style.getStructureGuide().trim()).append('\n');
+            }
+            if (StringUtils.hasText(style.getBrandGuide())) {
+                sb.append("品牌露出：").append(style.getBrandGuide().trim()).append('\n');
+            }
+            if (StringUtils.hasText(style.getSamplePhrases())) {
+                String sample = style.getSamplePhrases().trim();
+                if (sample.length() > 280) {
+                    sample = sample.substring(0, 280) + "…";
+                }
+                sb.append("可感句式参考（勿照抄）：").append(sample).append('\n');
+            }
+        }
+        if (skeleton != null && StringUtils.hasText(skeleton.getSectionSchema())
+                && !skeleton.getSectionSchema().contains("one-shot")) {
+            sb.append("版式骨架提示（可吸收思路，勿机械填空）：")
+                    .append(truncate(skeleton.getSectionSchema().trim(), 360)).append('\n');
+        }
+        return sb.toString().trim();
     }
 
     /** 从审稿知识库拼硬性口径；失败时退回内置摘要，不阻断成文。 */
@@ -309,53 +372,50 @@ public class GeoArticlePipelineService {
     }
 
     /**
-     * 外网模式主调用：一次生成完整文章（优先流式，便于 Lake 打字机）。
-     * 用户侧顺序：问题主线 → 审稿口径 → 自定义要求 → 语气 → 卖点资料。
+     * 约稿一次成文：深度思考 → 完整成稿（流式推打字机）。
+     * 给模型的是「编辑约稿包」，不是工序指令。
      */
     private Parsed chatWriteOnce(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
-                                 GeoArticleStylePack style, String evidenceProse, String reviewGuardrails,
+                                 GeoArticleStylePack style, GeoArticleSkeleton skeleton,
+                                 String evidenceProse, String reviewGuardrails,
                                  String provider, ProgressListener progress) {
         String topic = nz(placement.getTopicName());
         String question = nz(placement.getTargetQuestion());
         String spine = StringUtils.hasText(question) ? question : topic;
         String system = WRITER_BRIEF + """
-                输出格式（二选一，优先 A）：
-                A) Markdown：第一行用「# 标题」，正文用「## 小节」分段，不要代码块包裹。
-                B) JSON：{"title":"...","html":"..."}，html 用 h2/p 等简单标签。
-                字数大约 1200～1800 字。专心写好文章，不要解释你的写法。
+
+                【交稿格式】
+                只交成稿 Markdown：第一行「# 标题」，其下至少 3 个「## 小节」；不要代码块、不要 JSON、不要写作说明。
+                篇幅约 1200～1800 字。深度思考过程留在思考里，正文里不要出现「我的推理/大纲如下」之类元叙述。
                 """;
 
         StringBuilder user = new StringBuilder();
-        user.append("请写一篇能直接回答读者问题的专题文章。\n\n");
-        user.append("【成文主线——全文必须围绕它展开】\n");
-        user.append(spine).append('\n');
+        user.append("【约稿】请就下列读者问题，独立完成一篇条理清晰、逻辑自洽的专题成稿。\n\n");
+        user.append("读者问题：").append(spine).append('\n');
         if (StringUtils.hasText(question) && StringUtils.hasText(topic) && !question.equals(topic)) {
-            user.append("（所属话题：").append(topic).append("）\n");
-        }
-        user.append("\n自检：①读者能否直接得到对主线的回答；②文中每个具体数字/认证/对比/独家/渠道场景是否都能在「审稿硬性口径」或「卖点资料」中找到原文依据；")
-                .append("③有无资料未写明的行业因果被写成「真相」。通不过就删改，宁可少写一句，也不要补造。\n");
-
-        if (StringUtils.hasText(reviewGuardrails)) {
-            user.append("\n【审稿硬性口径——冲突时以本段为准，高于卖点发挥】\n")
-                    .append(reviewGuardrails).append('\n');
+            user.append("栏目/话题背景：").append(topic).append("（仅背景，勿写成品牌专题）\n");
         }
         if (StringUtils.hasText(dto.getUserPrompt())) {
-            user.append("\n【自定义写作要求——必须遵守，但不得突破审稿硬性口径】\n")
-                    .append(dto.getUserPrompt().trim()).append('\n');
+            user.append("\n编辑额外要求：\n").append(dto.getUserPrompt().trim()).append('\n');
         }
-        if (StringUtils.hasText(style.getToneGuide())) {
-            user.append("\n语气参考：").append(style.getToneGuide().trim()).append('\n');
+
+        String styleBrief = formatStyleBrief(style, skeleton);
+        if (StringUtils.hasText(styleBrief)) {
+            user.append("\n【风格与结构参考——吸收气质，自主谋篇】\n").append(styleBrief).append('\n');
         }
-        user.append("\n【卖点事实来源——封闭世界；按主线挑选，禁止补造】\n")
-                .append(evidenceProse).append('\n');
-        user.append("\n配图稍后由系统从素材库插入，你只需写好文字。");
+        if (StringUtils.hasText(reviewGuardrails)) {
+            user.append("\n【审稿口径——事实冲突时以这里为准】\n")
+                    .append(reviewGuardrails).append('\n');
+        }
+        user.append("\n【参考笔记】\n").append(evidenceProse).append('\n');
+        user.append("\n请先在思考中完成：重述问题 → 定主线判断 → 安排小节递进 → 对照 E-E-A-T 与广告法自检 → 决定用哪几条笔记（可不用）。")
+                .append("想清楚后再写正文。配图由编辑后补，你只负责文字成稿。");
 
         StringBuilder acc = new StringBuilder();
         long[] lastPush = {0L};
         boolean[] thinkingNotified = {false};
         boolean[] writingNotified = {false};
         try {
-            // 流式开深度思考：reasoning 只更新进度文案；content 推打字机草稿
             String raw = aiChatService.chatStream(system, user.toString(), provider,
                     WRITE_TEMPERATURE, true, WRITE_TOP_P, delta -> {
                 if (!StringUtils.hasText(delta)) {
@@ -363,7 +423,7 @@ public class GeoArticlePipelineService {
                 }
                 if (!writingNotified[0]) {
                     writingNotified[0] = true;
-                    mark(null, progress, "write", "撰写正文", "running", "正在流式写稿…");
+                    mark(null, progress, "write", "撰稿人成文", "running", "撰稿人落笔中…");
                 }
                 acc.append(delta);
                 long now = System.currentTimeMillis();
@@ -382,12 +442,11 @@ public class GeoArticlePipelineService {
             }, reasoning -> {
                 if (!thinkingNotified[0] && StringUtils.hasText(reasoning)) {
                     thinkingNotified[0] = true;
-                    mark(null, progress, "write", "撰写正文", "running", "深度思考中，正文稍后出现…");
+                    mark(null, progress, "write", "撰稿人成文", "running", "撰稿人深度推理中…");
                 }
             });
             return parseArticleFlexible(raw);
         } catch (BusinessException e) {
-            // 流式不可用时回退非流式（可开深度思考求稳）
             log.warn("流式写稿失败，回退非流式: {}", e.getMessage());
             String raw = aiChatService.chat(system, user.toString(), provider,
                     WRITE_TEMPERATURE, true, WRITE_TOP_P);
@@ -567,6 +626,19 @@ public class GeoArticlePipelineService {
         return sb.toString();
     }
 
+    /** 话题/问题/自定义要求是否明确要求点到品牌；清单类生活方式问题默认不强制。 */
+    private static boolean wantsBrandMention(GeoContentPlacement placement, GeoContentAiGenerateDTO dto) {
+        String blob = (nz(placement.getTopicName()) + " "
+                + nz(placement.getTargetQuestion()) + " "
+                + (dto != null ? nz(dto.getUserPrompt()) : "")).toLowerCase(Locale.ROOT);
+        if (blob.contains("小巴依") || blob.contains("品牌") || blob.contains("软文") || blob.contains("种草品牌")) {
+            return true;
+        }
+        // 明确的对比/选购「哪家」「哪个牌子」
+        return blob.contains("哪家") || blob.contains("哪个牌子") || blob.contains("什么牌子")
+                || blob.contains("品牌推荐") || blob.contains("怎么选品牌");
+    }
+
     private static int countBrandMentions(String html) {
         if (!StringUtils.hasText(html)) {
             return 0;
@@ -673,6 +745,13 @@ public class GeoArticlePipelineService {
             html.append("<p>").append(para).append("</p>");
         }
         if (!StringUtils.hasText(title)) {
+            // 模型偶发只写 ## 不写 #：用第一个小节标题顶上，避免落成「未命名文章」
+            Matcher h2 = Pattern.compile("(?is)<h2>(.*?)</h2>").matcher(html);
+            if (h2.find()) {
+                title = h2.group(1).replaceAll("\\s+", " ").trim();
+            }
+        }
+        if (!StringUtils.hasText(title) || "未命名文章".equals(title)) {
             title = "未命名文章";
         }
         if (html.isEmpty()) {
