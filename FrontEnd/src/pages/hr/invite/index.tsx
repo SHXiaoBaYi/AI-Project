@@ -148,6 +148,7 @@ function textOf(value: unknown) {
 function mapRow(raw: Record<string, unknown>): InviteRow {
   const interviewerUserId = Number(raw.interviewer_user_id);
   const status = textOf(raw.status);
+  // 后端仅关联「已有结论」的面试记录；空壳不算 hasRecord
   const hasRecord = raw.record_id != null && raw.record_id !== '';
   const ccUserIds = String(raw.cc_user_ids ?? '')
     .split('|')

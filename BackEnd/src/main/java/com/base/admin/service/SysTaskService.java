@@ -55,6 +55,7 @@ public interface SysTaskService {
 
     /**
      * 发起审核后，为该阶段审核人生成「审核文章」任务（biz=审核轮次）。
+     * 同审核记录驳回后再提审时重开已完成任务，不新建重复任务。
      * @param sourceUserId 任务来源人=文章撰写人
      */
     void createGeoReviewTasks(Long reviewId, Long placementId, String bizTitle,

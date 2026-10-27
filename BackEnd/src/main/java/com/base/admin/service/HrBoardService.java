@@ -171,7 +171,7 @@ public class HrBoardService {
                 LEFT JOIN hr_channel ch ON ch.channel_code = a.channel_code
                 LEFT JOIN hr_stage_def sd ON sd.stage_code = a.current_stage
                 WHERE rec.is_active = 1
-                  AND (rec.conclusion IS NULL OR rec.conclusion = '' OR UPPER(rec.conclusion) = 'PENDING')
+                  AND UPPER(TRIM(rec.conclusion)) = 'PENDING'
                 """);
         List<Object> args = new ArrayList<>();
         appendPendingRoundFilter(sql, args, pendingIndex);
@@ -1291,9 +1291,9 @@ public class HrBoardService {
     }
 
     /**
-     * 待面试：与「面试记录」同口径——结论为待定(PENDING)或未填，
+     * 待面试：与「面试记录」同口径——结论为待定(PENDING)，
      * 面试时间（记录 interviewed_at，空则回退邀约 interview_at）落在筛选范围内；按候选人去重。
-     * 初试=round1，复试=round2，终试=round≥3。
+     * 初试=round1，复试=round2，终试=round≥3。空壳未填结论不计入。
      */
     private long[] countPendingInterview(HrBoardQueryDTO base, LocalDate start, LocalDate end) {
         HrBoardQueryDTO q = copyQueryDates(base, start, end);
@@ -1312,7 +1312,7 @@ public class HrBoardService {
                 LEFT JOIN hr_interview_invite inv ON inv.id = rec.invite_id AND inv.is_active = 1
                 LEFT JOIN hr_requisition r ON r.id = COALESCE(rec.requisition_id, a.requisition_id) AND r.is_active = 1
                 WHERE rec.is_active = 1
-                  AND (rec.conclusion IS NULL OR rec.conclusion = '' OR UPPER(rec.conclusion) = 'PENDING')
+                  AND UPPER(TRIM(rec.conclusion)) = 'PENDING'
                 """);
         List<Object> args = new ArrayList<>();
         appendPendingRoundFilter(sql, args, pendingIndex);

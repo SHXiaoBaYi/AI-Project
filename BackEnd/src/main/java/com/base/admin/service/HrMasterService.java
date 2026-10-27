@@ -231,6 +231,7 @@ public class HrMasterService {
                        (SELECT COUNT(DISTINCT a.id) FROM hr_application a
                         JOIN hr_interview_record rec ON rec.application_id = a.id AND rec.is_active = 1
                         WHERE a.requisition_id = r.id AND a.is_active = 1
+                          AND rec.conclusion IS NOT NULL AND TRIM(rec.conclusion) <> ''
                           AND COALESCE(rec.interviewed_at, rec.create_time) >= CURDATE()
                           AND COALESCE(rec.interviewed_at, rec.create_time) < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
                        ) today_interview_count,
@@ -770,6 +771,7 @@ public class HrMasterService {
                     SELECT DISTINCT a.id FROM hr_application a
                     JOIN hr_interview_record rec ON rec.application_id = a.id AND rec.is_active = 1
                     WHERE a.is_active = 1 AND a.requisition_id = ?
+                      AND rec.conclusion IS NOT NULL AND TRIM(rec.conclusion) <> ''
                       AND COALESCE(rec.interviewed_at, rec.create_time) >= CURDATE()
                       AND COALESCE(rec.interviewed_at, rec.create_time) < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
                     """;

@@ -48,6 +48,7 @@ public class HrInterviewRecordService {
                 LEFT JOIN hr_interview_verdict v ON v.application_id = rec.application_id AND v.round_no = rec.round_no AND v.is_active = 1
                 LEFT JOIN sys_user vu ON vu.user_id = v.decided_by
                 WHERE rec.is_active = 1
+                  AND rec.conclusion IS NOT NULL AND TRIM(rec.conclusion) <> ''
                 """);
         List<Object> args = new ArrayList<>();
         if (q.getCandidateName() != null && !q.getCandidateName().isBlank()) {

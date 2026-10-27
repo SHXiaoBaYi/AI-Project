@@ -216,7 +216,7 @@ public class HrInviteService {
                         LEFT JOIN sys_user cu ON cu.user_id = cc.cc_user_id
                         WHERE cc.invite_id = i.id AND cc.is_active = 1) cc_names,
                        mine_rec.id record_id, mine_rec.conclusion my_conclusion, mine_rec.fail_reason my_fail_reason, mine_rec.comment my_comment,
-                       CASE WHEN mine_rec.id IS NOT NULL AND mine_rec.conclusion IS NOT NULL AND mine_rec.conclusion <> '' THEN 1 ELSE 0 END reviewed
+                       CASE WHEN mine_rec.id IS NOT NULL THEN 1 ELSE 0 END reviewed
                 FROM hr_interview_invite i
                 JOIN hr_application a ON a.id = i.application_id
                 JOIN hr_candidate c ON c.id = a.candidate_id
@@ -226,6 +226,7 @@ public class HrInviteService {
                 LEFT JOIN hr_interview_record mine_rec ON mine_rec.application_id = i.application_id
                   AND mine_rec.round_no = i.round_no AND mine_rec.interviewer_user_id = i.interviewer_user_id
                   AND mine_rec.is_active = 1
+                  AND mine_rec.conclusion IS NOT NULL AND TRIM(mine_rec.conclusion) <> ''
                 WHERE i.is_active = 1
                 """);
         List<Object> args = new ArrayList<>();
@@ -639,11 +640,13 @@ public class HrInviteService {
         }
     }
 
+    /** 仅当已有有效面试结论时才视为「有面试记录」，空壳/未填结论不锁邀约。 */
     private boolean hasInterviewRecord(Long inviteId) {
         Integer count = jdbc.queryForObject("""
                 SELECT COUNT(1)
                 FROM hr_interview_invite i
                 JOIN hr_interview_record rec ON rec.is_active = 1
+                  AND rec.conclusion IS NOT NULL AND TRIM(rec.conclusion) <> ''
                   AND (
                     rec.invite_id = i.id
                     OR (rec.application_id = i.application_id AND rec.round_no = i.round_no

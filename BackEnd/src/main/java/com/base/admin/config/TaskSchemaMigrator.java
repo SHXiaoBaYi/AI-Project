@@ -36,11 +36,91 @@ public class TaskSchemaMigrator implements ApplicationRunner {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v18_task_complete_proof.sql"));
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v24_geo_review_task.sql"));
             ensureTaskSourceColumns(connection);
+            cleanupDuplicateGeoReviewTasks(connection);
         } catch (Exception e) {
             log.error("Task schema migrate failed", e);
             throw e;
         }
         log.info("任务模块表与菜单已同步");
+    }
+
+    /**
+     * 清理「审核文章」脏任务：
+     * 1) 同投放同阶段仅保留当前审核记录（优先 pending，否则最大 id）对应任务，其余软删；
+     * 2) 同一审核记录+负责人多条有效任务只留一条（优先未完成，否则最大 id）。
+     */
+    private void cleanupDuplicateGeoReviewTasks(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_review") || !tableExists(connection, "sys_task")) {
+            return;
+        }
+        boolean hasStage = columnExists(connection, "geo_content_review", "stage_no");
+        String stageExpr = hasStage ? "IFNULL(r.stage_no, 1)" : "1";
+        String stageExprK = hasStage ? "IFNULL(stage_no, 1)" : "1";
+        try (Statement st = connection.createStatement()) {
+            int superseded = st.executeUpdate("""
+                    UPDATE sys_task t
+                    INNER JOIN (
+                      SELECT r.id AS old_id
+                      FROM geo_content_review r
+                      INNER JOIN (
+                        SELECT placement_id, %s AS stage_key,
+                               COALESCE(MAX(CASE WHEN status = 'pending' THEN id END), MAX(id)) AS keep_id
+                        FROM geo_content_review
+                        WHERE is_active = 1
+                        GROUP BY placement_id, %s
+                      ) k ON r.placement_id = k.placement_id
+                         AND %s = k.stage_key
+                         AND r.id <> k.keep_id
+                      WHERE r.is_active = 1
+                    ) x ON t.biz_id = x.old_id
+                    SET t.is_active = 0,
+                        t.status = CASE WHEN t.status IN ('已完成', '已取消') THEN t.status ELSE '已取消' END,
+                        t.update_by = 'cleanup-geo-review-task'
+                    WHERE t.is_active = 1
+                      AND t.biz_type = 'geo_content_review'
+                      AND t.task_type = '审核文章'
+                    """.formatted(stageExprK, stageExprK, stageExpr));
+            if (superseded > 0) {
+                log.info("已软删 {} 条被同阶段新审核记录替代的审核任务", superseded);
+            }
+
+            int dupOwner = st.executeUpdate("""
+                    UPDATE sys_task t
+                    INNER JOIN (
+                      SELECT id FROM (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                 PARTITION BY biz_id, owner_user_id
+                                 ORDER BY CASE WHEN status IN ('已完成', '已取消') THEN 1 ELSE 0 END ASC, id DESC
+                               ) AS rn
+                        FROM sys_task
+                        WHERE is_active = 1
+                          AND biz_type = 'geo_content_review'
+                          AND task_type = '审核文章'
+                      ) ranked
+                      WHERE rn > 1
+                    ) d ON t.id = d.id
+                    SET t.is_active = 0,
+                        t.status = CASE WHEN t.status IN ('已完成', '已取消') THEN t.status ELSE '已取消' END,
+                        t.update_by = 'cleanup-geo-review-task'
+                    """);
+            if (dupOwner > 0) {
+                log.info("已软删 {} 条同一审核记录下重复的审核任务", dupOwner);
+            }
+        }
+    }
+
+    private boolean tableExists(Connection connection, String table) throws Exception {
+        String sql = """
+                SELECT COUNT(1) FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+                """;
+        try (var ps = connection.prepareStatement(sql)) {
+            ps.setString(1, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getInt(1) > 0;
+            }
+        }
     }
 
     /** 任务来源人：历史/系统任务默认「系统」，手动创建时可指定用户 */

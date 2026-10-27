@@ -613,11 +613,13 @@ CREATE TABLE IF NOT EXISTS hr_application_ai (
   KEY idx_hr_app_ai (application_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='候选人AI分析，可多份';
 
-INSERT INTO hr_interview_record (application_id, requisition_id, round_no, interviewer_user_id, comment, interviewed_at, create_by, is_active)
-SELECT ir.application_id, a.requisition_id, ir.round_no, ir.interviewer_user_id, ir.comment, ir.interview_at, 'hr-migrate', 1
+-- 仅回填「轮次上已有评语」的历史数据；邀约产生的空轮次不再灌成无结论面试记录
+INSERT INTO hr_interview_record (application_id, requisition_id, round_no, interviewer_user_id, conclusion, comment, interviewed_at, create_by, is_active)
+SELECT ir.application_id, a.requisition_id, ir.round_no, ir.interviewer_user_id, 'PENDING', ir.comment, ir.interview_at, 'hr-migrate', 1
 FROM hr_interview_round ir
 JOIN hr_application a ON a.id = ir.application_id
 WHERE ir.is_active = 1 AND ir.interviewer_user_id IS NOT NULL
+  AND ir.comment IS NOT NULL AND TRIM(ir.comment) <> ''
 AND NOT EXISTS (
   SELECT 1 FROM hr_interview_record rec
   WHERE rec.application_id = ir.application_id AND rec.round_no = ir.round_no AND rec.interviewer_user_id = ir.interviewer_user_id

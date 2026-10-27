@@ -575,22 +575,37 @@ public class SysTaskServiceImpl implements SysTaskService {
         }
         taskTypeService.resolveTypeName(Constants.TASK_TYPE_GEO_REVIEW);
         String titleBase = StringUtils.hasText(bizTitle) ? bizTitle.trim() : ("投放#" + placementId);
+        String stageName = stageNo == Constants.CONTENT_REVIEW_STAGE2 ? "二审" : "一审";
         for (Long reviewerId : reviewerUserIds) {
             if (reviewerId == null) {
                 continue;
             }
-            Long exists = taskMapper.selectCount(new LambdaQueryWrapper<SysTask>()
+            // 进行中：不重复建
+            Long open = taskMapper.selectCount(new LambdaQueryWrapper<SysTask>()
                     .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_REVIEW)
                     .eq(SysTask::getBizId, reviewId)
                     .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_REVIEW)
                     .eq(SysTask::getOwnerUserId, reviewerId)
+                    .ne(SysTask::getStatus, "已完成")
                     .ne(SysTask::getStatus, "已取消"));
-            if (exists != null && exists > 0) {
+            if (open != null && open > 0) {
+                continue;
+            }
+            // 同审核记录曾完成后再次提审：重开原任务，避免重复任务
+            List<SysTask> done = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                    .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_REVIEW)
+                    .eq(SysTask::getBizId, reviewId)
+                    .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_REVIEW)
+                    .eq(SysTask::getOwnerUserId, reviewerId)
+                    .eq(SysTask::getStatus, "已完成")
+                    .orderByDesc(SysTask::getId)
+                    .last("LIMIT 1"));
+            if (!done.isEmpty()) {
+                reopenGeoReviewTask(done.get(0), reviewerId, stageName, titleBase, placementId);
                 continue;
             }
             SysUser user = requireUser(reviewerId, "审核人");
             SysTaskDTO dto = new SysTaskDTO();
-            String stageName = stageNo == Constants.CONTENT_REVIEW_STAGE2 ? "二审" : "一审";
             dto.setTitle("【审核文章·" + stageName + "】" + abbreviate(titleBase, 80));
             dto.setContent(placementId == null ? "" : ("placementId=" + placementId));
             dto.setTaskType(Constants.TASK_TYPE_GEO_REVIEW);
@@ -609,6 +624,30 @@ public class SysTaskServiceImpl implements SysTaskService {
             }
             create(dto);
         }
+    }
+
+    private void reopenGeoReviewTask(SysTask task, Long reviewerId, String stageName, String titleBase, Long placementId) {
+        String oldStatus = task.getStatus();
+        String note = "撰写人再次提审，任务重新打开";
+        if (StringUtils.hasText(task.getRemark())) {
+            task.setRemark(task.getRemark().trim() + "；" + note);
+        } else {
+            task.setRemark(note);
+        }
+        task.setTitle("【审核文章·" + stageName + "】" + abbreviate(titleBase, 80));
+        task.setBizTitle(titleBase);
+        if (placementId != null) {
+            task.setContent("placementId=" + placementId);
+        }
+        task.setStatus("未开始");
+        task.setProgress(0);
+        task.setActualEndTime(null);
+        applyStatusSideEffects(task, oldStatus);
+        taskMapper.updateById(task);
+        assigneeMapper.update(null, new LambdaUpdateWrapper<SysTaskAssignee>()
+                .eq(SysTaskAssignee::getTaskId, task.getId())
+                .eq(SysTaskAssignee::getUserId, reviewerId)
+                .set(SysTaskAssignee::getDone, 0));
     }
 
     @Override

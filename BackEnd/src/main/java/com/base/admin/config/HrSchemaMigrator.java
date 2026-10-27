@@ -38,6 +38,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         seedMenus();
         seedAliases();
         cleanupOrphanOwnerAliases();
+        cleanupEmptyInterviewRecords();
         seedTaskType();
         ensureFailReasonColumn();
         ensureInviteCcEventColumn();
@@ -51,6 +52,23 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureCandidateProfileColumns();
         alignStageDisplayNames();
         log.info("招聘表结构、角色、用户和菜单已同步");
+    }
+
+    /**
+     * 软删无结论且无评语的空壳面试记录（历史上由「轮次→记录」启动灌数产生）。
+     * 面试记录应以真实评价为准；仅有邀约不应出现在面试记录列表。
+     */
+    private void cleanupEmptyInterviewRecords() {
+        int n = jdbc.update("""
+                UPDATE hr_interview_record
+                SET is_active = 0, update_by = 'hr-cleanup-empty-record'
+                WHERE is_active = 1
+                  AND (conclusion IS NULL OR TRIM(conclusion) = '')
+                  AND (comment IS NULL OR TRIM(comment) = '')
+                """);
+        if (n > 0) {
+            log.info("已软删 {} 条无结论且无评语的空壳面试记录", n);
+        }
     }
 
     /** 一期：统一 hr_stage_def 展示名；电话通过进漏斗可见。 */
