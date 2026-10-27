@@ -619,21 +619,21 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
 
     private static String metricLabel(String chartType, String level, BoardTaskTofuQueryDTO q) {
         return switch (chartType) {
-            case "publishCount" -> "发布数量";
-            case "citeRate" -> "被收录/投放成功%";
-            case "employeeCiteCompare" -> "被收录/投放成功%";
-            case "employeeCiteMom" -> "收录率环比(pp)";
-            case "employeeCiteYoy" -> "收录率同比(pp)";
+            case "publishCount" -> "发布数量（整数）";
+            case "citeRate" -> "被收录/投放成功×100+%";
+            case "employeeCiteCompare" -> "被收录/投放成功×100+%";
+            case "employeeCiteMom" -> "收录率环比(百分点%)";
+            case "employeeCiteYoy" -> "收录率同比(百分点%)";
             case "topicCiteCount" -> {
                 if ("topic".equals(level)
                         && StringUtils.hasText(q.getContentPlatform())
                         && StringUtils.hasText(q.getAiPlatform())) {
-                    yield q.getContentPlatform().trim() + " · " + q.getAiPlatform().trim() + " · 各话题引用次数";
+                    yield q.getContentPlatform().trim() + " · " + q.getAiPlatform().trim() + " · 各话题引用次数（整数）";
                 }
                 if ("aiPlatform".equals(level) && StringUtils.hasText(q.getContentPlatform())) {
-                    yield q.getContentPlatform().trim() + " · 各AI平台引用次数";
+                    yield q.getContentPlatform().trim() + " · 各AI平台引用次数（整数）";
                 }
-                yield "各内容平台被引用次数";
+                yield "各内容平台被引用次数（整数）";
             }
             default -> "指标";
         };

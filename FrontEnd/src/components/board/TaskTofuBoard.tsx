@@ -80,6 +80,38 @@ function formatSigned(value: unknown) {
   return `${rounded > 0 ? `+${text}` : text}%`;
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 发布数量 / 被引用次数：整数，无小数 */
+function formatCount(value: unknown) {
+  const n = toFiniteNumber(value);
+  if (n == null) return '';
+  return String(Math.round(n));
+}
+
+/** 收录率：后端已 ×100，前端补 % */
+function formatPercent(value: unknown) {
+  const n = toFiniteNumber(value);
+  if (n == null) return '';
+  const rounded = Math.round(n * 10) / 10;
+  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return `${text}%`;
+}
+
+function isCountChart(chartType: BoardTaskTofuChartType) {
+  return chartType === 'publishCount' || chartType === 'topicCiteCount';
+}
+
+function formatChartValue(chartType: BoardTaskTofuChartType, value: unknown) {
+  if (chartType === 'citeRate' || chartType === 'employeeCiteCompare') return formatPercent(value);
+  if (chartType === 'employeeCiteMom' || chartType === 'employeeCiteYoy') return formatSigned(value);
+  if (isCountChart(chartType)) return formatCount(value);
+  return formatCount(value);
+}
+
 function buildCiteTable(charts: { axis: string; series: string; value: number; key?: string }[]) {
   const axes: string[] = [];
   const seen = new Set<string>();
@@ -104,38 +136,38 @@ const CHARTS: ChartDef[] = [
   {
     chartType: 'publishCount',
     title: '话题发布数量',
-    hint: '口径：平台明细且投放状态=投放成功，按发布时间落入筛选区间计数（不含审核未通过）。对齐文章列表请同时筛「投放成功」+发布时间。下钻：话题 → 目标问题 → 员工 → 内容平台',
+    hint: '口径：平台明细且投放状态=投放成功，按发布时间落入筛选区间计数（整数，不含审核未通过）。对齐文章列表请同时筛「投放成功」+发布时间。下钻：话题 → 目标问题 → 员工 → 内容平台',
     publishDetail: true,
   },
   {
     chartType: 'citeRate',
     title: '话题被AI收录率',
-    hint: '口径：分母=区间内投放成功篇数；分子=其中至少被 1 个 AI 收录的篇数。第1层按话题；第2层按 AI 平台',
+    hint: '口径：分母=区间内投放成功篇数；分子=其中至少被 1 个 AI 收录的篇数；展示=分子/分母×100+%。第1层按话题；第2层按 AI 平台',
   },
   {
     chartType: 'employeeCiteCompare',
     title: '员工AI收录对比',
-    hint: '口径：分母=该撰写人区间内投放成功篇数；分子=其中被 AI 收录篇数（不含审核未通过）。第1层按撰写人；第2层按 AI 平台',
+    hint: '口径：分母=该撰写人区间内投放成功篇数；分子=其中被 AI 收录篇数（不含审核未通过）；展示=分子/分母×100+%。第1层按撰写人；第2层按 AI 平台',
     writerDrill: true,
   },
   {
     chartType: 'employeeCiteMom',
     title: '员工AI收录环比',
-    hint: '口径：同上「投放成功」收录率，本周期减上一周期，单位百分点（可为负）。点表格下钻',
+    hint: '口径：同上「投放成功」收录率，本周期减上一周期，单位百分点（可为负，带%展示）。点表格下钻',
     tableDrill: true,
     writerDrill: true,
   },
   {
     chartType: 'employeeCiteYoy',
     title: '员工AI收录同比',
-    hint: '口径：同上「投放成功」收录率，本周期减去年同期，单位百分点（可为负）。点表格下钻',
+    hint: '口径：同上「投放成功」收录率，本周期减去年同期，单位百分点（可为负，带%展示）。点表格下钻',
     tableDrill: true,
     writerDrill: true,
   },
   {
     chartType: 'topicCiteCount',
     title: '被引用内容发布平台数',
-    hint: '口径：统计区间内、关联投放成功文章的 AI 引用次数（按引用记录计）。第1层内容平台 → 第2层 AI → 第3层话题',
+    hint: '口径：统计区间内、关联投放成功文章的 AI 引用次数（按引用记录计，整数）。第1层内容平台 → 第2层 AI → 第3层话题',
     citePlatformDrill: true,
   },
 ];
@@ -406,11 +438,12 @@ function IndependentTaskTofuCard({
   };
 
   // 系列必须用完整原文；下钻键只用 drillKey，禁止再写 key（G2 会把 key 当系列，话题层变成数字 ID）
+  // 发布数量 / 被引用次数在数据层先取整，避免柱标、轴刻度露出小数
   const chartData = charts.map((p) => ({
     axis: formatAxis(p.axis),
     series: p.series,
     fullSeries: p.series,
-    value: p.value,
+    value: isCountChart(def.chartType) ? Math.round(p.value) : p.value,
     drillKey: p.key ?? p.series,
   }));
   drillLookupRef.current = buildBoardDrillLookup(chartData);
@@ -535,27 +568,19 @@ function IndependentTaskTofuCard({
                 labelAutoHide: false,
                 labelAutoRotate: false,
               },
-              ...(def.tableDrill
-                ? {
-                    y: {
-                      labelFormatter: (value: unknown) =>
-                        formatSigned(typeof value === 'number' ? value : Number(value)),
-                    },
-                  }
-                : {}),
+              y: {
+                labelFormatter: (value: unknown) =>
+                  formatChartValue(def.chartType, typeof value === 'number' ? value : Number(value)),
+              },
             }}
             {...boardColumnChartProps}
-            {...(def.tableDrill
-              ? {
-                  label: {
-                    ...boardColumnChartProps.label,
-                    text: (datum: Record<string, unknown>) => {
-                      const text = formatSigned(datum?.value);
-                      return text === '-' ? '' : text;
-                    },
-                  },
-                }
-              : {})}
+            label={{
+              ...boardColumnChartProps.label,
+              text: (datum: Record<string, unknown>) => {
+                const text = formatChartValue(def.chartType, datum?.value);
+                return text === '-' ? '' : text;
+              },
+            }}
             onReady={def.tableDrill ? undefined : bindChartClick}
           />
         </BoardColumnScrollArea>
