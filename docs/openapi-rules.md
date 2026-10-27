@@ -2,7 +2,7 @@
 
 ## 基本要求
 
-- 类级别必须加 `@Schema(description = "xxx")`
+- 类级别必须加 `@Schema(description = "xxxx")`
 - 每个字段必须加 `@Schema(description = "xxx")`
 - 所有数值类型字段（`Integer`、`Long`、`int`、`long`）**必须加 `example`**，否则 SpringDoc 会自动填充最大值
 - `description` 使用中文
