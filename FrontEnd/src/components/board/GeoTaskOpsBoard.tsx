@@ -237,38 +237,47 @@ export function GeoTaskOpsBoard({
     void loadDrill(drill, pageNum, pageSize, subFilter);
   }, [drill, pageNum, pageSize, subFilter, loadDrill]);
 
-  const taskColumns: ColumnsType<BoardGeoTaskRow> = [
-    { title: '任务', dataIndex: 'title', ellipsis: true },
-    { title: '类型', dataIndex: 'taskType', width: 120, ellipsis: true },
-    { title: '话题', dataIndex: 'topicName', width: 120, ellipsis: true },
-    { title: '撰写人', dataIndex: 'writerName', width: 96 },
-    {
-      title: '进度',
-      dataIndex: 'progress',
-      width: 100,
-      render: (v) => (
-        <Progress
-          percent={v ?? 0}
-          size='small'
-        />
-      ),
-    },
-    { title: '状态', dataIndex: 'status', width: 88 },
-    {
-      title: '优先级',
-      dataIndex: 'priority',
-      width: 72,
-      render: (v) => PRIORITY[v as number] ?? '-',
-    },
-    { title: '计划截止', dataIndex: 'planEndTime', width: 160 },
-    { title: '实际完成', dataIndex: 'actualEndTime', width: 160 },
-    {
-      title: '完成情况',
-      key: 'timing',
-      width: 180,
-      render: (_, r) => <TimingTag row={r} />,
-    },
-  ];
+  const taskColumns: ColumnsType<BoardGeoTaskRow> = useMemo(
+    () => [
+      { title: '任务', dataIndex: 'title', ellipsis: true },
+      { title: '类型', dataIndex: 'taskType', width: 120, ellipsis: true },
+      { title: '话题', dataIndex: 'topicName', width: 120, ellipsis: true },
+      { title: '撰写人', dataIndex: 'writerName', width: 96, render: (v) => v || '-' },
+      {
+        title: '审核人',
+        dataIndex: 'ownerName',
+        width: 96,
+        render: (v, r) => (r.taskType === '审核文章' ? v || r.assigneeNames || '-' : '-'),
+      },
+      {
+        title: '进度',
+        dataIndex: 'progress',
+        width: 100,
+        render: (v) => (
+          <Progress
+            percent={v ?? 0}
+            size='small'
+          />
+        ),
+      },
+      { title: '状态', dataIndex: 'status', width: 88 },
+      {
+        title: '优先级',
+        dataIndex: 'priority',
+        width: 72,
+        render: (v) => PRIORITY[v as number] ?? '-',
+      },
+      { title: '计划截止', dataIndex: 'planEndTime', width: 160 },
+      { title: '实际完成', dataIndex: 'actualEndTime', width: 160 },
+      {
+        title: '完成情况',
+        key: 'timing',
+        width: 180,
+        render: (_, r) => <TimingTag row={r} />,
+      },
+    ],
+    [],
+  );
 
   const onTableChange = (p: TablePaginationConfig) => {
     setPageNum(p.current ?? 1);

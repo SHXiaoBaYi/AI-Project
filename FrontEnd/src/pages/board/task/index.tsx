@@ -3,9 +3,10 @@ import { Card, DatePicker, Radio, Space } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { TaskTofuBoard } from '@/components/board/TaskTofuBoard';
 import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
+import { endOfIsoWeek, startOfIsoWeek } from '@/utils/geoBoardQuery';
 
 function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
-  if (grain === 'week') return [start.startOf('week'), end.endOf('week')];
+  if (grain === 'week') return [startOfIsoWeek(start), endOfIsoWeek(end)];
   if (grain === 'month') return [start.startOf('month'), end.endOf('month')];
   if (grain === 'year') return [start.startOf('year'), end.endOf('year')];
   return [start.startOf('day'), end.endOf('day')];

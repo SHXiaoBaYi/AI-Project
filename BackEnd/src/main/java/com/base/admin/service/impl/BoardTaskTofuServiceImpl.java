@@ -83,6 +83,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
 
         List<GeoChartPointVO> points = switch (chartType) {
             case "publishCount" -> buildPublishCount(data, range[0], range[1], grain, level, q);
+            // 收录看板统一：分母/计数仅「投放成功」（不含审核未通过）
             case "citeRate", "employeeCiteCompare" -> buildCiteRate(data, range[0], range[1], grain, level, q, null);
             case "employeeCiteMom" -> buildCiteRate(data, range[0], range[1], grain, level, q, "mom");
             case "employeeCiteYoy" -> buildCiteRate(data, range[0], range[1], grain, level, q, "yoy");
@@ -100,7 +101,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         Dataset data = loadDataset(range[0], range[1], q);
         List<GeoContentArticleDetailRowVO> rows = new ArrayList<>();
         for (ItemRow row : data.items) {
-            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(row.item.getPublishStatus())) {
+            if (!isPublishSuccess(row.item) || !hasPlatform(row.item)) {
                 continue;
             }
             if (!matchFilters(row, q, true)) {
@@ -133,7 +134,8 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         Map<String, Integer> bag = new LinkedHashMap<>();
         Map<String, String> labels = new LinkedHashMap<>();
         for (ItemRow row : data.items) {
-            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(row.item.getPublishStatus())) {
+            // 发布数量：仅投放成功；须有平台名（与文章列表一致）
+            if (!isPublishSuccess(row.item) || !hasPlatform(row.item)) {
                 continue;
             }
             if (row.item.getPublishTime() == null
@@ -185,7 +187,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
     }
 
     /**
-     * deltaMode null=收录率；mom/yoy=百分点差。
+     * 收录率：分母仅投放成功（有平台）；deltaMode null=收录率，mom/yoy=百分点差。
      */
     private List<GeoChartPointVO> buildCiteRate(Dataset data, LocalDate start, LocalDate end,
                                                  String grain, String level, BoardTaskTofuQueryDTO q,
@@ -197,8 +199,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
         Set<Long> citedItemIds = data.cites.stream().map(c -> c.item.getId()).collect(Collectors.toSet());
 
         for (ItemRow row : data.items) {
-            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(row.item.getPublishStatus())
-                    || row.item.getPublishTime() == null) {
+            if (!isPublishSuccess(row.item) || !hasPlatform(row.item) || row.item.getPublishTime() == null) {
                 continue;
             }
             if (row.item.getPublishTime().toLocalDate().isBefore(start) || row.item.getPublishTime().toLocalDate().isAfter(end)) {
@@ -210,7 +211,7 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             if (!matchFilters(row, q, false)) {
                 continue;
             }
-            // AI 平台层：成功分母仍按当前过滤范围的成功投放；分子看是否被该 AI 引用
+            // AI 平台层：分母=投放成功；分子=被该 AI 引用
             if ("aiPlatform".equals(level)) {
                 Set<String> aiOfItem = data.cites.stream()
                         .filter(c -> Objects.equals(c.item.getId(), row.item.getId()))
@@ -247,12 +248,11 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             labels.put(ref.key, ref.label);
         }
 
-        // AI 平台层分母：同一日期桶下成功投放数（按员工等过滤后）
+        // AI 平台层分母：同一日期桶下投放成功数（按员工等过滤后）
         if ("aiPlatform".equals(level)) {
             Map<String, Set<Long>> successByAxis = new HashMap<>();
             for (ItemRow row : data.items) {
-                if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(row.item.getPublishStatus())
-                        || row.item.getPublishTime() == null) {
+                if (!isPublishSuccess(row.item) || !hasPlatform(row.item) || row.item.getPublishTime() == null) {
                     continue;
                 }
                 if (!matchFilters(row, q, false)) {
@@ -325,6 +325,16 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             delta.put(e.getKey(), round2(e.getValue() - base));
         }
         return toRatePoints(delta, labels, start, end, grain);
+    }
+
+    /** 收录看板统一口径：投放成功 */
+    private static boolean isPublishSuccess(GeoContentPlacementItem item) {
+        return item != null && Constants.CONTENT_PUBLISH_SUCCESS.equals(item.getPublishStatus());
+    }
+
+    /** 与文章列表一致：必须已选发布平台 */
+    private static boolean hasPlatform(GeoContentPlacementItem item) {
+        return item != null && StringUtils.hasText(item.getPlatformName());
     }
 
     private boolean matchFilters(ItemRow row, BoardTaskTofuQueryDTO q, boolean requireContentPlatform) {
@@ -610,8 +620,8 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
     private static String metricLabel(String chartType, String level, BoardTaskTofuQueryDTO q) {
         return switch (chartType) {
             case "publishCount" -> "发布数量";
-            case "citeRate" -> "被收录文章/发布文章%";
-            case "employeeCiteCompare" -> "被收录文章/产出文章%";
+            case "citeRate" -> "被收录/投放成功%";
+            case "employeeCiteCompare" -> "被收录/投放成功%";
             case "employeeCiteMom" -> "收录率环比(pp)";
             case "employeeCiteYoy" -> "收录率同比(pp)";
             case "topicCiteCount" -> {
@@ -663,7 +673,8 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
             case "month" -> date.getYear() + "-" + String.format("%02d", date.getMonthValue());
             case "year" -> String.valueOf(date.getYear());
             case "week" -> {
-                WeekFields wf = WeekFields.of(Locale.CHINA);
+                // 与前端 isoWeek / 文章列表周筛选统一为 ISO（周一至周日）
+                WeekFields wf = WeekFields.ISO;
                 int w = date.get(wf.weekOfWeekBasedYear());
                 int y = date.get(wf.weekBasedYear());
                 yield y + "-W" + String.format("%02d", w);
@@ -682,8 +693,8 @@ public class BoardTaskTofuServiceImpl implements BoardTaskTofuService {
                     int y = Integer.parseInt(p[0]);
                     int w = Integer.parseInt(p[1]);
                     yield LocalDate.of(y, 1, 1)
-                            .with(WeekFields.of(Locale.CHINA).weekOfWeekBasedYear(), w)
-                            .with(WeekFields.of(Locale.CHINA).dayOfWeek(), 1);
+                            .with(WeekFields.ISO.weekOfWeekBasedYear(), w)
+                            .with(WeekFields.ISO.dayOfWeek(), 1);
                 }
                 default -> LocalDate.parse(axis);
             };
