@@ -331,6 +331,14 @@ public class DingTalkScheduleRuleService {
      * @param hasResume 仅 interview 必填；会议/汇报可为 false
      */
     public void assertBookable(Long targetUserId, String action, LocalDateTime start, int durationMin, boolean hasResume) {
+        assertBookable(targetUserId, action, start, durationMin, hasResume, true);
+    }
+
+    /**
+     * @param enforcePreferenceWindows false 时不校验喜好时段（招聘侧面试邀约全天可约，仍校验简历/节假日/不安排窗）
+     */
+    public void assertBookable(Long targetUserId, String action, LocalDateTime start, int durationMin,
+                               boolean hasResume, boolean enforcePreferenceWindows) {
         String act = normalizeAction(action);
         if (start == null) {
             throw new BusinessException("请选择开始时间");
@@ -361,7 +369,7 @@ public class DingTalkScheduleRuleService {
         if (overlapsWindows(rule.getBlockedWindows(), start, end)) {
             throw new BusinessException(hintOr(rule, "该时段对方设置为不安排任何日程"));
         }
-        if (!rule.isEnabled()) {
+        if (!enforcePreferenceWindows || !rule.isEnabled()) {
             return;
         }
         if (!withinWindows(pref.getWindows(), start, end)) {

@@ -180,7 +180,7 @@ export default function InviteFormModal({
   editingInitial,
   seed,
   slotOptions,
-  createDingTalkCalendar,
+  createDingTalkCalendar = true,
   sendDingTalkWorkNotice,
 }: InviteFormModalProps) {
   const { message } = App.useApp();
@@ -310,7 +310,16 @@ export default function InviteFormModal({
           if (editingId) {
             const saved = await updateHrInviteApi(editingId, payload);
             if (saved?.warning) message.warning(saved.warning, 8);
-            else message.success(ids.length > 1 ? `已保存这场邀约，共 ${ids.length} 名面试官` : '已保存');
+            else
+              message.success(
+                createDingTalkCalendar
+                  ? ids.length > 1
+                    ? `已保存这场邀约，共 ${ids.length} 名面试官（钉钉日程已重建，简历已挂钉盘）`
+                    : '已保存，钉钉日程已重建（简历已挂钉盘）'
+                  : ids.length > 1
+                    ? `已保存这场邀约，共 ${ids.length} 名面试官`
+                    : '已保存',
+              );
           } else {
             const saved = await createHrInviteApi(payload);
             if (saved?.warning) message.warning(saved.warning, 8);
@@ -318,7 +327,7 @@ export default function InviteFormModal({
               message.success(
                 sendDingTalkWorkNotice === false
                   ? `已发起邀约并创建钉钉日程（简历已挂钉盘描述），共 ${ids.length} 名面试官`
-                  : `已为 ${ids.length} 名面试官发起邀约并创建钉钉日程`,
+                  : `已为 ${ids.length} 名面试官发起邀约并创建钉钉日程（简历已挂钉盘）`,
               );
             } else {
               message.success(`已为 ${ids.length} 名面试官发起邀约`);

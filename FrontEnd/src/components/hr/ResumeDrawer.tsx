@@ -427,6 +427,7 @@ export function ResumeDrawer({
         open={invitePreset != null}
         preset={invitePreset}
         lockCandidate
+        createDingTalkCalendar
         onOpenChange={(next) => {
           if (!next) setInvitePreset(null);
         }}

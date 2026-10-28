@@ -890,9 +890,10 @@ public class HrInviteService {
             if (interviewerUserId == null) {
                 continue;
             }
+            // 招聘侧面试邀约：全天可约，不套日程喜好时段（仍校验简历/节假日/不安排窗）
             dingTalkScheduleRuleService.assertBookable(
                     interviewerUserId, DingTalkScheduleRuleService.ACTION_INTERVIEW,
-                    dto.getInterviewAt(), duration, true);
+                    dto.getInterviewAt(), duration, true, false);
             Map<String, Object> person = loadInvitePerson(interviewerUserId, dto.getApplicationId());
             if (person == null) {
                 markNoCalendar(inviteId);
