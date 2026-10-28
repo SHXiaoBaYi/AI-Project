@@ -53,13 +53,12 @@ public class HrPanelService {
 
         DateWindow window = resolveWindow(q);
         log.info("hr panel stats window {} ~ {} grain={}", window.start(), window.end(), q.getGrain());
-        // 在招岗位：当前 OPEN，跟部门/负责人等筛选项，不跟日周月窗；
-        // 其余活动指标 + 下方岗位列表：仍按区间（接收日/活动）过滤
+        // 下方岗位列表与「目前在招」豆腐块同一过滤口径（部门/负责人/状态等），不套日周月窗；
+        // 日期窗只影响其它活动指标，以及列表里的「区间进展」汇总
         FilterSql baseFilter = buildFilter(q, null);
-        FilterSql jobFilter = buildFilter(q, window);
         LocalDate today = LocalDate.now();
-        long total = countLong("SELECT COUNT(1) " + jobFilter.fromWhere, jobFilter.args);
-        List<HrPanelJobVO> rows = queryJobs(jobFilter, today, pageNum, pageSize, true, window);
+        long total = countLong("SELECT COUNT(1) " + baseFilter.fromWhere, baseFilter.args);
+        List<HrPanelJobVO> rows = queryJobs(baseFilter, today, pageNum, pageSize, true, window);
         HrPanelVO vo = new HrPanelVO();
         vo.setStats(loadStats(baseFilter, window));
         vo.setTotal(total);
@@ -505,8 +504,8 @@ public class HrPanelService {
     }
 
     /**
-     * @param window 非空时按岗位接收日（无则创建日）或区间内招聘活动限制，用于下方岗位列表；
-     *               目前在招岗位统计传 null，不套日期窗
+     * @param window 保留参数以兼容旧调用；面板主列表与在招统计均传 null（不按日期裁岗位）。
+     *               日期窗仅用于活动指标与「区间进展」。
      */
     private FilterSql buildFilter(HrPanelQueryDTO q, DateWindow window) {
         StringBuilder sql = new StringBuilder("""

@@ -34,13 +34,13 @@ import java.util.Map;
 public class HrInviteService {
 
     private static final String NO_CALENDAR_REASON = "面试官未绑定钉钉，未创建钉钉日程";
-    /** 临时关闭自动建钉钉日程时的状态说明（列表「创建钉钉日程」入口也已关闭） */
-    private static final String CALENDAR_SKIPPED_REASON = "暂未自动创建钉钉日程";
+    /** 显式跳过建日程时的状态说明（仅当请求未要求建日程时使用） */
+    private static final String CALENDAR_SKIPPED_REASON = "未创建钉钉日程";
     /**
-     * 临时开关：创建/修改面试邀约时是否自动创建钉钉日程。
-     * false = 只落邀约记录（状态 NO_CALENDAR），不调钉钉；恢复时改回 true。
+     * 创建/修改面试邀约时是否自动创建钉钉日程（简历上传钉盘 + 描述挂链）。
+     * false 时仅落邀约记录；也可由 DTO.createDingTalkCalendar=true 单次开启。
      */
-    private static final boolean AUTO_CREATE_DINGTALK_CALENDAR = false;
+    private static final boolean AUTO_CREATE_DINGTALK_CALENDAR = true;
     private static final Map<Integer, String> ROUND_NAME = Map.of(1, "一面", 2, "二面", 3, "三面", 4, "四面", 5, "五面");
     /** 面试开始时间：全天可约，半小时整点 */
 
@@ -419,17 +419,10 @@ public class HrInviteService {
 
     @Transactional
     public void createCalendar(Long id) {
-        // 临时关闭：面试邀约不再创建钉钉日程
-        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
-            throw new BusinessException("当前已关闭面试邀约创建钉钉日程，仅保存邀约记录");
-        }
         createCalendar(id, true);
     }
 
     private void createCalendar(Long id, boolean notifyCc) {
-        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
-            throw new BusinessException("当前已关闭面试邀约创建钉钉日程，仅保存邀约记录");
-        }
         Map<String, Object> invite = loadInvite(id);
         assertCalendarCreatable(invite);
         Long interviewerUserId = (Long) invite.get("interviewerUserId");
@@ -470,10 +463,6 @@ public class HrInviteService {
 
     @Transactional
     public HrInviteSaveVO createCalendarBatch(java.util.List<Long> ids) {
-        // 临时关闭：面试邀约不再创建钉钉日程
-        if (!AUTO_CREATE_DINGTALK_CALENDAR) {
-            throw new BusinessException("当前已关闭面试邀约创建钉钉日程，仅保存邀约记录");
-        }
         if (ids == null || ids.isEmpty()) {
             throw new BusinessException("请选择要创建钉钉日程的面试邀约");
         }

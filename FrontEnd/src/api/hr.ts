@@ -969,7 +969,7 @@ export function createHrInviteApi(data: {
   interviewAt: string;
   durationMin?: number;
   location?: string;
-  /** 日程助手等场景：创建钉钉日程并上传简历到钉盘写入描述 */
+  /** 是否创建钉钉日程并上传简历到钉盘写入描述；后端默认已自动创建，助手场景可显式传 true */
   createDingTalkCalendar?: boolean;
   /** 是否发钉钉工作通知；助手场景传 false */
   sendDingTalkWorkNotice?: boolean;
@@ -1014,17 +1014,17 @@ export function updateHrInviteApi(id: number, data: Record<string, unknown>) {
   return request.put<unknown, { id: number; warning?: string }>(`/hr/invite/${id}`, data);
 }
 
-// 临时关闭：面试邀约不再创建钉钉日程（恢复时与后端 calendar 接口一并打开）
-// export function createHrInviteCalendarApi(id: number) {
-//   return request.post(`/hr/invite/${id}/calendar`);
-// }
-//
-// export function createHrInviteCalendarBatchApi(ids: number[]) {
-//   return request.post<unknown, { id?: number; warning?: string; created?: number; unboundInterviewers?: string[] }>(
-//     '/hr/invite/calendar/batch',
-//     ids,
-//   );
-// }
+/** 为未建日程的邀约补建钉钉日程（简历上传钉盘并写入描述） */
+export function createHrInviteCalendarApi(id: number) {
+  return request.post(`/hr/invite/${id}/calendar`);
+}
+
+export function createHrInviteCalendarBatchApi(ids: number[]) {
+  return request.post<unknown, { id?: number; warning?: string; created?: number; unboundInterviewers?: string[] }>(
+    '/hr/invite/calendar/batch',
+    ids,
+  );
+}
 
 export function deleteHrInviteApi(id: number) {
   return request.delete<unknown, { id: number; warning?: string }>(`/hr/invite/${id}`);

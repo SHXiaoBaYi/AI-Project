@@ -139,29 +139,27 @@ export function bookingRangeError(
   return null;
 }
 
-/** 面试开始时间：当天若已过某些半点则禁用 */
+/** 面试开始时间：全天 0–23 点可约（半小时档）；当天仅禁用已过去的时分 */
 export function interviewPastDisabledTime(selected?: Dayjs | null) {
   const clock = dayjs();
   const base = selected && dayjs.isDayjs(selected) && selected.isValid() ? selected : clock;
   const sameDay = base.isSame(clock, 'day');
   return {
     disabledHours: () => {
+      if (!sameDay) return [];
       const hours: number[] = [];
       for (let h = 0; h < 24; h++) {
-        if (h < 9 || h > 17) hours.push(h);
-        else if (sameDay && h < clock.hour()) hours.push(h);
+        if (h < clock.hour()) hours.push(h);
       }
       return hours;
     },
     disabledMinutes: (hour: number) => {
+      if (!sameDay || hour !== clock.hour()) return [];
       const blocked: number[] = [];
-      if (hour === 9) blocked.push(0);
-      if (sameDay && hour === clock.hour()) {
-        for (const m of [0, 30]) {
-          if (m <= clock.minute()) blocked.push(m);
-        }
+      for (const m of [0, 30]) {
+        if (m <= clock.minute()) blocked.push(m);
       }
-      return [...new Set(blocked)];
+      return blocked;
     },
   };
 }

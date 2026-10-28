@@ -143,6 +143,7 @@ const HrPanelPage = memo(function HrPanelPage() {
         dataIndex: 'panelStatus',
         valueType: 'select',
         width: 100,
+        initialValue: 'OPEN',
         fieldProps: { options: PANEL_STATUS, allowClear: true },
         render: (_, record) => (
           <Tag color={record.panelStatus === 'OPEN' ? 'processing' : 'default'}>{record.panelStatusLabel || '—'}</Tag>
@@ -372,7 +373,7 @@ const HrPanelPage = memo(function HrPanelPage() {
           />
           <span className='text-xs text-neutral-500'>
             当前统计：{dateQuery.startDate} ~ {dateQuery.endDate}
-            （「目前在招岗位」为当前招聘中需求条数，不受日期影响；进入背调/待入职、筛选简历、电话、约面、面试及下方列表按该区间）
+            （「目前在招岗位」与下方列表均为当前筛选下的需求条数，不受日期影响；进入背调/待入职、筛选简历、电话、约面、面试及列表「区间进展」按该区间）
           </span>
         </Space>
       </Card>

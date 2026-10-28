@@ -535,7 +535,7 @@ public class HrMasterController {
         return Result.ok();
     }
 
-    @Operation(summary = "发起面试邀约（暂不创建钉钉日程）")
+    @Operation(summary = "发起面试邀约（自动创建钉钉日程并挂载简历钉盘链接）")
     @PostMapping("/invite")
     @RequiresPermission("hr:invite:add")
     @Log(title = "面试邀约", businessType = 1)
@@ -568,7 +568,7 @@ public class HrMasterController {
         return Result.ok(inviteService.list(q));
     }
 
-    @Operation(summary = "修改面试邀约（暂不创建钉钉日程）")
+    @Operation(summary = "修改面试邀约（自动重建钉钉日程并挂载简历钉盘链接）")
     @PutMapping("/invite/{id}")
     @RequiresPermission("hr:invite:edit")
     @Log(title = "面试邀约", businessType = 2)
@@ -576,23 +576,22 @@ public class HrMasterController {
         return Result.ok(inviteService.update(id, dto));
     }
 
-    // 临时关闭：面试邀约不再提供「创建钉钉日程」接口（恢复时取消注释，并打开 HrInviteService.AUTO_CREATE_DINGTALK_CALENDAR）
-    // @Operation(summary = "为未建日程的邀约创建钉钉日程")
-    // @PostMapping("/invite/{id:\\d+}/calendar")
-    // @RequiresPermission("hr:invite:edit")
-    // @Log(title = "面试邀约", businessType = 2)
-    // public Result<Void> createInviteCalendar(@PathVariable Long id) {
-    //     inviteService.createCalendar(id);
-    //     return Result.ok();
-    // }
-    //
-    // @Operation(summary = "批量为未建日程的邀约创建钉钉日程")
-    // @PostMapping("/invite/calendar/batch")
-    // @RequiresPermission("hr:invite:edit")
-    // @Log(title = "面试邀约-批量创建钉钉日程", businessType = 2)
-    // public Result<HrInviteSaveVO> createInviteCalendarBatch(@RequestBody List<Long> ids) {
-    //     return Result.ok(inviteService.createCalendarBatch(ids));
-    // }
+    @Operation(summary = "为未建日程的邀约创建钉钉日程（强制附带简历钉盘链接）")
+    @PostMapping("/invite/{id:\\d+}/calendar")
+    @RequiresPermission("hr:invite:edit")
+    @Log(title = "面试邀约", businessType = 2)
+    public Result<Void> createInviteCalendar(@PathVariable Long id) {
+        inviteService.createCalendar(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量为未建日程的邀约创建钉钉日程（强制附带简历钉盘链接）")
+    @PostMapping("/invite/calendar/batch")
+    @RequiresPermission("hr:invite:edit")
+    @Log(title = "面试邀约-批量创建钉钉日程", businessType = 2)
+    public Result<HrInviteSaveVO> createInviteCalendarBatch(@RequestBody List<Long> ids) {
+        return Result.ok(inviteService.createCalendarBatch(ids));
+    }
 
     @Operation(summary = "删除邀约")
     @DeleteMapping("/invite/{id:\\d+}")
