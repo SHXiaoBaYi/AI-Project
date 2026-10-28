@@ -1754,9 +1754,9 @@
   {
     "category": "article_structure",
     "code": "as-faq-table",
-    "title": "须含表格或FAQ",
+    "title": "须含表格与结论后相关问题",
     "sortOrder": 130,
-    "content": "正文至少包含：①一张对比/推荐表（Markdown 表即可），或等价的强结构化列表；②文末问答 2～4问（标题可不固定叫「常见问题」），问答对齐目标提问词。表与问答的位置、小节标题应随题目变化，避免篇篇同构。",
+    "content": "正文至少含一张 Markdown 管道对比/推荐表（转 HTML 表）。文末顺序：先「结论」，再「相关问题」2～4组（问：/答：中文；答=判断+硬事实）。禁止 Q/A/QA、禁止相关问题放在结论前。",
     "sourceFile": "人工审稿-结构化"
   },
   {
@@ -1782,5 +1782,29 @@
     "sortOrder": 131,
     "content": "开头不仅回应问题，还要带出可核对依据或关键取舍（参数/系列差异/场景边界），让读者感到有重点，而不是模板总述。",
     "sourceFile": "人工反馈-首段同质化"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-closing-reasoned",
+    "title": "先结论后相关问题",
+    "sortOrder": 54,
+    "content": "文末顺序：先「结论」（推理美文回扣本题答案并嵌硬事实，禁综上所述等套话），再「相关问题」2～4组（问：/答：）。答先通顺判断再落资料事实；问句须贴本文，禁万能三问与 Q/A/QA。",
+    "sourceFile": "人工反馈-结论与相关问题"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-end-reasoned",
+    "title": "结论后接相关问题",
+    "sortOrder": 132,
+    "content": "「结论」应能独立回答标题/提问且至少带1个可核对依据；其后「相关问题」延伸真追问，答案=美文判断+事实，减少同质化。",
+    "sourceFile": "人工反馈-结论与相关问题"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-related-qa-after-close",
+    "title": "相关问题在结论之后",
+    "sortOrder": 133,
+    "content": "相关问题必须写在结论之后；每组问答应与本篇主题相关；禁止把问答块插在结论前或写成英文字母 Q/A。",
+    "sourceFile": "人工反馈-结论与相关问题"
   }
 ]

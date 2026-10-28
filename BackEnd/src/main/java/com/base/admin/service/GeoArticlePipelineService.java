@@ -75,27 +75,36 @@ public class GeoArticlePipelineService {
             2. 禁止开篇套话：勿用「本文将从…方面进行分析」「随着生活水平…」「在众多…中，如何选择…至关重要」「维护良好的…至关重要」等空导语；勿只写一句正确的废话就进目录。
             3. 首段要让人感到「这篇有判断」：说清推荐谁/送什么/选哪一类，以及为什么（用事实，不用空洞形容词）。
 
-            【反 AI 味、反同质化——结构可以变】
-            4. 禁止每篇同一骨架：勿固定成「1.品质 2.口感 3.供应链 4.权威认证 + 结论」；小节标题要贴本题，像真人专栏，不像评分表填空。
-            5. 降低 AI 腔：少用「首先/其次/再者/最后」「综上所述」「值得一提的是」「在…的过程中」堆砌；段与段用具体判断衔接，不要对称排比空话。
-            6. 必需要素（表或强列表、文末 FAQ）保留，但出现位置、小节数、标题措辞、叙事顺序按本题变化；可把表放在中段或靠后，FAQ 标题也可写成「读者常问」等，勿篇篇「## 常见问题」一字不差还接「结论与建议」。
-            7. 篇幅与节奏有变化：有的小节短、有的展开一个场景；避免「每节等长四段」。
+            【反 AI 味、反同质化——中段可变；先结论，再相关问题】
+            4. 禁止中段万能四连：勿固定「1.品质 2.口感 3.供应链 4.权威认证」；小节标题贴本题。
+            5. 降低 AI 腔：少用「首先/其次/再者/最后」「综上所述」「总而言之」「希望以上内容对你有所帮助」「值得一提的是」；用具体判断衔接。
+            6. 必需要素：一张 Markdown 管道表（系统转 HTML 表）。
+            7. 文末顺序固定：先「## 结论」，再「## 相关问题」（2～4 组）。禁止把相关问题放在结论前；禁止 Q/A/QA、「你想确认的几点」。
+
+            【结论——推理美文 + 事实依据】
+            8. 「## 结论」先回扣读者问题（推荐谁/送什么/选哪类），再写清「为什么」——依据必须落到笔记里的参数、系列差异或场景边界。
+            9. 结论 120～200 字，像专栏收束；切入可轮换（回扣推荐 / 场景收束 / 取舍落地 / 下一步行动），禁套话与同质化句式。
+
+            【相关问题——结论之后，仍要美文感 + 事实答】
+            10. 「## 相关问题」紧接结论后：每组「问：…」「答：…」；问句须与本文主题/目标提问相关（延伸读者真会追问的点），勿万能三问。
+            11. 答：先用一两句通顺判断（可读、有观点），再落到资料硬事实；无资料则不编。禁止条目复读正文、禁止空原则答。
+            12. 各组问法与答法要有变化，避免篇篇同一套「好不好保存/贵不贵/怎么买」。
 
             【推理写美文】
-            8. 定一个核心判断，再拆 3～5 个递进小节（因果/对比）；公共常识把问题讲透，品牌论据只从参考笔记取用。
-            9. 文风像头条/知乎成稿：有观点、段意分明；不是内部软文，也不是资料粘贴。
+            13. 定一个核心判断，再拆 3～5 个递进小节；公共常识把问题讲透，品牌论据只从参考笔记取用。
+            14. 文风像头条/知乎成稿：有观点、段意分明；不是内部软文，也不是资料粘贴。
 
             【封闭世界——品牌相关必须守住】
-            10. 概念正确：只有「小巴依大尾羊」是羊品种；乳羔羊/小羯羊/金羯羊等是产品系列，品种仍是大尾羊。
-            11. 硬事实替换形容词；场景与卖点对齐；背书写全或删掉；无资料不补造。
-            12. 禁区：冬运会/航天背书、机场专柜、修行定制、自建全程冷链、对客「礼盒/精品包装」、顺丰骑手/冰袋、地理标志/溯源码/工厂加工过程等。
+            15. 概念正确：只有「小巴依大尾羊」是羊品种；乳羔羊/小羯羊/金羯羊等是产品系列，品种仍是大尾羊。
+            16. 硬事实替换形容词；场景与卖点对齐；背书写全或删掉；无资料不补造。
+            17. 禁区：冬运会/航天背书、机场专柜、修行定制、自建全程冷链、对客「礼盒/精品包装」、顺丰骑手/冰袋、地理标志/溯源码/工厂加工过程等。
 
             【题型对齐】
-            13. 榜单/「哪个」给对比结论；「送什么」给清单；「选哪种羊」给对比推荐。禁止把清单/榜单题写成纯方法论。
-            14. 品牌「小巴依」自然出现（建议不超过 3 处）；牧场写到资料专名；谈包装须落到产品包装事实。
+            18. 榜单/「哪个」给对比结论；「送什么」给清单；「选哪种羊」给对比推荐。禁止把清单/榜单题写成纯方法论。
+            19. 品牌「小巴依」自然出现（建议不超过 3 处）；牧场写到资料专名；谈包装须落到产品包装事实。
 
             【广告法与 E-E-A-T】
-            15. 禁用最/第一/唯一/顶级/领先地位/行业领先/消费者首选等；禁疗效与虚构评价；勿伪造「我亲自实测」。
+            20. 禁用最/第一/唯一/顶级/领先地位/行业领先/消费者首选等；禁疗效与虚构评价；勿伪造「我亲自实测」。
             """;
 
     /** 高置信杜撰/违禁句式兜底擦除（提示词仍是主防线） */
@@ -153,6 +162,7 @@ public class GeoArticlePipelineService {
         QuestionIntent intent = classifyIntent(placement.getTargetQuestion(), placement.getTopicName());
         int diversitySeed = diversitySeed(placement);
         LeadStyle leadStyle = LeadStyle.pick(diversitySeed);
+        ClosingStyle closingStyle = ClosingStyle.pick(diversitySeed + 9);
         LayoutSpice layoutSpice = LayoutSpice.pick(diversitySeed + 17);
         GeoArticleStylePack style = pickStylePack(placement, diversitySeed);
         GeoArticleSkeleton skeleton = pickSkeleton(intent, diversitySeed);
@@ -162,7 +172,8 @@ public class GeoArticlePipelineService {
                 style.getName()
                         + (StringUtils.hasText(skeleton.getName()) ? " · " + skeleton.getName() : "")
                         + " · 题型=" + intent.label()
-                        + " · 开篇=" + leadStyle.label());
+                        + " · 开篇=" + leadStyle.label()
+                        + " · 结论=" + closingStyle.label());
 
         mark(stages, progress, "sell", "整理参考", "running", "整理卖点与审稿口径（封闭世界事实槽）…");
         GeoSellPointContextVO ctx = sellPointContextService.build(
@@ -184,7 +195,7 @@ public class GeoArticlePipelineService {
                 candidates.isEmpty() ? "暂无素材" : ("候选 " + candidates.size() + " 张，成文后按需插入"));
 
         mark(stages, progress, "write", "撰稿人成文", "running", "撰稿人深度推理中，成稿稍后写出…");
-        Parsed draft = chatWriteOnce(placement, dto, style, skeleton, intent, leadStyle, layoutSpice,
+        Parsed draft = chatWriteOnce(placement, dto, style, skeleton, intent, leadStyle, closingStyle, layoutSpice,
                 evidenceProse, reviewGuardrails, provider, progress);
         draft = scrubFabrications(draft);
         draft = normalizeDraftMarkup(draft);
@@ -400,8 +411,8 @@ public class GeoArticlePipelineService {
      */
     private Parsed chatWriteOnce(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
                                  GeoArticleStylePack style, GeoArticleSkeleton skeleton,
-                                 QuestionIntent intent, LeadStyle leadStyle, LayoutSpice layoutSpice,
-                                 String evidenceProse, String reviewGuardrails,
+                                 QuestionIntent intent, LeadStyle leadStyle, ClosingStyle closingStyle,
+                                 LayoutSpice layoutSpice, String evidenceProse, String reviewGuardrails,
                                  String provider, ProgressListener progress) {
         String topic = nz(placement.getTopicName());
         String question = nz(placement.getTargetQuestion());
@@ -409,10 +420,11 @@ public class GeoArticlePipelineService {
         String system = WRITER_BRIEF + """
 
                 【交稿格式】
-                只交成稿 Markdown：第一行「# 标题」，其下至少 3 个「## 小节」（小节标题必须贴本题，禁止万能四段标题）。
-                须含一张 Markdown 表（或等价强列表）与文末问答块；问答标题可换说法。
-                不要代码块、不要 JSON、不要写作说明；正文不要残留「###」粘连。
-                篇幅约 1100～1700 字，允许各节长短不一。深度思考留在思考通道。
+                只交成稿 Markdown：第一行「# 标题」→ 中段贴本题的「## 小节」→「## 结论」→「## 相关问题」。
+                对比/推荐表用管道表（系统转 HTML 表格）。
+                「## 结论」：推理美文 + 事实依据，回扣本题，去套话、去同质化。
+                「## 相关问题」必须在结论之后：2～4 组，格式「问：…」「答：…」；答要通顺有判断且依据笔记硬事实；问句贴本文，勿万能三问、勿 Q/A/QA。
+                不要代码块、不要 JSON、不要写作说明。篇幅约 1200～1800 字。
                 """;
 
         StringBuilder user = new StringBuilder();
@@ -420,6 +432,7 @@ public class GeoArticlePipelineService {
         user.append("读者问题：").append(spine).append('\n');
         user.append("题型判定：").append(intent.label()).append(" —— ").append(intent.contract()).append('\n');
         user.append("开篇写法（本篇指定）：").append(leadStyle.instruction()).append('\n');
+        user.append("结论写法（本篇指定）：").append(closingStyle.instruction()).append('\n');
         user.append("版式变化（本篇指定）：").append(layoutSpice.instruction()).append('\n');
         if (StringUtils.hasText(question) && StringUtils.hasText(topic) && !question.equals(topic)) {
             user.append("栏目/话题背景：").append(topic).append("（仅背景，勿写成品牌说明书）\n");
@@ -437,9 +450,10 @@ public class GeoArticlePipelineService {
                     .append(reviewGuardrails).append('\n');
         }
         user.append("\n【封闭世界参考笔记】\n").append(evidenceProse).append('\n');
-        user.append("\n请先在思考中完成：重述问题 → 写出首段要突出的 1～2 个重点（须含硬事实）→ 定与本题相关的小节标题（禁止品质/口感/供应链/权威认证四连）")
-                .append(" → 安排表与问答位置 → 自检品种/系列、场景对齐、半截背书、广告法与套话。")
-                .append("想清楚后再写正文。配图由编辑后补。");
+        user.append("\n请先在思考中完成：重述问题 → 首段重点（含硬事实）→ 中段小节标题（禁万能四连）→ 表")
+                .append(" → 起草「结论」：本题答案 + 1～2 条硬事实 + 去套话")
+                .append(" → 起草「相关问题」2～4 组（贴本文的追问；答=判断美文句 + 事实依据，勿同质化万能问）")
+                .append(" → 自检品种/系列、场景对齐、半截背书、广告法。想清楚后再写正文。");
 
         StringBuilder acc = new StringBuilder();
         long[] lastPush = {0L};
@@ -614,12 +628,43 @@ public class GeoArticlePipelineService {
         }
     }
 
-    /** 版式调料：同一题型也不要篇篇同构 */
+    /** 结论切入：保留「## 结论」标题，内容去 AI 味、去同质化 */
+    private enum ClosingStyle {
+        RESTATE_PICK,
+        SCENE_CLOSE,
+        TRADEOFF_CLOSE,
+        ACTION_CLOSE;
+
+        static ClosingStyle pick(int seed) {
+            ClosingStyle[] all = values();
+            return all[Math.floorMod(seed, all.length)];
+        }
+
+        String label() {
+            return switch (this) {
+                case RESTATE_PICK -> "回扣推荐";
+                case SCENE_CLOSE -> "场景收束";
+                case TRADEOFF_CLOSE -> "取舍落地";
+                case ACTION_CLOSE -> "下一步行动";
+            };
+        }
+
+        String instruction() {
+            return switch (this) {
+                case RESTATE_PICK -> "「## 结论」直接回扣本题推荐（谁/哪类/送什么），用 1～2 个资料硬事实说明依据；勿写「综上所述」。";
+                case SCENE_CLOSE -> "「## 结论」用吃法/送礼/选购场景收束到答案，场景里嵌硬事实；像专栏收尾，不像总结报告。";
+                case TRADEOFF_CLOSE -> "「## 结论」点明关键取舍如何落地（及为何），依据必须来自笔记参数/系列差异；禁空形容词。";
+                case ACTION_CLOSE -> "「## 结论」给一句可执行下一步，并紧跟事实依据；禁「希望以上内容有帮助」「祝你…成功」。";
+            };
+        }
+    }
+
+    /** 版式调料：中段可变，结尾固定落到「结论」 */
     private enum LayoutSpice {
         TABLE_MID,
         TABLE_LATE,
         LIST_HEAVY,
-        FAQ_ALT_TITLE;
+        FAQ_BEFORE_CLOSE;
 
         static LayoutSpice pick(int seed) {
             LayoutSpice[] all = values();
@@ -628,10 +673,10 @@ public class GeoArticlePipelineService {
 
         String instruction() {
             return switch (this) {
-                case TABLE_MID -> "对比/推荐表放在中段；前后用叙事小节承接；文末问答可用「常见问题」。";
-                case TABLE_LATE -> "先把判断与场景讲透，表放在靠后；文末问答标题可写成「还想确认的几点」。";
-                case LIST_HEAVY -> "主体以错落列表+短段为主，表可更短；避免四段等长；问答放文末。";
-                case FAQ_ALT_TITLE -> "表可在前半出现；文末问答标题勿固定「常见问题」，可用「读者常问」「买前先看」等。";
+                case TABLE_MID -> "对比/推荐表放中段；文末顺序固定：「## 结论」→「## 相关问题」（问/答中文，答含硬事实）。";
+                case TABLE_LATE -> "先叙事再放表；然后「## 结论」（美文+事实），最后「## 相关问题」。";
+                case LIST_HEAVY -> "中段以错落列表+短段为主，表可短；「## 结论」后接「## 相关问题」，禁套话与万能三问。";
+                case FAQ_BEFORE_CLOSE -> "表可在前半；仍须先写「## 结论」，再写「## 相关问题」（本枚举名历史保留，顺序以结论在前为准）。";
             };
         }
     }
@@ -915,7 +960,9 @@ public class GeoArticlePipelineService {
             title = h1.group(1).trim();
             text = text.substring(0, h1.start()) + text.substring(h1.end());
         }
-        text = text.trim();
+        text = normalizeFaqMarkdown(text.trim());
+        // 先把管道表提成 HTML，避免被当成段落转义
+        text = convertMarkdownTables(text);
         // ## → 临时标记再转 h2
         String withHeads = MD_H2.matcher(text).replaceAll("\n\n@@H2@@$1@@/H2@@\n\n");
         StringBuilder html = new StringBuilder();
@@ -925,12 +972,23 @@ public class GeoArticlePipelineService {
                 continue;
             }
             if (b.startsWith("@@H2@@") && b.endsWith("@@/H2@@")) {
-                String h = b.substring(6, b.length() - 7).trim();
+                String h = sanitizeFaqHeading(b.substring(6, b.length() - 7).trim());
                 html.append("<h2>").append(escapeHtml(h)).append("</h2>");
+                continue;
+            }
+            if (b.startsWith("<table")) {
+                html.append(b);
+                continue;
+            }
+            if (b.startsWith("<")) {
+                // 已是片段 HTML（如问答块）
+                html.append(b);
                 continue;
             }
             String para = escapeHtml(b).replace("\n", "<br/>");
             para = para.replaceAll("\\*\\*(.+?)\\*\\*", "<strong>$1</strong>");
+            // 转义后的「问：」「答：」加粗可读性
+            para = para.replace("问：", "<strong>问：</strong>").replace("答：", "<strong>答：</strong>");
             html.append("<p>").append(para).append("</p>");
         }
         if (!StringUtils.hasText(title)) {
@@ -949,6 +1007,118 @@ public class GeoArticlePipelineService {
         return new Parsed(title, stripDataImages(html.toString()));
     }
 
+    /** Markdown 管道表 → HTML &lt;table&gt; */
+    private static String convertMarkdownTables(String md) {
+        if (!StringUtils.hasText(md) || !md.contains("|")) {
+            return md;
+        }
+        String[] lines = md.replace("\r\n", "\n").split("\n", -1);
+        StringBuilder out = new StringBuilder();
+        List<String> tableLines = new ArrayList<>();
+        for (int i = 0; i <= lines.length; i++) {
+            String line = i < lines.length ? lines[i] : null;
+            if (line != null && looksLikeMdTableRow(line)) {
+                tableLines.add(line);
+                continue;
+            }
+            if (tableLines.size() >= 2) {
+                out.append('\n').append(mdTableToHtml(tableLines)).append("\n\n");
+            } else {
+                for (String t : tableLines) {
+                    out.append(t).append('\n');
+                }
+            }
+            tableLines.clear();
+            if (line != null) {
+                out.append(line).append('\n');
+            }
+        }
+        return out.toString().trim();
+    }
+
+    private static boolean looksLikeMdTableRow(String line) {
+        String t = line == null ? "" : line.trim();
+        if (!t.contains("|")) {
+            return false;
+        }
+        long bars = t.chars().filter(c -> c == '|').count();
+        return bars >= 2;
+    }
+
+    private static boolean looksLikeMdTableSep(String line) {
+        String t = line == null ? "" : line.trim();
+        return t.matches("^\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$");
+    }
+
+    private static String mdTableToHtml(List<String> rows) {
+        List<String> body = new ArrayList<>(rows);
+        // 去掉对齐分隔行
+        if (body.size() >= 2 && looksLikeMdTableSep(body.get(1))) {
+            body.remove(1);
+        }
+        if (body.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("<table>");
+        for (int r = 0; r < body.size(); r++) {
+            List<String> cells = splitMdRow(body.get(r));
+            sb.append("<tr>");
+            for (String cell : cells) {
+                String tag = r == 0 ? "th" : "td";
+                String inner = escapeHtml(cell.trim()).replaceAll("\\*\\*(.+?)\\*\\*", "<strong>$1</strong>");
+                sb.append('<').append(tag).append('>').append(inner).append("</").append(tag).append('>');
+            }
+            sb.append("</tr>");
+        }
+        sb.append("</table>");
+        return sb.toString();
+    }
+
+    private static List<String> splitMdRow(String row) {
+        String t = row.trim();
+        if (t.startsWith("|")) {
+            t = t.substring(1);
+        }
+        if (t.endsWith("|")) {
+            t = t.substring(0, t.length() - 1);
+        }
+        String[] parts = t.split("\\|", -1);
+        List<String> cells = new ArrayList<>();
+        for (String p : parts) {
+            cells.add(p == null ? "" : p.trim());
+        }
+        return cells;
+    }
+
+    /** 把英文字母 Q/A/QA 问法收成中文「问：」「答：」 */
+    private static String normalizeFaqMarkdown(String md) {
+        if (!StringUtils.hasText(md)) {
+            return md;
+        }
+        String s = md;
+        s = s.replaceAll("(?m)^#{1,6}\\s*你想确认的几点\\s*$", "## 常见问题");
+        s = s.replaceAll("(?m)^#{1,6}\\s*还想确认的几点\\s*$", "## 买前先看");
+        s = s.replaceAll("(?m)^#{1,6}\\s*QA\\s*[?？]?\\s*$", "## 常见问题");
+        s = s.replaceAll("(?m)^#{1,6}\\s*Q\\s*A\\s*[?？]?\\s*$", "## 常见问题");
+        s = s.replaceAll("(?m)^\\s*\\*?\\*?\\s*Q\\s*[:：]\\s*", "问：");
+        s = s.replaceAll("(?m)^\\s*\\*?\\*?\\s*A\\s*[:：]\\s*", "答：");
+        s = s.replaceAll("(?m)^\\s*QA\\s*[:：]?\\s*", "问：");
+        return s;
+    }
+
+    private static String sanitizeFaqHeading(String heading) {
+        if (!StringUtils.hasText(heading)) {
+            return heading;
+        }
+        String h = heading.trim();
+        if (h.matches("(?i)QA\\s*[?？]?") || h.matches("(?i)Q\\s*A\\s*[?？]?")
+                || h.contains("你想确认的几点") || h.contains("还想确认的几点")) {
+            return "常见问题";
+        }
+        return h;
+    }
+
     private JsonNode readJson(String content) throws Exception {
         String text = content == null ? "" : content.trim();
         int start = text.indexOf('{');
@@ -964,6 +1134,15 @@ public class GeoArticlePipelineService {
             return "";
         }
         String html = raw.trim();
+        // 若模型把管道表直接塞进 HTML 段落，再尝试抢救成 table
+        if (html.contains("|") && !html.toLowerCase(Locale.ROOT).contains("<table")) {
+            html = convertMarkdownTables(html.replace("<br/>", "\n").replace("<br>", "\n")
+                    .replaceAll("(?is)</?p>", "\n"));
+        }
+        html = html.replaceAll("(?is)<h2>\\s*(?:你想确认的几点|还想确认的几点|QA\\s*[?？]?|Q\\s*A\\s*[?？]?)\\s*</h2>",
+                "<h2>常见问题</h2>");
+        html = html.replaceAll("(?i)>\\s*Q\\s*[:：]\\s*", "><strong>问：</strong>");
+        html = html.replaceAll("(?i)>\\s*A\\s*[:：]\\s*", "><strong>答：</strong>");
         html = html.replaceAll("(?m)^#{1,6}\\s*", "");
         html = html.replaceAll("\\*\\*([^*]+)\\*\\*", "<strong>$1</strong>");
         html = html.replaceAll("(?i)</?h1\\b[^>]*>", "");
