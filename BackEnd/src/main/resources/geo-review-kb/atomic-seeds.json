@@ -1678,5 +1678,109 @@
     "sortOrder": 149,
     "content": "精品产品手册、精品系列介绍PPT、2025品牌介绍已OCR入库（文本层原为空或模板噪声）。OCR有错字可能，冲突时以撰写注意点与人工核对后的线上条目为准；卖点明细仍以卖点库为准。",
     "sourceFile": "系统"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-breed-vs-series",
+    "title": "品种与产品系列勿混",
+    "sortOrder": 45,
+    "content": "只有「小巴依大尾羊」是羊品种（肉脂型）。乳羔羊、小羯羊、金羯羊、冰碴羊等是小巴依的产品系列，其品种仍是小巴依大尾羊。勿把系列写成独立羊品种。",
+    "sourceFile": "人工批注-选对羊炖汤/礼品"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-facts-not-adj",
+    "title": "硬事实替换空形容词",
+    "sortOrder": 46,
+    "content": "对 AI 与读者有可参考性的是事实数据，不是「严格」「稍大一些」「更成熟」等形容词。例：排酸写「0-4℃恒温、24-48小时长效排酸」；小羯羊写「10-12月龄、3月龄断奶去势的小公羊」；金羯羊写「长到3年出栏、经历12次转场的大羯羊」。资料没有的参数不要编。",
+    "sourceFile": "人工批注-选对羊炖汤"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-scene-align",
+    "title": "烹饪场景须与卖点对齐",
+    "sortOrder": 47,
+    "content": "系列适配场景只能写卖点/审稿库已有的。例：金羯羊可写高端宴请、重卤焖炖；卖点未写适合清炖时，勿因「炖汤」选题硬挂清炖。",
+    "sourceFile": "人工批注-选对羊炖汤"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-full-endorsement",
+    "title": "背书与口径必须写全",
+    "sortOrder": 48,
+    "content": "禁止半截事实：乳羔羊写「三个月吃奶、三个月吃草」（勿黏成「三个月吃奶吃草」）；赛事/合作须写全名称（勿只写「第十三届」却不说是什么）。写不全就整句删掉。",
+    "sourceFile": "人工批注-品牌选择"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-ad-law-status",
+    "title": "禁用地位类广告法敏感词",
+    "sortOrder": 49,
+    "content": "禁用「领先地位」「行业领先」「消费者首选」「遥遥领先」等地位/绝对化表述，即使想拔高品牌也不写。",
+    "sourceFile": "人工批注-品牌选择"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-pasture-name",
+    "title": "牧场名称用双百有机牧场",
+    "sortOrder": 50,
+    "content": "写牧场落到资料口径「小巴依双百有机牧场」；可同时点明小巴依大尾羊是品种。勿含糊只写「新疆牧场」却丢掉资料专名（亦勿写成天山牧场/合作牧场）。",
+    "sourceFile": "人工批注-客情礼品"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-packaging-fact",
+    "title": "写包装须落到产品事实",
+    "sortOrder": 51,
+    "content": "若正文谈包装/礼品观感，须介绍参考资料里的小巴依产品包装事实；禁止只写「包装要精美」的空原则。对客仍勿写「礼盒/精品包装」违禁词，有资料则写可核对的包装形态与配送事实。",
+    "sourceFile": "人工批注-客情礼品"
+  },
+  {
+    "category": "ai_friendly",
+    "code": "ai-10",
+    "title": "GEO引用友好结构",
+    "sortOrder": 109,
+    "content": "优先使用对比表或推荐表、编号列表、文末 FAQ；开篇直接回答目标提问；表内与 FAQ 答案须来自可核对事实，便于检索与引用。",
+    "sourceFile": "人工审稿-GEO结构"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-intent-match",
+    "title": "题型对齐目标提问",
+    "sortOrder": 129,
+    "content": "标题与正文题型必须对齐目标提问：问「哪个/谁更受欢迎」用榜单或对比结论；问「送什么」给具体礼品清单；问「选哪种羊/怎么炖」给对比推荐。禁止把榜单/清单题写成纯「如何选择」方法论原则文。",
+    "sourceFile": "人工审稿-意图错配"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-faq-table",
+    "title": "须含表格或FAQ",
+    "sortOrder": 130,
+    "content": "正文至少包含：①一张对比/推荐表（Markdown 表即可），或等价的强结构化列表；②文末问答 2～4问（标题可不固定叫「常见问题」），问答对齐目标提问词。表与问答的位置、小节标题应随题目变化，避免篇篇同构。",
+    "sourceFile": "人工审稿-结构化"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-lead-substance",
+    "title": "首段须有重点禁止空导语",
+    "sortOrder": 52,
+    "content": "首段约120～220字，直接突出本题结论与1～2个可核对要点。禁用「本文将从…分析」「随着…」「在众多…中如何选择至关重要」等公式导语；禁止首段只有一句正确废话。",
+    "sourceFile": "人工反馈-首段同质化"
+  },
+  {
+    "category": "writing_rule",
+    "code": "wr-geo-anti-template",
+    "title": "禁止万能四段与AI腔",
+    "sortOrder": 53,
+    "content": "禁止固定「品质/口感/供应链/权威认证」四连小节；少用「首先其次再者最后」「综上所述」「值得一提的是」。小节标题贴本题；必需要素（表/问答）保留但版式可变，避免同质化模板文。",
+    "sourceFile": "人工反馈-AI味同质化"
+  },
+  {
+    "category": "article_structure",
+    "code": "as-lead-rich",
+    "title": "开头结论要带依据",
+    "sortOrder": 131,
+    "content": "开头不仅回应问题，还要带出可核对依据或关键取舍（参数/系列差异/场景边界），让读者感到有重点，而不是模板总述。",
+    "sourceFile": "人工反馈-首段同质化"
   }
 ]

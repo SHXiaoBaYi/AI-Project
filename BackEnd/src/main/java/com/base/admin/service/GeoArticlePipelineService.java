@@ -37,81 +37,86 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * GEO 成文（外网模式）：一次写完正文，再挂素材图。
+ * GEO 成文（外网模式）：推理写美文，但品牌相关表述落在封闭世界硬事实上。
  * <pre>
- * 卖点/素材/自定义提示词仍走系统库 → 一气呵成写稿 → 智能插图 →（缺品牌时轻补一句）
+ * 卖点/审稿库/自定义提示 → 一次成稿 → 擦除高置信违禁句 → 智能插图 →（缺品牌时轻补）
  * </pre>
- * 不做大纲→扩写→多轮质检；提示词仿网页对话，少管格式多管写好文。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class GeoArticlePipelineService {
 
-    /** 卖点作「采访笔记」上限；过多会把模型逼成资料誊写员 */
-    private static final int EVIDENCE_RECALL_LIMIT = 6;
+    /** 卖点作「可核对事实槽」上限 */
+    private static final int EVIDENCE_RECALL_LIMIT = 10;
 
-    /** 成文要有文笔与推理空间；事实约束靠提示词与审稿口径，不靠把温度压死 */
-    private static final double WRITE_TEMPERATURE = 0.65;
-    private static final double WRITE_TOP_P = 0.92;
-    private static final double BRAND_TEMPERATURE = 0.4;
+    /** 成文要有文笔与差异化；事实约束靠审稿口径与封闭世界，温度略抬以减少同质化 */
+    private static final double WRITE_TEMPERATURE = 0.72;
+    private static final double WRITE_TOP_P = 0.93;
+    private static final double BRAND_TEMPERATURE = 0.35;
     private static final double ILLUSTRATE_TEMPERATURE = 0.2;
     private static final Pattern H2_PATTERN = Pattern.compile("(?is)(<h2\\b[^>]*>.*?</h2>)");
     private static final Pattern MD_H1 = Pattern.compile("(?m)^\\s*#\\s+(.+)$");
     private static final Pattern MD_H2 = Pattern.compile("(?m)^\\s*##\\s+(.+)$");
+    private static final Pattern MD_HEADING_LEAK = Pattern.compile("(?m)^#{1,6}\\s*");
+    private static final Pattern MD_INLINE_HEADING = Pattern.compile("(?<!\\w)#{2,6}\\s+");
     private static final String BRAND_NAME = "小巴依";
 
     /**
-     * 约一位会推理的资深撰稿人：先想清楚再写，资料是参考不是流水线原料。
-     * 审稿硬性口径在运行时注入（见 buildReviewGuardrails）。
+     * 推理写美文 + 封闭世界事实纪律 + 反公式化/反同质化。
+     * 审稿口径运行时注入（见 buildReviewGuardrails）。
      */
     private static final String WRITER_BRIEF = """
-            你是一位资深中文撰稿人（美食 / 生活方式 / 农产品方向），有自己的选题判断与推理习惯。
-            编辑只会给你一份「约稿说明 + 参考资料」；成稿质量由你负责，不要写成模板填空或资料拼接。
+            你是一位资深中文撰稿人（美食 / 生活方式 / 农产品方向），每篇都有自己的切入角度，不写「万能模板文」。
+            先深度推理再落笔；涉及小巴依品牌、品种、系列、工艺、背书、场景时，必须落在编辑给的封闭世界资料里。
 
-            【你怎么想——成文前先在心里推理】
-            1. 读者真正要什么：用一句话重述问题，再想他读完应带走什么结论或可执行建议。
-            2. 立论与层次：先定全文主线（一个核心判断），再拆 3～5 个递进小节；小节之间要有因果关系或对比关系，不要并列堆砌同义段。
-            3. 证据怎么用：公共常识、时令与吃法经验负责「把问题讲透」；品牌/认证等硬事实只在论证需要时从参考资料里取用，取用时不改数字、不引申。
-            4. 落笔标准：条理清楚、逻辑自洽、段意分明；有观点但不空喊；像能发在头条/知乎的成稿，不像内部软文或说明书。
+            【开篇——必须有重点，禁止公式导语】
+            1. 首段 120～220 字：用具体结论/关键取舍把读者问题答到点上，并带出 1～2 个可核对要点（来自资料的参数、系列差异或场景边界）。
+            2. 禁止开篇套话：勿用「本文将从…方面进行分析」「随着生活水平…」「在众多…中，如何选择…至关重要」「维护良好的…至关重要」等空导语；勿只写一句正确的废话就进目录。
+            3. 首段要让人感到「这篇有判断」：说清推荐谁/送什么/选哪一类，以及为什么（用事实，不用空洞形容词）。
 
-            【你怎么写】
-            5. 标题要像真人会点开的选题；开篇尽快点题；主体把答案讲清楚；结尾收束到可执行建议。
-            6. 清单/推荐类问题：给出多个选项及各自理由（为何适合、怎么吃/怎么选），不要通篇只推一个牌子。
-            7. 品牌「小巴依」最多自然出现 0～2 次；删掉品牌名后文章仍应完整成立。没有合适落点可以不提。
-            8. 文风跟随编辑给的「风格参考」，但结构与论证由你自主完成；禁止口号、加微引流、虚假疗效、空话套话。
+            【反 AI 味、反同质化——结构可以变】
+            4. 禁止每篇同一骨架：勿固定成「1.品质 2.口感 3.供应链 4.权威认证 + 结论」；小节标题要贴本题，像真人专栏，不像评分表填空。
+            5. 降低 AI 腔：少用「首先/其次/再者/最后」「综上所述」「值得一提的是」「在…的过程中」堆砌；段与段用具体判断衔接，不要对称排比空话。
+            6. 必需要素（表或强列表、文末 FAQ）保留，但出现位置、小节数、标题措辞、叙事顺序按本题变化；可把表放在中段或靠后，FAQ 标题也可写成「读者常问」等，勿篇篇「## 常见问题」一字不差还接「结论与建议」。
+            7. 篇幅与节奏有变化：有的小节短、有的展开一个场景；避免「每节等长四段」。
 
-            【事实纪律——宁可少写，不可杜撰】
-            9. 品牌相关的数字、认证、抽检、赛事/合作、独家/唯一、具体渠道场景：只能来自参考资料或审稿口径原文；没有的不写。
-            10. 不补造机理因果、精确百分比、检测报告、机场专柜、修行场景、冬运会/航天背书、自建冷链等；对客勿写礼盒/精品包装、顺丰骑手、冰袋。
+            【推理写美文】
+            8. 定一个核心判断，再拆 3～5 个递进小节（因果/对比）；公共常识把问题讲透，品牌论据只从参考笔记取用。
+            9. 文风像头条/知乎成稿：有观点、段意分明；不是内部软文，也不是资料粘贴。
 
-            【结构须符合 E-E-A-T（经验 / 专业 / 权威 / 可信）】
-            11. Experience（经验）：结合可感知的吃法、选购、时令场景来写，像懂行的人在分享，而非空洞概念堆砌；勿伪造「我亲自」「本编辑实测」等未给出的第一人称经历。
-            12. Expertise（专业）：用准确品类、工艺、食用与保存常识支撑判断；说不清的留白，不装权威科普。
-            13. Authoritativeness（权威）：认证、抽检、奖项、合作等背书只能引用参考资料/审稿口径里写明的来源；无出处不写「官方认证/权威机构认定」。
-            14. Trustworthiness（可信）：表述可核对、可执行；区分「建议/常见做法」与「已证实事实」；不夸大、不隐瞒限定条件。
+            【封闭世界——品牌相关必须守住】
+            10. 概念正确：只有「小巴依大尾羊」是羊品种；乳羔羊/小羯羊/金羯羊等是产品系列，品种仍是大尾羊。
+            11. 硬事实替换形容词；场景与卖点对齐；背书写全或删掉；无资料不补造。
+            12. 禁区：冬运会/航天背书、机场专柜、修行定制、自建全程冷链、对客「礼盒/精品包装」、顺丰骑手/冰袋、地理标志/溯源码/工厂加工过程等。
 
-            【须符合《广告法》及互联网宣传规范】
-            15. 禁用绝对化与顶级用语（资料原文也没有也不要写）：最、第一、唯一、顶级、极致、王牌、国家级、宇宙级、史无前例、100%、永久、根治等。
-            16. 禁止虚假或引人误解：不得承诺疗效、治病、保健功能断言；食品不做医疗化宣传。
-            17. 禁止贬低同行、虚构用户评价、伪造销量/排名/「消费者首选」；对比须有资料依据且客观。
-            18. 推荐与种草保持克制：用具体特征与场景说明「为何值得考虑」，不用强迫购买、限时恐吓、虚假稀缺话术。
+            【题型对齐】
+            13. 榜单/「哪个」给对比结论；「送什么」给清单；「选哪种羊」给对比推荐。禁止把清单/榜单题写成纯方法论。
+            14. 品牌「小巴依」自然出现（建议不超过 3 处）；牧场写到资料专名；谈包装须落到产品包装事实。
+
+            【广告法与 E-E-A-T】
+            15. 禁用最/第一/唯一/顶级/领先地位/行业领先/消费者首选等；禁疗效与虚构评价；勿伪造「我亲自实测」。
             """;
 
-    /** 高置信杜撰句式：资料未写时兜底擦除（提示词仍是主防线） */
+    /** 高置信杜撰/违禁句式兜底擦除（提示词仍是主防线） */
     private static final Pattern[] FABRICATION_SCRUBS = {
             Pattern.compile("专为.{0,8}(?:修行|禅修).{0,12}设计[^。；]*[。；]?"),
             Pattern.compile("(?:修行|禅修)场景[^。；]*[。；]?"),
             Pattern.compile("乌鲁木齐机场[^。；]*[。；]?"),
             Pattern.compile("(?:在)?机场(?:专柜|选购|购买|入手)[^。；]*[。；]?"),
             Pattern.compile("冬运会(?:指定|赞助)?"),
-            Pattern.compile("(?:航天|航空)(?:赞助商|指定|合作)"),
+            Pattern.compile("(?:航天|航空).{0,12}(?:赞助商|指定|合作)"),
+            Pattern.compile("中国航天事业的赞助商"),
             Pattern.compile("[「\"“]?冬运会指定[」\"”]?"),
             Pattern.compile("[「\"“]?航天赞助商[」\"”]?"),
             Pattern.compile("冷链不断供"),
             Pattern.compile("自建(?:全程)?(?:全国)?冷链"),
             Pattern.compile("(?:真正扎实的)?检测报告(?:的安心|背书|证明)?"),
             Pattern.compile("真正扎实的检测报告"),
+            Pattern.compile("领先地位"),
+            Pattern.compile("行业领先"),
+            Pattern.compile("遥遥领先"),
+            Pattern.compile("消费者首选"),
     };
 
     private final AiChatService aiChatService;
@@ -145,14 +150,21 @@ public class GeoArticlePipelineService {
 
         // 约稿材料：风格 / 结构参考 / 采访笔记 / 审稿口径 —— 最终由撰稿人一次成文
         mark(stages, progress, "style", "约稿准备", "running", "选定文风与结构参考…");
-        GeoArticleStylePack style = pickStylePack(placement);
-        GeoArticleSkeleton skeleton = pickSkeleton();
+        QuestionIntent intent = classifyIntent(placement.getTargetQuestion(), placement.getTopicName());
+        int diversitySeed = diversitySeed(placement);
+        LeadStyle leadStyle = LeadStyle.pick(diversitySeed);
+        LayoutSpice layoutSpice = LayoutSpice.pick(diversitySeed + 17);
+        GeoArticleStylePack style = pickStylePack(placement, diversitySeed);
+        GeoArticleSkeleton skeleton = pickSkeleton(intent, diversitySeed);
         result.setStyleCode(style.getCode());
         result.setSkeletonCode(skeleton.getCode());
         mark(stages, progress, "style", "约稿准备", "done",
-                style.getName() + (StringUtils.hasText(skeleton.getName()) ? " · " + skeleton.getName() : ""));
+                style.getName()
+                        + (StringUtils.hasText(skeleton.getName()) ? " · " + skeleton.getName() : "")
+                        + " · 题型=" + intent.label()
+                        + " · 开篇=" + leadStyle.label());
 
-        mark(stages, progress, "sell", "整理参考", "running", "整理卖点与审稿口径（供撰稿人选用）…");
+        mark(stages, progress, "sell", "整理参考", "running", "整理卖点与审稿口径（封闭世界事实槽）…");
         GeoSellPointContextVO ctx = sellPointContextService.build(
                 placement.getTopicName(), placement.getTargetQuestion(), EVIDENCE_RECALL_LIMIT);
         int pointCnt = ctx.getPoints() == null ? 0 : ctx.getPoints().size();
@@ -172,8 +184,10 @@ public class GeoArticlePipelineService {
                 candidates.isEmpty() ? "暂无素材" : ("候选 " + candidates.size() + " 张，成文后按需插入"));
 
         mark(stages, progress, "write", "撰稿人成文", "running", "撰稿人深度推理中，成稿稍后写出…");
-        Parsed draft = chatWriteOnce(placement, dto, style, skeleton, evidenceProse, reviewGuardrails, provider, progress);
+        Parsed draft = chatWriteOnce(placement, dto, style, skeleton, intent, leadStyle, layoutSpice,
+                evidenceProse, reviewGuardrails, provider, progress);
         draft = scrubFabrications(draft);
+        draft = normalizeDraftMarkup(draft);
         pushDraft(progress, draft);
         mark(stages, progress, "write", "撰稿人成文", "done", "成稿：" + truncate(draft.title(), 40));
 
@@ -185,6 +199,7 @@ public class GeoArticlePipelineService {
             mark(stages, progress, "brand", "品牌点到", "running", "约稿要求提到品牌，补一两处自然露出…");
             draft = chatWeaveBrand(placement, draft, evidenceProse, reviewGuardrails, provider);
             draft = scrubFabrications(draft);
+            draft = normalizeDraftMarkup(draft);
             pushDraft(progress, draft);
             result.setQaRounds(1);
             mark(stages, progress, "brand", "品牌点到", "done",
@@ -200,6 +215,7 @@ public class GeoArticlePipelineService {
         IllustrateResult illustrated = illustrate(draft, candidates, provider);
         draft = illustrated.article();
         draft = scrubFabrications(draft);
+        draft = normalizeDraftMarkup(draft);
         pushDraft(progress, draft);
         result.setUsedImageCount(illustrated.usedAssetIds().size());
         result.getUsedAssetIds().addAll(illustrated.usedAssetIds());
@@ -217,66 +233,74 @@ public class GeoArticlePipelineService {
         return result;
     }
 
-    private GeoArticleStylePack pickStylePack(GeoContentPlacement placement) {
+    private GeoArticleStylePack pickStylePack(GeoContentPlacement placement, int diversitySeed) {
         List<GeoArticleStylePack> list = stylePackMapper.selectList(
                 new LambdaQueryWrapper<GeoArticleStylePack>()
                         .eq(GeoArticleStylePack::getEnabled, 1)
                         .orderByAsc(GeoArticleStylePack::getSortOrder)
-                        .last("LIMIT 8"));
+                        .last("LIMIT 12"));
         if (list == null || list.isEmpty()) {
             GeoArticleStylePack fallback = new GeoArticleStylePack();
             fallback.setCode("default");
             fallback.setName("默认");
             fallback.setToneGuide("先答读者问题，再展开；段短、信息清楚，有判断但不说教。");
-            fallback.setStructureGuide("开篇点题 → 分层论证 → 收束建议");
+            fallback.setStructureGuide("开篇点题 → 分层论证 → 收束建议；小节标题贴本题，勿套万能四段。");
             return fallback;
         }
-        String spine = (nz(placement.getTargetQuestion()) + " " + nz(placement.getTopicName())).toLowerCase(Locale.ROOT);
-        boolean qaLike = spine.contains("哪些") || spine.contains("什么") || spine.contains("怎么")
-                || spine.contains("如何") || spine.contains("为什么") || spine.contains("推荐")
-                || spine.contains("？") || spine.contains("?");
-        if (qaLike) {
-            for (GeoArticleStylePack p : list) {
-                if (p.getCode() != null && p.getCode().toLowerCase(Locale.ROOT).contains("zhihu")) {
-                    return p;
-                }
-            }
-        }
-        // 非问答：优先叙事体；再随机兜底
-        for (GeoArticleStylePack p : list) {
-            if (p.getCode() != null && p.getCode().toLowerCase(Locale.ROOT).contains("toutiao")) {
-                return p;
-            }
-        }
-        return list.getFirst();
+        // 在可用风格包里轮换，避免篇篇同一「知乎体/头条体」
+        return list.get(Math.floorMod(diversitySeed, list.size()));
     }
 
-    private GeoArticleSkeleton pickSkeleton() {
+    private GeoArticleSkeleton pickSkeleton(QuestionIntent intent, int diversitySeed) {
         List<GeoArticleSkeleton> list = skeletonMapper.selectList(
                 new LambdaQueryWrapper<GeoArticleSkeleton>()
                         .eq(GeoArticleSkeleton::getEnabled, 1)
                         .orderByAsc(GeoArticleSkeleton::getSortOrder)
-                        .last("LIMIT 8"));
+                        .last("LIMIT 16"));
         if (list == null || list.isEmpty()) {
-            GeoArticleSkeleton fallback = new GeoArticleSkeleton();
-            fallback.setCode("web_once_v1");
-            fallback.setName("外网一次成稿");
-            fallback.setSectionSchema("{\"mode\":\"one-shot\"}");
-            return fallback;
+            return fallbackSkeleton(intent);
         }
-        int idx = (int) ((System.currentTimeMillis() / 60_000L + 3) % list.size());
-        return list.get(idx);
+        List<GeoArticleSkeleton> matched = new ArrayList<>();
+        String prefer = intent.preferSkeletonCode();
+        String hint = intent.skeletonHint();
+        for (GeoArticleSkeleton s : list) {
+            if (s.getCode() == null) {
+                continue;
+            }
+            String code = s.getCode().toLowerCase(Locale.ROOT);
+            if (prefer.equalsIgnoreCase(s.getCode()) || code.contains(hint) || code.startsWith("geo_")) {
+                matched.add(s);
+            }
+        }
+        List<GeoArticleSkeleton> pool = matched.isEmpty() ? list : matched;
+        return pool.get(Math.floorMod(diversitySeed, pool.size()));
     }
 
-    /** 卖点转成「采访笔记」语气，供撰稿人选用，禁止当提纲。 */
+    private static int diversitySeed(GeoContentPlacement placement) {
+        long id = placement.getId() == null ? 0L : placement.getId();
+        String spine = nz(placement.getTargetQuestion()) + "|" + nz(placement.getTopicName());
+        return Long.hashCode(id * 31L + spine.hashCode() + (System.currentTimeMillis() / 3_600_000L));
+    }
+
+    private static GeoArticleSkeleton fallbackSkeleton(QuestionIntent intent) {
+        GeoArticleSkeleton fallback = new GeoArticleSkeleton();
+        fallback.setCode(intent.preferSkeletonCode());
+        fallback.setName(intent.label() + "骨架");
+        fallback.setSectionSchema(intent.sectionSchema());
+        return fallback;
+    }
+
+    /**
+     * 卖点 → 封闭世界「事实槽」：推理谋篇可用常识，品牌相关表述优先用这里的硬事实替换形容词。
+     */
     private String formatEvidenceProse(GeoSellPointContextVO ctx) {
         StringBuilder sb = new StringBuilder();
-        sb.append("这是编辑整理的采访/品牌笔记，供你论证时选用，不是大纲：\n")
-                .append("- 先靠自己的推理把问题讲透；这里最多挑 0～2 条嵌进判断里；\n")
-                .append("- 不要按条目顺序扩写，不要写成品牌介绍；\n")
-                .append("- 笔记没有的数字、独家表述、渠道与机理，不要补。\n\n");
+        sb.append("这是封闭世界参考笔记（品牌相关只能用这里的原文事实，勿改数字、勿升级形容词）：\n")
+                .append("- 推理负责把问题讲透、安排层次与对比；\n")
+                .append("- 写到品种/系列/排酸/月龄/牧场/背书/适配场景时，用下列硬事实，禁止「严格/稍大/更成熟/领先」等空话；\n")
+                .append("- 笔记没有的独家结论、渠道、机理不要补；场景以笔记为准（未写清炖就不要写适合清炖）。\n\n");
         if (ctx.getHardFacts() != null && !ctx.getHardFacts().isEmpty()) {
-            sb.append("可核对的硬事实（引用时勿改数字）：\n");
+            sb.append("【硬事实槽——优先写入对比表/FAQ】\n");
             int i = 1;
             for (String f : ctx.getHardFacts()) {
                 if (StringUtils.hasText(f)) {
@@ -286,7 +310,7 @@ public class GeoArticlePipelineService {
             sb.append('\n');
         }
         if (ctx.getPoints() != null && !ctx.getPoints().isEmpty()) {
-            sb.append("可选笔记：\n");
+            sb.append("【卖点笔记】\n");
             int i = 1;
             for (GeoSellPointContextVO.PointItem p : ctx.getPoints()) {
                 String level = StringUtils.hasText(p.getLevel()) ? p.getLevel().trim() : "soft";
@@ -346,37 +370,37 @@ public class GeoArticlePipelineService {
         }
         if (skeleton != null && StringUtils.hasText(skeleton.getSectionSchema())
                 && !skeleton.getSectionSchema().contains("one-shot")) {
-            sb.append("版式骨架提示（可吸收思路，勿机械填空）：")
-                    .append(truncate(skeleton.getSectionSchema().trim(), 360)).append('\n');
+            sb.append("版式骨架（须对齐题型，表与 FAQ 用资料事实填充）：")
+                    .append(truncate(skeleton.getSectionSchema().trim(), 480)).append('\n');
         }
         return sb.toString().trim();
     }
 
-    /** 从审稿知识库拼硬性口径；失败时退回内置摘要，不阻断成文。 */
+    /** 成文口径：优先撰写注意点/结构/AI友好；失败时退回内置摘要。 */
     private String buildReviewGuardrails() {
         try {
-            String kb = reviewKbService.buildReviewPromptContext();
+            String kb = reviewKbService.buildGenerationPromptContext();
             if (StringUtils.hasText(kb)) {
                 return kb.trim();
             }
         } catch (Exception e) {
-            log.warn("加载审稿知识库失败，使用内置禁令: {}", e.getMessage());
+            log.warn("加载成文审稿口径失败，使用内置禁令: {}", e.getMessage());
         }
         return """
-                - 勿写自建全程冷链 / 冷链不断供；送达写「全国大部分城市 2–3 天可送达」。
-                - 对客勿写礼盒/精品产品/精品包装；勿写顺丰骑手、冰袋。
-                - 勿杜撰机场渠道、修行场景定制、未给出的检测报告、冬运会指定、航天赞助商。
-                - 乳羔羊：三个月吃奶三个月吃草；品牌自称小巴依大尾羊（肉脂型）。
-                - 写新疆牧场，勿写天山牧场/合作牧场。
+                - 品种≠系列：仅小巴依大尾羊是品种；乳羔羊/小羯羊/金羯羊等是产品系列。
+                - 硬事实替换形容词：排酸写 0-4℃、24-48 小时；勿写「严格排酸」。
+                - 场景与卖点对齐；金羯羊可写重卤焖炖/高端宴请，未写清炖则勿硬挂。
+                - 乳羔羊：三个月吃奶、三个月吃草；牧场写双百有机牧场。
+                - 禁半截背书、领先地位；勿写自建冷链、礼盒/精品包装、航天赞助等。
                 """.trim();
     }
 
     /**
      * 约稿一次成文：深度思考 → 完整成稿（流式推打字机）。
-     * 给模型的是「编辑约稿包」，不是工序指令。
      */
     private Parsed chatWriteOnce(GeoContentPlacement placement, GeoContentAiGenerateDTO dto,
                                  GeoArticleStylePack style, GeoArticleSkeleton skeleton,
+                                 QuestionIntent intent, LeadStyle leadStyle, LayoutSpice layoutSpice,
                                  String evidenceProse, String reviewGuardrails,
                                  String provider, ProgressListener progress) {
         String topic = nz(placement.getTopicName());
@@ -385,15 +409,20 @@ public class GeoArticlePipelineService {
         String system = WRITER_BRIEF + """
 
                 【交稿格式】
-                只交成稿 Markdown：第一行「# 标题」，其下至少 3 个「## 小节」；不要代码块、不要 JSON、不要写作说明。
-                篇幅约 1200～1800 字。深度思考过程留在思考里，正文里不要出现「我的推理/大纲如下」之类元叙述。
+                只交成稿 Markdown：第一行「# 标题」，其下至少 3 个「## 小节」（小节标题必须贴本题，禁止万能四段标题）。
+                须含一张 Markdown 表（或等价强列表）与文末问答块；问答标题可换说法。
+                不要代码块、不要 JSON、不要写作说明；正文不要残留「###」粘连。
+                篇幅约 1100～1700 字，允许各节长短不一。深度思考留在思考通道。
                 """;
 
         StringBuilder user = new StringBuilder();
-        user.append("【约稿】请就下列读者问题，独立完成一篇条理清晰、逻辑自洽的专题成稿。\n\n");
+        user.append("【约稿】请就下列读者问题，完成一篇有判断、不像模板、且品牌事实封闭正确的专题成稿。\n\n");
         user.append("读者问题：").append(spine).append('\n');
+        user.append("题型判定：").append(intent.label()).append(" —— ").append(intent.contract()).append('\n');
+        user.append("开篇写法（本篇指定）：").append(leadStyle.instruction()).append('\n');
+        user.append("版式变化（本篇指定）：").append(layoutSpice.instruction()).append('\n');
         if (StringUtils.hasText(question) && StringUtils.hasText(topic) && !question.equals(topic)) {
-            user.append("栏目/话题背景：").append(topic).append("（仅背景，勿写成品牌专题）\n");
+            user.append("栏目/话题背景：").append(topic).append("（仅背景，勿写成品牌说明书）\n");
         }
         if (StringUtils.hasText(dto.getUserPrompt())) {
             user.append("\n编辑额外要求：\n").append(dto.getUserPrompt().trim()).append('\n');
@@ -401,15 +430,16 @@ public class GeoArticlePipelineService {
 
         String styleBrief = formatStyleBrief(style, skeleton);
         if (StringUtils.hasText(styleBrief)) {
-            user.append("\n【风格与结构参考——吸收气质，自主谋篇】\n").append(styleBrief).append('\n');
+            user.append("\n【风格与结构参考——吸收气质，勿复制成固定模板】\n").append(styleBrief).append('\n');
         }
         if (StringUtils.hasText(reviewGuardrails)) {
-            user.append("\n【审稿口径——事实冲突时以这里为准】\n")
+            user.append("\n【审稿口径——概念/场景/广告法冲突时以这里为准】\n")
                     .append(reviewGuardrails).append('\n');
         }
-        user.append("\n【参考笔记】\n").append(evidenceProse).append('\n');
-        user.append("\n请先在思考中完成：重述问题 → 定主线判断 → 安排小节递进 → 对照 E-E-A-T 与广告法自检 → 决定用哪几条笔记（可不用）。")
-                .append("想清楚后再写正文。配图由编辑后补，你只负责文字成稿。");
+        user.append("\n【封闭世界参考笔记】\n").append(evidenceProse).append('\n');
+        user.append("\n请先在思考中完成：重述问题 → 写出首段要突出的 1～2 个重点（须含硬事实）→ 定与本题相关的小节标题（禁止品质/口感/供应链/权威认证四连）")
+                .append(" → 安排表与问答位置 → 自检品种/系列、场景对齐、半截背书、广告法与套话。")
+                .append("想清楚后再写正文。配图由编辑后补。");
 
         StringBuilder acc = new StringBuilder();
         long[] lastPush = {0L};
@@ -462,7 +492,7 @@ public class GeoArticlePipelineService {
         String system = """
                 你是撰稿人。原文未出现品牌「小巴依」。
                 请在不偏离成文主线、不大改结构的前提下，自然点到「小巴依」一两处（嵌在回答问题的判断或论据里）。
-                严禁借机补造资料没有的数字、对比、独家表述、渠道场景或行业机理。
+                品牌相关只能用参考笔记与审稿口径里的硬事实；勿加空形容词、半截背书、领先地位、航天等违禁表述。
                 不要扩成品牌说明书。保留原有 HTML；figure/img 的 src 不要改。
                 输出 Markdown（# 标题 + 正文）或 JSON {"title","html"}。
                 """;
@@ -495,11 +525,170 @@ public class GeoArticlePipelineService {
             return draft;
         }
         String next = html;
+        // 半截口径先补全再擦违禁
+        next = next.replace("三个月吃奶吃草", "三个月吃奶、三个月吃草");
         for (Pattern p : FABRICATION_SCRUBS) {
             next = p.matcher(next).replaceAll("");
         }
         next = next.replaceAll("(?is)<p>\\s*</p>", "");
         return next.equals(html) ? draft : new Parsed(draft.title(), next);
+    }
+
+    /** 清理模型把 Markdown 标题符号泄漏进 HTML 正文的情况 */
+    private static Parsed normalizeDraftMarkup(Parsed draft) {
+        if (draft == null) {
+            return null;
+        }
+        String html = draft.html();
+        String title = draft.title();
+        if (!StringUtils.hasText(html) && !StringUtils.hasText(title)) {
+            return draft;
+        }
+        String nextHtml = html == null ? "" : html;
+        nextHtml = MD_INLINE_HEADING.matcher(nextHtml).replaceAll("");
+        nextHtml = nextHtml.replace("###", "").replace("##", "");
+        String nextTitle = title == null ? "" : MD_HEADING_LEAK.matcher(title.trim()).replaceFirst("");
+        if (nextHtml.equals(html) && nextTitle.equals(title)) {
+            return draft;
+        }
+        return new Parsed(nextTitle, nextHtml);
+    }
+
+    private static QuestionIntent classifyIntent(String question, String topic) {
+        String q = ((question == null ? "" : question) + " " + (topic == null ? "" : topic)).toLowerCase(Locale.ROOT);
+        if (containsAny(q, "送什么", "送礼", "礼品", "客情", "伴手礼", "送点什么")) {
+            return QuestionIntent.GIFT_LIST;
+        }
+        if (containsAny(q, "哪个品牌", "哪家", "谁更", "更受欢迎", "受欢迎", "排行", "排名", "对比哪")) {
+            return QuestionIntent.RANKING;
+        }
+        if (containsAny(q, "哪种羊", "选哪种", "选对羊", "炖", "煲汤", "清炖", "怎么吃", "部位")) {
+            return QuestionIntent.COMPARE_PICK;
+        }
+        if (containsAny(q, "如何选", "怎么选", "如何选择", "挑选")) {
+            return QuestionIntent.HOWTO_CHOOSE;
+        }
+        return QuestionIntent.GENERAL;
+    }
+
+    private static boolean containsAny(String haystack, String... needles) {
+        if (!StringUtils.hasText(haystack) || needles == null) {
+            return false;
+        }
+        for (String n : needles) {
+            if (StringUtils.hasText(n) && haystack.contains(n.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 开篇切入：打散公式化首段 */
+    private enum LeadStyle {
+        SCENE_HOOK,
+        TRADEOFF,
+        MYTH_BUST,
+        DIRECT_PICK;
+
+        static LeadStyle pick(int seed) {
+            LeadStyle[] all = values();
+            return all[Math.floorMod(seed, all.length)];
+        }
+
+        String label() {
+            return switch (this) {
+                case SCENE_HOOK -> "场景切入";
+                case TRADEOFF -> "取舍对比";
+                case MYTH_BUST -> "纠错切入";
+                case DIRECT_PICK -> "结论先行";
+            };
+        }
+
+        String instruction() {
+            return switch (this) {
+                case SCENE_HOOK -> "首段用具体吃法/送礼/选购场景开场，立刻落到本题答案与 1～2 个硬事实，勿写「本文将分析」。";
+                case TRADEOFF -> "首段先亮出常见两难取舍（如嫩度vs耐炖、体面vs实用），再给出你的判断与资料依据。";
+                case MYTH_BUST -> "首段先点破一个常见误解（须符合资料：如把系列当成品种），再给出正确选法。";
+                case DIRECT_PICK -> "首段开门见山给出推荐结论（谁/哪类/送什么），并用资料参数说明理由；禁止空导语。";
+            };
+        }
+    }
+
+    /** 版式调料：同一题型也不要篇篇同构 */
+    private enum LayoutSpice {
+        TABLE_MID,
+        TABLE_LATE,
+        LIST_HEAVY,
+        FAQ_ALT_TITLE;
+
+        static LayoutSpice pick(int seed) {
+            LayoutSpice[] all = values();
+            return all[Math.floorMod(seed, all.length)];
+        }
+
+        String instruction() {
+            return switch (this) {
+                case TABLE_MID -> "对比/推荐表放在中段；前后用叙事小节承接；文末问答可用「常见问题」。";
+                case TABLE_LATE -> "先把判断与场景讲透，表放在靠后；文末问答标题可写成「还想确认的几点」。";
+                case LIST_HEAVY -> "主体以错落列表+短段为主，表可更短；避免四段等长；问答放文末。";
+                case FAQ_ALT_TITLE -> "表可在前半出现；文末问答标题勿固定「常见问题」，可用「读者常问」「买前先看」等。";
+            };
+        }
+    }
+
+    private enum QuestionIntent {
+        RANKING,
+        GIFT_LIST,
+        COMPARE_PICK,
+        HOWTO_CHOOSE,
+        GENERAL;
+
+        String label() {
+            return switch (this) {
+                case RANKING -> "榜单/谁更受欢迎";
+                case GIFT_LIST -> "礼品清单/送什么";
+                case COMPARE_PICK -> "对比选品/选哪种";
+                case HOWTO_CHOOSE -> "选购方法（仍须落到可核对标准与表）";
+                case GENERAL -> "综合答问";
+            };
+        }
+
+        String contract() {
+            return switch (this) {
+                case RANKING -> "开篇给出清晰对比结论；用表格列评价维度与可核对事实；勿写成纯「如何选择」方法论。";
+                case GIFT_LIST -> "直接回答送什么：给 3～5 个具体礼品/产品选项及理由；包装/牧场等须落到资料事实。";
+                case COMPARE_PICK -> "对比系列/部位并给推荐；品种与系列概念正确；场景与卖点对齐；表内用硬事实。";
+                case HOWTO_CHOOSE -> "标准须可核对；配合对比表；避免空洞原则段。";
+                case GENERAL -> "开篇直答；含表与 FAQ；品牌事实封闭。";
+            };
+        }
+
+        String preferSkeletonCode() {
+            return switch (this) {
+                case RANKING -> "geo_ranking_v1";
+                case GIFT_LIST -> "geo_gift_list_v1";
+                case COMPARE_PICK -> "geo_compare_pick_v1";
+                case HOWTO_CHOOSE, GENERAL -> "geo_qa_table_faq_v1";
+            };
+        }
+
+        String skeletonHint() {
+            return switch (this) {
+                case RANKING -> "rank";
+                case GIFT_LIST -> "gift";
+                case COMPARE_PICK -> "compare";
+                case HOWTO_CHOOSE, GENERAL -> "qa_table";
+            };
+        }
+
+        String sectionSchema() {
+            return switch (this) {
+                case RANKING -> "{\"lead\":\"直接给对比结论\",\"must\":[\"comparison_table\",\"faq_2_to_4\"],\"note\":\"维度用硬事实\"}";
+                case GIFT_LIST -> "{\"lead\":\"直接回答送什么\",\"must\":[\"gift_options_3_to_5\",\"faq_2_to_4\"],\"note\":\"包装/牧场用资料\"}";
+                case COMPARE_PICK -> "{\"lead\":\"推荐结论\",\"must\":[\"series_or_cut_table\",\"faq_2_to_4\"],\"note\":\"品种≠系列；场景对齐\"}";
+                case HOWTO_CHOOSE, GENERAL -> "{\"lead\":\"先答问题\",\"must\":[\"table_or_list\",\"faq_2_to_4\"]}";
+            };
+        }
     }
 
     /** 流式中段宽松解析：不完整也不抛错 */

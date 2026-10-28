@@ -2255,7 +2255,46 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                           ELSE tone_guide END
                     WHERE code IN ('zhihu_explain', 'toutiao_story') AND is_active = 1
                     """.formatted(brandGuide.replace("'", "''")));
+            // GEO 题型骨架：表 + FAQ，封闭世界填槽
+            seedSkeleton(statement, "geo_ranking_v1", "榜单对比骨架",
+                    "{\"lead\":\"直接给对比结论\",\"must\":[\"comparison_table\",\"faq_2_to_4\"],\"note\":\"维度用硬事实，勿纯方法论\"}", 10);
+            seedSkeleton(statement, "geo_gift_list_v1", "礼品清单骨架",
+                    "{\"lead\":\"直接回答送什么\",\"must\":[\"gift_options_3_to_5\",\"faq_2_to_4\"],\"note\":\"包装/牧场用资料事实\"}", 11);
+            seedSkeleton(statement, "geo_compare_pick_v1", "选品对比骨架",
+                    "{\"lead\":\"推荐结论\",\"must\":[\"series_or_cut_table\",\"faq_2_to_4\"],\"note\":\"品种≠系列；场景与卖点对齐\"}", 12);
+            seedSkeleton(statement, "geo_qa_table_faq_v1", "答问表FAQ骨架",
+                    "{\"lead\":\"先答问题\",\"must\":[\"table_or_list\",\"faq_2_to_4\"],\"note\":\"硬事实替换形容词\"}", 13);
         }
+    }
+
+    private void seedSkeleton(Statement statement, String code, String name, String schema, int sortOrder)
+            throws Exception {
+        statement.execute("""
+                INSERT INTO geo_article_skeleton
+                  (code, name, section_schema, enabled, sort_order, is_active)
+                SELECT * FROM (
+                  SELECT
+                    '%s' AS code,
+                    '%s' AS name,
+                    '%s' AS section_schema,
+                    1 AS enabled, %d AS sort_order, 1 AS is_active
+                ) t
+                WHERE NOT EXISTS (SELECT 1 FROM geo_article_skeleton x WHERE x.code = '%s' AND x.is_active = 1)
+                """.formatted(
+                code.replace("'", "''"),
+                name.replace("'", "''"),
+                schema.replace("'", "''"),
+                sortOrder,
+                code.replace("'", "''")));
+        statement.execute("""
+                UPDATE geo_article_skeleton
+                SET name = '%s', section_schema = '%s', enabled = 1, sort_order = %d
+                WHERE code = '%s' AND is_active = 1
+                """.formatted(
+                name.replace("'", "''"),
+                schema.replace("'", "''"),
+                sortOrder,
+                code.replace("'", "''")));
     }
 
     private void addItemColumn(Connection connection, String column, String sql) throws Exception {

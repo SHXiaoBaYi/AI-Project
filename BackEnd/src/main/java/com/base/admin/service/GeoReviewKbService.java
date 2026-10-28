@@ -147,17 +147,55 @@ public class GeoReviewKbService {
     }
 
     public String buildReviewPromptContext() {
+        return buildPromptContext(List.of(
+                CAT_WRITING, CAT_AI, CAT_STRUCTURE, CAT_BRAND, CAT_FAQ, CAT_PRODUCT, CAT_STORE),
+                "以下为小巴依 GEO 内容审核知识库（线上可维护）。冲突时以「撰写注意点」为准。\n",
+                PROMPT_BUDGET);
+    }
+
+    /**
+     * 成文专用：优先注入撰写注意点 / 结构 / AI友好 / 品牌，控制体量，避免产品门店冲掉硬规则。
+     */
+    public String buildGenerationPromptContext() {
+        return buildPromptContext(List.of(
+                CAT_WRITING, CAT_STRUCTURE, CAT_AI, CAT_BRAND, CAT_FAQ),
+                "以下为成文须遵守的审稿知识（线上可维护）。冲突时以「撰写注意点」为准；品牌/系列硬事实以条目原文为准，勿用形容词代替。\n",
+                Math.min(PROMPT_BUDGET, 9000));
+    }
+
+    private String buildPromptContext(List<String> categoryOrder, String header, int budget) {
         ensureSeeded();
         List<GeoReviewKb> rows = kbMapper.selectList(new LambdaQueryWrapper<GeoReviewKb>()
                 .eq(GeoReviewKb::getEnabled, 1)
                 .notIn(GeoReviewKb::getCode, LEGACY_CODES)
+                .in(GeoReviewKb::getCategory, categoryOrder)
                 .orderByAsc(GeoReviewKb::getSortOrder)
                 .orderByAsc(GeoReviewKb::getId));
         if (rows.isEmpty()) {
             return "";
         }
+        Map<String, Integer> orderIndex = new LinkedHashMap<>();
+        for (int i = 0; i < categoryOrder.size(); i++) {
+            orderIndex.put(categoryOrder.get(i), i);
+        }
+        rows.sort((a, b) -> {
+            int ia = orderIndex.getOrDefault(a.getCategory(), 99);
+            int ib = orderIndex.getOrDefault(b.getCategory(), 99);
+            if (ia != ib) {
+                return Integer.compare(ia, ib);
+            }
+            int so = Integer.compare(
+                    a.getSortOrder() == null ? 0 : a.getSortOrder(),
+                    b.getSortOrder() == null ? 0 : b.getSortOrder());
+            if (so != 0) {
+                return so;
+            }
+            long ida = a.getId() == null ? 0L : a.getId();
+            long idb = b.getId() == null ? 0L : b.getId();
+            return Long.compare(ida, idb);
+        });
         StringBuilder sb = new StringBuilder();
-        sb.append("以下为小巴依 GEO 内容审核知识库（线上可维护）。冲突时以「撰写注意点」为准。\n");
+        sb.append(header);
         String lastCat = null;
         for (GeoReviewKb row : rows) {
             String cat = row.getCategory();
@@ -174,7 +212,7 @@ public class GeoReviewKbService {
                 body = compactContent(row.getContent());
             }
             String block = "- **" + nz(row.getTitle()) + "**：" + body + "\n";
-            if (sb.length() + block.length() > PROMPT_BUDGET) {
+            if (sb.length() + block.length() > budget) {
                 sb.append("\n（后续知识条目已省略，请以已列出的硬性口径为准）\n");
                 break;
             }
