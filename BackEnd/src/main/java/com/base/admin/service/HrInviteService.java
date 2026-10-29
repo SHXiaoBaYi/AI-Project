@@ -208,6 +208,10 @@ public class HrInviteService {
                 SELECT i.id, i.application_id, i.round_no, i.interviewer_user_id, u.nickname interviewer_name,
                        i.interview_at, i.duration_min, i.location, i.status, i.fail_reason, i.dingtalk_event_id,
                        c.display_name, a.requisition_id, a.current_stage, r.job_name, f.file_name,
+                       (SELECT GROUP_CONCAT(ou.nickname ORDER BY ro.id SEPARATOR '、')
+                        FROM hr_requisition_owner ro
+                        LEFT JOIN sys_user ou ON ou.user_id = ro.user_id
+                        WHERE ro.requisition_id = r.id AND ro.is_active = 1) owner_names,
                        (SELECT GROUP_CONCAT(cc.cc_user_id ORDER BY cc.id SEPARATOR '|')
                         FROM hr_interview_invite_cc cc
                         WHERE cc.invite_id = i.id AND cc.is_active = 1) cc_user_ids,
@@ -255,6 +259,14 @@ public class HrInviteService {
         if (q.getStatus() != null && !q.getStatus().isBlank()) {
             sql.append(" AND i.status = ? ");
             args.add(q.getStatus());
+        }
+        if (q.getStartDate() != null) {
+            sql.append(" AND i.interview_at >= ? ");
+            args.add(q.getStartDate().atStartOfDay());
+        }
+        if (q.getEndDate() != null) {
+            sql.append(" AND i.interview_at < ? ");
+            args.add(q.getEndDate().plusDays(1).atStartOfDay());
         }
         HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         sql.append(" ORDER BY i.interview_at DESC, i.id DESC");

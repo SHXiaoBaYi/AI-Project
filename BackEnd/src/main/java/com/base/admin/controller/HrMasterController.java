@@ -554,7 +554,7 @@ public class HrMasterController {
 
     @Operation(summary = "邀约列表")
     @PostMapping("/invite/list")
-    @RequiresPermission({"hr:invite:list", "hr:invite:add", "hr:interview:mine"})
+    @RequiresPermission({"hr:invite:list", "hr:invite:add", "hr:interview:mine", "hr:calendar:view"})
     public Result<List<Map<String, Object>>> invites(@RequestBody(required = false) HrBoardQueryDTO query) {
         return Result.ok(inviteService.list(query));
     }

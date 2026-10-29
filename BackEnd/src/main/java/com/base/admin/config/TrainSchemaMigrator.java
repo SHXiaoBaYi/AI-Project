@@ -311,14 +311,8 @@ public class TrainSchemaMigrator implements ApplicationRunner {
 
     private void menu(int id, String name, int parent, int sort, String path, String component, String type,
                       String perms, String icon, String remark) {
-        jdbc.update("""
-                INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 1)
-                ON DUPLICATE KEY UPDATE
-                  menu_name = VALUES(menu_name), parent_id = VALUES(parent_id), sort_order = VALUES(sort_order),
-                  path = VALUES(path), component = VALUES(component), menu_type = VALUES(menu_type),
-                  perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark)
-                """, id, name, parent, sort, path, component, type, perms, icon, remark);
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.TRAIN, id, name, parent, sort, path, component, type,
+                perms, icon, remark);
     }
 
     private void grant(long roleId, int... menuIds) {

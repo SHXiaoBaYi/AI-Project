@@ -229,34 +229,30 @@ public class RobotSchemaMigrator implements ApplicationRunner {
     }
 
     private void ensureMenus() {
-        jdbc.update("""
-                INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
-                VALUES
-                (250, '机器人', 0, 45, '/robot', '', 'M', '', 'RobotOutlined', 0, 0, '多意图机器人后台', 1),
-                (251, '意图管理', 250, 1, 'intent', 'robot/intent/index', 'C', 'robot:intent:list', 'ApartmentOutlined', 0, 0, '', 1),
-                (252, '意图编辑', 251, 1, '', '', 'F', 'robot:intent:edit', '#', 0, 0, '', 1),
-                (253, '会话列表', 250, 2, 'session', 'robot/session/index', 'C', 'robot:session:list', 'MessageOutlined', 0, 0, '', 1),
-                (254, '结束会话', 253, 1, '', '', 'F', 'robot:session:end', '#', 0, 0, '', 1),
-                (255, '消息流水', 250, 3, 'message', 'robot/message/index', 'C', 'robot:message:list', 'UnorderedListOutlined', 0, 0, '', 1),
-                (256, '链接监控', 250, 4, 'link-monitor', 'robot/link-monitor/index', 'C', 'robot:link-monitor:list', 'LinkOutlined', 0, 0, '', 1),
-                (257, '监控新增', 256, 1, '', '', 'F', 'robot:link-monitor:add', '#', 0, 0, '', 1),
-                (258, '监控编辑', 256, 2, '', '', 'F', 'robot:link-monitor:edit', '#', 0, 0, '', 1),
-                (259, '监控删除', 256, 3, '', '', 'F', 'robot:link-monitor:delete', '#', 0, 0, '', 1),
-                (260, '立即探测', 256, 4, '', '', 'F', 'robot:link-monitor:probe', '#', 0, 0, '', 1)
-                ON DUPLICATE KEY UPDATE
-                  menu_name = VALUES(menu_name),
-                  parent_id = VALUES(parent_id),
-                  sort_order = VALUES(sort_order),
-                  path = VALUES(path),
-                  component = VALUES(component),
-                  menu_type = VALUES(menu_type),
-                  perms = VALUES(perms),
-                  icon = VALUES(icon),
-                  remark = VALUES(remark),
-                  visible = 0,
-                  status = 0,
-                  is_active = 1
-                """);
+        SysMenuSeedSupport.assertIdsInRange(SysMenuIdRanges.Owner.ROBOT,
+                250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260);
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 250, "机器人", 0, 45, "/robot", "", "M",
+                "", "RobotOutlined", "多意图机器人后台");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 251, "意图管理", 250, 1, "intent",
+                "robot/intent/index", "C", "robot:intent:list", "ApartmentOutlined", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 252, "意图编辑", 251, 1, "", "", "F",
+                "robot:intent:edit", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 253, "会话列表", 250, 2, "session",
+                "robot/session/index", "C", "robot:session:list", "MessageOutlined", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 254, "结束会话", 253, 1, "", "", "F",
+                "robot:session:end", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 255, "消息流水", 250, 3, "message",
+                "robot/message/index", "C", "robot:message:list", "UnorderedListOutlined", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 256, "链接监控", 250, 4, "link-monitor",
+                "robot/link-monitor/index", "C", "robot:link-monitor:list", "LinkOutlined", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 257, "监控新增", 256, 1, "", "", "F",
+                "robot:link-monitor:add", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 258, "监控编辑", 256, 2, "", "", "F",
+                "robot:link-monitor:edit", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 259, "监控删除", 256, 3, "", "", "F",
+                "robot:link-monitor:delete", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.ROBOT, 260, "立即探测", 256, 4, "", "", "F",
+                "robot:link-monitor:probe", "#", "");
         jdbc.update("""
                 INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                 SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 250 AND 260

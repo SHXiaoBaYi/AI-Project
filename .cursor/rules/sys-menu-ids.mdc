@@ -1,0 +1,18 @@
+---
+description: 新增/修改 sys_menu 菜单 ID 时必须查号段登记表，禁止跨模块冲突
+globs: BackEnd/**/*Migrator*.java,BackEnd/**/sys*menu*,docs/sys-menu-id-registry.md
+alwaysApply: true
+---
+
+# sys_menu.menu_id 禁止冲突
+
+新增功能菜单、改 SchemaMigrator 种子、或手写 `INSERT INTO sys_menu` 时：
+
+1. **先读** [`docs/sys-menu-id-registry.md`](docs/sys-menu-id-registry.md) 与 `SysMenuIdRanges.java`，按模块号段选 **空闲** ID。
+2. **禁止** 接下一个「看起来没用」的整数跨模块占用（例：招聘不得用 250–260，该段是机器人）。
+3. 写入代码后 **同步更新** `docs/sys-menu-id-registry.md`（标明新占用；更新「下一空闲」）。
+4. Java 种子必须用 `SysMenuSeedSupport.upsert(jdbc, Owner.模块, id, …)`；禁止裸 `ON DUPLICATE KEY UPDATE` 覆盖他模块菜单。
+5. HR 下一空闲从 **262** 起（261=面试日历）；机器人 **250–260** 整段锁定。
+
+若启动日志出现「拒绝覆盖菜单」或「号段审计」报错，先改 ID / 登记表，再发版。
+---

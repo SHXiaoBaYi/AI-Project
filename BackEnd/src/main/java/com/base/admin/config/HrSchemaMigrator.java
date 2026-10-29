@@ -278,6 +278,9 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(238, "KPI导出", 237, 1, "", "", "F", "hr:kpi:export", "#", "导出绩效报表");
         menu(203, "候选人", 200, 5, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "候选人与简历");
         menu(220, "面试邀约记录", 200, 6, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
+        // 250–260 已占用为机器人菜单，面试日历用 261
+        menu(261, "HR面试日历", 200, 6, "hr/calendar", "hr/calendar/index", "C", "hr:calendar:view", "ScheduleOutlined", "按月查看面试日程，可按负责人筛选");
+        repairCalendarMenuIdConflict();
         menu(221, "面试记录", 200, 7, "hr/record", "hr/record/index", "C", "hr:record:list", "FormOutlined", "各轮面试官评语");
         menu(222, "我的面试", 200, 8, "hr/mine", "hr/mine/index", "C", "hr:interview:mine", "ScheduleOutlined", "面试官待面日程与结论");
         menu(204, "部门管理", systemParent == 0 ? 200 : systemParent, 9, "hr/department", "hr/department/index", "C", "hr:dept:list", "BankOutlined", "部门树");
@@ -323,12 +326,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261);
         grant(plain, 200, 201, 209, 234, 235, 237, 249);
-        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235, 249);
+        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235, 249, 261);
     }
 
     private int menuId(String name, String type) {
@@ -340,16 +343,42 @@ public class HrSchemaMigrator implements ApplicationRunner {
         return ids.isEmpty() ? 0 : ids.get(0);
     }
 
+    /**
+     * 曾误用 menu_id=250（机器人顶级菜单）。把误绑角色迁到 261，交还 250，并清掉招聘角色上误授的机器人顶级菜单。
+     */
+    private void repairCalendarMenuIdConflict() {
+        Integer hijacked = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM sys_menu
+                WHERE menu_id = 250 AND (path = 'hr/calendar' OR perms = 'hr:calendar:view')
+                """, Integer.class);
+        if (hijacked == null || hijacked == 0) {
+            return;
+        }
+        jdbc.update("""
+                INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                SELECT role_id, 261, 1 FROM sys_role_menu
+                WHERE menu_id = 250 AND IFNULL(is_active, 1) = 1
+                """);
+        jdbc.update("""
+                UPDATE sys_menu SET
+                  menu_name = '机器人', parent_id = 0, sort_order = 45, path = '/robot', component = '',
+                  menu_type = 'M', perms = '', icon = 'RobotOutlined', remark = '多意图机器人后台',
+                  visible = 0, status = 0, is_active = 1
+                WHERE menu_id = 250
+                """);
+        jdbc.update("""
+                DELETE rm FROM sys_role_menu rm
+                INNER JOIN sys_role r ON r.role_id = rm.role_id
+                WHERE rm.menu_id = 250
+                  AND r.role_key IN ('hr_admin', 'hr_owner', 'hr_exec', 'hr_interviewer', 'hr_user')
+                """);
+        log.info("已将误占的 menu_id=250 交还给机器人，HR面试日历改用 261");
+    }
+
     private void menu(int id, String name, int parent, int sort, String path, String component, String type,
                       String perms, String icon, String remark) {
-        jdbc.update("""
-                INSERT INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, component, menu_type, perms, icon, visible, status, remark, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 1)
-                ON DUPLICATE KEY UPDATE
-                  menu_name = VALUES(menu_name), parent_id = VALUES(parent_id), sort_order = VALUES(sort_order),
-                  path = VALUES(path), component = VALUES(component), menu_type = VALUES(menu_type),
-                  perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark)
-                """, id, name, parent, sort, path, component, type, perms, icon, remark);
+        SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.HR, id, name, parent, sort, path, component, type,
+                perms, icon, remark);
     }
 
     private void grant(long roleId, int... menuIds) {
