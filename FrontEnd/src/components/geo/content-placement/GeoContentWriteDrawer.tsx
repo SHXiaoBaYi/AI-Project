@@ -154,10 +154,12 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const pendingRetryRef = useRef(false);
   const activeRef = useRef<ActiveKey>('shared');
   const editorHostRef = useRef<LakexEditorHostHandle | null>(null);
+  const bundleRef = useRef<GeoContentArticleBundle | null>(null);
 
   bodyRef.current = body;
   titleRef.current = contentTitle;
   activeRef.current = active;
+  bundleRef.current = bundle;
 
   const article = useMemo(
     () => (typeof active === 'number' ? bundle?.articles.find((row) => row.itemId === active) : undefined),
@@ -204,6 +206,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     setSaveError('');
     try {
       const data = await getGeoContentArticleBundleApi(id);
+      bundleRef.current = data;
       setBundle(data);
       const next = prefer ?? 'shared';
       setActive(next);
@@ -216,6 +219,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       }
     } catch (e) {
       message.error(e instanceof Error ? e.message : '加载文章失败');
+      bundleRef.current = null;
       setBundle(null);
     } finally {
       setLoading(false);
@@ -334,7 +338,11 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
             contentVersion: versionRef.current,
           });
           versionRef.current = next.contentVersion ?? versionRef.current + 1;
-          setBundle((prev) => (prev ? { ...prev, shared: next } : prev));
+          setBundle((prev) => {
+            const nextBundle = prev ? { ...prev, shared: next } : prev;
+            bundleRef.current = nextBundle;
+            return nextBundle;
+          });
         } else if (row) {
           const next = await saveGeoContentItemDraftApi({
             itemId: row.itemId,
@@ -344,11 +352,13 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
             contentVersion: versionRef.current,
           });
           versionRef.current = next.contentVersion ?? versionRef.current + 1;
-          setBundle((prev) =>
-            prev
+          setBundle((prev) => {
+            const nextBundle = prev
               ? { ...prev, articles: prev.articles.map((item) => (item.itemId === next.itemId ? next : item)) }
-              : prev,
-          );
+              : prev;
+            bundleRef.current = nextBundle;
+            return nextBundle;
+          });
         }
         setSaveState('saved');
         if (!opts?.silent) message.success('已保存');
@@ -388,11 +398,12 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     if (mode === 'write') await persist({ silent: true });
     setEditorReady(false);
     setActive(next);
-    if (!bundle) return;
-    if (next === 'shared') applyShared(bundle);
+    const latest = bundleRef.current;
+    if (!latest) return;
+    if (next === 'shared') applyShared(latest);
     else {
-      const row = bundle.articles.find((item) => item.itemId === next);
-      if (row) applyArticle(row, bundle);
+      const row = latest.articles.find((item) => item.itemId === next);
+      if (row) applyArticle(row, latest);
     }
     setSaveState('idle');
   };
@@ -404,18 +415,22 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   };
 
   const replaceArticle = (next: GeoContentArticle) => {
-    setBundle((prev) =>
-      prev ? { ...prev, articles: prev.articles.map((item) => (item.itemId === next.itemId ? next : item)) } : prev,
-    );
+    setBundle((prev) => {
+      const nextBundle = prev
+        ? { ...prev, articles: prev.articles.map((item) => (item.itemId === next.itemId ? next : item)) }
+        : prev;
+      bundleRef.current = nextBundle;
+      return nextBundle;
+    });
     if (active === next.itemId) {
       if (next.contentMode === 'custom') {
         setContentTitle(next.contentTitle || '');
         setBody(next.contentBody || '');
         versionRef.current = next.contentVersion ?? 0;
-      } else if (bundle) {
-        setContentTitle(bundle.shared.contentTitle || '');
-        setBody(bundle.shared.contentBody || '');
-        versionRef.current = bundle.shared.contentVersion ?? 0;
+      } else if (bundleRef.current) {
+        setContentTitle(bundleRef.current.shared.contentTitle || '');
+        setBody(bundleRef.current.shared.contentBody || '');
+        versionRef.current = bundleRef.current.shared.contentVersion ?? 0;
       }
     }
   };
@@ -433,7 +448,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         contentMode,
         contentTitle: contentMode === 'custom' ? titleRef.current : undefined,
         contentBody: contentMode === 'custom' ? bodyRef.current : undefined,
-        contentVersion: article.contentVersion,
+        contentVersion: article.contentMode === 'custom' ? versionRef.current : article.contentVersion,
       });
       replaceArticle(next);
       message.success(contentMode === 'custom' ? '已改为该平台独立稿' : '已改回统一稿');
@@ -860,10 +875,14 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                       void (async () => {
                         try {
                           const created = await addGeoContentPlatformArticleApi({ placementId, platformName });
-                          setBundle((prev) => (prev ? { ...prev, articles: [...prev.articles, created] } : prev));
+                          setBundle((prev) => {
+                            const nextBundle = prev ? { ...prev, articles: [...prev.articles, created] } : prev;
+                            bundleRef.current = nextBundle;
+                            return nextBundle;
+                          });
                           message.success(`已添加 ${platformName}`);
                           setActive(created.itemId);
-                          applyArticle(created, bundle);
+                          if (bundleRef.current) applyArticle(created, bundleRef.current);
                         } catch (e) {
                           message.error(e instanceof Error ? e.message : '添加平台失败');
                         }

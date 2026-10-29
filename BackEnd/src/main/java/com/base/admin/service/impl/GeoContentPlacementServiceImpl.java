@@ -405,14 +405,20 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         long currentVersion = placement.getContentVersion() == null ? 0L : placement.getContentVersion();
         Long clientVersion = dto.getContentVersion();
-        if (clientVersion != null && clientVersion != currentVersion) {
-            throw new BusinessException("正文已在别处保存，请刷新后重试（版本冲突）");
-        }
         String nextTitle = dto.getContentTitle() == null ? "" : dto.getContentTitle().trim();
         String nextBody = dto.getContentBody() == null ? "" : dto.getContentBody();
         String prevTitle = placement.getContentTitle() == null ? "" : placement.getContentTitle();
         String prevBody = placement.getContentBody() == null ? "" : placement.getContentBody();
         boolean changed = !nextTitle.equals(prevTitle) || !nextBody.equals(prevBody);
+        if (clientVersion != null && clientVersion != currentVersion) {
+            if (!changed) {
+                return toDraftVo(placement);
+            }
+            throw new BusinessException("正文已在别处保存，请刷新后重试（版本冲突）");
+        }
+        if (!changed) {
+            return toDraftVo(placement);
+        }
         String nextStatus = lockStatus;
         if (!StringUtils.hasText(nextStatus)
                 || (Constants.CONTENT_STATUS_PENDING_REVIEW.equals(nextStatus) && !hasPendingContentReview(placement.getId()))) {
@@ -532,14 +538,21 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             throw new BusinessException("当前审核状态不可修改这篇稿");
         }
         long currentVersion = item.getContentVersion() == null ? 0L : item.getContentVersion();
-        if (dto.getContentVersion() != null && dto.getContentVersion() != currentVersion
-                && Constants.CONTENT_MODE_CUSTOM.equals(mode)) {
-            throw new BusinessException("正文已在别处保存，请刷新后重试（版本冲突）");
-        }
-        item.setContentMode(mode);
         if (Constants.CONTENT_MODE_CUSTOM.equals(mode)) {
             String title = dto.getContentTitle() == null ? "" : dto.getContentTitle().trim();
             String body = dto.getContentBody() == null ? "" : dto.getContentBody();
+            String prevTitle = item.getContentTitle() == null ? "" : item.getContentTitle();
+            String prevBody = item.getContentBody() == null ? "" : item.getContentBody();
+            boolean changed = !title.equals(prevTitle) || !body.equals(prevBody);
+            if (dto.getContentVersion() != null && dto.getContentVersion() != currentVersion) {
+                if (!changed) {
+                    return toArticleVo(placement, item, loadOpinions(placement.getId()));
+                }
+                throw new BusinessException("正文已在别处保存，请刷新后重试（版本冲突）");
+            }
+            if (!changed && Constants.CONTENT_MODE_CUSTOM.equals(normalizeContentMode(item.getContentMode()))) {
+                return toArticleVo(placement, item, loadOpinions(placement.getId()));
+            }
             if (!StringUtils.hasText(body)) {
                 body = placement.getContentBody() == null ? "" : placement.getContentBody();
                 if (!StringUtils.hasText(title)) {
@@ -556,6 +569,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 item.setTitle(title);
             }
         }
+        item.setContentMode(mode);
         itemMapper.updateById(item);
         refreshPlacementContentRollup(placement.getId());
         return toArticleVo(requirePlacement(placement.getId()), requireItem(item.getId()), loadOpinions(placement.getId()));
