@@ -45,6 +45,7 @@ public class HrInviteService {
     /** 面试开始时间：全天可约，半小时整点 */
 
     private final JdbcTemplate jdbc;
+    private final HrApplicationStageSync stageSync;
     private final DingTalkCalendarClient dingTalk;
     private final HrMasterService hrMasterService;
     private final FileStorageService fileStorage;
@@ -195,10 +196,7 @@ public class HrInviteService {
                 WHERE application_id = ? AND round_no = ?
                 """, applicationId, roundNo);
         if (roundNo == 1) {
-            jdbc.update("""
-                    UPDATE hr_stage_event SET is_active = 0
-                    WHERE application_id = ? AND stage_code = 'INVITED' AND source_sheet = 'INVITE'
-                    """, applicationId);
+            stageSync.revertRoundOneInvite(applicationId);
         }
     }
 
@@ -361,6 +359,9 @@ public class HrInviteService {
         if (peersLeft == null || peersLeft == 0) {
             releaseCcCalendarsForSession(applicationId, roundNo, interviewAt);
         }
+        if (roundNo == 1) {
+            stageSync.revertRoundOneInvite(applicationId);
+        }
         return saveResult(id, null);
     }
 
@@ -397,6 +398,9 @@ public class HrInviteService {
                 """, Integer.class, applicationId, roundNo, interviewAt);
         if (peersLeft == null || peersLeft == 0) {
             releaseCcCalendarsForSession(applicationId, roundNo, interviewAt);
+        }
+        if (roundNo == 1) {
+            stageSync.revertRoundOneInvite(applicationId);
         }
         return saveResult(id, warning);
     }
@@ -606,6 +610,9 @@ public class HrInviteService {
                 SET status = 'CANCELLED', cancelled_by = ?, cancelled_at = ?
                 WHERE id = ?
                 """, SecurityUtils.getCurrentUserId(), LocalDateTime.now(), id);
+        if (((Number) invite.get("roundNo")).intValue() == 1) {
+            stageSync.revertRoundOneInvite((Long) invite.get("applicationId"));
+        }
         return created;
     }
 
@@ -1630,6 +1637,7 @@ public class HrInviteService {
                     VALUES (?, 'INVITED', ?, 'INVITE', ?, 1)
                     ON DUPLICATE KEY UPDATE is_active = 1
                     """, dto.getApplicationId(), LocalDateTime.now(), SecurityUtils.getCurrentUsername());
+            stageSync.markRoundOneInvited(dto.getApplicationId());
         }
     }
 

@@ -344,15 +344,31 @@ public class HrInterviewRecordService {
         return reason;
     }
 
+    @Transactional
     public void delete(Long id) {
-        Long requisitionId = jdbc.query("""
-                SELECT requisition_id FROM hr_interview_record WHERE id = ? AND is_active = 1
-                """, rs -> rs.next() && rs.getObject(1) != null ? rs.getLong(1) : null, id);
+        Map<String, Object> row = jdbc.query("""
+                SELECT application_id, round_no, requisition_id
+                FROM hr_interview_record WHERE id = ? AND is_active = 1
+                """, rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            Map<String, Object> found = new java.util.HashMap<>();
+            found.put("applicationId", rs.getLong("application_id"));
+            found.put("roundNo", rs.getInt("round_no"));
+            found.put("requisitionId", rs.getObject("requisition_id") == null ? null : rs.getLong("requisition_id"));
+            return found;
+        }, id);
+        if (row == null) {
+            throw new BusinessException("面试记录不存在");
+        }
         int updated = jdbc.update("UPDATE hr_interview_record SET is_active = 0 WHERE id = ? AND is_active = 1", id);
         if (updated == 0) {
             throw new BusinessException("面试记录不存在");
         }
+        Long requisitionId = (Long) row.get("requisitionId");
         kpiTaskService.onResumeQualifiedChanged(requisitionId);
+        resyncAfterReviewRemoved((Long) row.get("applicationId"), (Integer) row.get("roundNo"), requisitionId);
     }
 
     @Transactional
@@ -379,6 +395,7 @@ public class HrInterviewRecordService {
         delete(id);
     }
 
+    @Transactional
     public void deleteBatch(java.util.List<Long> ids) {
         if (ids == null || ids.isEmpty()) {
             throw new BusinessException("请选择要删除的面试记录");
@@ -507,6 +524,99 @@ public class HrInterviewRecordService {
             return prefix + "评价已保存，候选人阶段已更新为" + stageName(code);
         }
         return prefix.isEmpty() ? "已保存" : prefix.substring(0, prefix.length() - 1);
+    }
+
+    private void resyncAfterReviewRemoved(Long applicationId, Integer roundNo, Long requisitionId) {
+        if (applicationId == null || roundNo == null || roundNo <= 0) {
+            return;
+        }
+        Long resolvedRequisition = requisitionId != null ? requisitionId : requisitionIdOf(applicationId);
+        String verdict = jdbc.query("""
+                SELECT conclusion FROM hr_interview_verdict
+                WHERE application_id = ? AND round_no = ? AND is_active = 1
+                """, rs -> rs.next() ? rs.getString(1) : null, applicationId, roundNo);
+        if (verdict != null && !verdict.isBlank()) {
+            applyConsensus(applicationId, resolvedRequisition, roundNo, verdict.trim().toUpperCase(), "");
+            return;
+        }
+        Long inviteId = jdbc.query("""
+                SELECT id FROM hr_interview_invite
+                WHERE application_id = ? AND round_no = ? AND is_active = 1
+                  AND status IN ('SUCCESS', 'NO_CALENDAR')
+                ORDER BY interview_at DESC, id DESC
+                LIMIT 1
+                """, rs -> rs.next() ? rs.getLong(1) : null, applicationId, roundNo);
+        if (inviteId != null) {
+            String outcome = syncStage(applicationId, roundNo, inviteId);
+            if (!"WAIT".equals(outcome) && !"NONE".equals(outcome)) {
+                return;
+            }
+            rollbackRoundStage(applicationId, roundNo);
+            return;
+        }
+        List<String> conclusions = jdbc.query("""
+                SELECT conclusion FROM hr_interview_record
+                WHERE application_id = ? AND round_no = ? AND is_active = 1
+                  AND conclusion IS NOT NULL AND TRIM(conclusion) <> ''
+                """, (rs, rowNum) -> rs.getString(1), applicationId, roundNo);
+        if (conclusions.isEmpty()) {
+            rollbackRoundStage(applicationId, roundNo);
+            return;
+        }
+        Set<String> unique = new LinkedHashSet<>();
+        for (String conclusion : conclusions) {
+            unique.add(conclusion.trim().toUpperCase());
+        }
+        if (unique.size() > 1) {
+            applyStage(applicationId, "R" + roundNo + "_DISPUTE");
+            return;
+        }
+        applyConsensus(applicationId, resolvedRequisition, roundNo, unique.iterator().next(), "");
+    }
+
+    private void rollbackRoundStage(Long applicationId, int roundNo) {
+        String current = jdbc.query("SELECT current_stage FROM hr_application WHERE id = ? AND is_active = 1",
+                rs -> rs.next() ? rs.getString(1) : null, applicationId);
+        if (!stageBelongsToRound(current, roundNo)) {
+            return;
+        }
+        applyStage(applicationId, roundNo <= 1 ? showOrInvited(applicationId) : previousPass(roundNo));
+    }
+
+    private String showOrInvited(Long applicationId) {
+        Integer started = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_interview_invite
+                WHERE application_id = ? AND round_no = 1 AND is_active = 1
+                  AND status IN ('SUCCESS', 'NO_CALENDAR') AND interview_at <= NOW()
+                """, Integer.class, applicationId);
+        return started != null && started > 0 ? "SHOW_UP" : "INVITED";
+    }
+
+    private static String previousPass(int roundNo) {
+        if (roundNo <= 2) {
+            return "FIRST_ROUND";
+        }
+        if (roundNo == 3) {
+            return "SECOND_ROUND";
+        }
+        return "R" + (roundNo - 1) + "_PASS";
+    }
+
+    private static boolean stageBelongsToRound(String stage, int roundNo) {
+        if (stage == null || stage.isBlank()) {
+            return false;
+        }
+        return switch (roundNo) {
+            case 1 -> "FIRST_PENDING".equals(stage) || "FIRST_ROUND".equals(stage)
+                    || "FIRST_FAIL".equals(stage) || "R1_DISPUTE".equals(stage);
+            case 2 -> "R2_PENDING".equals(stage) || "SECOND_ROUND".equals(stage)
+                    || "R2_FAIL".equals(stage) || "R2_DISPUTE".equals(stage);
+            default -> {
+                String prefix = "R" + roundNo + "_";
+                yield stage.startsWith(prefix) && (stage.endsWith("PASS") || stage.endsWith("PENDING")
+                        || stage.endsWith("DISPUTE") || stage.endsWith("FAIL"));
+            }
+        };
     }
 
     private void applyStage(Long applicationId, String stageCode) {

@@ -241,6 +241,10 @@ public class SysTaskServiceImpl implements SysTaskService {
         applyStatusSideEffects(task, oldStatus);
         taskMapper.updateById(task);
         replaceAssignees(task.getId(), assigneeIds);
+        HrHirePipelineService pipeline = hirePipeline.getIfAvailable();
+        if (pipeline != null) {
+            pipeline.onTaskStatusChanged(task, oldStatus);
+        }
     }
 
     @Override

@@ -87,6 +87,26 @@ public class HrHirePipelineService {
         }
     }
 
+    /** 任务编辑里把入职前任务改成已完成，或从已完成改回去时，按当前完成情况重算阶段。 */
+    public void onTaskStatusChanged(SysTask task, String oldStatus) {
+        if (task == null || task.getBizId() == null || !StringUtils.hasText(task.getBizType())) {
+            return;
+        }
+        if (!BIZ_STEP.equals(task.getBizType()) && !BIZ_ONBOARD.equals(task.getBizType())) {
+            return;
+        }
+        boolean wasDone = "已完成".equals(oldStatus);
+        boolean nowDone = "已完成".equals(task.getStatus());
+        if (wasDone == nowDone) {
+            return;
+        }
+        if (nowDone) {
+            afterTaskCompleted(task);
+            return;
+        }
+        refreshStage(task.getBizId());
+    }
+
     private void openOnboard(Long applicationId) {
         if (taskCount(applicationId, BIZ_ONBOARD, null, null) > 0) {
             return;
@@ -137,7 +157,14 @@ public class HrHirePipelineService {
     }
 
     private boolean stepDone(Long applicationId, String code) {
-        return taskCount(applicationId, BIZ_STEP, code, "已完成") > 0;
+        Step step = STEPS.stream().filter(item -> item.code().equals(code)).findFirst().orElse(null);
+        String taskType = step == null ? "" : step.taskType();
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM sys_task
+                WHERE biz_type = ? AND biz_id = ? AND is_active = 1 AND status = '已完成'
+                  AND (remark LIKE ? OR task_type = ?)
+                """, Integer.class, BIZ_STEP, applicationId, "hireStep:" + code + "%", taskType);
+        return count != null && count > 0;
     }
 
     private int taskCount(Long applicationId, String bizType, String stepCode, String status) {
