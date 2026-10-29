@@ -7,11 +7,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * 按面试邀约时间，给面试官发钉钉工作通知催填评价；点击通知直达「我的面试」评价。
+ * 按面试邀约时间，给面试官发钉钉工作通知催填评价；
+ * 点击通知经企业免登后直达「我的面试」评价弹窗。
  */
 @Slf4j
 @Service
@@ -21,6 +24,7 @@ public class HrInterviewReviewPushService {
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalk;
     private final DingTalkProperties dingTalkProperties;
+    private final DingTalkAppService dingTalkAppService;
 
     /** 定时扫描：面试结束后约 30 分钟催评；次日补催一次。 */
     public void scanAndPush() {
@@ -65,7 +69,7 @@ public class HrInterviewReviewPushService {
             logPush(inviteId, interviewerUserId, kind, "SKIP", "面试官未绑定钉钉");
             return;
         }
-        String link = reviewLink(inviteId);
+        String link = reviewEntryLink(inviteId);
         if (!StringUtils.hasText(link)) {
             logPush(inviteId, interviewerUserId, kind, "SKIP", "未配置 dingtalk.h5-base-url");
             return;
@@ -78,7 +82,7 @@ public class HrInterviewReviewPushService {
                 + "- 候选人：**" + name + "**\n"
                 + "- 岗位：" + job + "\n"
                 + "- 轮次：第" + roundNo + "面\n\n"
-                + "请尽快填写评价（含「简历是否合格」）。点击下方按钮直达评价。";
+                + "请尽快填写评价（含「简历是否合格」）。点击下方按钮将免登进入并打开评价。";
         DingTalkCalendarClient.NoticeCall call = dingTalk.notifyActionCard(
                 dingUserId, title, markdown, "去评价", link);
         if (call.success()) {
@@ -115,13 +119,22 @@ public class HrInterviewReviewPushService {
                 """, inviteId, interviewerUserId, kind, status, msg == null ? "" : msg.substring(0, Math.min(500, msg.length())));
     }
 
-    /** 直达我的面试并打开该场评价：/hr/mine?inviteId= */
-    private String reviewLink(Long inviteId) {
+    /** 免登落地页 → 我的面试评价弹窗 */
+    private String reviewEntryLink(Long inviteId) {
         String base = dingTalkProperties.getH5BaseUrl();
         if (!StringUtils.hasText(base)) {
             return "";
         }
         String root = base.trim().replaceAll("/+$", "");
-        return root + "/hr/mine?inviteId=" + inviteId;
+        StringBuilder url = new StringBuilder(root)
+                .append("/hr/review-entry?inviteId=")
+                .append(inviteId);
+        String corpId = dingTalkAppService.corpId();
+        if (StringUtils.hasText(corpId)) {
+            url.append("&corpId=").append(URLEncoder.encode(corpId.trim(), StandardCharsets.UTF_8));
+        } else {
+            log.warn("催评链接未带 corpId：钉钉应用 CorpId 为空，免登可能失败");
+        }
+        return url.toString();
     }
 }

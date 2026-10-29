@@ -16,7 +16,7 @@ public class HrJobCandidateVO {
     @Schema(description = "姓名")
     private String displayName;
 
-    @Schema(description = "是否未处理（已录入）")
+    @Schema(description = "是否未处理：入库后无沟通/改阶段/评价等任何处理记录")
     private Boolean pending;
 
     @Schema(description = "性别 男/女")
@@ -43,7 +43,7 @@ public class HrJobCandidateVO {
     @Schema(description = "提交时间 yyyy-MM-dd")
     private String recommendedAt;
 
-    @Schema(description = "剩余处理小时，超时为负", example = "47.49", nullable = true)
+    @Schema(description = "未处理时剩余小时（入库 create_time 起 48h，无则推荐日 0 点）；已处理为 null；超时为负", example = "47.49", nullable = true)
     private Double remainingHours;
 
     @Schema(description = "提交人")

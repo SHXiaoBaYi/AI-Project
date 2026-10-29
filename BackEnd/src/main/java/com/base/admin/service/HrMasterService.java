@@ -200,7 +200,19 @@ public class HrMasterService {
                            AND jp.code = r.job_priority_code LIMIT 1) job_priority_name,
                        (SELECT COUNT(1) FROM hr_application a
                         WHERE a.requisition_id = r.id AND a.is_active = 1
-                          AND IFNULL(NULLIF(TRIM(a.current_stage), ''), 'ENTERED') = 'ENTERED') pending_count,
+                          AND IFNULL(NULLIF(TRIM(a.current_stage), ''), 'ENTERED') = 'ENTERED'
+                          AND (a.screen_result IS NULL OR TRIM(a.screen_result) = '')
+                          AND NOT EXISTS (
+                              SELECT 1 FROM hr_phone_screen p
+                              WHERE p.application_id = a.id AND p.is_active = 1)
+                          AND NOT EXISTS (
+                              SELECT 1 FROM hr_interview_record rec
+                              WHERE rec.application_id = a.id AND rec.is_active = 1)
+                          AND NOT EXISTS (
+                              SELECT 1 FROM hr_stage_event e
+                              WHERE e.application_id = a.id AND e.is_active = 1
+                                AND UPPER(TRIM(IFNULL(e.stage_code, ''))) <> 'ENTERED')
+                       ) pending_count,
                        (SELECT COUNT(1) FROM hr_application a
                         WHERE a.requisition_id = r.id AND a.is_active = 1
                           AND a.current_stage IN (
@@ -738,7 +750,7 @@ public class HrMasterService {
             stage = "ENTERED";
         }
         return switch (bucket) {
-            case "PENDING" -> "ENTERED".equalsIgnoreCase(stage);
+            case "PENDING" -> Boolean.TRUE.equals(row.get("pending"));
             case "INTERVIEWING" -> JOB_FUNNEL_INTERVIEWING.contains(stage.toUpperCase(Locale.ROOT));
             case "ONBOARDED" -> "ONBOARDED".equalsIgnoreCase(stage);
             case "BG_CHECK" -> "BG_CHECK".equalsIgnoreCase(stage) || "BG_COLLECT".equalsIgnoreCase(stage);
@@ -798,9 +810,31 @@ public class HrMasterService {
 
     private static void attachCandidateDisplay(Map<String, Object> row) {
         row.put("basic_info", buildBasicInfo(row));
-        row.put("remaining_hours", remainingHours(row.get("create_time"), row.get("submitted_at")));
+        boolean pending = !isHandled(row);
+        row.put("pending", pending);
+        // 仅未产生任何处理记录时才计 48h；已沟通/改阶段/评价等显示 —
+        row.put("remaining_hours", pending
+                ? remainingHours(row.get("create_time"), row.get("submitted_at"))
+                : null);
+    }
+
+    /**
+     * 已处理：改过阶段、有初筛结果、电话沟通、面试评价，或阶段事件（入库 ENTERED 除外）。
+     */
+    private static boolean isHandled(Map<String, Object> row) {
+        Object flag = row.get("handled");
+        if (flag instanceof Number n) {
+            return n.intValue() != 0;
+        }
+        if (flag instanceof Boolean b) {
+            return b;
+        }
         String stage = stringOf(row.get("current_stage"));
-        row.put("pending", stage == null || stage.isBlank() || "ENTERED".equalsIgnoreCase(stage));
+        if (stage != null && !stage.isBlank() && !"ENTERED".equalsIgnoreCase(stage)) {
+            return true;
+        }
+        String screen = stringOf(row.get("screen_result"));
+        return screen != null && !screen.isBlank();
     }
 
     private static HrJobCandidateVO toJobCandidate(Map<String, Object> row) {
@@ -881,13 +915,28 @@ public class HrMasterService {
         StringBuilder sql = new StringBuilder("""
                 SELECT a.id, c.id candidate_id, c.display_name, c.phone, c.email, c.gender, c.age, c.education, c.candidate_no,
                        c.current_title, c.current_company, a.requisition_id, r.job_name, a.channel_code, ch.channel_name,
-                       a.resume_status, a.current_stage, s.stage_name, a.submitter_user_id, a.submitter_name, a.submitted_at, a.create_time,
+                       a.resume_status, a.screen_result, a.current_stage, s.stage_name, a.submitter_user_id, a.submitter_name, a.submitted_at, a.create_time,
                        f.file_name,
                        (SELECT ai.score FROM hr_application_ai ai WHERE ai.application_id = a.id AND ai.is_active = 1 ORDER BY ai.id DESC LIMIT 1) ai_score,
                        (SELECT COUNT(1) FROM hr_application_ai ai WHERE ai.application_id = a.id AND ai.is_active = 1) ai_count,
                        (SELECT COUNT(1) FROM hr_candidate_portfolio p WHERE p.candidate_id = c.id AND p.is_active = 1) portfolio_count,
                        (SELECT GROUP_CONCAT(CONCAT(p.id, ':', p.file_name) ORDER BY p.id DESC SEPARATOR '||')
-                          FROM hr_candidate_portfolio p WHERE p.candidate_id = c.id AND p.is_active = 1) portfolio_files
+                          FROM hr_candidate_portfolio p WHERE p.candidate_id = c.id AND p.is_active = 1) portfolio_files,
+                       (CASE
+                          WHEN IFNULL(NULLIF(TRIM(a.current_stage), ''), 'ENTERED') <> 'ENTERED' THEN 1
+                          WHEN a.screen_result IS NOT NULL AND TRIM(a.screen_result) <> '' THEN 1
+                          WHEN EXISTS (
+                              SELECT 1 FROM hr_phone_screen p
+                              WHERE p.application_id = a.id AND p.is_active = 1) THEN 1
+                          WHEN EXISTS (
+                              SELECT 1 FROM hr_interview_record rec
+                              WHERE rec.application_id = a.id AND rec.is_active = 1) THEN 1
+                          WHEN EXISTS (
+                              SELECT 1 FROM hr_stage_event e
+                              WHERE e.application_id = a.id AND e.is_active = 1
+                                AND UPPER(TRIM(IFNULL(e.stage_code, ''))) <> 'ENTERED') THEN 1
+                          ELSE 0
+                        END) handled
                 FROM hr_application a
                 JOIN hr_candidate c ON c.id = a.candidate_id
                 LEFT JOIN hr_requisition r ON r.id = a.requisition_id

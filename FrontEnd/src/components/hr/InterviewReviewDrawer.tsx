@@ -44,6 +44,7 @@ type ReviewRow = {
   interviewerName?: string;
   conclusion?: string;
   failReason?: string;
+  resumeQualified?: boolean;
   comment?: string;
   interviewedAt?: string;
 };
@@ -129,6 +130,7 @@ export default function InterviewReviewDrawer({
         interviewerUserId: editing.row.interviewerUserId,
         conclusion: editing.row.conclusion,
         failReason: editing.row.failReason,
+        resumeQualified: editing.row.resumeQualified ?? true,
         comment: editing.row.comment,
       });
       return;
@@ -138,6 +140,7 @@ export default function InterviewReviewDrawer({
       interviewerUserId: undefined,
       conclusion: undefined,
       failReason: undefined,
+      resumeQualified: true,
       comment: undefined,
     });
   }, [editing, form]);
@@ -229,6 +232,12 @@ export default function InterviewReviewDrawer({
             render: (value: string, row) => (row.conclusion === 'FAIL' ? value || '—' : '—'),
           },
           {
+            title: '简历是否合格',
+            dataIndex: 'resumeQualified',
+            width: 120,
+            render: (value: boolean | undefined) => (value == null ? '—' : value ? '合格' : '不合格'),
+          },
+          {
             title: '评语',
             dataIndex: 'comment',
             ellipsis: true,
@@ -261,12 +270,22 @@ export default function InterviewReviewDrawer({
                 ? dayjs(String(editing.row.interviewedAt).replace('T', ' '))
                 : null;
             const interviewedAt = (existingAt?.isValid() ? existingAt : dayjs()).format('YYYY-MM-DD HH:mm:ss');
+            if (values.conclusion === 'FAIL' && values.resumeQualified == null) {
+              message.warning('未通过时必须选择简历是否合格');
+              return;
+            }
             const payload: Record<string, unknown> = {
               applicationId,
               roundNo: values.roundNo,
               interviewerUserId: values.interviewerUserId,
               conclusion: values.conclusion,
               failReason: values.conclusion === 'FAIL' ? values.failReason : undefined,
+              resumeQualified:
+                values.conclusion === 'PASS'
+                  ? (values.resumeQualified ?? true)
+                  : values.conclusion === 'FAIL'
+                    ? values.resumeQualified
+                    : values.resumeQualified,
               comment: values.comment,
               interviewedAt,
               updateStage: false,
@@ -328,6 +347,9 @@ export default function InterviewReviewDrawer({
                 placeholder='请选择结论'
                 onChange={(value) => {
                   if (value !== 'FAIL') form.setFieldValue('failReason', undefined);
+                  if (value === 'PASS' && form.getFieldValue('resumeQualified') == null) {
+                    form.setFieldValue('resumeQualified', true);
+                  }
                 }}
               />
             </Form.Item>
@@ -351,6 +373,32 @@ export default function InterviewReviewDrawer({
                   </Form.Item>
                 ) : null
               }
+            </Form.Item>
+            <Form.Item
+              noStyle
+              shouldUpdate={(prev, next) => prev.conclusion !== next.conclusion}
+            >
+              {() => {
+                const conclusion = form.getFieldValue('conclusion');
+                if (!conclusion || conclusion === 'PENDING') return null;
+                return (
+                  <Form.Item
+                    name='resumeQualified'
+                    label='简历是否合格'
+                    rules={
+                      conclusion === 'FAIL' ? [{ required: true, message: '未通过时必须选择简历是否合格' }] : undefined
+                    }
+                  >
+                    <Select
+                      options={[
+                        { value: true, label: '合格' },
+                        { value: false, label: '不合格' },
+                      ]}
+                      placeholder='请选择'
+                    />
+                  </Form.Item>
+                );
+              }}
             </Form.Item>
             <Form.Item
               name='comment'

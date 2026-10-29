@@ -353,6 +353,8 @@ const ApplicationPage = memo(function ApplicationPage() {
       },
       {
         title: '剩余处理时间',
+        tooltip:
+          '仅未处理候选人：自入库 create_time（无则推荐日 0 点）起 48 小时；一旦有沟通/改阶段/面试评价等记录即视为已处理，显示「—」；超时显示「已超时」',
         dataIndex: 'remainingHours',
         search: false,
         width: 140,

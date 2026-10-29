@@ -1132,6 +1132,7 @@ export function listHrInterviewReviewsApi(applicationId: number) {
       interviewerName?: string;
       conclusion?: string;
       failReason?: string;
+      resumeQualified?: boolean;
       comment?: string;
       interviewedAt?: string;
     }[]

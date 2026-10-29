@@ -30,7 +30,8 @@ function isDingTalkBridgePath() {
     return (
       path.includes('/dingtalk/bridge') ||
       path.includes('/train/cashier-assistant') ||
-      path.includes('/robot/link-monitor/fill')
+      path.includes('/robot/link-monitor/fill') ||
+      path.includes('/hr/review-entry')
     );
   } catch {
     return false;
