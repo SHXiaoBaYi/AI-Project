@@ -682,6 +682,10 @@ export function saveHrKpiScoreRuleApi(data: HrKpiScoreRule) {
   return request.put('/hr/kpi/score-rule', data);
 }
 
+export function backfillHrKpiAssessmentApi() {
+  return request.post<unknown, number>('/hr/kpi/assessment/backfill');
+}
+
 export async function downloadHrKpiApi(data: HrKpiQuery = {}, filename = '招聘KPI报表.xlsx') {
   const token = getToken();
   const res = await fetch(withBase('/api/hr/kpi/export'), {

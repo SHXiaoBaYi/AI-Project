@@ -72,8 +72,10 @@ public class HrKpiTaskService {
         }
 
         ScoreRule rule = loadScoreRule();
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime due = now.plusMonths(rule.dueMonths());
+        // 新 OPEN 槽到期落在本月，保证「考核得分」当月能看到在招任务
+        LocalDate monthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDateTime due = monthStart.plusMonths(1).atStartOfDay().minusSeconds(1);
+        LocalDateTime published = due.minusMonths(Math.max(1, rule.dueMonths()));
         String username = safeUser();
         for (Long ownerId : owners) {
             int doneSlots = countSlots(requisitionId, ownerId, "DONE");
@@ -97,7 +99,7 @@ public class HrKpiTaskService {
                           done_at = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_at),
                           done_reason = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_reason),
                           done_application_id = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_application_id)
-                        """, requisitionId, ownerId, slot, priority, now, due, due, username);
+                        """, requisitionId, ownerId, slot, priority, published, due, due, username);
                 openSlots.add(slot);
             }
             // 多余 OPEN 取消（从大 slot 开始）
@@ -200,7 +202,179 @@ public class HrKpiTaskService {
         }
     }
 
+    /**
+     * 同步全部招聘中的 P0/P1 任务槽，并按已入职/合格简历尝试完成。
+     */
+    @Transactional
+    public int syncAllOpenScoreRequisitions() {
+        List<Long> ids = jdbc.query("""
+                SELECT id FROM hr_requisition
+                WHERE is_active = 1 AND status = 'OPEN'
+                  AND UPPER(IFNULL(job_priority_code, '')) IN ('P0', 'P1')
+                ORDER BY id
+                """, (rs, i) -> rs.getLong(1));
+        int n = 0;
+        LocalDateTime now = LocalDateTime.now();
+        for (Long id : ids) {
+            syncForRequisition(id);
+            List<Long> owners = loadOwners(id);
+            for (Long ownerId : owners) {
+                tryCompleteByOnboard(id, ownerId, now, null);
+                tryCompleteByQualifiedResumes(id, ownerId);
+            }
+            n++;
+        }
+        return n;
+    }
+
+    /**
+     * 全量历史回填：按入职时间线与合格简历重建所有 P0/P1 考核任务（含已关闭岗位），
+     * 完成任务的到期日落在完成当月，便于按月核算历史得分。
+     */
+    @Transactional
+    public int backfillAllHistorical() {
+        int cleared = jdbc.update("UPDATE hr_kpi_task SET is_active = 0 WHERE is_active = 1");
+        log.info("考核任务历史回填：先软删旧任务 {} 条", cleared);
+        ScoreRule rule = loadScoreRule();
+        List<Map<String, Object>> reqs = jdbc.queryForList("""
+                SELECT id, status, headcount, job_priority_code,
+                       COALESCE(received_date, DATE(create_time)) AS start_day
+                FROM hr_requisition
+                WHERE is_active = 1
+                  AND UPPER(IFNULL(job_priority_code, '')) IN ('P0', 'P1')
+                ORDER BY id
+                """);
+        int reqCount = 0;
+        int taskCount = 0;
+        for (Map<String, Object> req : reqs) {
+            Long requisitionId = ((Number) req.get("id")).longValue();
+            String status = String.valueOf(req.get("status"));
+            String priority = String.valueOf(req.get("job_priority_code")).trim().toUpperCase();
+            int headcount = Math.max(1, ((Number) req.get("headcount")).intValue());
+            List<Long> owners = loadOwners(requisitionId);
+            if (owners.isEmpty()) {
+                continue;
+            }
+            List<OnboardHit> onboards = listOnboards(requisitionId);
+            List<LocalDateTime> qualifiedAts = "P1".equals(priority) ? listQualifiedAts(requisitionId) : List.of();
+            for (Long ownerId : owners) {
+                taskCount += backfillOwnerTasks(requisitionId, ownerId, priority, status, headcount,
+                        rule, onboards, qualifiedAts);
+            }
+            reqCount++;
+        }
+        // 招聘中的再补齐当前 OPEN 槽
+        syncAllOpenScoreRequisitions();
+        log.info("考核任务历史回填完成：需求 {} 个，写入任务约 {} 条", reqCount, taskCount);
+        return reqCount;
+    }
+
+    private int backfillOwnerTasks(Long requisitionId, Long ownerId, String priority, String status,
+                                   int headcount, ScoreRule rule, List<OnboardHit> onboards,
+                                   List<LocalDateTime> qualifiedAts) {
+        int needOnboard = "P0".equals(priority) ? rule.p0OnboardCount() : rule.p1OnboardCount();
+        int scoreOnboard = "P0".equals(priority) ? rule.p0Score() : rule.p1Score();
+        int needResume = rule.p1QualifiedResumeCount();
+        int scoreResume = rule.p1Score();
+        int dueMonths = Math.max(1, rule.dueMonths());
+        int slot = 1;
+        int written = 0;
+        int onboardCursor = 0;
+        int resumeCursor = 0;
+
+        // 1) 按入职人数门槛生成历史 DONE
+        while (onboardCursor + needOnboard <= onboards.size() && slot <= headcount) {
+            OnboardHit last = onboards.get(onboardCursor + needOnboard - 1);
+            LocalDateTime doneAt = last.at();
+            LocalDateTime due = endOfMonth(doneAt);
+            LocalDateTime published = due.minusMonths(dueMonths);
+            insertHistoricalTask(requisitionId, ownerId, slot, priority, published, due,
+                    "DONE", doneAt, "ONBOARD", last.applicationId(), scoreOnboard);
+            slot++;
+            written++;
+            onboardCursor += needOnboard;
+        }
+
+        // 2) P1：剩余 HC 用合格简历门槛补 DONE（与入职二选一）
+        if ("P1".equals(priority)) {
+            while (resumeCursor + needResume <= qualifiedAts.size() && slot <= headcount) {
+                LocalDateTime doneAt = qualifiedAts.get(resumeCursor + needResume - 1);
+                LocalDateTime due = endOfMonth(doneAt);
+                LocalDateTime published = due.minusMonths(dueMonths);
+                insertHistoricalTask(requisitionId, ownerId, slot, priority, published, due,
+                        "DONE", doneAt, "QUALIFIED_RESUME", null, scoreResume);
+                slot++;
+                written++;
+                resumeCursor += needResume;
+            }
+        }
+
+        // 3) 仍在招：剩余槽位留给 sync 补 OPEN（此处不写，避免与当月回填策略冲突）
+        return written;
+    }
+
+    private void insertHistoricalTask(Long requisitionId, Long ownerId, int slot, String priority,
+                                      LocalDateTime published, LocalDateTime due, String status,
+                                      LocalDateTime doneAt, String doneReason, Long applicationId, int score) {
+        jdbc.update("""
+                INSERT INTO hr_kpi_task (requisition_id, owner_user_id, slot_no, priority_code,
+                  published_at, due_at, origin_due_at, status, done_at, done_reason, done_application_id,
+                  score, create_by, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'kpi-backfill', 1)
+                ON DUPLICATE KEY UPDATE
+                  priority_code = VALUES(priority_code),
+                  published_at = VALUES(published_at),
+                  due_at = VALUES(due_at),
+                  origin_due_at = VALUES(origin_due_at),
+                  status = VALUES(status),
+                  done_at = VALUES(done_at),
+                  done_reason = VALUES(done_reason),
+                  done_application_id = VALUES(done_application_id),
+                  score = VALUES(score),
+                  create_by = VALUES(create_by),
+                  is_active = 1
+                """, requisitionId, ownerId, slot, priority, published, due, due,
+                status, doneAt, doneReason, applicationId, score);
+    }
+
+    private List<OnboardHit> listOnboards(Long requisitionId) {
+        return jdbc.query("""
+                SELECT a.id AS application_id,
+                       COALESCE(
+                         (SELECT MIN(e.event_at) FROM hr_stage_event e
+                           WHERE e.application_id = a.id AND e.stage_code = 'ONBOARDED' AND e.is_active = 1),
+                         a.update_time, a.create_time
+                       ) AS onboard_at
+                FROM hr_application a
+                WHERE a.requisition_id = ? AND a.is_active = 1 AND a.current_stage = 'ONBOARDED'
+                ORDER BY onboard_at ASC, a.id ASC
+                """, (rs, i) -> new OnboardHit(
+                rs.getLong("application_id"),
+                rs.getTimestamp("onboard_at").toLocalDateTime()), requisitionId);
+    }
+
+    private List<LocalDateTime> listQualifiedAts(Long requisitionId) {
+        return jdbc.query("""
+                SELECT MIN(COALESCE(rec.interviewed_at, rec.update_time, rec.create_time)) AS hit_at
+                FROM hr_interview_record rec
+                JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
+                WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
+                GROUP BY rec.application_id
+                ORDER BY hit_at ASC
+                """, (rs, i) -> rs.getTimestamp("hit_at").toLocalDateTime(), requisitionId);
+    }
+
+    private static LocalDateTime endOfMonth(LocalDateTime at) {
+        LocalDate d = at.toLocalDate().withDayOfMonth(1).plusMonths(1);
+        return d.atStartOfDay().minusSeconds(1);
+    }
+
+    private record OnboardHit(long applicationId, LocalDateTime at) {
+    }
+
     public HrKpiAssessmentVO assessment(HrKpiAssessmentQueryDTO query) {
+        // 增量同步在招岗位槽位；历史 DONE 由 backfillAllHistorical 生成
+        syncAllOpenScoreRequisitions();
         HrKpiAssessmentQueryDTO q = query == null ? new HrKpiAssessmentQueryDTO() : query;
         LocalDate month = q.getSettleMonth() == null ? LocalDate.now() : q.getSettleMonth();
         LocalDate monthStart = month.withDayOfMonth(1);
@@ -494,6 +668,13 @@ public class HrKpiTaskService {
                 WHERE requisition_id = ? AND is_active = 1 AND user_id IS NOT NULL
                 ORDER BY sort_no, id
                 """, (rs, i) -> rs.getLong(1), requisitionId);
+    }
+
+    private int countAnyTask(Long requisitionId) {
+        Integer n = jdbc.queryForObject("""
+                SELECT COUNT(1) FROM hr_kpi_task WHERE requisition_id = ? AND is_active = 1
+                """, Integer.class, requisitionId);
+        return n == null ? 0 : n;
     }
 
     private int countSlots(Long requisitionId, Long ownerId, String status) {

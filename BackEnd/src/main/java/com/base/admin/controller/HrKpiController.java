@@ -76,4 +76,11 @@ public class HrKpiController {
         kpiTaskService.saveScoreRule(dto);
         return Result.ok();
     }
+
+    @Operation(summary = "按历史入职/合格简历全量回填考核任务")
+    @PostMapping("/assessment/backfill")
+    @RequiresPermission({"hr:kpi-rule:edit", "hr:kpi:view"})
+    public Result<Integer> backfillAssessment() {
+        return Result.ok(kpiTaskService.backfillAllHistorical());
+    }
 }

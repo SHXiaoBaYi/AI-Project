@@ -1,8 +1,15 @@
 import { memo, useCallback, useEffect, useState } from 'react';
-import { App, Card, Col, DatePicker, Modal, Row, Select, Space, Statistic, Table, Tag } from 'antd';
+import { App, Button, Card, Col, DatePicker, Modal, Row, Select, Space, Statistic, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
-import { getHrKpiAssessmentApi, getHrUsersApi, updateHrKpiTaskDueApi, type HrKpiAssessment } from '@/api/hr';
+import PermissionButton from '@/components/Buttons/PermissionButton';
+import {
+  backfillHrKpiAssessmentApi,
+  getHrKpiAssessmentApi,
+  getHrUsersApi,
+  updateHrKpiTaskDueApi,
+  type HrKpiAssessment,
+} from '@/api/hr';
 
 const STATUS_OPTIONS = [
   { label: '全部', value: '' },
@@ -26,6 +33,7 @@ const AssessmentPage = memo(function AssessmentPage() {
   const [dueEdit, setDueEdit] = useState<{ id: number; dueAt?: string; jobName?: string } | null>(null);
   const [dueValue, setDueValue] = useState<Dayjs | null>(null);
   const [savingDue, setSavingDue] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
 
   useEffect(() => {
     getHrUsersApi('owner').then((list) =>
@@ -132,6 +140,28 @@ const AssessmentPage = memo(function AssessmentPage() {
             value={status}
             onChange={setStatus}
           />
+          <PermissionButton
+            perm='hr:kpi:view'
+            loading={backfilling}
+            onClick={async () => {
+              setBackfilling(true);
+              try {
+                const n = await backfillHrKpiAssessmentApi();
+                message.success(`历史回填完成，处理 ${n} 个 P0/P1 岗位`);
+                load();
+              } finally {
+                setBackfilling(false);
+              }
+            }}
+          >
+            回填历史数据
+          </PermissionButton>
+          <Button
+            onClick={() => load()}
+            loading={loading}
+          >
+            刷新
+          </Button>
         </Space>
       </Card>
 
