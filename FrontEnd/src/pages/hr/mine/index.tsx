@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react';
 import { App, Form, Input, Modal, Select, Table } from 'antd';
 import dayjs from 'dayjs';
+import { useSearchParams } from 'react-router-dom';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
 import {
@@ -32,8 +33,28 @@ function interviewEnded(value: unknown) {
   return !dayjs(String(value).replace('T', ' ')).isAfter(dayjs());
 }
 
+function openReviewForm(
+  form: ReturnType<typeof Form.useForm>[0],
+  row: Record<string, unknown>,
+  setReviewing: (row: Record<string, unknown>) => void,
+) {
+  const reviewed = Number(row.reviewed) > 0;
+  form.setFieldsValue({
+    conclusion: reviewed ? row.my_conclusion : undefined,
+    failReason: reviewed ? row.my_fail_reason || undefined : undefined,
+    resumeQualified:
+      row.my_resume_qualified == null ? (reviewed ? undefined : true) : Number(row.my_resume_qualified) === 1,
+    comment: reviewed ? row.my_comment || '' : undefined,
+  });
+  if (!reviewed) {
+    form.setFieldsValue({ resumeQualified: true });
+  }
+  setReviewing(row);
+}
+
 const MinePage = memo(function MinePage() {
   const { message } = App.useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [failReasons, setFailReasons] = useState<{ value: string; label: string }[]>([]);
@@ -59,6 +80,21 @@ const MinePage = memo(function MinePage() {
       setFailReasons((list ?? []).map((item) => ({ value: item.name, label: item.name }))),
     );
   }, []);
+
+  useEffect(() => {
+    const inviteId = Number(searchParams.get('inviteId') || 0);
+    if (!inviteId || !rows.length) return;
+    const row = rows.find((item) => Number(item.id) === inviteId);
+    if (!row) return;
+    if (!interviewEnded(row.interview_at) && !(Number(row.reviewed) > 0)) {
+      message.warning('面试尚未结束，暂不能评价');
+    } else {
+      openReviewForm(form, row, setReviewing);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('inviteId');
+    setSearchParams(next, { replace: true });
+  }, [rows, searchParams, setSearchParams, form, message]);
 
   return (
     <>
@@ -89,14 +125,7 @@ const MinePage = memo(function MinePage() {
                             key: 'edit-review',
                             label: '编辑评价',
                             perm: 'hr:interview:mine',
-                            onClick: () => {
-                              form.setFieldsValue({
-                                conclusion: row.my_conclusion,
-                                failReason: row.my_fail_reason || undefined,
-                                comment: row.my_comment || '',
-                              });
-                              setReviewing(row);
-                            },
+                            onClick: () => openReviewForm(form, row, setReviewing),
                           }
                         : {
                             key: 'review',
@@ -105,7 +134,7 @@ const MinePage = memo(function MinePage() {
                             disabled: !ended,
                             onClick: () => {
                               form.resetFields();
-                              setReviewing(row);
+                              openReviewForm(form, row, setReviewing);
                             },
                           },
                       ...(reviewed
@@ -205,6 +234,7 @@ const MinePage = memo(function MinePage() {
               ...(reviewing.record_id ? { id: reviewing.record_id } : {}),
               conclusion: values.conclusion,
               failReason: values.conclusion === 'FAIL' ? values.failReason : undefined,
+              resumeQualified: values.resumeQualified,
               comment: values.comment,
               interviewedAt: reviewing.interview_at
                 ? String(reviewing.interview_at).replace('T', ' ').slice(0, 19)
@@ -234,6 +264,9 @@ const MinePage = memo(function MinePage() {
                 if (value !== 'FAIL') {
                   form.setFieldValue('failReason', undefined);
                 }
+                if (value === 'PASS' && form.getFieldValue('resumeQualified') == null) {
+                  form.setFieldValue('resumeQualified', true);
+                }
               }}
             />
           </Form.Item>
@@ -257,6 +290,32 @@ const MinePage = memo(function MinePage() {
                 </Form.Item>
               ) : null
             }
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, next) => prev.conclusion !== next.conclusion}
+          >
+            {() => {
+              const conclusion = form.getFieldValue('conclusion');
+              if (!conclusion || conclusion === 'PENDING') return null;
+              return (
+                <Form.Item
+                  name='resumeQualified'
+                  label='简历是否合格'
+                  rules={
+                    conclusion === 'FAIL' ? [{ required: true, message: '未通过时必须选择简历是否合格' }] : undefined
+                  }
+                >
+                  <Select
+                    options={[
+                      { value: true, label: '合格' },
+                      { value: false, label: '不合格' },
+                    ]}
+                    placeholder='请选择'
+                  />
+                </Form.Item>
+              );
+            }}
           </Form.Item>
           <Form.Item
             name='comment'

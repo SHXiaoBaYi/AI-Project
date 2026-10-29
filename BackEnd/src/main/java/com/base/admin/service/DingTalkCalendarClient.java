@@ -175,6 +175,36 @@ public class DingTalkCalendarClient {
     }
 
     /**
+     * ActionCard 工作通知：正文 + 单按钮跳转（用于催评直达评价页）。
+     */
+    public NoticeCall notifyActionCard(String dingUserId, String title, String markdown,
+                                       String buttonTitle, String buttonUrl) {
+        if (!ready()) {
+            return NoticeCall.fail("钉钉未配置");
+        }
+        if (!StringUtils.hasText(dingUserId)) {
+            return NoticeCall.fail("面试官没有钉钉 userid，不能发工作通知");
+        }
+        Long agentId = dingTalkAppService.agentId();
+        if (agentId == null) {
+            return NoticeCall.fail("钉钉应用未配置 AgentId，不能发工作通知");
+        }
+        if (!StringUtils.hasText(buttonUrl)) {
+            return NoticeCall.fail("缺少跳转链接");
+        }
+        try {
+            String token = legacyToken(credential());
+            sendWorkNotice(token, agentId, dingUserId,
+                    actionCardMsg(title, markdown, buttonTitle, buttonUrl.trim()));
+            return NoticeCall.ok(false);
+        } catch (BusinessException ex) {
+            return NoticeCall.fail(ex.getMessage());
+        } catch (Exception ex) {
+            return NoticeCall.fail("发送钉钉工作通知失败：" + ex.getMessage());
+        }
+    }
+
+    /**
      * 企业机器人主动发群消息（需开放平台权限「企业内机器人发送消息」）。
      * robotCode 默认用 ClientId；msgKey=sampleMarkdown。
      */
@@ -1431,6 +1461,18 @@ public class DingTalkCalendarClient {
         markdown.put("title", title);
         markdown.put("text", text);
         msg.set("markdown", markdown);
+        return msg;
+    }
+
+    private ObjectNode actionCardMsg(String title, String markdown, String buttonTitle, String buttonUrl) {
+        ObjectNode msg = objectMapper.createObjectNode();
+        msg.put("msgtype", "action_card");
+        ObjectNode card = objectMapper.createObjectNode();
+        card.put("title", title == null ? "通知" : title);
+        card.put("markdown", markdown == null ? "" : markdown);
+        card.put("single_title", StringUtils.hasText(buttonTitle) ? buttonTitle : "打开");
+        card.put("single_url", buttonUrl);
+        msg.set("action_card", card);
         return msg;
     }
 

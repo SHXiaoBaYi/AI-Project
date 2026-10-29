@@ -40,6 +40,9 @@ public class HrInterviewReviewVO {
     @Schema(description = "未通过原因")
     private String failReason;
 
+    @Schema(description = "简历是否合格")
+    private Boolean resumeQualified;
+
     @Schema(description = "评语")
     private String comment;
 

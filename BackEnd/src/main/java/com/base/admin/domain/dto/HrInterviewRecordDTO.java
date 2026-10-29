@@ -42,6 +42,9 @@ public class HrInterviewRecordDTO {
     @Schema(description = "未通过原因，结论为 FAIL 时必填")
     private String failReason;
 
+    @Schema(description = "简历是否合格：true合格 false不合格；FAIL 时必填，PASS 默认合格")
+    private Boolean resumeQualified;
+
     @Schema(description = "评语")
     private String comment;
 

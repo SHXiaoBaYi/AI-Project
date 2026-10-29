@@ -51,6 +51,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         backfillWorkAddressFromLocation();
         ensureCandidateProfileColumns();
         alignStageDisplayNames();
+        ensureKpiAssessmentSchema();
         log.info("招聘表结构、角色、用户和菜单已同步");
     }
 
@@ -278,9 +279,10 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(238, "KPI导出", 237, 1, "", "", "F", "hr:kpi:export", "#", "导出绩效报表");
         menu(203, "候选人", 200, 5, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "候选人与简历");
         menu(220, "面试邀约记录", 200, 6, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
-        // 250–260 已占用为机器人菜单，面试日历用 261
+        // 250–260 已占用为机器人菜单，面试日历用 261，考核得分用 262
         menu(261, "HR面试日历", 200, 6, "hr/calendar", "hr/calendar/index", "C", "hr:calendar:view", "ScheduleOutlined", "按月查看面试日程，可按负责人筛选");
         repairCalendarMenuIdConflict();
+        menu(262, "考核得分", 200, 5, "hr/assessment", "hr/assessment/index", "C", "hr:kpi:view", "TrophyOutlined", "P0/P1考核任务与月度得分");
         menu(221, "面试记录", 200, 7, "hr/record", "hr/record/index", "C", "hr:record:list", "FormOutlined", "各轮面试官评语");
         menu(222, "我的面试", 200, 8, "hr/mine", "hr/mine/index", "C", "hr:interview:mine", "ScheduleOutlined", "面试官待面日程与结论");
         menu(204, "部门管理", systemParent == 0 ? 200 : systemParent, 9, "hr/department", "hr/department/index", "C", "hr:dept:list", "BankOutlined", "部门树");
@@ -301,6 +303,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(246, "电话&面试不合适理由编辑", 245, 1, "", "", "F", "hr:unsuitable:edit", "#", "");
         menu(247, "岗位优先级", 218, 8, "hr/job-priority", "hr/job-priority/index", "C", "hr:job-priority:list", "ThunderboltOutlined", "P0/P1等到岗优先级，独立于紧急/优先/常规");
         menu(248, "岗位优先级编辑", 247, 1, "", "", "F", "hr:job-priority:edit", "#", "");
+        menu(263, "考核计分规则", 218, 9, "hr/kpi-rule", "hr/kpi-rule/index", "C", "hr:kpi-rule:view", "SettingOutlined", "P0入职计分、P1合格简历或入职、任务周期");
+        menu(264, "考核计分规则编辑", 263, 1, "", "", "F", "hr:kpi-rule:edit", "#", "");
         menu(205, "发起邀约", 203, 1, "", "", "F", "hr:invite:add", "#", "");
         menu(206, "取消邀约", 203, 2, "", "", "F", "hr:invite:cancel", "#", "");
         menu(207, "看板导出", 201, 1, "", "", "F", "hr:board:export", "#", "");
@@ -326,10 +330,10 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 263, 264);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 263, 264);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262, 263);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261, 262, 263);
         grant(plain, 200, 201, 209, 234, 235, 237, 249);
         grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235, 249, 261);
     }
@@ -468,6 +472,87 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 "ALTER TABLE hr_requisition ADD COLUMN job_priority_code VARCHAR(32) NULL COMMENT '岗位优先级P0/P1，独立于priority紧急优先常规' AFTER priority");
         addColumnIfMissing("hr_requisition", "work_address_id",
                 "ALTER TABLE hr_requisition ADD COLUMN work_address_id BIGINT NULL COMMENT '工作地址hr_base_dict.id' AFTER location_code");
+        // 历史列 dingtalk_open_conversation_id 已废弃（催评改发面试官工作通知），保留列以免破坏存量库
+    }
+
+    /** P0/P1 考核任务 + 面试「简历是否合格」字段 */
+    private void ensureKpiAssessmentSchema() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_kpi_task (
+                  id                  BIGINT       NOT NULL AUTO_INCREMENT,
+                  requisition_id      BIGINT       NOT NULL,
+                  owner_user_id       BIGINT       NOT NULL,
+                  slot_no             INT          NOT NULL DEFAULT 1 COMMENT '该负责人下第几条HC槽位',
+                  priority_code       VARCHAR(16)  NOT NULL COMMENT 'P0/P1快照',
+                  published_at        DATETIME     NOT NULL COMMENT '任务发布日',
+                  due_at              DATETIME     NOT NULL COMMENT '到期日，可延期',
+                  origin_due_at       DATETIME     NOT NULL COMMENT '首次到期日',
+                  status              VARCHAR(16)  NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN/DONE/CANCELLED',
+                  done_at             DATETIME     NULL,
+                  done_reason         VARCHAR(32)  NULL COMMENT 'ONBOARD/QUALIFIED_RESUME',
+                  done_application_id BIGINT       NULL,
+                  score               INT          NOT NULL DEFAULT 0,
+                  create_by           VARCHAR(64)  DEFAULT '',
+                  create_time         DATETIME     DEFAULT CURRENT_TIMESTAMP,
+                  update_time         DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  is_active           TINYINT      NOT NULL DEFAULT 1,
+                  PRIMARY KEY (id),
+                  UNIQUE KEY uk_hr_kpi_task_slot (requisition_id, owner_user_id, slot_no),
+                  KEY idx_hr_kpi_task_due (due_at, status),
+                  KEY idx_hr_kpi_task_owner (owner_user_id, status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘P0/P1考核任务'
+                """);
+        addColumnIfMissing("hr_interview_record", "resume_qualified",
+                "ALTER TABLE hr_interview_record ADD COLUMN resume_qualified TINYINT NULL COMMENT '简历是否合格1是0否；FAIL时必填，PASS默认1' AFTER fail_reason");
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_interview_review_push_log (
+                  id              BIGINT       NOT NULL AUTO_INCREMENT,
+                  invite_id       BIGINT       NOT NULL,
+                  interviewer_user_id BIGINT   NOT NULL,
+                  push_kind       VARCHAR(32)  NOT NULL DEFAULT 'AFTER' COMMENT 'BEFORE/AFTER/REMIND',
+                  push_status     VARCHAR(16)  NOT NULL DEFAULT 'OK' COMMENT 'OK/SKIP/FAIL',
+                  push_msg        VARCHAR(500) DEFAULT '',
+                  create_time     DATETIME     DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (id),
+                  KEY idx_hr_review_push_invite (invite_id, interviewer_user_id, push_kind)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='面试评价催填推送记录'
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_kpi_score_rule (
+                  id                         BIGINT   NOT NULL,
+                  p0_onboard_count           INT      NOT NULL DEFAULT 1 COMMENT 'P0完成多少人入职',
+                  p0_score                   INT      NOT NULL DEFAULT 2 COMMENT 'P0记多少分',
+                  p1_qualified_resume_count  INT      NOT NULL DEFAULT 3 COMMENT 'P1周期内合格简历份数',
+                  p1_onboard_count           INT      NOT NULL DEFAULT 1 COMMENT 'P1周期内入职人数',
+                  p1_score                   INT      NOT NULL DEFAULT 1 COMMENT 'P1达成记多少分',
+                  due_months                 INT      NOT NULL DEFAULT 1 COMMENT '任务默认周期（月）',
+                  update_by                  VARCHAR(64) DEFAULT '',
+                  update_time                DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘考核计分规则（单行）'
+                """);
+        addColumnIfMissing("hr_kpi_score_rule", "p0_onboard_count",
+                "ALTER TABLE hr_kpi_score_rule ADD COLUMN p0_onboard_count INT NOT NULL DEFAULT 1 COMMENT 'P0完成多少人入职' AFTER id");
+        addColumnIfMissing("hr_kpi_score_rule", "p1_qualified_resume_count",
+                "ALTER TABLE hr_kpi_score_rule ADD COLUMN p1_qualified_resume_count INT NOT NULL DEFAULT 3 COMMENT 'P1周期内合格简历份数' AFTER p0_score");
+        addColumnIfMissing("hr_kpi_score_rule", "p1_onboard_count",
+                "ALTER TABLE hr_kpi_score_rule ADD COLUMN p1_onboard_count INT NOT NULL DEFAULT 1 COMMENT 'P1周期内入职人数' AFTER p1_qualified_resume_count");
+        // 兼容旧列名
+        try {
+            jdbc.update("""
+                    UPDATE hr_kpi_score_rule
+                    SET p1_qualified_resume_count = COALESCE(NULLIF(p1_qualified_resume_count, 0), qualified_resume_count, 3)
+                    WHERE id = 1
+                    """);
+        } catch (Exception ignored) {
+            // 无库无旧列则忽略
+        }
+        jdbc.update("""
+                INSERT INTO hr_kpi_score_rule (id, p0_onboard_count, p0_score, p1_qualified_resume_count,
+                  p1_onboard_count, p1_score, due_months, update_by)
+                VALUES (1, 1, 2, 3, 1, 1, 1, 'system')
+                ON DUPLICATE KEY UPDATE id = id
+                """);
     }
 
     private void ensureCandidateProfileColumns() {

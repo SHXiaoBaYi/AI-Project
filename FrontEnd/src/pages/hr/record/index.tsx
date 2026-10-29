@@ -46,6 +46,7 @@ interface RecordMember {
   interviewerName?: string;
   conclusion?: string;
   failReason?: string;
+  resumeQualified?: boolean;
   comment?: string;
   interviewedAt?: string;
 }
@@ -66,6 +67,7 @@ interface RecordRow {
   conclusion?: string;
   conclusionsDiffer: boolean;
   failReason?: string;
+  resumeQualified?: boolean;
   comment?: string;
   interviewedAt?: string;
   currentStage?: string;
@@ -153,6 +155,8 @@ function conclusionLabel(value?: string) {
 function mapRow(raw: Record<string, unknown>): RecordRow {
   const conclusion = textOf(raw.conclusion);
   const failReason = textOf(raw.fail_reason);
+  const resumeQualified =
+    raw.resume_qualified == null || raw.resume_qualified === '' ? undefined : Number(raw.resume_qualified) === 1;
   const comment = textOf(raw.comment);
   const interviewerName = textOf(raw.interviewer_name);
   const interviewedAt =
@@ -175,6 +179,7 @@ function mapRow(raw: Record<string, unknown>): RecordRow {
     conclusion,
     conclusionsDiffer: false,
     failReason,
+    resumeQualified,
     comment,
     interviewedAt,
     currentStage: textOf(raw.current_stage),
@@ -190,6 +195,7 @@ function mapRow(raw: Record<string, unknown>): RecordRow {
         interviewerName,
         conclusion,
         failReason,
+        resumeQualified,
         comment,
         interviewedAt,
       },
@@ -233,11 +239,14 @@ function groupRecords(rows: RecordRow[]) {
     const sameComment = row.members.every((member) => member.comment === row.members[0].comment);
     const failReasons = row.members.map((member) => member.failReason).filter((item): item is string => Boolean(item));
     const sameFailReason = failReasons.length > 0 && failReasons.every((item) => item === failReasons[0]);
+    const quals = row.members.map((member) => member.resumeQualified).filter((item): item is boolean => item != null);
+    const sameQual = quals.length > 0 && quals.every((item) => item === quals[0]);
     return {
       ...row,
       conclusionsDiffer: differ,
       conclusion: unique.length === 1 ? unique[0] : undefined,
       failReason: unique.length === 1 && unique[0] === 'FAIL' && sameFailReason ? failReasons[0] : undefined,
+      resumeQualified: sameQual ? quals[0] : undefined,
       comment:
         row.members.length === 1 || sameComment
           ? row.members[0].comment
@@ -545,6 +554,36 @@ const RecordPage = memo(function RecordPage() {
         },
       },
       {
+        title: '简历是否合格',
+        dataIndex: 'resumeQualified',
+        valueType: 'select',
+        width: 120,
+        search: false,
+        fieldProps: {
+          options: [
+            { value: true, label: '合格' },
+            { value: false, label: '不合格' },
+          ],
+          allowClear: true,
+        },
+        formItemProps: {
+          rules: [
+            ({ getFieldValue }) => ({
+              validator(_: unknown, value: unknown) {
+                if (getFieldValue('conclusion') === 'FAIL' && value == null) {
+                  return Promise.reject(new Error('未通过时必须选择简历是否合格'));
+                }
+                return Promise.resolve();
+              },
+            }),
+          ],
+        },
+        render: (_, record) => {
+          if (record.resumeQualified == null) return '—';
+          return record.resumeQualified ? '合格' : '不合格';
+        },
+      },
+      {
         title: '评语',
         dataIndex: 'comment',
         valueType: 'textarea',
@@ -715,6 +754,7 @@ const RecordPage = memo(function RecordPage() {
                 interviewerUserIds: editing.interviewerUserIds,
                 conclusion: editing.conclusion,
                 failReason: editing.failReason,
+                resumeQualified: editing.resumeQualified ?? true,
                 comment: editing.members.every((member) => member.comment === editing.members[0]?.comment)
                   ? editing.members[0]?.comment
                   : undefined,
@@ -727,7 +767,11 @@ const RecordPage = memo(function RecordPage() {
               }
         }
         onFinish={async (values) => {
-          const form = values as RecordRow & { interviewerUserIds?: number[]; failReason?: string };
+          const form = values as RecordRow & {
+            interviewerUserIds?: number[];
+            failReason?: string;
+            resumeQualified?: boolean;
+          };
           const ids = form.interviewerUserIds ?? [];
           if (!ids.length) {
             message.warning('请选择面试官');
@@ -735,6 +779,10 @@ const RecordPage = memo(function RecordPage() {
           }
           if (form.conclusion === 'FAIL' && !String(form.failReason ?? '').trim()) {
             message.warning('未通过必须选择原因');
+            return false;
+          }
+          if (form.conclusion === 'FAIL' && form.resumeQualified == null) {
+            message.warning('未通过时必须选择简历是否合格');
             return false;
           }
           const interviewedAt = form.interviewedAt
@@ -749,6 +797,12 @@ const RecordPage = memo(function RecordPage() {
             interviewerUserIds: ids,
             conclusion: form.conclusion,
             failReason: form.conclusion === 'FAIL' ? form.failReason : undefined,
+            resumeQualified:
+              form.conclusion === 'PASS'
+                ? (form.resumeQualified ?? true)
+                : form.conclusion === 'FAIL'
+                  ? form.resumeQualified
+                  : form.resumeQualified,
             comment: form.comment,
             interviewedAt,
           });

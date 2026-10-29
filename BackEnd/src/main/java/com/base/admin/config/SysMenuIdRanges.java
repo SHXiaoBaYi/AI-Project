@@ -73,6 +73,6 @@ public final class SysMenuIdRanges {
 
     /** HR 号段内下一可用建议（含扩展段）；调用方仍须避开已占用 ID。 */
     public static int hrNextHint() {
-        return 262;
+        return 265;
     }
 }

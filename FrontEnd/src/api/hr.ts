@@ -618,6 +618,70 @@ export function getHrKpiBoardApi(data: HrKpiQuery = {}) {
   return request.post<unknown, HrKpiBoard>('/hr/kpi/board', data);
 }
 
+export type HrKpiAssessmentQuery = {
+  settleMonth?: string;
+  ownerUserIds?: number[];
+  status?: string;
+};
+
+export type HrKpiAssessment = {
+  settleMonth?: string;
+  owners: {
+    ownerUserId: number;
+    ownerName?: string;
+    dueCount: number;
+    doneCount: number;
+    openCount: number;
+    p0Due: number;
+    p0Done: number;
+    p1Due: number;
+    p1Done: number;
+    score: number;
+  }[];
+  tasks: {
+    id: number;
+    requisitionId: number;
+    jobName?: string;
+    ownerUserId: number;
+    ownerName?: string;
+    slotNo: number;
+    priorityCode?: string;
+    publishedAt?: string;
+    dueAt?: string;
+    originDueAt?: string;
+    status: string;
+    doneAt?: string;
+    doneReason?: string;
+    score?: number;
+  }[];
+};
+
+export function getHrKpiAssessmentApi(data: HrKpiAssessmentQuery = {}) {
+  return request.post<unknown, HrKpiAssessment>('/hr/kpi/assessment', data);
+}
+
+export function updateHrKpiTaskDueApi(id: number, dueAt: string) {
+  return request.put(`/hr/kpi/task/${id}/due`, { dueAt });
+}
+
+export type HrKpiScoreRule = {
+  p0OnboardCount: number;
+  p0Score: number;
+  p1QualifiedResumeCount: number;
+  p1OnboardCount: number;
+  p1Score: number;
+  dueMonths: number;
+  updateTime?: string;
+};
+
+export function getHrKpiScoreRuleApi() {
+  return request.get<unknown, HrKpiScoreRule>('/hr/kpi/score-rule');
+}
+
+export function saveHrKpiScoreRuleApi(data: HrKpiScoreRule) {
+  return request.put('/hr/kpi/score-rule', data);
+}
+
 export async function downloadHrKpiApi(data: HrKpiQuery = {}, filename = '招聘KPI报表.xlsx') {
   const token = getToken();
   const res = await fetch(withBase('/api/hr/kpi/export'), {

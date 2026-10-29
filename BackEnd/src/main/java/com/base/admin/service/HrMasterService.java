@@ -69,6 +69,7 @@ public class HrMasterService {
     private final DingTalkCalendarClient dingTalk;
     private final FileStorageService fileStorage;
     private final HrStageCatalog stageCatalog;
+    private final HrKpiTaskService kpiTaskService;
 
     public List<Map<String, Object>> requisitions(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
@@ -462,7 +463,7 @@ public class HrMasterService {
     }
 
     @Transactional
-    public void saveRequisition(HrRequisitionDTO dto) {
+    public Long saveRequisition(HrRequisitionDTO dto) {
         int headcount = dto.getHeadcount() == null || dto.getHeadcount() < 1 ? 1 : dto.getHeadcount();
         String target = dto.getTargetText() == null ? "" : dto.getTargetText().trim();
         if (target.isEmpty()) {
@@ -497,6 +498,7 @@ public class HrMasterService {
                     dto.getImportanceLevel(), urgency, dto.getDifficultyLevel(),
                     dto.getReceivedDate(), dto.getOnboardDate(), SecurityUtils.getCurrentUsername());
             requisitionId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+            dto.setId(requisitionId);
         } else {
             Integer urgency = dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2;
             int updated = jdbc.update("""
@@ -519,6 +521,8 @@ public class HrMasterService {
         }
         replaceOwners(requisitionId, dto.getOwnerUserIds());
         replaceRounds(requisitionId, dto.getInterviewRounds());
+        kpiTaskService.syncForRequisition(requisitionId);
+        return requisitionId;
     }
 
     public void changeRequisitionStatus(Long id, String status) {
@@ -529,6 +533,7 @@ public class HrMasterService {
         if (updated == 0) {
             throw new BusinessException("需求不存在");
         }
+        kpiTaskService.syncForRequisition(id);
     }
 
     public void deleteRequisition(Long id) {

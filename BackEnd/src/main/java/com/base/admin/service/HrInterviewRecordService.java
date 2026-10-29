@@ -29,12 +29,14 @@ public class HrInterviewRecordService {
     private final JdbcTemplate jdbc;
     private final SysTaskService taskService;
     private final HrHirePipelineService hirePipeline;
+    private final HrKpiTaskService kpiTaskService;
 
     public List<Map<String, Object>> list(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
         StringBuilder sql = new StringBuilder("""
                 SELECT rec.id, rec.application_id, rec.requisition_id, rec.invite_id, rec.round_no,
-                       rec.interviewer_user_id, u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment, rec.interviewed_at,
+                       rec.interviewer_user_id, u.nickname interviewer_name, rec.conclusion, rec.fail_reason,
+                       rec.resume_qualified, rec.comment, rec.interviewed_at,
                        c.display_name, r.job_name, f.file_name, a.current_stage,
                        CASE WHEN v.id IS NULL THEN 0 ELSE 1 END has_verdict,
                        v.conclusion verdict_conclusion, v.fail_reason verdict_fail_reason, v.comment verdict_comment,
@@ -107,6 +109,7 @@ public class HrInterviewRecordService {
             one.setInviteId(matchInvite(dto.getApplicationId(), dto.getRoundNo(), ids.get(i), dto.getInviteId()));
             one.setConclusion(dto.getConclusion());
             one.setFailReason(dto.getFailReason());
+            one.setResumeQualified(dto.getResumeQualified());
             one.setComment(dto.getComment());
             one.setInterviewedAt(dto.getInterviewedAt());
             saveOne(one);
@@ -114,6 +117,8 @@ public class HrInterviewRecordService {
                 inviteIds.add(one.getInviteId());
             }
         }
+        Long requisitionId = dto.getRequisitionId() != null ? dto.getRequisitionId() : requisitionIdOf(applicationId);
+        kpiTaskService.onResumeQualifiedChanged(requisitionId);
         String prefix = ids.size() == 1 ? "" : "已为 " + ids.size() + " 名面试官保存面试评价。";
         // 候选人列表补录评价：只落记录，不改阶段
         if (Boolean.FALSE.equals(dto.getUpdateStage())) {
@@ -121,7 +126,7 @@ public class HrInterviewRecordService {
         }
         String outcome = "NONE";
         if (inviteIds.isEmpty()) {
-            outcome = applyConsensus(applicationId, requisitionIdOf(applicationId), roundNo, dto.getConclusion().trim().toUpperCase(), "");
+            outcome = applyConsensus(applicationId, requisitionId, roundNo, dto.getConclusion().trim().toUpperCase(), "");
         } else {
             for (Long inviteId : inviteIds) {
                 outcome = stronger(outcome, syncStage(applicationId, roundNo, inviteId));
@@ -134,7 +139,7 @@ public class HrInterviewRecordService {
         List<HrInterviewReviewVO> rows = new ArrayList<>();
         jdbc.query("""
                 SELECT rec.id, rec.application_id, rec.interviewer_user_id, rec.invite_id, rec.round_no,
-                       u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.comment,
+                       u.nickname interviewer_name, rec.conclusion, rec.fail_reason, rec.resume_qualified, rec.comment,
                        COALESCE(rec.interviewed_at, rec.update_time, rec.create_time) interviewed_at
                 FROM hr_interview_record rec
                 LEFT JOIN sys_user u ON u.user_id = rec.interviewer_user_id
@@ -152,6 +157,8 @@ public class HrInterviewRecordService {
             vo.setInterviewerName(rs.getString("interviewer_name"));
             vo.setConclusion(rs.getString("conclusion"));
             vo.setFailReason(rs.getString("fail_reason"));
+            Object rq = rs.getObject("resume_qualified");
+            vo.setResumeQualified(rq == null ? null : rs.getInt("resume_qualified") == 1);
             vo.setComment(rs.getString("comment"));
             vo.setInterviewedAt(rs.getTimestamp("interviewed_at") == null ? null : rs.getTimestamp("interviewed_at").toLocalDateTime());
             rows.add(vo);
@@ -264,6 +271,7 @@ public class HrInterviewRecordService {
             throw new BusinessException("面试结论只能是通过、未通过或待定");
         }
         String failReason = resolveFailReason(conclusion, dto.getFailReason());
+        Integer resumeQualified = resolveResumeQualified(conclusion, dto.getResumeQualified());
         Long requisitionId = dto.getRequisitionId();
         if (requisitionId == null) {
             requisitionId = jdbc.query("SELECT requisition_id FROM hr_application WHERE id = ? AND is_active = 1",
@@ -283,25 +291,41 @@ public class HrInterviewRecordService {
         }
         if (dto.getId() == null) {
             jdbc.update("""
-                    INSERT INTO hr_interview_record (application_id, requisition_id, invite_id, round_no, interviewer_user_id, conclusion, fail_reason, comment, interviewed_at, create_by, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    INSERT INTO hr_interview_record (application_id, requisition_id, invite_id, round_no, interviewer_user_id,
+                      conclusion, fail_reason, resume_qualified, comment, interviewed_at, create_by, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     ON DUPLICATE KEY UPDATE requisition_id = VALUES(requisition_id), invite_id = VALUES(invite_id),
-                      conclusion = VALUES(conclusion), fail_reason = VALUES(fail_reason), comment = VALUES(comment),
+                      conclusion = VALUES(conclusion), fail_reason = VALUES(fail_reason),
+                      resume_qualified = VALUES(resume_qualified), comment = VALUES(comment),
                       interviewed_at = COALESCE(VALUES(interviewed_at), interviewed_at), is_active = 1
                     """, dto.getApplicationId(), requisitionId, dto.getInviteId(), dto.getRoundNo(), dto.getInterviewerUserId(),
-                    conclusion, failReason, empty(dto.getComment()), interviewedAt, SecurityUtils.getCurrentUsername());
+                    conclusion, failReason, resumeQualified, empty(dto.getComment()), interviewedAt, SecurityUtils.getCurrentUsername());
         } else {
             int updated = jdbc.update("""
                     UPDATE hr_interview_record
                     SET application_id = ?, requisition_id = ?, invite_id = ?, round_no = ?, interviewer_user_id = ?,
-                        conclusion = ?, fail_reason = ?, comment = ?, interviewed_at = ?
+                        conclusion = ?, fail_reason = ?, resume_qualified = ?, comment = ?, interviewed_at = ?
                     WHERE id = ? AND is_active = 1
                     """, dto.getApplicationId(), requisitionId, dto.getInviteId(), dto.getRoundNo(), dto.getInterviewerUserId(),
-                    conclusion, failReason, empty(dto.getComment()), interviewedAt, dto.getId());
+                    conclusion, failReason, resumeQualified, empty(dto.getComment()), interviewedAt, dto.getId());
             if (updated == 0) {
                 throw new BusinessException("面试记录不存在");
             }
         }
+    }
+
+    /** PASS 默认合格；FAIL 必须明示；PENDING 可空。 */
+    private Integer resolveResumeQualified(String conclusion, Boolean raw) {
+        if ("PASS".equals(conclusion)) {
+            return raw == null || Boolean.TRUE.equals(raw) ? 1 : 0;
+        }
+        if ("FAIL".equals(conclusion)) {
+            if (raw == null) {
+                throw new BusinessException("未通过时必须选择简历是否合格");
+            }
+            return Boolean.TRUE.equals(raw) ? 1 : 0;
+        }
+        return raw == null ? null : (Boolean.TRUE.equals(raw) ? 1 : 0);
     }
 
     private String resolveFailReason(String conclusion, String raw) {
@@ -321,10 +345,14 @@ public class HrInterviewRecordService {
     }
 
     public void delete(Long id) {
+        Long requisitionId = jdbc.query("""
+                SELECT requisition_id FROM hr_interview_record WHERE id = ? AND is_active = 1
+                """, rs -> rs.next() && rs.getObject(1) != null ? rs.getLong(1) : null, id);
         int updated = jdbc.update("UPDATE hr_interview_record SET is_active = 0 WHERE id = ? AND is_active = 1", id);
         if (updated == 0) {
             throw new BusinessException("面试记录不存在");
         }
+        kpiTaskService.onResumeQualifiedChanged(requisitionId);
     }
 
     @Transactional

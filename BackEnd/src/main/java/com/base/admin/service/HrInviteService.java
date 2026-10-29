@@ -219,7 +219,8 @@ public class HrInviteService {
                         FROM hr_interview_invite_cc cc
                         LEFT JOIN sys_user cu ON cu.user_id = cc.cc_user_id
                         WHERE cc.invite_id = i.id AND cc.is_active = 1) cc_names,
-                       mine_rec.id record_id, mine_rec.conclusion my_conclusion, mine_rec.fail_reason my_fail_reason, mine_rec.comment my_comment,
+                       mine_rec.id record_id, mine_rec.conclusion my_conclusion, mine_rec.fail_reason my_fail_reason,
+                       mine_rec.resume_qualified my_resume_qualified, mine_rec.comment my_comment,
                        CASE WHEN mine_rec.id IS NOT NULL THEN 1 ELSE 0 END reviewed
                 FROM hr_interview_invite i
                 JOIN hr_application a ON a.id = i.application_id

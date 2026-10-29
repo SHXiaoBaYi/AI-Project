@@ -26,7 +26,7 @@ Prettier config location: `FrontEnd/.prettierrc`
 - Backend follows Controller → Service → Mapper layered architecture
 - All API responses use `Result<T>` wrapper: `{code, msg, data}`
 - Permissions use string format: `system:user:list`, `system:user:add`, etc.
-- **菜单 ID**：新增 `sys_menu` 必须查并更新 `docs/sys-menu-id-registry.md`，按模块号段取值；种子写入用 `SysMenuSeedSupport.upsert`，禁止跨模块占用（机器人 250–260、HR 下一空闲 262+）
+- **菜单 ID**：新增 `sys_menu` 必须查并更新 `docs/sys-menu-id-registry.md`，按模块号段取值；种子写入用 `SysMenuSeedSupport.upsert`，禁止跨模块占用（机器人 250–260、HR 下一空闲 265+）
 
 ## OpenAPI 注解规则
 

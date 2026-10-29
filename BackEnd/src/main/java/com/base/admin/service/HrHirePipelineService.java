@@ -33,6 +33,7 @@ public class HrHirePipelineService {
 
     private final JdbcTemplate jdbc;
     private final SysTaskService taskService;
+    private final HrKpiTaskService kpiTaskService;
 
     public boolean isFinalRound(Long requisitionId, Integer roundNo) {
         Integer maxRound = maxRound(requisitionId);
@@ -82,6 +83,7 @@ public class HrHirePipelineService {
             }
             touch(applicationId, "ONBOARDED");
             jdbc.update("UPDATE hr_application SET current_stage = 'ONBOARDED' WHERE id = ? AND is_active = 1", applicationId);
+            kpiTaskService.onApplicationOnboarded(applicationId);
         }
     }
 
