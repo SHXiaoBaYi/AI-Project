@@ -555,6 +555,9 @@ public class HrBoardService {
     }
 
     private static String displayStageName(String code, String stageName) {
+        if ("ENTERED".equals(code) || "待初筛".equals(stageName)) {
+            return "初筛";
+        }
         if (stageName != null && !stageName.isBlank()) {
             return stageName;
         }
