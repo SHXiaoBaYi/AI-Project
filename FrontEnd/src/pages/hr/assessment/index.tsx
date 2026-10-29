@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { App, Button, Card, Col, DatePicker, Modal, Row, Select, Space, Statistic, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -34,6 +34,8 @@ const AssessmentPage = memo(function AssessmentPage() {
   const [dueValue, setDueValue] = useState<Dayjs | null>(null);
   const [savingDue, setSavingDue] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
+  const tableHostRef = useRef<HTMLDivElement>(null);
+  const [tableBodyY, setTableBodyY] = useState(320);
 
   useEffect(() => {
     getHrUsersApi('owner').then((list) =>
@@ -63,6 +65,24 @@ const AssessmentPage = memo(function AssessmentPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const host = tableHostRef.current;
+    if (!host || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const head =
+        (host.querySelector('.ant-table-header') as HTMLElement | null) ||
+        (host.querySelector('.ant-table-thead') as HTMLElement | null);
+      const pagination = host.querySelector('.ant-table-pagination') as HTMLElement | null;
+      const headH = head?.offsetHeight || 39;
+      const pageH = pagination ? pagination.offsetHeight + 16 : 56;
+      setTableBodyY(Math.max(120, host.clientHeight - headH - pageH));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [data?.tasks?.length, loading]);
 
   const taskColumns: ColumnsType<HrKpiAssessment['tasks'][number]> = [
     {
@@ -110,8 +130,11 @@ const AssessmentPage = memo(function AssessmentPage() {
   ];
 
   return (
-    <div className='flex flex-col gap-3 p-1'>
-      <Card size='small'>
+    <div className='flex h-[calc(100vh-100px)] min-h-0 flex-col gap-3 overflow-hidden p-1'>
+      <Card
+        size='small'
+        className='shrink-0'
+      >
         <Space wrap>
           <span className='text-sm text-neutral-500'>核算月</span>
           <DatePicker
@@ -165,65 +188,73 @@ const AssessmentPage = memo(function AssessmentPage() {
         </Space>
       </Card>
 
-      <Row gutter={[12, 12]}>
-        {(data?.owners ?? []).map((o) => (
-          <Col
-            key={o.ownerUserId}
-            xs={24}
-            sm={12}
-            lg={8}
-            xl={6}
-          >
-            <Card size='small'>
-              <div className='mb-2 font-medium'>{o.ownerName || o.ownerUserId}</div>
-              <Row gutter={8}>
-                <Col span={8}>
-                  <Statistic
-                    title='得分'
-                    value={o.score}
-                  />
-                </Col>
-                <Col span={8}>
-                  <Statistic
-                    title='完成'
-                    value={`${o.doneCount}/${o.dueCount}`}
-                  />
-                </Col>
-                <Col span={8}>
-                  <Statistic
-                    title='未完成'
-                    value={o.openCount}
-                  />
-                </Col>
-              </Row>
-              <div className='mt-2 text-xs text-neutral-500'>
-                P0 {o.p0Done}/{o.p0Due} · P1 {o.p1Done}/{o.p1Due}
-              </div>
-            </Card>
-          </Col>
-        ))}
-        {!loading && !(data?.owners ?? []).length ? (
-          <Col span={24}>
-            <Card size='small'>
-              <div className='py-6 text-center text-neutral-400'>本月暂无到期考核任务</div>
-            </Card>
-          </Col>
-        ) : null}
-      </Row>
+      <div className='max-h-[38%] shrink-0 overflow-y-auto'>
+        <Row gutter={[12, 12]}>
+          {(data?.owners ?? []).map((o) => (
+            <Col
+              key={o.ownerUserId}
+              xs={24}
+              sm={12}
+              lg={8}
+              xl={6}
+            >
+              <Card size='small'>
+                <div className='mb-2 font-medium'>{o.ownerName || o.ownerUserId}</div>
+                <Row gutter={8}>
+                  <Col span={8}>
+                    <Statistic
+                      title='得分'
+                      value={o.score}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic
+                      title='完成'
+                      value={`${o.doneCount}/${o.dueCount}`}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic
+                      title='未完成'
+                      value={o.openCount}
+                    />
+                  </Col>
+                </Row>
+                <div className='mt-2 text-xs text-neutral-500'>
+                  P0 {o.p0Done}/{o.p0Due} · P1 {o.p1Done}/{o.p1Due}
+                </div>
+              </Card>
+            </Col>
+          ))}
+          {!loading && !(data?.owners ?? []).length ? (
+            <Col span={24}>
+              <Card size='small'>
+                <div className='py-6 text-center text-neutral-400'>本月暂无到期考核任务</div>
+              </Card>
+            </Col>
+          ) : null}
+        </Row>
+      </div>
 
       <Card
         size='small'
         title='任务明细'
+        className='flex min-h-0 flex-1 flex-col overflow-hidden [&_.ant-card-body]:flex [&_.ant-card-body]:min-h-0 [&_.ant-card-body]:flex-1 [&_.ant-card-body]:flex-col [&_.ant-card-body]:overflow-hidden [&_.ant-card-body]:!pt-3'
       >
-        <Table
-          rowKey='id'
-          size='small'
-          loading={loading}
-          dataSource={data?.tasks ?? []}
-          columns={taskColumns}
-          scroll={{ x: 1200 }}
-          pagination={{ pageSize: 20, showSizeChanger: true }}
-        />
+        <div
+          ref={tableHostRef}
+          className='min-h-0 flex-1 overflow-hidden'
+        >
+          <Table
+            rowKey='id'
+            size='small'
+            loading={loading}
+            dataSource={data?.tasks ?? []}
+            columns={taskColumns}
+            scroll={{ x: 1200, y: tableBodyY }}
+            pagination={{ pageSize: 20, showSizeChanger: true }}
+          />
+        </div>
       </Card>
 
       <Modal
