@@ -318,19 +318,27 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         pendingRetryRef.current = true;
         return null;
       }
+      const latest = bundleRef.current;
       const current = activeRef.current;
-      const row = typeof current === 'number' ? bundle.articles.find((item) => item.itemId === current) : undefined;
-      const editingShared = current === 'shared' || row?.contentMode !== 'custom';
-      if (!editingShared && row && !row.editable) return null;
+      const row = typeof current === 'number' ? latest?.articles.find((item) => item.itemId === current) : undefined;
+      // 打开的是某个内容平台上的文章：只保存这篇，不写回统一稿。不看投放/发布状态。
+      const onPlatform = row != null;
+      if (onPlatform && row.contentMode === 'custom' && !row.editable) return null;
       const lake = editorHostRef.current?.getLake();
       if (lake != null) {
         bodyRef.current = lake;
+      }
+      if (onPlatform && row.contentMode !== 'custom') {
+        const shared = latest?.shared;
+        const sameTitle = (titleRef.current || '') === (shared?.contentTitle || '');
+        const sameBody = (bodyRef.current || '') === (shared?.contentBody || '');
+        if (sameTitle && sameBody) return null;
       }
       flushingRef.current = true;
       setSaveState('saving');
       setSaveError('');
       try {
-        if (editingShared) {
+        if (!onPlatform) {
           const next = await saveGeoContentDraftApi({
             placementId,
             contentTitle: titleRef.current,
@@ -349,7 +357,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
             contentMode: 'custom',
             contentTitle: titleRef.current,
             contentBody: bodyRef.current,
-            contentVersion: versionRef.current,
+            contentVersion: row.contentMode === 'custom' ? versionRef.current : (row.contentVersion ?? 0),
           });
           versionRef.current = next.contentVersion ?? versionRef.current + 1;
           setBundle((prev) => {
@@ -573,7 +581,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     setPrecheckResult(null);
     // 弹窗保持打开：撰写正文阶段 SSE 打字机预览；Lake 等成文后再覆盖
     try {
-      const itemId = active !== 'shared' && article?.contentMode === 'custom' ? article.itemId : undefined;
+      const itemId = active !== 'shared' && article ? article.itemId : undefined;
       const started = await startAiGenerateGeoContentArticleApi({
         placementId,
         itemId,
@@ -896,7 +904,10 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
               <div className='flex flex-wrap items-center gap-2 border-b border-neutral-100 px-4 py-2'>
                 {headerStatus ? <Tag color={headerStatus.color}>{headerStatus.text}</Tag> : <Tag>统一稿</Tag>}
                 {article ? (
-                  <Tag>{article.contentMode === 'custom' ? '独立稿' : '沿用统一稿'}</Tag>
+                  <>
+                    <Tag>{article.contentMode === 'custom' ? '独立稿' : '沿用统一稿'}</Tag>
+                    <span className='text-xs text-neutral-400'>本平台的文章只保存在这里，不会写进统一稿</span>
+                  </>
                 ) : (
                   <span className='text-xs text-neutral-400'>改这里会同步到所有「沿用统一稿」的平台</span>
                 )}
