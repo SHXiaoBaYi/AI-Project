@@ -482,6 +482,10 @@ public class HrPanelService {
         if ("INVITED".equals(code)) {
             return null;
         }
+        // 区间进展里的入库事件是「这段时间进过初筛」，不是「现在还待初筛」
+        if ("ENTERED".equals(code) || "待初筛".equals(name)) {
+            return "初筛";
+        }
         if ("SCREEN_PASS".equals(code) || "SCREEN_FAIL".equals(code)) {
             return "筛选简历";
         }
