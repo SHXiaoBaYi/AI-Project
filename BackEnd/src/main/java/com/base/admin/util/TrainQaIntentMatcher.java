@@ -34,6 +34,21 @@ public final class TrainQaIntentMatcher {
             {"支付", "收款", "结算", "收银"},
             {"订货", "要货", "下单", "采购", "补货"},
             {"厂子", "厂家", "厂商", "厂方", "工厂", "供应商"},
+            {"流水", "销售明细", "查销售", "销售查询", "顾客销售"},
+            {"报表", "统计"},
+    };
+
+    /**
+     * 互斥话题族下标对：用户只带其中一族、标题只带另一族时判冲突。
+     * 例：问寄存却命中「销售流水」→ 硬闸门拦截。
+     */
+    private static final int[][] EXCLUSIVE_FAMILY_PAIRS = {
+            {0, 1},   // 折扣 ↔ 退货
+            {3, 10},  // 寄存 ↔ 流水/销售查询
+            {3, 11},  // 寄存 ↔ 报表
+            {3, 8},   // 寄存 ↔ 订货
+            {4, 10},  // 挂单 ↔ 流水
+            {8, 10},  // 订货 ↔ 流水
     };
 
     /** 归一：同义写法落到同一核心词，便于「订货/要货」「厂子/厂家」同意图。 */
@@ -53,6 +68,85 @@ public final class TrainQaIntentMatcher {
 
     public static boolean titleMatches(String userQuestion, String title) {
         return textMatches(userQuestion, title, 1);
+    }
+
+    /**
+     * HIT 前硬闸门：互斥话题冲突则否；用户有明确业务核心词时，题干须有词面/同义族重合。
+     * 核心过短（&lt;2）时不做词面强校验，仍拦互斥冲突。
+     */
+    public static boolean passesHardGate(String userQuestion, String title) {
+        return passesHardGate(userQuestion, title, null);
+    }
+
+    public static boolean passesHardGate(String userQuestion, String title, Iterable<String> aliases) {
+        if (!StringUtils.hasText(userQuestion) || !StringUtils.hasText(title)) {
+            return false;
+        }
+        if (conflicts(userQuestion, title)) {
+            return false;
+        }
+        if (aliases != null) {
+            for (String alias : aliases) {
+                if (StringUtils.hasText(alias) && conflicts(userQuestion, alias)) {
+                    return false;
+                }
+            }
+        }
+        String canon = canonicalCore(userQuestion);
+        if (canon.length() < 2) {
+            return true;
+        }
+        if (lexicalOrFamilyOverlap(canon, title)) {
+            return true;
+        }
+        if (aliases != null) {
+            for (String alias : aliases) {
+                if (StringUtils.hasText(alias) && lexicalOrFamilyOverlap(canon, alias)) {
+                    return true;
+                }
+            }
+        }
+        // 用户带了明确话题族，题干/别名却完全无该族且无词面重合 → 拦截
+        return !hasExclusiveTopic(canon);
+    }
+
+    /** 关键词重合度 0~1，供向量召回融合加分。 */
+    public static float keywordOverlap(String userQuestion, String title) {
+        Set<String> tokens = contentTokens(userQuestion);
+        if (tokens.isEmpty() || !StringUtils.hasText(title)) {
+            return 0f;
+        }
+        String t = canonicalize(compact(title));
+        int hit = 0;
+        int total = 0;
+        for (String tok : tokens) {
+            if (tok.length() < 2) {
+                continue;
+            }
+            total++;
+            String cTok = canonicalize(tok);
+            if (t.contains(tok) || t.contains(cTok) || familyHit(tok, t) || familyHit(cTok, t)) {
+                hit++;
+            }
+        }
+        if (total == 0) {
+            return 0f;
+        }
+        return hit / (float) total;
+    }
+
+    public static float keywordOverlap(String userQuestion, String title, Iterable<String> aliases) {
+        float best = keywordOverlap(userQuestion, title);
+        if (aliases == null) {
+            return best;
+        }
+        for (String alias : aliases) {
+            if (!StringUtils.hasText(alias)) {
+                continue;
+            }
+            best = Math.max(best, keywordOverlap(userQuestion, alias));
+        }
+        return best;
     }
 
     /**
@@ -244,15 +338,52 @@ public final class TrainQaIntentMatcher {
     private static boolean conflicts(String userQuestion, String title) {
         String u = canonicalize(compact(userQuestion));
         String t = canonicalize(compact(title));
-        boolean userDiscount = familyPresent(u, FAMILIES[0]);
-        boolean userRefund = familyPresent(u, FAMILIES[1]);
-        boolean titleDiscount = familyPresent(t, FAMILIES[0]);
-        boolean titleRefund = familyPresent(t, FAMILIES[1]);
-        if (userDiscount && !userRefund && titleRefund && !titleDiscount) {
+        for (int[] pair : EXCLUSIVE_FAMILY_PAIRS) {
+            boolean uA = familyPresent(u, FAMILIES[pair[0]]);
+            boolean uB = familyPresent(u, FAMILIES[pair[1]]);
+            boolean tA = familyPresent(t, FAMILIES[pair[0]]);
+            boolean tB = familyPresent(t, FAMILIES[pair[1]]);
+            if (uA && !uB && tB && !tA) {
+                return true;
+            }
+            if (uB && !uA && tA && !tB) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean lexicalOrFamilyOverlap(String userCanon, String text) {
+        String t = canonicalize(compact(text));
+        if (t.isEmpty()) {
+            return false;
+        }
+        if (userCanon.length() >= 2 && t.contains(userCanon)) {
             return true;
         }
-        if (userRefund && !userDiscount && titleDiscount && !titleRefund) {
-            return true;
+        for (String tok : contentTokens(userCanon)) {
+            if (tok.length() < 2) {
+                continue;
+            }
+            String cTok = canonicalize(tok);
+            if (t.contains(tok) || t.contains(cTok) || familyHit(tok, t) || familyHit(cTok, t)) {
+                return true;
+            }
+        }
+        // 仅话题族：用户核心含某族，文本也含同族
+        for (String[] fam : FAMILIES) {
+            if (familyPresent(userCanon, fam) && familyPresent(t, fam)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasExclusiveTopic(String userCanon) {
+        for (int[] pair : EXCLUSIVE_FAMILY_PAIRS) {
+            if (familyPresent(userCanon, FAMILIES[pair[0]]) || familyPresent(userCanon, FAMILIES[pair[1]])) {
+                return true;
+            }
         }
         return false;
     }

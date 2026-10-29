@@ -493,7 +493,8 @@ public class TrainQaCalibrateService {
     }
 
     private boolean matchesIntent(String norm, Map<String, Object> row) {
-        String intentNorm = normalizeIntent(str(row.get("user_question")));
+        String storedQ = str(row.get("user_question"));
+        String intentNorm = normalizeIntent(storedQ);
         if (norm.equals(intentNorm)) {
             return true;
         }
@@ -504,12 +505,36 @@ public class TrainQaCalibrateService {
             }
         }
         String topic = str(row.get("topic_title"));
-        String storedQ = str(row.get("user_question"));
-        if (TrainQaIntentMatcher.titleMatches(norm, storedQ) || TrainQaIntentMatcher.titleMatches(norm, topic)) {
+        String topicNorm = normalizeIntent(topic);
+        if (StringUtils.hasText(topicNorm) && norm.equals(topicNorm)) {
             return true;
         }
-        String topicNorm = normalizeIntent(topic);
-        return StringUtils.hasText(topicNorm) && (norm.equals(topicNorm) || topicNorm.contains(norm) || norm.contains(topicNorm));
+        // 宽松匹配须过硬闸门，禁止单靠 contains 串题（上千条时易误命中）
+        if (TrainQaIntentMatcher.titleMatches(norm, storedQ)
+                && TrainQaIntentMatcher.passesHardGate(norm, storedQ)) {
+            return true;
+        }
+        if (StringUtils.hasText(topic)
+                && TrainQaIntentMatcher.titleMatches(norm, topic)
+                && TrainQaIntentMatcher.passesHardGate(norm, topic)) {
+            return true;
+        }
+        // 核心几乎相同（长度差≤2 且互相包含）才认 contains
+        if (StringUtils.hasText(topicNorm) && nearlySameCore(norm, topicNorm)
+                && TrainQaIntentMatcher.passesHardGate(norm, topic)) {
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean nearlySameCore(String a, String b) {
+        if (!StringUtils.hasText(a) || !StringUtils.hasText(b)) {
+            return false;
+        }
+        if (Math.abs(a.length() - b.length()) > 2) {
+            return false;
+        }
+        return a.contains(b) || b.contains(a);
     }
 
     private Long findIdByNorm(long docId, long versionId, String norm) {

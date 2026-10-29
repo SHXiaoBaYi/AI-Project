@@ -18,12 +18,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 扫码提问：向量只负责召回；意图吻合度决定是否直出答案。
+ * 扫码提问：全库向量(+关键词)召回 → 小池 AI 精排 → 硬闸门后才 HIT。
  * <ul>
- *   <li>≥0.9：命中，直接返回答案</li>
- *   <li>[0.8, 0.9)：未确定命中，给出相近原题供点选</li>
- *   <li>[0.75, 0.8)：建议原题，请用户点选</li>
- *   <li>&lt;0.75：未命中（宁缺毋滥，不出错答）</li>
+ *   <li>召回：全库算分，取 Top {@link #RECALL_TOP}</li>
+ *   <li>精排：Top {@link #RERANK_POOL} 交 AI 打意图分</li>
+ *   <li>≥0.9 且硬闸门通过：HIT 直出答案</li>
+ *   <li>[0.8, 0.9)：相近原题点选</li>
+ *   <li>[0.75, 0.8)：不确定建议</li>
+ *   <li>更低：未命中（弱向量建议仅保留有词面/族重合的）</li>
  * </ul>
  */
 @Slf4j
@@ -36,8 +38,16 @@ public class TrainQaSearchService {
     private static final float NEAR = 0.80f;
     /** [SUGGEST, NEAR)：不确定建议 */
     private static final float SUGGEST = 0.75f;
-    private static final int RERANK_POOL = 12;
+    /** 全库粗召回条数 */
+    private static final int RECALL_TOP = 100;
+    /** 交给 AI 精排的条数 */
+    private static final int RERANK_POOL = 20;
     private static final int SUGGEST_LIMIT = 3;
+    /** 关键词重合对召回分的加成上限 */
+    private static final float KEYWORD_BONUS = 0.18f;
+    private static final float WORDING_BONUS = 0.03f;
+    /** 弱向量建议地板：过低不推；且须过硬闸门或有关键词重合 */
+    private static final float WEAK_VECTOR_FLOOR = 0.42f;
 
     private static final String MSG_HIT = "已根据培训文档找到相关问答";
     private static final String MSG_NEAR =
@@ -80,31 +90,40 @@ public class TrainQaSearchService {
             return java.util.Optional.of(miss(cat, oldVersions));
         }
 
-        List<Scored> pool = ranked.subList(0, Math.min(RERANK_POOL, ranked.size()));
-        // 有 AI 时用意图吻合度覆盖排序；否则退回向量分（同一套严格门槛，宁缺毋滥）
+        List<Scored> pool = new ArrayList<>(ranked.subList(0, Math.min(RERANK_POOL, ranked.size())));
         if (aiChatService.isEnabled()) {
             applyIntentScores(question, pool);
-            pool = new ArrayList<>(pool);
             pool.sort(Comparator.comparingDouble((Scored s) -> s.intent).reversed());
         } else {
             for (Scored s : pool) {
-                s.intent = clamp01(s.raw);
+                s.intent = clamp01(Math.max(s.raw, s.keyword));
             }
+            pool.sort(Comparator.comparingDouble((Scored s) -> s.intent).reversed());
         }
 
-        Scored best = pool.get(0);
-        float score = best.intent;
-        if (score >= HIT) {
-            return java.util.Optional.of(hit(best.entry, MSG_HIT));
+        // HIT：意图够高且硬闸门通过；高分但闸门失败则降级，避免错答
+        for (Scored s : pool) {
+            if (s.intent < HIT) {
+                break;
+            }
+            if (passesEntryGate(question, s.entry)) {
+                log.info("答疑向量HIT question={} score={} title={}", question, s.intent, s.entry.question);
+                return java.util.Optional.of(hit(s.entry, MSG_HIT));
+            }
+            log.info("答疑HIT被硬闸门拦截 question={} score={} title={}", question, s.intent, s.entry.question);
+            s.intent = Math.min(s.intent, NEAR - 0.01f);
         }
-        if (score >= NEAR) {
-            return java.util.Optional.of(suggestByIntent(pool, MSG_NEAR, NEAR));
+        pool.sort(Comparator.comparingDouble((Scored s) -> s.intent).reversed());
+
+        List<Scored> gatedPool = filterSuggestable(question, pool);
+        float best = gatedPool.isEmpty() ? 0f : gatedPool.get(0).intent;
+        if (best >= NEAR) {
+            return java.util.Optional.of(suggestByIntent(gatedPool, MSG_NEAR, NEAR));
         }
-        if (score >= SUGGEST) {
-            return java.util.Optional.of(suggestByIntent(pool, MSG_SUGGEST, SUGGEST));
+        if (best >= SUGGEST) {
+            return java.util.Optional.of(suggestByIntent(gatedPool, MSG_SUGGEST, SUGGEST));
         }
-        // 意图分不够也不直接放弃：按向量相近给出原题，避免「只有搜旧版、没有推荐」
-        TrainAssistantAskVO related = suggestByVector(ranked, MSG_NEAR);
+        TrainAssistantAskVO related = suggestByVector(question, ranked, MSG_NEAR);
         if (related.getItems() != null && !related.getItems().isEmpty()) {
             return java.util.Optional.of(related);
         }
@@ -131,28 +150,30 @@ public class TrainQaSearchService {
         return n != null && n > 0;
     }
 
+    /** 全库打分，取 Top {@link #RECALL_TOP}：向量 + 关键词重合 + 措辞命中。 */
     private List<Scored> rank(String question, List<TrainQaVectorIndex.Entry> entries) {
         float[] query = embedQuery(question);
         List<Scored> ranked = new ArrayList<>();
-        if (query == null) {
-            return ranked;
-        }
         for (TrainQaVectorIndex.Entry e : entries) {
-            if (e.vector == null || e.vector.length != query.length) {
+            float keyword = TrainQaIntentMatcher.keywordOverlap(question, e.question, e.aliases);
+            float raw = 0f;
+            if (query != null && e.vector != null && e.vector.length == query.length) {
+                raw = TrainQaVectors.dot(query, e.vector);
+            } else if (keyword <= 0f && !matchesWording(question, e)) {
                 continue;
             }
-            float raw = TrainQaVectors.dot(query, e.vector);
-            float bonus = matchesWording(question, e) ? 0.03f : 0f;
+            float bonus = matchesWording(question, e) ? WORDING_BONUS : 0f;
             Scored s = new Scored();
             s.entry = e;
             s.raw = raw;
-            s.rank = raw + bonus;
+            s.keyword = keyword;
+            s.rank = raw + KEYWORD_BONUS * keyword + bonus;
             s.intent = 0f;
             ranked.add(s);
         }
         ranked.sort(Comparator.comparingDouble((Scored s) -> s.rank).reversed());
-        if (ranked.size() > 20) {
-            return new ArrayList<>(ranked.subList(0, 20));
+        if (ranked.size() > RECALL_TOP) {
+            return new ArrayList<>(ranked.subList(0, RECALL_TOP));
         }
         return ranked;
     }
@@ -177,14 +198,14 @@ public class TrainQaSearchService {
 
     /**
      * 让模型给每个候选题干打「用户意图吻合度」0～1。
-     * 解析失败时保留向量分作为 intent，避免整条链路不可用。
+     * 解析失败时保留向量/关键词分；不再把「仅 index」抬到 HIT，避免千题错配。
      */
     private void applyIntentScores(String question, List<Scored> pool) {
         if (pool == null || pool.isEmpty()) {
             return;
         }
         for (Scored s : pool) {
-            s.intent = clamp01(s.raw);
+            s.intent = clamp01(Math.max(s.raw, s.keyword * 0.9f));
         }
         StringBuilder catalog = new StringBuilder();
         for (int i = 0; i < pool.size(); i++) {
@@ -198,6 +219,7 @@ public class TrainQaSearchService {
                 - 0.8~0.9：相关但不确定是否同一题
                 - 0.75~0.8：勉强相关
                 - 低于 0.75：不相关或答非所问
+                - 业务域不同必须低分（例：寄存/暂存 ≠ 销售流水/查顾客销售；订货 ≠ 退货）
                 只输出 JSON，不要其它文字：
                 {"scores":[{"index":1,"score":0.92},{"index":2,"score":0.41}]}
                 index 从 1 开始，必须覆盖全部候选。
@@ -206,10 +228,12 @@ public class TrainQaSearchService {
         try {
             String raw = aiChatService.chat(system, user, null, 0.1);
             if (!applyScoreJson(raw, pool)) {
-                // 兼容旧格式：只回了 index，则仅抬高该条，其余保持向量分
+                // 旧格式只回 index：仅作「略抬、不超过 NEAR」，禁止直接 HIT
                 int pick = parseIndexOnly(raw);
                 if (pick > 0 && pick <= pool.size()) {
-                    pool.get(pick - 1).intent = Math.max(pool.get(pick - 1).intent, 0.91f);
+                    Scored s = pool.get(pick - 1);
+                    s.intent = Math.min(NEAR - 0.01f, Math.max(s.intent, 0.82f));
+                    log.info("答疑意图仅返回index，不抬到HIT index={} title={}", pick, s.entry.question);
                 }
             }
         } catch (Exception e) {
@@ -313,7 +337,6 @@ public class TrainQaSearchService {
         return vo;
     }
 
-    /** 按意图分筛选建议题（0.75/0.8 档） */
     private TrainAssistantAskVO suggestByIntent(List<Scored> ranked, String message, float minScore) {
         List<Scored> filtered = new ArrayList<>();
         for (Scored s : ranked) {
@@ -324,25 +347,45 @@ public class TrainQaSearchService {
         return buildSuggest(filtered, message);
     }
 
-    /**
-     * 意图未达门槛时：按向量相近给出 Top 原题（不返回答案正文，避免错答）。
-     * 解决「库里有支付相关题，却只提示搜旧版、没有任何推荐」的问题。
-     */
-    private TrainAssistantAskVO suggestByVector(List<Scored> vectorRanked, String message) {
+    /** 意图未达门槛：仅推有词面/族重合或硬闸门通过的向量近邻，避免无关噪声。 */
+    private TrainAssistantAskVO suggestByVector(String question, List<Scored> vectorRanked, String message) {
         List<Scored> ordered = new ArrayList<>(vectorRanked);
-        ordered.sort(Comparator.comparingDouble((Scored s) -> s.raw).reversed());
+        ordered.sort(Comparator.comparingDouble((Scored s) -> s.rank).reversed());
         List<Scored> top = new ArrayList<>();
         for (Scored s : ordered) {
             if (top.size() >= SUGGEST_LIMIT) {
                 break;
             }
-            // 向量过低的不推，避免完全无关噪声；0.35 仅作弱相关地板
-            if (s.raw < 0.35f) {
-                break;
+            if (s.raw < WEAK_VECTOR_FLOOR && s.keyword < 0.2f) {
+                continue;
+            }
+            if (!isSuggestable(question, s)) {
+                continue;
             }
             top.add(s);
         }
         return buildSuggest(top, message);
+    }
+
+    private List<Scored> filterSuggestable(String question, List<Scored> pool) {
+        List<Scored> out = new ArrayList<>();
+        for (Scored s : pool) {
+            if (isSuggestable(question, s)) {
+                out.add(s);
+            }
+        }
+        return out;
+    }
+
+    private static boolean isSuggestable(String question, Scored s) {
+        if (s.keyword >= 0.34f || matchesWording(question, s.entry)) {
+            return true;
+        }
+        return passesEntryGate(question, s.entry);
+    }
+
+    private static boolean passesEntryGate(String question, TrainQaVectorIndex.Entry e) {
+        return TrainQaIntentMatcher.passesHardGate(question, e.question, e.aliases);
     }
 
     private TrainAssistantAskVO buildSuggest(List<Scored> ranked, String message) {
@@ -365,7 +408,6 @@ public class TrainQaSearchService {
             vo.setDocId(top.entry.docId);
             vo.setVersionId(top.entry.versionId);
             vo.setVersionLabel(top.entry.versionLabel);
-            // 有相近题可点时，不抢成「先搜旧版」；仅标记是否还有旧版可查
             vo.setHasOlderVersions(hasOlderWithContent(top.entry.category));
         }
         vo.setItems(items);
@@ -378,7 +420,6 @@ public class TrainQaSearchService {
 
     private TrainAssistantAskVO miss(String category, boolean oldVersions) {
         TrainAssistantAskVO vo = new TrainAssistantAskVO();
-        // 仅当旧版确有正文可检索时才提示「是否检索旧版」，避免空壳版本误导
         boolean older = !oldVersions && hasOlderWithContent(category);
         vo.setHasOlderVersions(older);
         if (older) {
@@ -412,7 +453,6 @@ public class TrainQaSearchService {
         }, category);
     }
 
-    /** 旧版是否有可检索正文（与 loadOlderDocs 条件一致；空壳版本不算） */
     private boolean hasOlderWithContent(String category) {
         Integer n = jdbc.queryForObject("""
                 SELECT COUNT(1) FROM train_doc d
@@ -449,8 +489,9 @@ public class TrainQaSearchService {
     private static final class Scored {
         TrainQaVectorIndex.Entry entry;
         float raw;
+        float keyword;
         float rank;
-        /** 用户意图与题干吻合度（优先 AI，否则为向量分） */
+        /** 用户意图与题干吻合度（优先 AI，否则为向量/关键词分） */
         float intent;
     }
 }

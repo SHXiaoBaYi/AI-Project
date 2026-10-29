@@ -516,6 +516,7 @@ public class TrainDocService {
         if (vo == null || vo.getStatus() == null) {
             return false;
         }
+        // HIT 直出；SUGGEST 给点选原题（均已过检索闸门）。NEED_OLD/NOT_FOUND 不算自信命中。
         return "HIT".equals(vo.getStatus()) || "SUGGEST".equals(vo.getStatus());
     }
 
@@ -1087,14 +1088,23 @@ public class TrainDocService {
         return list;
     }
 
+    /** 文档 AI 选题：全量规则预筛 → Top 小池给模型 → 硬闸门校验。 */
+    private static final int AI_BLOCK_RERANK_POOL = 30;
+
     private int pickBlockIndexWithAi(String question, List<QaBlock> blocks) {
         if (blocks == null || blocks.isEmpty()) {
             return -1;
         }
-        List<QaBlock> pool = blocks.size() > 80 ? blocks.subList(0, 80) : blocks;
+        List<int[]> scored = scoreAllBlocks(question, blocks);
+        if (scored.isEmpty()) {
+            return -1;
+        }
+        int poolSize = Math.min(AI_BLOCK_RERANK_POOL, scored.size());
+        List<int[]> poolMeta = scored.subList(0, poolSize);
         StringBuilder catalog = new StringBuilder();
-        for (int i = 0; i < pool.size(); i++) {
-            catalog.append(i + 1).append(". ").append(pool.get(i).question).append('\n');
+        for (int i = 0; i < poolMeta.size(); i++) {
+            int blockIdx = poolMeta.get(i)[0];
+            catalog.append(i + 1).append(". ").append(blocks.get(blockIdx).question).append('\n');
         }
         String system = """
                 你是收银操作培训手册的答疑选段助手。
@@ -1102,23 +1112,65 @@ public class TrainDocService {
                 要求：
                 1. 按语义理解，不要只做字面相等。近义词、同一操作的不同说法都算匹配
                    （例如：订货≈要货、厂子≈厂家、怎么找≈如何找、要货单操作≈找厂子要货）。
-                2. 只能从给定候选中选，禁止编造标题。
-                3. 只输出 JSON，不要 markdown、不要解释。格式：{"index":1}
+                2. 业务域不同不要选（寄存/暂存 ≠ 销售流水；订货 ≠ 退货）。
+                3. 只能从给定候选中选，禁止编造标题。
+                4. 只输出 JSON，不要 markdown、不要解释。格式：{"index":1}
                    index 从 1 开始；若明显都不相关则 {"index":0}。
                 """;
         String user = "用户问题：\n" + question + "\n\n候选问法：\n" + catalog;
         try {
             String raw = aiChatService.chat(system, user, null, 0.1);
-            Integer idx = parseCandidateIndex(raw, pool.size());
-            log.info("答疑AI选题原始返回 index={} raw={}", idx, raw == null ? "" : raw.replace('\n', ' '));
-            if (idx == null || idx <= 0) {
-                return -1;
+            Integer idx = parseCandidateIndex(raw, poolMeta.size());
+            log.info("答疑AI选题原始返回 poolIndex={} raw={}", idx, raw == null ? "" : raw.replace('\n', ' '));
+            if (idx != null && idx > 0 && idx <= poolMeta.size()) {
+                int blockIdx = poolMeta.get(idx - 1)[0];
+                String title = blocks.get(blockIdx).question;
+                if (TrainQaIntentMatcher.passesHardGate(question, title)) {
+                    return blockIdx + 1;
+                }
+                log.info("答疑AI选题被硬闸门拦截 title={}", title);
             }
-            return idx;
+            // AI 未选或闸门失败：在预筛池里找第一条过闸门且规则分够的
+            for (int[] row : poolMeta) {
+                String title = blocks.get(row[0]).question;
+                if (row[1] >= MIN_SECTION_SCORE && TrainQaIntentMatcher.passesHardGate(question, title)) {
+                    return row[0] + 1;
+                }
+            }
+            return -1;
         } catch (Exception e) {
             log.warn("答疑AI选题失败，将回退规则: {}", e.getMessage());
             return -1;
         }
+    }
+
+    /** 全量块打分，按分降序；元素为 [blockIndex, score]。 */
+    private List<int[]> scoreAllBlocks(String question, List<QaBlock> blocks) {
+        List<int[]> scored = new ArrayList<>();
+        for (int i = 0; i < blocks.size(); i++) {
+            String title = blocks.get(i).question;
+            int score = scoreUserAgainstTitle(question, title);
+            if (titleMatchesTopic(question, title)) {
+                score += 200;
+            }
+            String left = TrainQaIntentMatcher.leftover(question);
+            if (left.length() >= 4 && compact(title).contains(left)) {
+                score += 500;
+            }
+            float kw = TrainQaIntentMatcher.keywordOverlap(question, title);
+            score += Math.round(kw * 100);
+            if (score > 0 || titleMatchesTopic(question, title)) {
+                scored.add(new int[]{i, score});
+            }
+        }
+        // 无任何词面命中时仍保留规则分最高的一批，避免空池
+        if (scored.isEmpty()) {
+            for (int i = 0; i < blocks.size(); i++) {
+                scored.add(new int[]{i, scoreUserAgainstTitle(question, blocks.get(i).question)});
+            }
+        }
+        scored.sort((a, b) -> Integer.compare(b[1], a[1]));
+        return scored;
     }
 
     private int pickBlockIndexByRules(String question, List<QaBlock> blocks) {
@@ -1126,6 +1178,9 @@ public class TrainDocService {
         int bestScore = -1;
         for (int i = 0; i < blocks.size(); i++) {
             String title = blocks.get(i).question;
+            if (!TrainQaIntentMatcher.passesHardGate(question, title)) {
+                continue;
+            }
             if (!titleMatchesTopic(question, title)) {
                 continue;
             }
@@ -1228,10 +1283,19 @@ public class TrainDocService {
         if (candidates == null || candidates.isEmpty()) {
             return null;
         }
-        // 收银手册通常几十条；过长时截断，避免撑爆上下文
-        List<TitleCandidate> pool = candidates.size() > 80
-                ? new ArrayList<>(candidates.subList(0, 80))
-                : candidates;
+        // 全量按规则分排序，只把 Top 小池交给模型（上千题也不撑爆上下文）
+        List<TitleCandidate> ranked = new ArrayList<>(candidates);
+        ranked.sort(Comparator.comparingInt((TitleCandidate c) -> {
+            int s = scoreUserAgainstTitle(question, c.title) + c.score;
+            if (titleMatchesTopic(question, c.title)) {
+                s += 200;
+            }
+            s += Math.round(TrainQaIntentMatcher.keywordOverlap(question, c.title) * 100);
+            return s;
+        }).reversed());
+        List<TitleCandidate> pool = ranked.size() > AI_BLOCK_RERANK_POOL
+                ? new ArrayList<>(ranked.subList(0, AI_BLOCK_RERANK_POOL))
+                : ranked;
         StringBuilder catalog = new StringBuilder();
         for (int i = 0; i < pool.size(); i++) {
             catalog.append(i + 1).append(". ").append(pool.get(i).title).append('\n');
@@ -1242,8 +1306,9 @@ public class TrainDocService {
                 要求：
                 1. 按语义理解，不要只做字面相等。近义词、同一操作的不同说法都算匹配
                    （例如：订货≈要货、厂子≈厂家、怎么找≈如何找、要货单操作≈找厂子要货）。
-                2. 只能从给定候选中选，禁止编造标题。
-                3. 只输出 JSON，不要 markdown、不要解释。格式：{"index":1}
+                2. 业务域不同不要选（寄存/暂存 ≠ 销售流水；订货 ≠ 退货）。
+                3. 只能从给定候选中选，禁止编造标题。
+                4. 只输出 JSON，不要 markdown、不要解释。格式：{"index":1}
                    index 从 1 开始；若明显都不相关则 {"index":0}。
                 """;
         String user = "用户问题：\n" + question + "\n\n候选问法：\n" + catalog;
@@ -1251,10 +1316,20 @@ public class TrainDocService {
             String raw = aiChatService.chat(system, user, null, 0.1);
             Integer idx = parseCandidateIndex(raw, pool.size());
             log.info("答疑AI选段原始返回 index={} raw={}", idx, raw == null ? "" : raw.replace('\n', ' '));
-            if (idx == null || idx <= 0) {
-                return null;
+            if (idx != null && idx > 0 && idx <= pool.size()) {
+                TitleCandidate picked = pool.get(idx - 1);
+                if (TrainQaIntentMatcher.passesHardGate(question, picked.title)) {
+                    return picked;
+                }
+                log.info("答疑AI选段被硬闸门拦截 title={}", picked.title);
             }
-            return pool.get(idx - 1);
+            for (TitleCandidate c : pool) {
+                if (TrainQaIntentMatcher.passesHardGate(question, c.title)
+                        && scoreUserAgainstTitle(question, c.title) >= MIN_SECTION_SCORE) {
+                    return c;
+                }
+            }
+            return null;
         } catch (Exception e) {
             log.warn("答疑AI选段失败，将回退规则: {}", e.getMessage());
             return null;
