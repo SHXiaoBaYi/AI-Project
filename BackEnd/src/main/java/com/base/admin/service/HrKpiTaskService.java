@@ -42,7 +42,7 @@ public class HrKpiTaskService {
             return;
         }
         Map<String, Object> req = jdbc.query("""
-                SELECT id, status, headcount, job_priority_code
+                SELECT id, status, headcount, job_priority_code, received_date, create_time
                 FROM hr_requisition WHERE id = ? AND is_active = 1
                 """, rs -> {
             if (!rs.next()) {
@@ -53,6 +53,8 @@ public class HrKpiTaskService {
             m.put("status", rs.getString("status"));
             m.put("headcount", rs.getInt("headcount"));
             m.put("priority", rs.getString("job_priority_code"));
+            m.put("receivedDate", rs.getDate("received_date") == null ? null : rs.getDate("received_date").toLocalDate());
+            m.put("createTime", rs.getTimestamp("create_time") == null ? null : rs.getTimestamp("create_time").toLocalDateTime());
             return m;
         }, requisitionId);
         if (req == null) {
@@ -72,10 +74,17 @@ public class HrKpiTaskService {
         }
 
         ScoreRule rule = loadScoreRule();
-        // 新 OPEN 槽到期落在本月，保证「考核得分」当月能看到在招任务
-        LocalDate monthStart = LocalDate.now().withDayOfMonth(1);
-        LocalDateTime due = monthStart.plusMonths(1).atStartOfDay().minusSeconds(1);
-        LocalDateTime published = due.minusMonths(Math.max(1, rule.dueMonths()));
+        int dueMonths = Math.max(1, rule.dueMonths());
+        // 发布日=岗位收到日（无则创建日）；到期=发布日 + 规则周期 所在月末。禁止全员写死「本月末」。
+        LocalDate publishDay = req.get("receivedDate") instanceof LocalDate d ? d : null;
+        if (publishDay == null && req.get("createTime") instanceof LocalDateTime ct) {
+            publishDay = ct.toLocalDate();
+        }
+        if (publishDay == null) {
+            publishDay = LocalDate.now();
+        }
+        LocalDateTime published = publishDay.atStartOfDay();
+        LocalDateTime due = endOfMonth(publishDay.plusMonths(dueMonths).atStartOfDay());
         String username = safeUser();
         for (Long ownerId : owners) {
             int doneSlots = countSlots(requisitionId, ownerId, "DONE");
@@ -112,11 +121,16 @@ public class HrKpiTaskService {
                           AND status = 'OPEN' AND is_active = 1
                         """, requisitionId, ownerId, slot);
             }
-            // 刷新仍 OPEN 的优先级快照
+            // 刷新仍 OPEN 的优先级；未延期（due=origin_due）的按岗位发布日重算发布/到期，修复历史「全员本月末」脏数据
             jdbc.update("""
-                    UPDATE hr_kpi_task SET priority_code = ?
+                    UPDATE hr_kpi_task
+                    SET priority_code = ?,
+                        published_at = ?,
+                        due_at = IF(due_at <=> origin_due_at, ?, due_at),
+                        origin_due_at = IF(due_at <=> origin_due_at, ?, origin_due_at),
+                        update_time = NOW()
                     WHERE requisition_id = ? AND owner_user_id = ? AND status = 'OPEN' AND is_active = 1
-                    """, priority, requisitionId, ownerId);
+                    """, priority, published, due, due, requisitionId, ownerId);
         }
         // 已不在负责人列表中的 OPEN 任务取消
         if (!owners.isEmpty()) {
@@ -255,11 +269,14 @@ public class HrKpiTaskService {
             if (owners.isEmpty()) {
                 continue;
             }
+            LocalDate startDay = req.get("start_day") instanceof java.sql.Date sd
+                    ? sd.toLocalDate()
+                    : (req.get("start_day") instanceof LocalDate ld ? ld : LocalDate.now());
             List<OnboardHit> onboards = listOnboards(requisitionId);
             List<LocalDateTime> qualifiedAts = "P1".equals(priority) ? listQualifiedAts(requisitionId) : List.of();
             for (Long ownerId : owners) {
-                taskCount += backfillOwnerTasks(requisitionId, ownerId, priority, status, headcount,
-                        rule, onboards, qualifiedAts);
+                taskCount += backfillOwnerTasks(requisitionId, ownerId, priority, headcount,
+                        rule, startDay, onboards, qualifiedAts);
             }
             reqCount++;
         }
@@ -269,25 +286,30 @@ public class HrKpiTaskService {
         return reqCount;
     }
 
-    private int backfillOwnerTasks(Long requisitionId, Long ownerId, String priority, String status,
-                                   int headcount, ScoreRule rule, List<OnboardHit> onboards,
-                                   List<LocalDateTime> qualifiedAts) {
+    private int backfillOwnerTasks(Long requisitionId, Long ownerId, String priority,
+                                   int headcount, ScoreRule rule, LocalDate startDay,
+                                   List<OnboardHit> onboards, List<LocalDateTime> qualifiedAts) {
         int needOnboard = "P0".equals(priority) ? rule.p0OnboardCount() : rule.p1OnboardCount();
         int scoreOnboard = "P0".equals(priority) ? rule.p0Score() : rule.p1Score();
         int needResume = rule.p1QualifiedResumeCount();
         int scoreResume = rule.p1Score();
         int dueMonths = Math.max(1, rule.dueMonths());
+        LocalDateTime published = startDay.atStartOfDay();
         int slot = 1;
         int written = 0;
         int onboardCursor = 0;
         int resumeCursor = 0;
 
-        // 1) 按入职人数门槛生成历史 DONE
+        // 1) 按入职人数门槛生成历史 DONE：发布=岗位收到日；到期=完成所在月末（按月核算）
         while (onboardCursor + needOnboard <= onboards.size() && slot <= headcount) {
             OnboardHit last = onboards.get(onboardCursor + needOnboard - 1);
             LocalDateTime doneAt = last.at();
             LocalDateTime due = endOfMonth(doneAt);
-            LocalDateTime published = due.minusMonths(dueMonths);
+            // 若完成早于「发布+周期」，仍保留岗位发布日；否则到期不早于规则周期末
+            LocalDateTime ruleDue = endOfMonth(startDay.plusMonths(dueMonths).atStartOfDay());
+            if (due.isBefore(ruleDue)) {
+                due = ruleDue;
+            }
             insertHistoricalTask(requisitionId, ownerId, slot, priority, published, due,
                     "DONE", doneAt, "ONBOARD", last.applicationId(), scoreOnboard);
             slot++;
@@ -300,7 +322,10 @@ public class HrKpiTaskService {
             while (resumeCursor + needResume <= qualifiedAts.size() && slot <= headcount) {
                 LocalDateTime doneAt = qualifiedAts.get(resumeCursor + needResume - 1);
                 LocalDateTime due = endOfMonth(doneAt);
-                LocalDateTime published = due.minusMonths(dueMonths);
+                LocalDateTime ruleDue = endOfMonth(startDay.plusMonths(dueMonths).atStartOfDay());
+                if (due.isBefore(ruleDue)) {
+                    due = ruleDue;
+                }
                 insertHistoricalTask(requisitionId, ownerId, slot, priority, published, due,
                         "DONE", doneAt, "QUALIFIED_RESUME", null, scoreResume);
                 slot++;
