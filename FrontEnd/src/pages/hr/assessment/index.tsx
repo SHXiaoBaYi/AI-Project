@@ -72,23 +72,29 @@ function doneReasonColor(reason?: string) {
   return 'default';
 }
 
-/** P1：满门槛达标次数 + 未满门槛简历进度折算 */
-function p1BreakdownText(o: {
-  p1Done?: number;
-  p1DoneOnboard?: number;
-  p1DoneResume?: number;
-  p1ResumePartialCount?: number;
-  p1ResumePartialScore?: number;
-}) {
-  const parts: string[] = [];
-  const onboard = o.p1DoneOnboard ?? 0;
-  const resume = o.p1DoneResume ?? 0;
-  const partialCnt = o.p1ResumePartialCount ?? 0;
-  const partialScore = o.p1ResumePartialScore ?? 0;
-  if (onboard > 0) parts.push(`入职达标${onboard}次`);
-  if (resume > 0) parts.push(`简历达标${resume}次`);
-  if (partialCnt > 0) parts.push(`简历进度${partialCnt}份(+${fmtScore(partialScore)}分)`);
-  return parts.length ? `（${parts.join(' · ')}）` : '';
+/** 例：P0 入职 0/0 · P1 入职 0/3  简历合格5份(+1.66) */
+function ownerScoreBreakdown(
+  o: {
+    p0Done?: number;
+    p0Due?: number;
+    p1Due?: number;
+    p1DoneOnboard?: number;
+    p1DoneResume?: number;
+    p1ResumePartialCount?: number;
+    p1ResumePartialScore?: number;
+  },
+  p1ResumeNeed: number,
+  weightP1: number,
+) {
+  const p0 = `P0 入职 ${o.p0Done ?? 0}/${o.p0Due ?? 0}`;
+  const p1Onboard = `P1 入职 ${o.p1DoneOnboard ?? 0}/${o.p1Due ?? 0}`;
+  const need = Math.max(1, p1ResumeNeed || 3);
+  const resumeCnt = (o.p1DoneResume ?? 0) * need + (o.p1ResumePartialCount ?? 0);
+  const resumeScore = (o.p1DoneResume ?? 0) * Number(weightP1 || 0) + (o.p1ResumePartialScore ?? 0);
+  if (resumeCnt <= 0 && resumeScore <= 0) {
+    return `${p0} · ${p1Onboard}`;
+  }
+  return `${p0} · ${p1Onboard}  简历合格${resumeCnt}份(+${fmtScore(resumeScore)})`;
 }
 
 const AssessmentPage = memo(function AssessmentPage() {
@@ -161,10 +167,13 @@ const AssessmentPage = memo(function AssessmentPage() {
   const p1OnboardNeed = data?.p1OnboardCount ?? 1;
   const overallMax = data?.overallScoreMax ?? (data?.ownerCount ?? data?.owners?.length ?? 0) * baseScore;
   const overallAttain = scoreAttainPct(data?.overallScore, overallMax);
-  const overallP1Onboard = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneOnboard ?? 0), 0);
-  const overallP1Resume = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneResume ?? 0), 0);
   const overallP0Done = (data?.owners ?? []).reduce((n, o) => n + (o.p0Done ?? 0), 0);
-  const overallP1Done = (data?.owners ?? []).reduce((n, o) => n + (o.p1Done ?? 0), 0);
+  const overallP1Onboard = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneOnboard ?? 0), 0);
+  const overallP1ResumeDone = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneResume ?? 0), 0);
+  const overallP1ResumePartial = (data?.owners ?? []).reduce((n, o) => n + (o.p1ResumePartialCount ?? 0), 0);
+  const overallP1ResumePartialScore = (data?.owners ?? []).reduce((n, o) => n + (o.p1ResumePartialScore ?? 0), 0);
+  const overallResumeCnt = overallP1ResumeDone * Math.max(1, p1ResumeNeed) + overallP1ResumePartial;
+  const overallResumeScore = overallP1ResumeDone * Number(weightP1) + overallP1ResumePartialScore;
 
   const taskColumns: ColumnsType<HrKpiAssessment['tasks'][number]> = [
     {
@@ -340,11 +349,8 @@ const AssessmentPage = memo(function AssessmentPage() {
               <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
                 各人已得分之和 / ({data?.ownerCount ?? data?.owners?.length ?? 0}人 × 基准分{baseScore})
                 <br />
-                P0 达标 {overallP0Done} 次（每入职{p0OnboardNeed}人记{Math.round(Number(weightP0))}分）
-                <br />
-                P1 满门槛 {overallP1Done} 次（入职{overallP1Onboard} · 简历{overallP1Resume}）；未满按份折算（满
-                {p1ResumeNeed}份={fmtScore(weightP1)}分，已入职人选简历不计）或入职{p1OnboardNeed}人=
-                {fmtScore(weightP1)}分
+                P0 入职 {overallP0Done} · P1 入职 {overallP1Onboard}
+                {overallResumeCnt > 0 ? `  简历合格${overallResumeCnt}份(+${fmtScore(overallResumeScore)})` : ''}
               </div>
             </Card>
           </Col>
@@ -377,8 +383,7 @@ const AssessmentPage = memo(function AssessmentPage() {
                   <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
                     HC {o.doneCount}/{o.dueCount} · 未完成 {o.openCount}
                     <br />
-                    P0 达标 {o.p0Done}/{o.p0Due} · P1 达标 {o.p1Done}/{o.p1Due}
-                    {p1BreakdownText(o)}
+                    {ownerScoreBreakdown(o, p1ResumeNeed, weightP1)}
                   </div>
                 </Card>
               </Col>
