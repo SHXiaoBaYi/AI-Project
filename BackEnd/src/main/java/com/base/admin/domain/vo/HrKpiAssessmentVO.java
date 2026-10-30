@@ -38,7 +38,7 @@ public class HrKpiAssessmentVO {
     @Schema(description = "整体应计总权重")
     private Double overallTotalWeight;
 
-    @Schema(description = "整体实得分（完成率×基准分）")
+    @Schema(description = "整体得分=各负责人已得分之和/负责人数×基准分")
     private Double overallScore;
 
     @Schema(description = "按人汇总")
@@ -65,7 +65,7 @@ public class HrKpiAssessmentVO {
         private Double doneWeight;
         @Schema(description = "整体完成率 0~1")
         private Double completionRate;
-        @Schema(description = "实得分（完成率×基准分，无额外加减分；前端展示为 得分/基准分）")
+        @Schema(description = "已完成得分（按计分规则累加的 P0/P1 分；前端展示为 已得分/基准分）")
         private Double score;
     }
 

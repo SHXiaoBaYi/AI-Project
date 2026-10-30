@@ -129,7 +129,7 @@ const AssessmentPage = memo(function AssessmentPage() {
     },
     { title: '槽位', dataIndex: 'slotNo', width: 56 },
     {
-      title: '权重',
+      title: '记分',
       dataIndex: 'weight',
       width: 64,
       render: (v, row) => {
@@ -144,7 +144,7 @@ const AssessmentPage = memo(function AssessmentPage() {
       render: (v: string) => (v === 'DONE' ? <Tag color='success'>已完成</Tag> : <Tag color='processing'>未完成</Tag>),
     },
     {
-      title: '计入权重',
+      title: '计入得分',
       dataIndex: 'earnedWeight',
       width: 80,
       render: (v, row) => {
@@ -227,7 +227,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           className='!mt-2 !mb-0 text-xs leading-relaxed'
         >
           {data?.scoreRuleHint ||
-            `基准分${baseScore}分（计分规则可改）；展示为 实得分/${baseScore}；得分=整体完成率×${baseScore}；P0权重${weightP0}、P1权重${weightP1}；完成计权重、未完成计0；无额外加减分`}
+            `基准分${baseScore}（计分规则可改）；个人=已完成规则分/${baseScore}；整体=各人已得分之和/负责人数×${baseScore}；P0单任务${weightP0}分、P1单任务${weightP1}分`}
         </Typography.Paragraph>
       </Card>
 
@@ -244,12 +244,13 @@ const AssessmentPage = memo(function AssessmentPage() {
               className='overflow-hidden border-sky-200 bg-sky-50/60'
               loading={loading && !data}
             >
-              <div className='mb-2 truncate font-medium text-sky-800'>整体完成率</div>
+              <div className='mb-2 truncate font-medium text-sky-800'>整体完成</div>
               <Row gutter={8}>
                 <Col span={8}>
                   <Statistic
                     title='得分'
-                    value={scoreOverBase(data?.overallScore, baseScore)}
+                    value={data?.overallScore ?? 0}
+                    precision={1}
                   />
                 </Col>
                 <Col span={8}>
@@ -260,13 +261,14 @@ const AssessmentPage = memo(function AssessmentPage() {
                 </Col>
                 <Col span={8}>
                   <Statistic
-                    title='已完成/应计总权'
+                    title='已完成/应计总分'
                     value={`${Number(data?.overallDoneWeight ?? 0).toFixed(1)}/${Number(data?.overallTotalWeight ?? 0).toFixed(1)}`}
                   />
                 </Col>
               </Row>
               <div className='mt-2 text-xs text-neutral-500'>
-                P0权重{Number(weightP0).toFixed(1)} · P1权重{Number(weightP1).toFixed(1)}（考核计分规则）
+                各人已得分之和÷{data?.owners?.length ?? 0}人×基准分{baseScore}；P0 {Number(weightP0).toFixed(0)}分 /
+                任务 · P1 {Number(weightP1).toFixed(0)}分 / 任务
               </div>
             </Card>
           </Col>
@@ -298,7 +300,7 @@ const AssessmentPage = memo(function AssessmentPage() {
                   </Col>
                   <Col span={8}>
                     <Statistic
-                      title='已完成/应计总权'
+                      title='已完成/应计总分'
                       value={`${Number(o.doneWeight ?? 0).toFixed(1)}/${Number(o.totalWeight ?? 0).toFixed(1)}`}
                     />
                   </Col>

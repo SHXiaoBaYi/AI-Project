@@ -42,9 +42,8 @@ const KpiRulePage = memo(function KpiRulePage() {
           type='secondary'
           className='mb-4'
         >
-          完成门槛用于判定任务何时算「完成」。考核得分面板展示为「实得分 / 基准分」：实得分=整体完成率×基准分；P0/P1
-          岗位权重取本页配置；完成计权重、未完成计
-          0；无额外加减分。修改门槛后仅影响之后新完成的任务，基准分与权重变更立即影响得分展示。
+          完成门槛用于判定任务何时算「完成」。个人得分=已完成任务按下方 P0/P1 分值累加，面板展示为「已得分 /
+          基准分」；整体得分=各人已得分之和÷负责人数×基准分。修改门槛后仅影响之后新完成的任务，分值与基准分变更立即影响得分展示。
         </Typography.Paragraph>
         <Form
           form={form}
@@ -64,7 +63,7 @@ const KpiRulePage = memo(function KpiRulePage() {
             name='baseScore'
             label='考核基准分'
             rules={[{ required: true, message: '必填' }]}
-            extra='面板展示为「实得分 / 基准分」，默认 30'
+            extra='个人展示为「已得分 / 基准分」；整体得分=人均已得分×基准分，默认 30'
             className='mb-4'
           >
             <InputNumber
@@ -102,9 +101,9 @@ const KpiRulePage = memo(function KpiRulePage() {
               </Form.Item>
               <Form.Item
                 name='p0Score'
-                label='岗位权重（考核得分）'
+                label='完成记分（考核得分）'
                 rules={[{ required: true, message: '必填' }]}
-                extra='用于完成率加权，如 2'
+                extra='每完成 1 个 P0 任务计入的分，如 2'
               >
                 <InputNumber
                   min={0}
@@ -155,9 +154,9 @@ const KpiRulePage = memo(function KpiRulePage() {
               </Form.Item>
               <Form.Item
                 name='p1Score'
-                label='岗位权重（考核得分）'
+                label='完成记分（考核得分）'
                 rules={[{ required: true, message: '必填' }]}
-                extra='用于完成率加权，如 1'
+                extra='每完成 1 个 P1 任务计入的分，如 1'
               >
                 <InputNumber
                   min={0}

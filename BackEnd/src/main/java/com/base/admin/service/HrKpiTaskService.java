@@ -658,16 +658,21 @@ public class HrKpiTaskService {
                 s.setOpenCount(s.getOpenCount() + 1);
             }
         }
+        double sumOwnerEarned = 0.0;
         for (HrKpiAssessmentVO.OwnerSummary s : owners.values()) {
             double total = s.getTotalWeight() == null ? 0.0 : s.getTotalWeight();
             double done = s.getDoneWeight() == null ? 0.0 : s.getDoneWeight();
             double rate = total > 0 ? done / total : 0.0;
             s.setCompletionRate(round4(rate));
-            // 得分=整体完成率×基准分，无额外加减分；面板展示为「得分/基准分」
-            s.setScore(round2(rate * baseScore));
+            // 个人已完成得分=计分规则累加（完成的 P0/P1 任务分之和）；前端展示为 已得分/基准分
+            s.setScore(round2(done));
+            sumOwnerEarned += done;
         }
 
         double overallRate = overallTotalWeight > 0 ? overallDoneWeight / overallTotalWeight : 0.0;
+        int ownerCount = owners.size();
+        // 整体得分 = 各负责人已得分之和 / 负责人数 × 考核基准分
+        double overallScore = ownerCount > 0 ? round2((sumOwnerEarned / ownerCount) * baseScore) : 0.0;
 
         String statusFilter = StringUtils.hasText(q.getStatus()) ? q.getStatus().trim().toUpperCase() : "";
         List<HrKpiAssessmentVO.TaskRow> tasks = statusFilter.isEmpty() ? allTasks
@@ -681,9 +686,9 @@ public class HrKpiTaskService {
         vo.setOverallTotalWeight(round2(overallTotalWeight));
         vo.setOverallDoneWeight(round2(overallDoneWeight));
         vo.setOverallCompletionRate(round4(overallRate));
-        vo.setOverallScore(round2(overallRate * baseScore));
+        vo.setOverallScore(overallScore);
         vo.setScoreRuleHint(String.format(
-                "基准分%.0f分（可在计分规则配置）；面板展示为 实得分/%.0f；得分=整体完成率×%.0f；P0权重%.1f、P1权重%.1f；完成计权重、未完成计0；无额外加减分",
+                "基准分%.0f（计分规则可改）；个人得分=已完成任务按规则累加分，展示为 已得分/%.0f；整体得分=各人已得分之和/负责人数×%.0f；P0单任务%.0f分、P1单任务%.0f分；未完成计0",
                 baseScore, baseScore, baseScore, weightP0, weightP1));
         vo.setOwners(new ArrayList<>(owners.values()));
         vo.setTasks(tasks);
