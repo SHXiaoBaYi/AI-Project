@@ -1,12 +1,14 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { Button, Card, DatePicker, Drawer, Radio, Space, Statistic, Table, Tag } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
+import { Button, Card, DatePicker, Drawer, Radio, Space, Statistic, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
 import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
+import { downloadElementImage } from '@/utils/downloadElementImage';
 import {
   getHrDepartmentsApi,
   getHrDictOptionsApi,
@@ -64,6 +66,8 @@ const STATS: { key: keyof HrPanelStats; metric: HrPanelMetric; title: string; su
 
 const HrPanelPage = memo(function HrPanelPage() {
   const actionRef = useRef<ActionType>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
   const [stats, setStats] = useState<HrPanelStats>({});
   const [depts, setDepts] = useState<{ value: number; label: string }[]>([]);
   const [owners, setOwners] = useState<{ value: number; label: string }[]>([]);
@@ -343,11 +347,43 @@ const HrPanelPage = memo(function HrPanelPage() {
     void loadDetail(metric, 1);
   };
 
+  const exportSheet = async () => {
+    const sheet = sheetRef.current;
+    if (!sheet || exporting) return;
+    setExporting(true);
+    const hide = message.loading('正在生成图片…', 0);
+    try {
+      await downloadElementImage(sheet, `招聘面板-${dateQuery.startDate}_${dateQuery.endDate}.png`);
+      message.success('已导出图片');
+    } catch {
+      message.error('导出图片失败');
+    } finally {
+      hide();
+      setExporting(false);
+    }
+  };
+
   return (
-    <div className='flex flex-col gap-4'>
+    <div
+      ref={sheetRef}
+      className='flex flex-col gap-4'
+    >
       <Card
         size='small'
         title='招聘面板筛选'
+        extra={
+          <span data-export-ignore>
+            <Button
+              type='primary'
+              ghost
+              icon={<DownloadOutlined />}
+              loading={exporting}
+              onClick={() => void exportSheet()}
+            >
+              导出图片
+            </Button>
+          </span>
+        }
       >
         <Space wrap>
           <Radio.Group
