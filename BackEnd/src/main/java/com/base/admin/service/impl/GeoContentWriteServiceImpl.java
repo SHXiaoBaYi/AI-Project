@@ -10,6 +10,7 @@ import com.base.admin.domain.dto.GeoContentReviewQueryDTO;
 import com.base.admin.domain.dto.GeoContentSubmitReviewDTO;
 import com.base.admin.domain.dto.GeoContentWritingQueryDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
+import com.base.admin.domain.entity.GeoContentPlacementItem;
 import com.base.admin.domain.entity.GeoContentReview;
 import com.base.admin.domain.entity.GeoContentReviewAnnotation;
 import com.base.admin.domain.entity.GeoContentReviewer;
@@ -22,6 +23,7 @@ import com.base.admin.domain.vo.GeoContentReviewRoundVO;
 import com.base.admin.domain.vo.GeoContentReviewRowVO;
 import com.base.admin.domain.vo.GeoContentReviewerItemVO;
 import com.base.admin.domain.vo.GeoContentWritingRowVO;
+import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
 import com.base.admin.mapper.GeoContentReviewAnnotationMapper;
 import com.base.admin.mapper.GeoContentReviewMapper;
@@ -55,6 +57,7 @@ import java.util.stream.Collectors;
 public class GeoContentWriteServiceImpl implements GeoContentWriteService {
 
     private final GeoContentPlacementMapper placementMapper;
+    private final GeoContentPlacementItemMapper placementItemMapper;
     private final GeoContentReviewMapper reviewMapper;
     private final GeoContentReviewerMapper reviewerMapper;
     private final GeoContentReviewAnnotationMapper annotationMapper;
@@ -102,9 +105,6 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             if (StringUtils.hasText(query.getTargetQuestion())) {
                 qw.like(GeoContentPlacement::getTargetQuestion, query.getTargetQuestion().trim());
             }
-            if (StringUtils.hasText(query.getContentTitle())) {
-                qw.like(GeoContentPlacement::getContentTitle, query.getContentTitle().trim());
-            }
             if (StringUtils.hasText(query.getContentStatus())) {
                 qw.eq(GeoContentPlacement::getContentStatus, query.getContentStatus().trim());
             }
@@ -115,6 +115,13 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             return List.of();
         }
         List<Long> placementIds = rows.stream().map(GeoContentPlacement::getId).toList();
+        Map<Long, List<GeoContentPlacementItem>> itemsByPlacement = placementItemMapper.selectList(
+                        new LambdaQueryWrapper<GeoContentPlacementItem>()
+                                .in(GeoContentPlacementItem::getPlacementId, placementIds)
+                                .orderByAsc(GeoContentPlacementItem::getContentUpdatedAt)
+                                .orderByAsc(GeoContentPlacementItem::getId))
+                .stream()
+                .collect(Collectors.groupingBy(GeoContentPlacementItem::getPlacementId));
         List<GeoContentReview> allReviews = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
                 .in(GeoContentReview::getPlacementId, placementIds)
                 .orderByAsc(GeoContentReview::getId));
@@ -134,7 +141,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             vo.setPlacementId(p.getId());
             vo.setTopicName(nz(p.getTopicName()));
             vo.setTargetQuestion(nz(p.getTargetQuestion()));
-            vo.setContentTitle(nz(p.getContentTitle()));
+            vo.setContentTitle(writingTitle(p, itemsByPlacement.getOrDefault(p.getId(), List.of())));
             vo.setContentStatus(StringUtils.hasText(p.getContentStatus())
                     ? p.getContentStatus()
                     : Constants.CONTENT_STATUS_DRAFTING);
@@ -226,7 +233,38 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             }
             result.add(vo);
         }
+        if (query != null && StringUtils.hasText(query.getContentTitle())) {
+            String keyword = query.getContentTitle().trim();
+            result = result.stream()
+                    .filter(row -> row.getContentTitle() != null && row.getContentTitle().contains(keyword))
+                    .collect(Collectors.toCollection(ArrayList::new));
+        }
         return result;
+    }
+
+    /**
+     * 撰写记录正文标题：有统一稿用统一稿标题；没有则用最早生成的内容平台正文标题。
+     */
+    private static String writingTitle(GeoContentPlacement placement, List<GeoContentPlacementItem> items) {
+        if (hasSharedDraft(placement)) {
+            return nz(placement.getContentTitle());
+        }
+        return items.stream()
+                .filter(GeoContentWriteServiceImpl::hasPlatformDraft)
+                .min(Comparator
+                        .comparing(GeoContentPlacementItem::getContentUpdatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(GeoContentPlacementItem::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(item -> StringUtils.hasText(item.getContentTitle()) ? item.getContentTitle().trim() : nz(item.getTitle()))
+                .orElse("");
+    }
+
+    private static boolean hasSharedDraft(GeoContentPlacement placement) {
+        return placement != null && (StringUtils.hasText(placement.getContentTitle())
+                || StringUtils.hasText(placement.getContentBody()));
+    }
+
+    private static boolean hasPlatformDraft(GeoContentPlacementItem item) {
+        return item != null && (StringUtils.hasText(item.getContentTitle()) || StringUtils.hasText(item.getContentBody()));
     }
 
     @Override
