@@ -254,7 +254,7 @@ const AssessmentPage = memo(function AssessmentPage() {
                 </Col>
                 <Col span={8}>
                   <Statistic
-                    title='加权'
+                    title='已完成/应计总权'
                     value={`${Number(data?.overallDoneWeight ?? 0).toFixed(1)}/${Number(data?.overallTotalWeight ?? 0).toFixed(1)}`}
                   />
                 </Col>
@@ -293,7 +293,7 @@ const AssessmentPage = memo(function AssessmentPage() {
                   </Col>
                   <Col span={8}>
                     <Statistic
-                      title='加权'
+                      title='已完成/应计总权'
                       value={`${Number(o.doneWeight ?? 0).toFixed(1)}/${Number(o.totalWeight ?? 0).toFixed(1)}`}
                     />
                   </Col>
