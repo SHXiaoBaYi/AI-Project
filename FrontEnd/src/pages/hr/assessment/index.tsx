@@ -27,6 +27,13 @@ function pct(rate?: number) {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
+/** 展示为「实得分 / 基准分」，如 24.0 / 30 */
+function scoreOverBase(score?: number, base?: number) {
+  const s = score == null || Number.isNaN(score) ? 0 : Number(score);
+  const b = base == null || Number.isNaN(base) || base <= 0 ? 30 : Number(base);
+  return `${s.toFixed(1)} / ${Number.isInteger(b) ? b : b.toFixed(0)}`;
+}
+
 const AssessmentPage = memo(function AssessmentPage() {
   const { message } = App.useApp();
   const [month, setMonth] = useState<Dayjs>(dayjs().startOf('month'));
@@ -220,7 +227,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           className='!mt-2 !mb-0 text-xs leading-relaxed'
         >
           {data?.scoreRuleHint ||
-            `基准分${baseScore}分；得分=整体完成率×${baseScore}；P0权重${weightP0}、P1权重${weightP1}；完成计权重、未完成计0；无额外加减分`}
+            `基准分${baseScore}分（计分规则可改）；展示为 实得分/${baseScore}；得分=整体完成率×${baseScore}；P0权重${weightP0}、P1权重${weightP1}；完成计权重、未完成计0；无额外加减分`}
         </Typography.Paragraph>
       </Card>
 
@@ -241,9 +248,8 @@ const AssessmentPage = memo(function AssessmentPage() {
               <Row gutter={8}>
                 <Col span={8}>
                   <Statistic
-                    title={`得分/${baseScore}`}
-                    value={data?.overallScore ?? 0}
-                    precision={1}
+                    title='得分'
+                    value={scoreOverBase(data?.overallScore, baseScore)}
                   />
                 </Col>
                 <Col span={8}>
@@ -280,9 +286,8 @@ const AssessmentPage = memo(function AssessmentPage() {
                 <Row gutter={8}>
                   <Col span={8}>
                     <Statistic
-                      title={`得分/${baseScore}`}
-                      value={o.score ?? 0}
-                      precision={1}
+                      title='得分'
+                      value={scoreOverBase(o.score, baseScore)}
                     />
                   </Col>
                   <Col span={8}>

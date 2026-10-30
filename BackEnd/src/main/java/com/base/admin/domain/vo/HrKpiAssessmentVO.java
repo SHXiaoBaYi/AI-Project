@@ -65,7 +65,7 @@ public class HrKpiAssessmentVO {
         private Double doneWeight;
         @Schema(description = "整体完成率 0~1")
         private Double completionRate;
-        @Schema(description = "30 分基准下实得分（完成率×30，无额外加减分）")
+        @Schema(description = "实得分（完成率×基准分，无额外加减分；前端展示为 得分/基准分）")
         private Double score;
     }
 

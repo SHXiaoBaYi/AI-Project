@@ -12,6 +12,12 @@ public class HrKpiScoreRuleDTO {
 
     @NotNull
     @Min(1)
+    @Max(100)
+    @Schema(description = "考核基准分（完成率×基准分=实得分，面板展示为 得分/基准分）", example = "30")
+    private Integer baseScore;
+
+    @NotNull
+    @Min(1)
     @Max(99)
     @Schema(description = "P0：完成多少人入职", example = "1")
     private Integer p0OnboardCount;

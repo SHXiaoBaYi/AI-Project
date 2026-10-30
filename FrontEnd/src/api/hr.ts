@@ -683,6 +683,8 @@ export function updateHrKpiTaskDueApi(id: number, dueAt: string) {
 }
 
 export type HrKpiScoreRule = {
+  /** 考核基准分，面板展示为 实得分/基准分 */
+  baseScore: number;
   p0OnboardCount: number;
   p0Score: number;
   p1QualifiedResumeCount: number;

@@ -42,15 +42,16 @@ const KpiRulePage = memo(function KpiRulePage() {
           type='secondary'
           className='mb-4'
         >
-          完成门槛用于判定任务何时算「完成」。下方「岗位权重」同步用于考核得分面板：得分=整体完成率×30；P0/P1
-          权重取本页配置；完成计权重、未完成计
-          0；无额外加减分。修改门槛后仅影响之后新完成的任务，权重变更立即影响得分展示。
+          完成门槛用于判定任务何时算「完成」。考核得分面板展示为「实得分 / 基准分」：实得分=整体完成率×基准分；P0/P1
+          岗位权重取本页配置；完成计权重、未完成计
+          0；无额外加减分。修改门槛后仅影响之后新完成的任务，基准分与权重变更立即影响得分展示。
         </Typography.Paragraph>
         <Form
           form={form}
           layout='vertical'
           className='max-w-xl'
           initialValues={{
+            baseScore: 30,
             p0OnboardCount: 1,
             p0Score: 2,
             p1QualifiedResumeCount: 3,
@@ -59,6 +60,22 @@ const KpiRulePage = memo(function KpiRulePage() {
             dueMonths: 1,
           }}
         >
+          <Form.Item
+            name='baseScore'
+            label='考核基准分'
+            rules={[{ required: true, message: '必填' }]}
+            extra='面板展示为「实得分 / 基准分」，默认 30'
+            className='mb-4'
+          >
+            <InputNumber
+              min={1}
+              max={100}
+              precision={0}
+              addonAfter='分'
+              className='w-40'
+            />
+          </Form.Item>
+
           <Card
             type='inner'
             size='small'

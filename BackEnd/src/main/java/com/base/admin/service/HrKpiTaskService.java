@@ -533,8 +533,8 @@ public class HrKpiTaskService {
     private record OnboardHit(long applicationId, LocalDateTime at) {
     }
 
-    /** 考核展示基准分：完成率×基准分=实得分（无额外加减分）。P0/P1 权重取自考核计分规则。 */
-    public static final double ASSESS_BASE_SCORE = 30.0;
+    /** 考核基准分默认值（计分规则未配置时回退）。 */
+    public static final double ASSESS_BASE_SCORE_DEFAULT = 30.0;
 
     public HrKpiAssessmentVO assessment(HrKpiAssessmentQueryDTO query) {
         // 增量同步在招岗位槽位；历史 DONE 由 backfillAllHistorical 生成
@@ -546,6 +546,7 @@ public class HrKpiTaskService {
         LocalDateTime to = monthStart.plusMonths(1).atStartOfDay();
 
         ScoreRule rule = loadScoreRule();
+        double baseScore = Math.max(1, rule.baseScore());
         double weightP0 = Math.max(0, rule.p0Score());
         double weightP1 = Math.max(0, rule.p1Score());
         // 当前自然月：本月到期的 DONE + 全部仍 OPEN 的在招任务（负责人不能因到期纠偏到历史月而消失）
@@ -662,8 +663,8 @@ public class HrKpiTaskService {
             double done = s.getDoneWeight() == null ? 0.0 : s.getDoneWeight();
             double rate = total > 0 ? done / total : 0.0;
             s.setCompletionRate(round4(rate));
-            // 得分=整体完成率×30，无额外加减分
-            s.setScore(round2(rate * ASSESS_BASE_SCORE));
+            // 得分=整体完成率×基准分，无额外加减分；面板展示为「得分/基准分」
+            s.setScore(round2(rate * baseScore));
         }
 
         double overallRate = overallTotalWeight > 0 ? overallDoneWeight / overallTotalWeight : 0.0;
@@ -674,16 +675,16 @@ public class HrKpiTaskService {
 
         HrKpiAssessmentVO vo = new HrKpiAssessmentVO();
         vo.setSettleMonth(monthStart);
-        vo.setBaseScore(ASSESS_BASE_SCORE);
+        vo.setBaseScore(baseScore);
         vo.setWeightP0(weightP0);
         vo.setWeightP1(weightP1);
         vo.setOverallTotalWeight(round2(overallTotalWeight));
         vo.setOverallDoneWeight(round2(overallDoneWeight));
         vo.setOverallCompletionRate(round4(overallRate));
-        vo.setOverallScore(round2(overallRate * ASSESS_BASE_SCORE));
+        vo.setOverallScore(round2(overallRate * baseScore));
         vo.setScoreRuleHint(String.format(
-                "基准分%.0f分；得分=整体完成率×%.0f；P0权重%.1f、P1权重%.1f（取自考核计分规则）；完成计权重、未完成计0；无额外加减分",
-                ASSESS_BASE_SCORE, ASSESS_BASE_SCORE, weightP0, weightP1));
+                "基准分%.0f分（可在计分规则配置）；面板展示为 实得分/%.0f；得分=整体完成率×%.0f；P0权重%.1f、P1权重%.1f；完成计权重、未完成计0；无额外加减分",
+                baseScore, baseScore, baseScore, weightP0, weightP1));
         vo.setOwners(new ArrayList<>(owners.values()));
         vo.setTasks(tasks);
         return vo;
@@ -704,6 +705,7 @@ public class HrKpiTaskService {
     public HrKpiScoreRuleVO getScoreRule() {
         ScoreRule rule = loadScoreRule();
         HrKpiScoreRuleVO vo = new HrKpiScoreRuleVO();
+        vo.setBaseScore(rule.baseScore());
         vo.setP0OnboardCount(rule.p0OnboardCount());
         vo.setP0Score(rule.p0Score());
         vo.setP1QualifiedResumeCount(rule.p1QualifiedResumeCount());
@@ -719,11 +721,13 @@ public class HrKpiTaskService {
         if (dto == null) {
             throw new BusinessException("请填写计分规则");
         }
+        int baseScore = dto.getBaseScore() == null ? (int) ASSESS_BASE_SCORE_DEFAULT : dto.getBaseScore();
         jdbc.update("""
-                INSERT INTO hr_kpi_score_rule (id, p0_onboard_count, p0_score, p1_qualified_resume_count,
+                INSERT INTO hr_kpi_score_rule (id, base_score, p0_onboard_count, p0_score, p1_qualified_resume_count,
                   p1_onboard_count, p1_score, due_months, update_by)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
+                  base_score = VALUES(base_score),
                   p0_onboard_count = VALUES(p0_onboard_count),
                   p0_score = VALUES(p0_score),
                   p1_qualified_resume_count = VALUES(p1_qualified_resume_count),
@@ -731,7 +735,7 @@ public class HrKpiTaskService {
                   p1_score = VALUES(p1_score),
                   due_months = VALUES(due_months),
                   update_by = VALUES(update_by)
-                """, dto.getP0OnboardCount(), dto.getP0Score(), dto.getP1QualifiedResumeCount(),
+                """, baseScore, dto.getP0OnboardCount(), dto.getP0Score(), dto.getP1QualifiedResumeCount(),
                 dto.getP1OnboardCount(), dto.getP1Score(), dto.getDueMonths(), safeUser());
     }
 
@@ -818,14 +822,24 @@ public class HrKpiTaskService {
 
     private ScoreRule loadScoreRule() {
         ScoreRule row = jdbc.query("""
-                SELECT p0_onboard_count, p0_score, p1_qualified_resume_count, p1_onboard_count,
+                SELECT base_score, p0_onboard_count, p0_score, p1_qualified_resume_count, p1_onboard_count,
                        p1_score, due_months, update_time
                 FROM hr_kpi_score_rule WHERE id = 1
                 """, rs -> {
             if (!rs.next()) {
                 return null;
             }
+            int base;
+            try {
+                base = rs.getInt("base_score");
+                if (rs.wasNull() || base < 1) {
+                    base = (int) ASSESS_BASE_SCORE_DEFAULT;
+                }
+            } catch (Exception ignored) {
+                base = (int) ASSESS_BASE_SCORE_DEFAULT;
+            }
             return new ScoreRule(
+                    base,
                     Math.max(1, rs.getInt("p0_onboard_count")),
                     Math.max(0, rs.getInt("p0_score")),
                     Math.max(1, rs.getInt("p1_qualified_resume_count")),
@@ -834,11 +848,11 @@ public class HrKpiTaskService {
                     Math.max(1, rs.getInt("due_months")),
                     rs.getTimestamp("update_time") == null ? null : rs.getTimestamp("update_time").toLocalDateTime());
         });
-        return row != null ? row : new ScoreRule(1, 2, 3, 1, 1, 1, null);
+        return row != null ? row : new ScoreRule((int) ASSESS_BASE_SCORE_DEFAULT, 1, 2, 3, 1, 1, 1, null);
     }
 
-    private record ScoreRule(int p0OnboardCount, int p0Score, int p1QualifiedResumeCount, int p1OnboardCount,
-                             int p1Score, int dueMonths, LocalDateTime updateTime) {
+    private record ScoreRule(int baseScore, int p0OnboardCount, int p0Score, int p1QualifiedResumeCount,
+                             int p1OnboardCount, int p1Score, int dueMonths, LocalDateTime updateTime) {
     }
 
     private void markDone(Long taskId, LocalDateTime doneAt, String reason, Long applicationId, int score) {

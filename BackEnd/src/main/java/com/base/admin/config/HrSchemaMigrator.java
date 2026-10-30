@@ -520,6 +520,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS hr_kpi_score_rule (
                   id                         BIGINT   NOT NULL,
+                  base_score                 INT      NOT NULL DEFAULT 30 COMMENT '考核基准分（完成率×基准分=实得分）',
                   p0_onboard_count           INT      NOT NULL DEFAULT 1 COMMENT 'P0完成多少人入职',
                   p0_score                   INT      NOT NULL DEFAULT 2 COMMENT 'P0记多少分',
                   p1_qualified_resume_count  INT      NOT NULL DEFAULT 3 COMMENT 'P1周期内合格简历份数',
@@ -531,8 +532,10 @@ public class HrSchemaMigrator implements ApplicationRunner {
                   PRIMARY KEY (id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘考核计分规则（单行）'
                 """);
+        addColumnIfMissing("hr_kpi_score_rule", "base_score",
+                "ALTER TABLE hr_kpi_score_rule ADD COLUMN base_score INT NOT NULL DEFAULT 30 COMMENT '考核基准分（完成率×基准分=实得分）' AFTER id");
         addColumnIfMissing("hr_kpi_score_rule", "p0_onboard_count",
-                "ALTER TABLE hr_kpi_score_rule ADD COLUMN p0_onboard_count INT NOT NULL DEFAULT 1 COMMENT 'P0完成多少人入职' AFTER id");
+                "ALTER TABLE hr_kpi_score_rule ADD COLUMN p0_onboard_count INT NOT NULL DEFAULT 1 COMMENT 'P0完成多少人入职' AFTER base_score");
         addColumnIfMissing("hr_kpi_score_rule", "p1_qualified_resume_count",
                 "ALTER TABLE hr_kpi_score_rule ADD COLUMN p1_qualified_resume_count INT NOT NULL DEFAULT 3 COMMENT 'P1周期内合格简历份数' AFTER p0_score");
         addColumnIfMissing("hr_kpi_score_rule", "p1_onboard_count",
@@ -548,9 +551,9 @@ public class HrSchemaMigrator implements ApplicationRunner {
             // 无库无旧列则忽略
         }
         jdbc.update("""
-                INSERT INTO hr_kpi_score_rule (id, p0_onboard_count, p0_score, p1_qualified_resume_count,
+                INSERT INTO hr_kpi_score_rule (id, base_score, p0_onboard_count, p0_score, p1_qualified_resume_count,
                   p1_onboard_count, p1_score, due_months, update_by)
-                VALUES (1, 1, 2, 3, 1, 1, 1, 'system')
+                VALUES (1, 30, 1, 2, 3, 1, 1, 1, 'system')
                 ON DUPLICATE KEY UPDATE id = id
                 """);
     }

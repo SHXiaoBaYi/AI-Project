@@ -10,6 +10,9 @@ import java.time.LocalDateTime;
 @Schema(description = "考核计分规则")
 public class HrKpiScoreRuleVO {
 
+    @Schema(description = "考核基准分（完成率×基准分=实得分）", example = "30")
+    private Integer baseScore;
+
     @Schema(description = "P0：完成多少人入职")
     private Integer p0OnboardCount;
 
