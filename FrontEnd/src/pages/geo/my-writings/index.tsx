@@ -93,10 +93,13 @@ const MyWritingsPage = memo(function MyWritingsPage() {
     setAiPrecheckResult(null);
     try {
       const bundle = await getGeoContentArticleBundleApi(row.placementId);
-      const title = bundle?.shared?.contentTitle || row.contentTitle || '';
-      const body = (bundle?.shared?.contentBody || '').trim();
+      const platformDraft = (bundle?.articles ?? []).find(
+        (a) => a.contentMode === 'custom' && (a.contentBody || '').trim(),
+      );
+      const title = bundle?.shared?.contentTitle || platformDraft?.contentTitle || row.contentTitle || '';
+      const body = (bundle?.shared?.contentBody || '').trim() || (platformDraft?.contentBody || '').trim();
       if (!body) {
-        message.warning('当前统一稿正文为空，请先撰写或 AI 生成后再预审');
+        message.warning('当前正文为空（统一稿与内容平台稿均无内容），请先撰写或 AI 生成后再预审');
         setAiPrecheckResult({
           status: 'none',
           summary: '正文为空，未执行预检',

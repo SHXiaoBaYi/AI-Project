@@ -199,6 +199,20 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     versionRef.current = data.shared.contentVersion ?? 0;
   };
 
+  const resolvePreferTab = (data: GeoContentArticleBundle, prefer?: ActiveKey): ActiveKey => {
+    // 显式指定统一稿（撰写默认）时不自动跳转
+    if (prefer === 'shared') return 'shared';
+    if (prefer != null) return prefer;
+    const sharedBody = (data.shared?.contentBody || '').trim();
+    if (sharedBody) return 'shared';
+    // 审核打开且无统一稿正文：落到最早有正文的内容平台独立稿
+    const custom = (data.articles ?? []).find(
+      (a) => a.contentMode === 'custom' && (a.contentBody || '').trim() && a.itemId != null,
+    );
+    if (custom?.itemId != null) return custom.itemId;
+    return 'shared';
+  };
+
   const load = useCallback(async (id: number, prefer?: ActiveKey) => {
     setLoading(true);
     setEditorReady(false);
@@ -208,7 +222,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       const data = await getGeoContentArticleBundleApi(id);
       bundleRef.current = data;
       setBundle(data);
-      const next = prefer ?? 'shared';
+      const next = resolvePreferTab(data, prefer);
       setActive(next);
       if (next === 'shared') {
         applyShared(data);
@@ -237,7 +251,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     setAnnoComment('');
     setEditorReady(false);
     void prefetchLakexAssets();
-    void load(placementId, 'shared');
+    void load(placementId, mode === 'review' ? undefined : 'shared');
     if (mode === 'write') {
       void getGeoPlatformOptionsApi(GEO_PLATFORM_TYPE_CONTENT)
         .then(setPlatforms)
@@ -261,7 +275,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
           setVersionPair(null);
           return;
         }
-        // 补齐最新一轮快照（与对照抽屉一致）
+        // 补齐最新一轮快照（与对照抽屉一致；无统一稿时 currentDraft 已回退平台稿）
         const focusFilled: GeoContentReviewRound =
           focus.roundNo === latestRoundNo && res.currentDraft && !focus.hasSnapshot
             ? {

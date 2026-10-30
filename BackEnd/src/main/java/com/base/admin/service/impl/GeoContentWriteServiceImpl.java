@@ -435,10 +435,12 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         if (Constants.CONTENT_STATUS_QUEUE.equals(status) || Constants.CONTENT_STATUS_PUBLISHED.equals(status)) {
             throw new BusinessException("待投放/已发布文章不可再发起审核，请到「投放管理」维护投放");
         }
-        String title = nz(placement.getContentTitle());
-        String body = nz(placement.getContentBody());
-        if (!StringUtils.hasText(title) && !StringUtils.hasText(body)) {
-            throw new BusinessException("请先撰写并保存文章内容再发起审核");
+        ReviewArticleSnapshot snap = resolveReviewArticle(placement);
+        if (!StringUtils.hasText(snap.title()) && !StringUtils.hasText(snap.body())) {
+            throw new BusinessException("请先撰写并保存文章内容（统一稿或内容平台稿）再发起审核");
+        }
+        if (!StringUtils.hasText(snap.body())) {
+            throw new BusinessException("请先撰写并保存文章正文再发起审核");
         }
         List<GeoContentReview> history = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
                 .eq(GeoContentReview::getPlacementId, placement.getId())
@@ -778,14 +780,100 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         return new ArrayList<>(latest.values());
     }
 
-    /** 把投放主表当前正文写入审核轮次作为文章快照 */
+    /**
+     * 审核快照正文来源：优先统一稿；无统一稿正文时回退到最早有正文的内容平台独立稿。
+     * （撰写人可只写平台稿不写统一稿，提审/审核对照必须仍能看到内容）
+     */
+    private record ReviewArticleSnapshot(String title, String body, String format, long version, LocalDateTime updatedAt) {
+    }
+
+    private ReviewArticleSnapshot resolveReviewArticle(GeoContentPlacement placement) {
+        if (placement == null) {
+            return new ReviewArticleSnapshot("", "", Constants.CONTENT_FORMAT_LAKE, 0L, null);
+        }
+        String sharedTitle = nz(placement.getContentTitle());
+        String sharedBody = nz(placement.getContentBody());
+        if (StringUtils.hasText(sharedBody)) {
+            return new ReviewArticleSnapshot(
+                    sharedTitle,
+                    sharedBody,
+                    StringUtils.hasText(placement.getContentFormat())
+                            ? placement.getContentFormat()
+                            : Constants.CONTENT_FORMAT_LAKE,
+                    placement.getContentVersion() == null ? 0L : placement.getContentVersion(),
+                    placement.getContentUpdatedAt() != null
+                            ? placement.getContentUpdatedAt()
+                            : placement.getUpdateTime());
+        }
+        List<GeoContentPlacementItem> items = placementItemMapper.selectList(
+                new LambdaQueryWrapper<GeoContentPlacementItem>()
+                        .eq(GeoContentPlacementItem::getPlacementId, placement.getId())
+                        .orderByAsc(GeoContentPlacementItem::getContentUpdatedAt)
+                        .orderByAsc(GeoContentPlacementItem::getId));
+        GeoContentPlacementItem primary = items.stream()
+                .filter(item -> Constants.CONTENT_MODE_CUSTOM.equals(normalizeContentMode(item.getContentMode())))
+                .filter(item -> StringUtils.hasText(nz(item.getContentBody())))
+                .findFirst()
+                .orElse(null);
+        if (primary != null) {
+            String title = StringUtils.hasText(primary.getContentTitle())
+                    ? primary.getContentTitle().trim()
+                    : nz(primary.getTitle());
+            return new ReviewArticleSnapshot(
+                    title,
+                    nz(primary.getContentBody()),
+                    StringUtils.hasText(primary.getContentFormat())
+                            ? primary.getContentFormat()
+                            : Constants.CONTENT_FORMAT_LAKE,
+                    primary.getContentVersion() == null ? 0L : primary.getContentVersion(),
+                    primary.getContentUpdatedAt());
+        }
+        if (StringUtils.hasText(sharedTitle)) {
+            return new ReviewArticleSnapshot(
+                    sharedTitle,
+                    "",
+                    StringUtils.hasText(placement.getContentFormat())
+                            ? placement.getContentFormat()
+                            : Constants.CONTENT_FORMAT_LAKE,
+                    placement.getContentVersion() == null ? 0L : placement.getContentVersion(),
+                    placement.getContentUpdatedAt() != null
+                            ? placement.getContentUpdatedAt()
+                            : placement.getUpdateTime());
+        }
+        GeoContentPlacementItem titled = items.stream()
+                .filter(GeoContentWriteServiceImpl::hasPlatformDraft)
+                .findFirst()
+                .orElse(null);
+        if (titled != null) {
+            String title = StringUtils.hasText(titled.getContentTitle())
+                    ? titled.getContentTitle().trim()
+                    : nz(titled.getTitle());
+            return new ReviewArticleSnapshot(
+                    title,
+                    nz(titled.getContentBody()),
+                    StringUtils.hasText(titled.getContentFormat())
+                            ? titled.getContentFormat()
+                            : Constants.CONTENT_FORMAT_LAKE,
+                    titled.getContentVersion() == null ? 0L : titled.getContentVersion(),
+                    titled.getContentUpdatedAt());
+        }
+        return new ReviewArticleSnapshot("", "", Constants.CONTENT_FORMAT_LAKE, 0L, null);
+    }
+
+    private static String normalizeContentMode(String mode) {
+        if (Constants.CONTENT_MODE_CUSTOM.equals(mode)) {
+            return Constants.CONTENT_MODE_CUSTOM;
+        }
+        return Constants.CONTENT_MODE_SHARED;
+    }
+
+    /** 把当前有效正文（统一稿或平台独立稿）写入审核轮次作为文章快照 */
     private void applyArticleSnapshot(GeoContentReview review, GeoContentPlacement placement) {
-        review.setContentVersion(placement.getContentVersion() == null ? 0L : placement.getContentVersion());
-        review.setContentTitle(nz(placement.getContentTitle()));
-        review.setContentFormat(StringUtils.hasText(placement.getContentFormat())
-                ? placement.getContentFormat()
-                : Constants.CONTENT_FORMAT_LAKE);
-        review.setContentBody(nz(placement.getContentBody()));
+        ReviewArticleSnapshot snap = resolveReviewArticle(placement);
+        review.setContentVersion(snap.version());
+        review.setContentTitle(snap.title());
+        review.setContentFormat(snap.format());
+        review.setContentBody(snap.body());
     }
 
     private void ensureArticleSnapshotPersisted(Long reviewId, GeoContentPlacement placement) {
@@ -818,25 +906,25 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
 
     /**
      * 回填缺失的文章快照：
-     * - 待审轮：直接用当前正文补（应仍是提审稿）
-     * - 已结束轮：仅当 contentVersion 与当前稿一致时补（说明尚未改稿，正文仍是当时那版）
+     * - 待审轮：直接用当前正文补（统一稿或平台独立稿）
+     * - 已结束轮：仅当 contentVersion 与当前有效稿一致时补（说明尚未改稿，正文仍是当时那版）
      */
     private void backfillMissingArticleSnapshots(GeoContentPlacement placement, List<GeoContentReview> reviews) {
         if (placement == null || reviews == null || reviews.isEmpty()) {
             return;
         }
-        String body = nz(placement.getContentBody());
-        if (!StringUtils.hasText(body)) {
+        ReviewArticleSnapshot snap = resolveReviewArticle(placement);
+        if (!StringUtils.hasText(snap.body())) {
             return;
         }
-        Long placementVersion = placement.getContentVersion() == null ? 0L : placement.getContentVersion();
+        long currentVersion = snap.version();
         for (GeoContentReview review : reviews) {
             if (StringUtils.hasText(review.getContentBody())) {
                 continue;
             }
             boolean pending = "pending".equals(review.getStatus());
-            Long reviewVersion = review.getContentVersion() == null ? 0L : review.getContentVersion();
-            boolean sameVersion = Objects.equals(reviewVersion, placementVersion);
+            long reviewVersion = review.getContentVersion() == null ? 0L : review.getContentVersion();
+            boolean sameVersion = reviewVersion == currentVersion;
             if (!pending && !sameVersion) {
                 continue;
             }
@@ -853,6 +941,14 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         List<Long> placementIds = reviews.stream().map(GeoContentReview::getPlacementId).distinct().toList();
         Map<Long, GeoContentPlacement> placementMap = placementMapper.selectBatchIds(placementIds).stream()
                 .collect(Collectors.toMap(GeoContentPlacement::getId, p -> p, (a, b) -> a));
+        Map<Long, List<GeoContentPlacementItem>> itemsByPlacement = placementIds.isEmpty()
+                ? Map.of()
+                : placementItemMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementItem>()
+                                .in(GeoContentPlacementItem::getPlacementId, placementIds)
+                                .orderByAsc(GeoContentPlacementItem::getContentUpdatedAt)
+                                .orderByAsc(GeoContentPlacementItem::getId))
+                        .stream()
+                        .collect(Collectors.groupingBy(GeoContentPlacementItem::getPlacementId));
         Map<Long, List<GeoContentReviewer>> reviewersByReview = reviewerMapper.selectList(
                         new LambdaQueryWrapper<GeoContentReviewer>()
                                 .in(GeoContentReviewer::getReviewId, reviewIds)
@@ -873,7 +969,13 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             vo.setStatus(review.getStatus());
             vo.setTopicName(p == null ? "" : nz(p.getTopicName()));
             vo.setTargetQuestion(p == null ? "" : nz(p.getTargetQuestion()));
-            vo.setContentTitle(p == null ? "" : nz(p.getContentTitle()));
+            String reviewTitle = nz(review.getContentTitle());
+            String displayTitle = StringUtils.hasText(reviewTitle)
+                    ? reviewTitle
+                    : (p == null
+                            ? ""
+                            : writingTitle(p, itemsByPlacement.getOrDefault(p.getId(), List.of())));
+            vo.setContentTitle(displayTitle);
             vo.setSubmitterName(nz(review.getSubmitterName()));
             vo.setSubmitRemark(nz(review.getSubmitRemark()));
             vo.setCreateTime(review.getCreateTime());
@@ -933,6 +1035,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
     }
 
     private GeoContentReviewRoundVO toCurrentDraftVo(GeoContentPlacement placement) {
+        ReviewArticleSnapshot snap = resolveReviewArticle(placement);
         GeoContentReviewRoundVO vo = new GeoContentReviewRoundVO();
         vo.setReviewId(null);
         vo.setEntryType("draft");
@@ -940,16 +1043,16 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         vo.setStatus(null);
         vo.setSubmitterName(nz(placement.getOwnerName()));
         vo.setSubmitRemark("");
-        vo.setContentVersion(placement.getContentVersion() == null ? 0L : placement.getContentVersion());
-        vo.setContentTitle(nz(placement.getContentTitle()));
-        vo.setContentFormat(StringUtils.hasText(placement.getContentFormat())
-                ? placement.getContentFormat()
-                : Constants.CONTENT_FORMAT_LAKE);
-        vo.setContentBody(nz(placement.getContentBody()));
-        vo.setHasSnapshot(StringUtils.hasText(placement.getContentTitle()) || StringUtils.hasText(placement.getContentBody()));
-        vo.setCreateTime(placement.getContentUpdatedAt() != null
-                ? placement.getContentUpdatedAt()
-                : placement.getUpdateTime());
+        vo.setContentVersion(snap.version());
+        vo.setContentTitle(snap.title());
+        vo.setContentFormat(snap.format());
+        vo.setContentBody(snap.body());
+        vo.setHasSnapshot(StringUtils.hasText(snap.title()) || StringUtils.hasText(snap.body()));
+        vo.setCreateTime(snap.updatedAt() != null
+                ? snap.updatedAt()
+                : (placement.getContentUpdatedAt() != null
+                        ? placement.getContentUpdatedAt()
+                        : placement.getUpdateTime()));
         vo.setReviewers(List.of());
         vo.setReviewerSummary("");
         vo.setAnnotations(List.of());

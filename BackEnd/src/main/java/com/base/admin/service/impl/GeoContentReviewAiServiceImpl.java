@@ -6,6 +6,7 @@ import com.base.admin.domain.dto.GeoContentAiPrecheckDTO;
 import com.base.admin.domain.dto.GeoContentReviewAiBatchDTO;
 import com.base.admin.domain.dto.GeoContentReviewAiFeedbackDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
+import com.base.admin.domain.entity.GeoContentPlacementItem;
 import com.base.admin.domain.entity.GeoContentReview;
 import com.base.admin.domain.entity.GeoContentReviewAi;
 import com.base.admin.domain.entity.GeoContentReviewAnnotation;
@@ -14,6 +15,7 @@ import com.base.admin.domain.vo.GeoContentReviewAiIssueVO;
 import com.base.admin.domain.vo.GeoContentReviewAiVO;
 import com.base.admin.domain.vo.GeoContentReviewAnnotationVO;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
 import com.base.admin.mapper.GeoContentReviewAiMapper;
 import com.base.admin.mapper.GeoContentReviewAnnotationMapper;
@@ -71,6 +73,7 @@ public class GeoContentReviewAiServiceImpl implements GeoContentReviewAiService 
     private final GeoContentReviewAiMapper aiMapper;
     private final GeoContentReviewMapper reviewMapper;
     private final GeoContentPlacementMapper placementMapper;
+    private final GeoContentPlacementItemMapper placementItemMapper;
     private final GeoContentReviewerMapper reviewerMapper;
     private final GeoContentReviewAnnotationMapper annotationMapper;
     private final GeoContentReviewRuleService reviewRuleService;
@@ -445,10 +448,30 @@ public class GeoContentReviewAiServiceImpl implements GeoContentReviewAiService 
             String title = nz(review.getContentTitle());
             String body = nz(review.getContentBody());
             if (!StringUtils.hasText(body)) {
+                // 无统一稿、仅平台独立稿时，回退到最早有正文的内容平台稿
                 GeoContentPlacement placement = placementMapper.selectById(review.getPlacementId());
-                if (placement != null) {
+                if (placement != null && StringUtils.hasText(nz(placement.getContentBody()))) {
                     title = nz(placement.getContentTitle());
                     body = nz(placement.getContentBody());
+                } else if (review.getPlacementId() != null) {
+                    GeoContentPlacementItem primary = placementItemMapper.selectList(
+                                    new LambdaQueryWrapper<GeoContentPlacementItem>()
+                                            .eq(GeoContentPlacementItem::getPlacementId, review.getPlacementId())
+                                            .eq(GeoContentPlacementItem::getContentMode, Constants.CONTENT_MODE_CUSTOM)
+                                            .orderByAsc(GeoContentPlacementItem::getContentUpdatedAt)
+                                            .orderByAsc(GeoContentPlacementItem::getId))
+                            .stream()
+                            .filter(item -> StringUtils.hasText(nz(item.getContentBody())))
+                            .findFirst()
+                            .orElse(null);
+                    if (primary != null) {
+                        title = StringUtils.hasText(primary.getContentTitle())
+                                ? primary.getContentTitle().trim()
+                                : nz(primary.getTitle());
+                        body = nz(primary.getContentBody());
+                    } else if (placement != null) {
+                        title = nz(placement.getContentTitle());
+                    }
                 }
             }
             String kb = reviewKbService.buildReviewPromptContext();
