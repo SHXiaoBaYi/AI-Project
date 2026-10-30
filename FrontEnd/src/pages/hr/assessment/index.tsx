@@ -17,9 +17,9 @@ const STATUS_OPTIONS = [
   { label: '已完成', value: 'DONE' },
 ];
 
-function fmt(value?: string) {
+function fmtDate(value?: string) {
   if (!value) return '—';
-  return String(value).replace('T', ' ').slice(0, 16);
+  return String(value).replace('T', ' ').slice(0, 10);
 }
 
 function pct(rate?: number) {
@@ -147,8 +147,8 @@ const AssessmentPage = memo(function AssessmentPage() {
           : '0.0';
       },
     },
-    { title: '发布', dataIndex: 'publishedAt', width: 128, render: fmt },
-    { title: '到期', dataIndex: 'dueAt', width: 128, render: fmt },
+    { title: '发布', dataIndex: 'publishedAt', width: 110, render: fmtDate },
+    { title: '到期', dataIndex: 'dueAt', width: 110, render: fmtDate },
     {
       title: '完成方式',
       dataIndex: 'doneReason',

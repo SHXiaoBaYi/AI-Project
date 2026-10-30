@@ -121,17 +121,14 @@ public class HrKpiTaskService {
                           AND status = 'OPEN' AND is_active = 1
                         """, requisitionId, ownerId, slot);
             }
-            // 刷新仍 OPEN 的优先级；未延期（due=origin_due）的按岗位发布日重算发布/到期，修复历史「全员本月末」脏数据
+            // 刷新仍 OPEN 的优先级快照
             jdbc.update("""
-                    UPDATE hr_kpi_task
-                    SET priority_code = ?,
-                        published_at = ?,
-                        due_at = IF(due_at <=> origin_due_at, ?, due_at),
-                        origin_due_at = IF(due_at <=> origin_due_at, ?, origin_due_at),
-                        update_time = NOW()
+                    UPDATE hr_kpi_task SET priority_code = ?, update_time = NOW()
                     WHERE requisition_id = ? AND owner_user_id = ? AND status = 'OPEN' AND is_active = 1
-                    """, priority, published, due, due, requisitionId, ownerId);
+                    """, priority, requisitionId, ownerId);
         }
+        // 按岗位发布日重算本需求下未延期任务的发布/到期（生产同步后也要纠偏）
+        repairSchedulesForRequisition(requisitionId, published, due);
         // 已不在负责人列表中的 OPEN 任务取消
         if (!owners.isEmpty()) {
             StringBuilder in = new StringBuilder();
@@ -238,7 +235,146 @@ public class HrKpiTaskService {
             }
             n++;
         }
+        // 含已关闭岗位上的历史任务：生产同步后纠正「全员同一发布/到期」
+        repairAllTaskSchedulesFromRequisitions();
         return n;
+    }
+
+    /**
+     * 按岗位收到日重算发布/到期。已手动延期（due_at ≠ origin_due_at）的只改发布日。
+     */
+    @Transactional
+    public int repairAllTaskSchedulesFromRequisitions() {
+        ScoreRule rule = loadScoreRule();
+        int dueMonths = Math.max(1, rule.dueMonths());
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT t.id, t.status, t.due_at, t.origin_due_at, t.done_at,
+                       COALESCE(r.received_date, DATE(r.create_time)) AS start_day
+                FROM hr_kpi_task t
+                JOIN hr_requisition r ON r.id = t.requisition_id AND r.is_active = 1
+                WHERE t.is_active = 1 AND t.status IN ('OPEN', 'DONE')
+                """);
+        int n = 0;
+        for (Map<String, Object> row : rows) {
+            Long id = ((Number) row.get("id")).longValue();
+            String status = String.valueOf(row.get("status"));
+            LocalDate startDay = toLocalDate(row.get("start_day"));
+            if (startDay == null) {
+                startDay = LocalDate.now();
+            }
+            LocalDateTime published = startDay.atStartOfDay();
+            LocalDateTime dueAt = toLocalDateTime(row.get("due_at"));
+            LocalDateTime originDue = toLocalDateTime(row.get("origin_due_at"));
+            boolean postponed = dueAt != null && originDue != null && !dueAt.equals(originDue);
+            LocalDateTime newDue;
+            if ("DONE".equals(status)) {
+                LocalDateTime doneAt = toLocalDateTime(row.get("done_at"));
+                newDue = doneAt != null ? endOfMonth(doneAt) : endOfMonth(startDay.plusMonths(dueMonths).atStartOfDay());
+                LocalDateTime ruleDue = endOfMonth(startDay.plusMonths(dueMonths).atStartOfDay());
+                if (newDue.isBefore(ruleDue)) {
+                    newDue = ruleDue;
+                }
+            } else {
+                newDue = endOfMonth(startDay.plusMonths(dueMonths).atStartOfDay());
+            }
+            if (postponed) {
+                n += jdbc.update("""
+                        UPDATE hr_kpi_task SET published_at = ?, update_time = NOW() WHERE id = ? AND is_active = 1
+                        """, published, id);
+            } else {
+                n += jdbc.update("""
+                        UPDATE hr_kpi_task
+                        SET published_at = ?, due_at = ?, origin_due_at = ?, update_time = NOW()
+                        WHERE id = ? AND is_active = 1
+                        """, published, newDue, newDue, id);
+            }
+        }
+        if (n > 0) {
+            log.info("考核任务发布/到期已按岗位收到日纠偏 {} 条", n);
+        }
+        return n;
+    }
+
+    private void repairSchedulesForRequisition(Long requisitionId, LocalDateTime published, LocalDateTime openDue) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT id, status, due_at, origin_due_at, done_at
+                FROM hr_kpi_task
+                WHERE requisition_id = ? AND is_active = 1 AND status IN ('OPEN', 'DONE')
+                """, requisitionId);
+        ScoreRule rule = loadScoreRule();
+        int dueMonths = Math.max(1, rule.dueMonths());
+        LocalDate startDay = published.toLocalDate();
+        for (Map<String, Object> row : rows) {
+            Long id = ((Number) row.get("id")).longValue();
+            String status = String.valueOf(row.get("status"));
+            LocalDateTime dueAt = toLocalDateTime(row.get("due_at"));
+            LocalDateTime originDue = toLocalDateTime(row.get("origin_due_at"));
+            boolean postponed = dueAt != null && originDue != null && !dueAt.equals(originDue);
+            LocalDateTime newDue = openDue;
+            if ("DONE".equals(status)) {
+                LocalDateTime doneAt = toLocalDateTime(row.get("done_at"));
+                newDue = doneAt != null ? endOfMonth(doneAt) : endOfMonth(startDay.plusMonths(dueMonths).atStartOfDay());
+                LocalDateTime ruleDue = endOfMonth(startDay.plusMonths(dueMonths).atStartOfDay());
+                if (newDue.isBefore(ruleDue)) {
+                    newDue = ruleDue;
+                }
+            }
+            if (postponed) {
+                jdbc.update("UPDATE hr_kpi_task SET published_at = ?, update_time = NOW() WHERE id = ?",
+                        published, id);
+            } else {
+                jdbc.update("""
+                        UPDATE hr_kpi_task
+                        SET published_at = ?, due_at = ?, origin_due_at = ?, update_time = NOW()
+                        WHERE id = ?
+                        """, published, newDue, newDue, id);
+            }
+        }
+    }
+
+    private static LocalDate toLocalDate(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof LocalDate d) {
+            return d;
+        }
+        if (value instanceof java.sql.Date d) {
+            return d.toLocalDate();
+        }
+        if (value instanceof java.util.Date d) {
+            return new java.sql.Date(d.getTime()).toLocalDate();
+        }
+        if (value instanceof LocalDateTime t) {
+            return t.toLocalDate();
+        }
+        return LocalDate.parse(String.valueOf(value).substring(0, 10));
+    }
+
+    private static LocalDateTime toLocalDateTime(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof LocalDateTime t) {
+            return t;
+        }
+        if (value instanceof java.sql.Timestamp t) {
+            return t.toLocalDateTime();
+        }
+        if (value instanceof java.sql.Date d) {
+            return d.toLocalDate().atStartOfDay();
+        }
+        if (value instanceof LocalDate d) {
+            return d.atStartOfDay();
+        }
+        String s = String.valueOf(value).replace('T', ' ');
+        if (s.length() >= 19) {
+            return LocalDateTime.parse(s.substring(0, 19).replace(' ', 'T'));
+        }
+        if (s.length() >= 10) {
+            return LocalDate.parse(s.substring(0, 10)).atStartOfDay();
+        }
+        return null;
     }
 
     /**
