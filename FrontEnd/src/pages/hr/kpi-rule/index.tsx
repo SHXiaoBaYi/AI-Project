@@ -43,7 +43,8 @@ const KpiRulePage = memo(function KpiRulePage() {
           className='mb-4'
         >
           完成门槛用于判定任务何时算「完成」。个人得分=已完成任务按下方 P0/P1 分值累加，面板展示为「已得分 /
-          基准分」；整体得分=各人已得分之和÷负责人数×基准分。修改门槛后仅影响之后新完成的任务，分值与基准分变更立即影响得分展示。
+          基准分」；整体得分展示为「各人已得分之和 /
+          (负责人数×基准分)」。修改门槛后仅影响之后新完成的任务，分值与基准分变更立即影响得分展示。
         </Typography.Paragraph>
         <Form
           form={form}
@@ -63,7 +64,7 @@ const KpiRulePage = memo(function KpiRulePage() {
             name='baseScore'
             label='考核基准分'
             rules={[{ required: true, message: '必填' }]}
-            extra='个人展示为「已得分 / 基准分」；整体得分=人均已得分×基准分，默认 30'
+            extra='个人展示为「已得分 / 基准分」；整体分母=负责人数×基准分，默认 30'
             className='mb-4'
           >
             <InputNumber

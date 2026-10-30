@@ -27,11 +27,11 @@ function pct(rate?: number) {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
-/** 展示为「实得分 / 基准分」，如 24.0 / 30 */
+/** 展示为「已得分 / 满分」，整数，如 4 / 30、11 / 180 */
 function scoreOverBase(score?: number, base?: number) {
-  const s = score == null || Number.isNaN(score) ? 0 : Number(score);
-  const b = base == null || Number.isNaN(base) || base <= 0 ? 30 : Number(base);
-  return `${s.toFixed(1)} / ${Number.isInteger(b) ? b : b.toFixed(0)}`;
+  const s = score == null || Number.isNaN(score) ? 0 : Math.round(Number(score));
+  const b = base == null || Number.isNaN(base) || base <= 0 ? 30 : Math.round(Number(base));
+  return `${s} / ${b}`;
 }
 
 const AssessmentPage = memo(function AssessmentPage() {
@@ -134,7 +134,7 @@ const AssessmentPage = memo(function AssessmentPage() {
       width: 64,
       render: (v, row) => {
         const w = (v as number | undefined) ?? (row.priorityCode === 'P0' ? weightP0 : weightP1);
-        return Number(w).toFixed(1);
+        return String(Math.round(Number(w)));
       },
     },
     {
@@ -148,10 +148,10 @@ const AssessmentPage = memo(function AssessmentPage() {
       dataIndex: 'earnedWeight',
       width: 80,
       render: (v, row) => {
-        if (v != null && v !== '') return Number(v).toFixed(1);
+        if (v != null && v !== '') return String(Math.round(Number(v)));
         return row.status === 'DONE'
-          ? Number(row.weight ?? (row.priorityCode === 'P0' ? weightP0 : weightP1)).toFixed(1)
-          : '0.0';
+          ? String(Math.round(Number(row.weight ?? (row.priorityCode === 'P0' ? weightP0 : weightP1))))
+          : '0';
       },
     },
     { title: '发布', dataIndex: 'publishedAt', width: 110, render: fmtDate },
@@ -227,7 +227,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           className='!mt-2 !mb-0 text-xs leading-relaxed'
         >
           {data?.scoreRuleHint ||
-            `基准分${baseScore}（计分规则可改）；个人=已完成规则分/${baseScore}；整体=各人已得分之和/负责人数×${baseScore}；P0单任务${weightP0}分、P1单任务${weightP1}分`}
+            `基准分${baseScore}（计分规则可改）；个人=已得分/${baseScore}；整体=各人已得分之和/(负责人数×${baseScore})；P0单任务${weightP0}分、P1单任务${weightP1}分`}
         </Typography.Paragraph>
       </Card>
 
@@ -246,29 +246,25 @@ const AssessmentPage = memo(function AssessmentPage() {
             >
               <div className='mb-2 truncate font-medium text-sky-800'>整体完成</div>
               <Row gutter={8}>
-                <Col span={8}>
+                <Col span={12}>
                   <Statistic
                     title='得分'
-                    value={data?.overallScore ?? 0}
-                    precision={1}
+                    value={scoreOverBase(
+                      data?.overallScore,
+                      data?.overallScoreMax ?? (data?.owners?.length ?? 0) * baseScore,
+                    )}
                   />
                 </Col>
-                <Col span={8}>
+                <Col span={12}>
                   <Statistic
                     title='完成率'
                     value={pct(data?.overallCompletionRate)}
                   />
                 </Col>
-                <Col span={8}>
-                  <Statistic
-                    title='已完成/应计总分'
-                    value={`${Number(data?.overallDoneWeight ?? 0).toFixed(1)}/${Number(data?.overallTotalWeight ?? 0).toFixed(1)}`}
-                  />
-                </Col>
               </Row>
               <div className='mt-2 text-xs text-neutral-500'>
-                各人已得分之和÷{data?.owners?.length ?? 0}人×基准分{baseScore}；P0 {Number(weightP0).toFixed(0)}分 /
-                任务 · P1 {Number(weightP1).toFixed(0)}分 / 任务
+                各人已得分之和 / ({data?.ownerCount ?? data?.owners?.length ?? 0}人 × 基准分{baseScore})；P0{' '}
+                {Math.round(Number(weightP0))}分 / 任务 · P1 {Math.round(Number(weightP1))}分 / 任务
               </div>
             </Card>
           </Col>
@@ -286,22 +282,16 @@ const AssessmentPage = memo(function AssessmentPage() {
               >
                 <div className='mb-2 truncate font-medium'>{o.ownerName || o.ownerUserId}</div>
                 <Row gutter={8}>
-                  <Col span={8}>
+                  <Col span={12}>
                     <Statistic
                       title='得分'
                       value={scoreOverBase(o.score, baseScore)}
                     />
                   </Col>
-                  <Col span={8}>
+                  <Col span={12}>
                     <Statistic
                       title='完成率'
                       value={pct(o.completionRate)}
-                    />
-                  </Col>
-                  <Col span={8}>
-                    <Statistic
-                      title='已完成/应计总分'
-                      value={`${Number(o.doneWeight ?? 0).toFixed(1)}/${Number(o.totalWeight ?? 0).toFixed(1)}`}
                     />
                   </Col>
                 </Row>

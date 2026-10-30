@@ -38,8 +38,14 @@ public class HrKpiAssessmentVO {
     @Schema(description = "整体应计总权重")
     private Double overallTotalWeight;
 
-    @Schema(description = "整体得分=各负责人已得分之和/负责人数×基准分")
+    @Schema(description = "整体已得分（各负责人已得分之和，整数）", example = "11")
     private Double overallScore;
+
+    @Schema(description = "整体满分=负责人数×基准分，展示为 overallScore/overallScoreMax", example = "180")
+    private Double overallScoreMax;
+
+    @Schema(description = "参与核算的招聘负责人数", example = "6")
+    private Integer ownerCount;
 
     @Schema(description = "按人汇总")
     private List<OwnerSummary> owners = new ArrayList<>();
@@ -65,7 +71,7 @@ public class HrKpiAssessmentVO {
         private Double doneWeight;
         @Schema(description = "整体完成率 0~1")
         private Double completionRate;
-        @Schema(description = "已完成得分（按计分规则累加的 P0/P1 分；前端展示为 已得分/基准分）")
+        @Schema(description = "已完成得分（按计分规则累加的 P0/P1 分，整数；前端展示为 已得分/基准分）")
         private Double score;
     }
 

@@ -636,8 +636,12 @@ export type HrKpiAssessment = {
   overallCompletionRate?: number;
   overallDoneWeight?: number;
   overallTotalWeight?: number;
-  /** 整体得分 = 各人已得分之和 / 负责人数 × 基准分 */
+  /** 整体已得分（各人已得分之和，整数），展示分子 */
   overallScore?: number;
+  /** 整体满分=负责人数×基准分，展示分母，如 11 / 180 */
+  overallScoreMax?: number;
+  /** 参与核算的招聘负责人数 */
+  ownerCount?: number;
   owners: {
     ownerUserId: number;
     ownerName?: string;
@@ -652,7 +656,7 @@ export type HrKpiAssessment = {
     doneWeight?: number;
     /** 0~1 */
     completionRate?: number;
-    /** 已完成得分（计分规则累加），前端展示为 已得分/基准分 */
+    /** 已完成得分（计分规则累加，整数），前端展示为 已得分/基准分 */
     score: number;
   }[];
   tasks: {

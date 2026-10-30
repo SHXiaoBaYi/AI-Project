@@ -664,15 +664,19 @@ public class HrKpiTaskService {
             double done = s.getDoneWeight() == null ? 0.0 : s.getDoneWeight();
             double rate = total > 0 ? done / total : 0.0;
             s.setCompletionRate(round4(rate));
-            // 个人已完成得分=计分规则累加（完成的 P0/P1 任务分之和）；前端展示为 已得分/基准分
-            s.setScore(round2(done));
-            sumOwnerEarned += done;
+            // 个人已完成得分=计分规则累加（整数）；前端展示为 已得分/基准分
+            double earned = round0(done);
+            s.setScore(earned);
+            s.setDoneWeight(earned);
+            s.setTotalWeight(round0(total));
+            sumOwnerEarned += earned;
         }
 
         double overallRate = overallTotalWeight > 0 ? overallDoneWeight / overallTotalWeight : 0.0;
         int ownerCount = owners.size();
-        // 整体得分 = 各负责人已得分之和 / 负责人数 × 考核基准分
-        double overallScore = ownerCount > 0 ? round2((sumOwnerEarned / ownerCount) * baseScore) : 0.0;
+        // 整体展示：各人已得分之和 / (负责人数 × 基准分)，如 11 / 180
+        double overallEarned = round0(sumOwnerEarned);
+        double overallMax = round0(ownerCount * baseScore);
 
         String statusFilter = StringUtils.hasText(q.getStatus()) ? q.getStatus().trim().toUpperCase() : "";
         List<HrKpiAssessmentVO.TaskRow> tasks = statusFilter.isEmpty() ? allTasks
@@ -683,13 +687,15 @@ public class HrKpiTaskService {
         vo.setBaseScore(baseScore);
         vo.setWeightP0(weightP0);
         vo.setWeightP1(weightP1);
-        vo.setOverallTotalWeight(round2(overallTotalWeight));
-        vo.setOverallDoneWeight(round2(overallDoneWeight));
+        vo.setOwnerCount(ownerCount);
+        vo.setOverallTotalWeight(round0(overallTotalWeight));
+        vo.setOverallDoneWeight(overallEarned);
         vo.setOverallCompletionRate(round4(overallRate));
-        vo.setOverallScore(overallScore);
+        vo.setOverallScore(overallEarned);
+        vo.setOverallScoreMax(overallMax);
         vo.setScoreRuleHint(String.format(
-                "基准分%.0f（计分规则可改）；个人得分=已完成任务按规则累加分，展示为 已得分/%.0f；整体得分=各人已得分之和/负责人数×%.0f；P0单任务%.0f分、P1单任务%.0f分；未完成计0",
-                baseScore, baseScore, baseScore, weightP0, weightP1));
+                "基准分%.0f（计分规则可改）；个人得分展示为 已得分/%.0f（整数）；整体得分展示为 各人已得分之和/(负责人数×基准分)；P0单任务%.0f分、P1单任务%.0f分；未完成计0",
+                baseScore, baseScore, weightP0, weightP1));
         vo.setOwners(new ArrayList<>(owners.values()));
         vo.setTasks(tasks);
         return vo;
@@ -697,6 +703,10 @@ public class HrKpiTaskService {
 
     private static double assessWeight(String priorityCode, double weightP0, double weightP1) {
         return "P0".equalsIgnoreCase(priorityCode) ? weightP0 : weightP1;
+    }
+
+    private static double round0(double v) {
+        return Math.round(v);
     }
 
     private static double round2(double v) {
