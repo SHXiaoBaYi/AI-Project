@@ -5,7 +5,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { LeftOutlined, RightOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import 'dayjs/locale/zh-cn';
-import { getHrUsersApi, listHrInvitesApi } from '@/api/hr';
+import { getHrRequisitionsApi, getHrUsersApi, listHrInvitesApi } from '@/api/hr';
 
 dayjs.locale('zh-cn');
 
@@ -29,6 +29,7 @@ type CalendarEvent = {
   id: number;
   inviteIds: number[];
   applicationId: number;
+  requisitionId?: number;
   displayName: string;
   jobName?: string;
   roundNo: number;
@@ -44,6 +45,16 @@ type CalendarEvent = {
 type PersonSummaryRow = {
   key: string;
   name: string;
+  sessionCount: number;
+  candidateCount: number;
+  pendingCalendar: number;
+  failedCalendar: number;
+};
+
+type JobSummaryRow = {
+  key: string;
+  jobName: string;
+  requisitionIds: number[];
   sessionCount: number;
   candidateCount: number;
   pendingCalendar: number;
@@ -70,6 +81,7 @@ function mapRaw(raw: Record<string, unknown>): CalendarEvent {
     id: Number(raw.id),
     inviteIds: [Number(raw.id)],
     applicationId: Number(raw.application_id),
+    requisitionId: raw.requisition_id == null || raw.requisition_id === '' ? undefined : Number(raw.requisition_id),
     displayName: String(raw.display_name ?? ''),
     jobName: textOf(raw.job_name),
     roundNo: Number(raw.round_no) || 1,
@@ -81,6 +93,11 @@ function mapRaw(raw: Record<string, unknown>): CalendarEvent {
     status,
     memberStatuses: [status],
   };
+}
+
+function jobLabel(ev: Pick<CalendarEvent, 'jobName'>) {
+  const name = ev.jobName?.trim();
+  return name ? name : '未指定岗位';
 }
 
 function sessionKey(row: Pick<CalendarEvent, 'applicationId' | 'roundNo' | 'interviewAt'>) {
@@ -138,7 +155,9 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
 
 const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
   const [owners, setOwners] = useState<{ value: number; label: string }[]>([]);
+  const [jobs, setJobs] = useState<{ value: number; label: string }[]>([]);
   const [ownerUserIds, setOwnerUserIds] = useState<number[]>([]);
+  const [requisitionIds, setRequisitionIds] = useState<number[]>([]);
   const [panelValue, setPanelValue] = useState<Dayjs>(() => dayjs());
   const [selectedDate, setSelectedDate] = useState<Dayjs>(() => dayjs());
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -154,6 +173,16 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
           ),
           label: String((item as { nickname?: string }).nickname || (item as { username?: string }).username || ''),
         })),
+      ),
+    );
+    void getHrRequisitionsApi().then((rows) =>
+      setJobs(
+        (rows ?? [])
+          .map((row) => ({
+            value: Number(row.id),
+            label: String(row.job_name ?? row.jobName ?? '').trim(),
+          }))
+          .filter((item) => item.value > 0 && item.label),
       ),
     );
   }, []);
@@ -186,21 +215,28 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthKey, ownerUserIds, loadMonth]);
 
+  /** 岗位筛选：在负责人已拉取的数据上再筛 */
+  const filteredEvents = useMemo(() => {
+    if (!requisitionIds.length) return events;
+    const idSet = new Set(requisitionIds);
+    return events.filter((ev) => ev.requisitionId != null && idSet.has(ev.requisitionId));
+  }, [events, requisitionIds]);
+
   /** 汇总与日历色块：只统计当前面板月份内的场次 */
   const monthEvents = useMemo(() => {
-    return events.filter((ev) => dayjs(ev.interviewAt).isSame(panelValue, 'month'));
-  }, [events, panelValue]);
+    return filteredEvents.filter((ev) => dayjs(ev.interviewAt).isSame(panelValue, 'month'));
+  }, [filteredEvents, panelValue]);
 
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    for (const ev of events) {
+    for (const ev of filteredEvents) {
       const key = dayjs(ev.interviewAt).format('YYYY-MM-DD');
       const list = map.get(key) ?? [];
       list.push(ev);
       map.set(key, list);
     }
     return map;
-  }, [events]);
+  }, [filteredEvents]);
 
   const personSummary = useMemo<PersonSummaryRow[]>(() => {
     const map = new Map<string, { sessions: Set<string>; candidates: Set<number>; pending: number; failed: number }>();
@@ -232,6 +268,43 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
         failedCalendar: row.failed,
       }))
       .sort((a, b) => b.sessionCount - a.sessionCount || a.name.localeCompare(b.name, 'zh'));
+  }, [monthEvents]);
+
+  const jobSummary = useMemo<JobSummaryRow[]>(() => {
+    const map = new Map<
+      string,
+      { requisitionIds: Set<number>; sessions: Set<string>; candidates: Set<number>; pending: number; failed: number }
+    >();
+    for (const ev of monthEvents) {
+      const name = jobLabel(ev);
+      const sk = sessionKey(ev);
+      const row = map.get(name) ?? {
+        requisitionIds: new Set<number>(),
+        sessions: new Set<string>(),
+        candidates: new Set<number>(),
+        pending: 0,
+        failed: 0,
+      };
+      if (ev.requisitionId != null) row.requisitionIds.add(ev.requisitionId);
+      if (!row.sessions.has(sk)) {
+        row.sessions.add(sk);
+        if (ev.status === 'NO_CALENDAR') row.pending += 1;
+        if (ev.status === 'FAILED') row.failed += 1;
+      }
+      row.candidates.add(ev.applicationId);
+      map.set(name, row);
+    }
+    return [...map.entries()]
+      .map(([jobName, row]) => ({
+        key: jobName,
+        jobName,
+        requisitionIds: [...row.requisitionIds],
+        sessionCount: row.sessions.size,
+        candidateCount: row.candidates.size,
+        pendingCalendar: row.pending,
+        failedCalendar: row.failed,
+      }))
+      .sort((a, b) => b.sessionCount - a.sessionCount || a.jobName.localeCompare(b.jobName, 'zh'));
   }, [monthEvents]);
 
   const dateSummary = useMemo<DateSummaryRow[]>(() => {
@@ -279,6 +352,19 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
     if (matched.length) setOwnerUserIds(matched);
   };
 
+  const filterJobByRow = (row: JobSummaryRow) => {
+    if (row.jobName === '未指定岗位') {
+      setRequisitionIds([]);
+      return;
+    }
+    if (row.requisitionIds.length) {
+      setRequisitionIds(row.requisitionIds);
+      return;
+    }
+    const matched = jobs.filter((j) => j.label === row.jobName).map((j) => j.value);
+    if (matched.length) setRequisitionIds(matched);
+  };
+
   const personColumns = useMemo<ColumnsType<PersonSummaryRow>>(
     () => [
       {
@@ -295,24 +381,60 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
           </button>
         ),
       },
-      { title: '场次', dataIndex: 'sessionCount', width: 64, align: 'right' },
-      { title: '候选人', dataIndex: 'candidateCount', width: 72, align: 'right' },
+      { title: '场次', dataIndex: 'sessionCount', width: 56, align: 'right' },
+      { title: '候选人', dataIndex: 'candidateCount', width: 64, align: 'right' },
       {
-        title: '待建日程',
+        title: '待建',
         dataIndex: 'pendingCalendar',
-        width: 80,
+        width: 56,
         align: 'right',
         render: (n: number) => (n > 0 ? <span className='text-amber-600'>{n}</span> : n),
       },
       {
         title: '失败',
         dataIndex: 'failedCalendar',
-        width: 56,
+        width: 48,
         align: 'right',
         render: (n: number) => (n > 0 ? <span className='text-rose-600'>{n}</span> : n),
       },
     ],
     [owners],
+  );
+
+  const jobColumns = useMemo<ColumnsType<JobSummaryRow>>(
+    () => [
+      {
+        title: '岗位',
+        dataIndex: 'jobName',
+        ellipsis: true,
+        render: (_: string, row) => (
+          <button
+            type='button'
+            className='cursor-pointer border-0 bg-transparent p-0 text-left text-sky-600 hover:underline'
+            onClick={() => filterJobByRow(row)}
+          >
+            {row.jobName}
+          </button>
+        ),
+      },
+      { title: '场次', dataIndex: 'sessionCount', width: 56, align: 'right' },
+      { title: '候选人', dataIndex: 'candidateCount', width: 64, align: 'right' },
+      {
+        title: '待建',
+        dataIndex: 'pendingCalendar',
+        width: 56,
+        align: 'right',
+        render: (n: number) => (n > 0 ? <span className='text-amber-600'>{n}</span> : n),
+      },
+      {
+        title: '失败',
+        dataIndex: 'failedCalendar',
+        width: 48,
+        align: 'right',
+        render: (n: number) => (n > 0 ? <span className='text-rose-600'>{n}</span> : n),
+      },
+    ],
+    [jobs],
   );
 
   const dateColumns = useMemo<ColumnsType<DateSummaryRow>>(
@@ -331,12 +453,12 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
           </button>
         ),
       },
-      { title: '场次', dataIndex: 'sessionCount', width: 64, align: 'right' },
-      { title: '候选人', dataIndex: 'candidateCount', width: 72, align: 'right' },
+      { title: '场次', dataIndex: 'sessionCount', width: 56, align: 'right' },
+      { title: '候选人', dataIndex: 'candidateCount', width: 64, align: 'right' },
       {
-        title: '待建日程',
+        title: '待建',
         dataIndex: 'pendingCalendar',
-        width: 80,
+        width: 56,
         align: 'right',
         render: (n: number) => (n > 0 ? <span className='text-amber-600'>{n}</span> : n),
       },
@@ -454,10 +576,23 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
             maxTagCount='responsive'
             optionFilterProp='label'
             placeholder='招聘负责人（多选）'
-            className='min-w-[220px]'
+            className='min-w-[200px]'
             options={owners}
             value={ownerUserIds}
             onChange={(value) => setOwnerUserIds(value ?? [])}
+          />
+          <Select
+            allowClear
+            showSearch
+            mode='multiple'
+            size='small'
+            maxTagCount='responsive'
+            optionFilterProp='label'
+            placeholder='岗位（多选）'
+            className='min-w-[220px]'
+            options={jobs}
+            value={requisitionIds}
+            onChange={(value) => setRequisitionIds(value ?? [])}
           />
           <Button
             size='small'
@@ -469,7 +604,7 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
         </Space>
       </div>
 
-      <div className='grid h-[30%] min-h-[200px] shrink-0 gap-2 lg:grid-cols-2'>
+      <div className='grid h-[30%] min-h-[200px] shrink-0 gap-2 lg:grid-cols-3'>
         <div className='flex min-h-0 flex-col overflow-hidden rounded-lg bg-white px-3 py-2 shadow-sm'>
           <div className='mb-1 flex shrink-0 items-baseline justify-between gap-2'>
             <Typography.Text className='text-sm font-medium text-neutral-800'>人维度汇总</Typography.Text>
@@ -477,7 +612,7 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
               type='secondary'
               className='text-[11px]'
             >
-              按招聘负责人 · 本月 · 点击姓名可筛选
+              按负责人 · 点击筛选
             </Typography.Text>
           </div>
           <div className='min-h-0 flex-1 overflow-y-auto'>
@@ -494,12 +629,34 @@ const HrInterviewCalendarPage = memo(function HrInterviewCalendarPage() {
         </div>
         <div className='flex min-h-0 flex-col overflow-hidden rounded-lg bg-white px-3 py-2 shadow-sm'>
           <div className='mb-1 flex shrink-0 items-baseline justify-between gap-2'>
+            <Typography.Text className='text-sm font-medium text-neutral-800'>岗位维度汇总</Typography.Text>
+            <Typography.Text
+              type='secondary'
+              className='text-[11px]'
+            >
+              按岗位 · 点击筛选
+            </Typography.Text>
+          </div>
+          <div className='min-h-0 flex-1 overflow-y-auto'>
+            <Table<JobSummaryRow>
+              size='small'
+              rowKey='key'
+              pagination={false}
+              loading={loading}
+              columns={jobColumns}
+              dataSource={jobSummary}
+              locale={{ emptyText: '本月暂无面试' }}
+            />
+          </div>
+        </div>
+        <div className='flex min-h-0 flex-col overflow-hidden rounded-lg bg-white px-3 py-2 shadow-sm'>
+          <div className='mb-1 flex shrink-0 items-baseline justify-between gap-2'>
             <Typography.Text className='text-sm font-medium text-neutral-800'>日期维度汇总</Typography.Text>
             <Typography.Text
               type='secondary'
               className='text-[11px]'
             >
-              有安排的日期 · 点击可看当天明细
+              有安排的日期 · 点击看明细
             </Typography.Text>
           </div>
           <div className='min-h-0 flex-1 overflow-y-auto'>
