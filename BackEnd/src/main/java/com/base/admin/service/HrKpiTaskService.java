@@ -372,6 +372,9 @@ public class HrKpiTaskService {
     private record OnboardHit(long applicationId, LocalDateTime at) {
     }
 
+    /** 考核展示基准分：完成率×基准分=实得分（无额外加减分）。P0/P1 权重取自考核计分规则。 */
+    public static final double ASSESS_BASE_SCORE = 30.0;
+
     public HrKpiAssessmentVO assessment(HrKpiAssessmentQueryDTO query) {
         // 增量同步在招岗位槽位；历史 DONE 由 backfillAllHistorical 生成
         syncAllOpenScoreRequisitions();
@@ -380,6 +383,10 @@ public class HrKpiTaskService {
         LocalDate monthStart = month.withDayOfMonth(1);
         LocalDateTime from = monthStart.atStartOfDay();
         LocalDateTime to = monthStart.plusMonths(1).atStartOfDay();
+
+        ScoreRule rule = loadScoreRule();
+        double weightP0 = Math.max(0, rule.p0Score());
+        double weightP1 = Math.max(0, rule.p1Score());
 
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.requisition_id, r.job_name, t.owner_user_id, u.nickname owner_name, t.slot_no,
@@ -407,13 +414,10 @@ public class HrKpiTaskService {
             }
             sql.append(')');
         }
-        if (StringUtils.hasText(q.getStatus())) {
-            sql.append(" AND t.status = ? ");
-            args.add(q.getStatus().trim().toUpperCase());
-        }
+        // 得分始终按本月全部到期任务核算；状态筛选仅作用于明细列表
         sql.append(" ORDER BY t.owner_user_id, t.due_at, t.id");
 
-        List<HrKpiAssessmentVO.TaskRow> tasks = new ArrayList<>();
+        List<HrKpiAssessmentVO.TaskRow> allTasks = new ArrayList<>();
         jdbc.query(sql.toString(), rs -> {
             while (rs.next()) {
                 HrKpiAssessmentVO.TaskRow row = new HrKpiAssessmentVO.TaskRow();
@@ -423,20 +427,27 @@ public class HrKpiTaskService {
                 row.setOwnerUserId(rs.getLong("owner_user_id"));
                 row.setOwnerName(rs.getString("owner_name"));
                 row.setSlotNo(rs.getInt("slot_no"));
-                row.setPriorityCode(rs.getString("priority_code"));
+                String priority = rs.getString("priority_code");
+                row.setPriorityCode(priority);
                 row.setPublishedAt(rs.getTimestamp("published_at").toLocalDateTime());
                 row.setDueAt(rs.getTimestamp("due_at").toLocalDateTime());
                 row.setOriginDueAt(rs.getTimestamp("origin_due_at").toLocalDateTime());
-                row.setStatus(rs.getString("status"));
+                String status = rs.getString("status");
+                row.setStatus(status);
                 row.setDoneAt(rs.getTimestamp("done_at") == null ? null : rs.getTimestamp("done_at").toLocalDateTime());
                 row.setDoneReason(rs.getString("done_reason"));
                 row.setScore(rs.getInt("score"));
-                tasks.add(row);
+                double weight = assessWeight(priority, weightP0, weightP1);
+                row.setWeight(weight);
+                row.setEarnedWeight("DONE".equals(status) ? weight : 0.0);
+                allTasks.add(row);
             }
         }, args.toArray());
 
         Map<Long, HrKpiAssessmentVO.OwnerSummary> owners = new LinkedHashMap<>();
-        for (HrKpiAssessmentVO.TaskRow t : tasks) {
+        double overallTotalWeight = 0.0;
+        double overallDoneWeight = 0.0;
+        for (HrKpiAssessmentVO.TaskRow t : allTasks) {
             HrKpiAssessmentVO.OwnerSummary s = owners.computeIfAbsent(t.getOwnerUserId(), id -> {
                 HrKpiAssessmentVO.OwnerSummary o = new HrKpiAssessmentVO.OwnerSummary();
                 o.setOwnerUserId(id);
@@ -448,10 +459,16 @@ public class HrKpiTaskService {
                 o.setP0Done(0);
                 o.setP1Due(0);
                 o.setP1Done(0);
-                o.setScore(0);
+                o.setTotalWeight(0.0);
+                o.setDoneWeight(0.0);
+                o.setCompletionRate(0.0);
+                o.setScore(0.0);
                 return o;
             });
+            double weight = t.getWeight() == null ? assessWeight(t.getPriorityCode(), weightP0, weightP1) : t.getWeight();
             s.setDueCount(s.getDueCount() + 1);
+            s.setTotalWeight(round2(s.getTotalWeight() + weight));
+            overallTotalWeight += weight;
             boolean p0 = "P0".equalsIgnoreCase(t.getPriorityCode());
             if (p0) {
                 s.setP0Due(s.getP0Due() + 1);
@@ -460,7 +477,8 @@ public class HrKpiTaskService {
             }
             if ("DONE".equals(t.getStatus())) {
                 s.setDoneCount(s.getDoneCount() + 1);
-                s.setScore(s.getScore() + (t.getScore() == null ? 0 : t.getScore()));
+                s.setDoneWeight(round2(s.getDoneWeight() + weight));
+                overallDoneWeight += weight;
                 if (p0) {
                     s.setP0Done(s.getP0Done() + 1);
                 } else {
@@ -470,12 +488,48 @@ public class HrKpiTaskService {
                 s.setOpenCount(s.getOpenCount() + 1);
             }
         }
+        for (HrKpiAssessmentVO.OwnerSummary s : owners.values()) {
+            double total = s.getTotalWeight() == null ? 0.0 : s.getTotalWeight();
+            double done = s.getDoneWeight() == null ? 0.0 : s.getDoneWeight();
+            double rate = total > 0 ? done / total : 0.0;
+            s.setCompletionRate(round4(rate));
+            // 得分=整体完成率×30，无额外加减分
+            s.setScore(round2(rate * ASSESS_BASE_SCORE));
+        }
+
+        double overallRate = overallTotalWeight > 0 ? overallDoneWeight / overallTotalWeight : 0.0;
+
+        String statusFilter = StringUtils.hasText(q.getStatus()) ? q.getStatus().trim().toUpperCase() : "";
+        List<HrKpiAssessmentVO.TaskRow> tasks = statusFilter.isEmpty() ? allTasks
+                : allTasks.stream().filter(t -> statusFilter.equalsIgnoreCase(t.getStatus())).toList();
 
         HrKpiAssessmentVO vo = new HrKpiAssessmentVO();
         vo.setSettleMonth(monthStart);
+        vo.setBaseScore(ASSESS_BASE_SCORE);
+        vo.setWeightP0(weightP0);
+        vo.setWeightP1(weightP1);
+        vo.setOverallTotalWeight(round2(overallTotalWeight));
+        vo.setOverallDoneWeight(round2(overallDoneWeight));
+        vo.setOverallCompletionRate(round4(overallRate));
+        vo.setOverallScore(round2(overallRate * ASSESS_BASE_SCORE));
+        vo.setScoreRuleHint(String.format(
+                "基准分%.0f分；得分=整体完成率×%.0f；P0权重%.1f、P1权重%.1f（取自考核计分规则）；完成计权重、未完成计0；无额外加减分",
+                ASSESS_BASE_SCORE, ASSESS_BASE_SCORE, weightP0, weightP1));
         vo.setOwners(new ArrayList<>(owners.values()));
         vo.setTasks(tasks);
         return vo;
+    }
+
+    private static double assessWeight(String priorityCode, double weightP0, double weightP1) {
+        return "P0".equalsIgnoreCase(priorityCode) ? weightP0 : weightP1;
+    }
+
+    private static double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
+    private static double round4(double v) {
+        return Math.round(v * 10000.0) / 10000.0;
     }
 
     public HrKpiScoreRuleVO getScoreRule() {

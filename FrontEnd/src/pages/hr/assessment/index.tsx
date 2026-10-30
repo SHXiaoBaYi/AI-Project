@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { App, Button, Card, Col, DatePicker, Modal, Row, Select, Space, Statistic, Table, Tag } from 'antd';
+import { App, Button, Card, Col, DatePicker, Modal, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -20,6 +20,11 @@ const STATUS_OPTIONS = [
 function fmt(value?: string) {
   if (!value) return '—';
   return String(value).replace('T', ' ').slice(0, 16);
+}
+
+function pct(rate?: number) {
+  if (rate == null || Number.isNaN(rate)) return '—';
+  return `${(rate * 100).toFixed(1)}%`;
 }
 
 const AssessmentPage = memo(function AssessmentPage() {
@@ -84,11 +89,15 @@ const AssessmentPage = memo(function AssessmentPage() {
     return () => ro.disconnect();
   }, [data?.tasks?.length, loading]);
 
+  const baseScore = data?.baseScore ?? 30;
+  const weightP0 = data?.weightP0 ?? 2;
+  const weightP1 = data?.weightP1 ?? 1;
+
   const taskColumns: ColumnsType<HrKpiAssessment['tasks'][number]> = [
     {
       title: '操作',
       fixed: 'left',
-      width: 100,
+      width: 72,
       render: (_, row) =>
         row.status === 'OPEN' ? (
           <a
@@ -103,28 +112,48 @@ const AssessmentPage = memo(function AssessmentPage() {
           '—'
         ),
     },
-    { title: '负责人', dataIndex: 'ownerName', width: 100 },
+    { title: '负责人', dataIndex: 'ownerName', width: 88, ellipsis: true },
     { title: '岗位', dataIndex: 'jobName', ellipsis: true },
     {
       title: '优先级',
       dataIndex: 'priorityCode',
-      width: 80,
+      width: 72,
       render: (v: string) => <Tag color={v === 'P0' ? 'red' : 'blue'}>{v || '—'}</Tag>,
     },
-    { title: '槽位', dataIndex: 'slotNo', width: 70 },
+    { title: '槽位', dataIndex: 'slotNo', width: 56 },
+    {
+      title: '权重',
+      dataIndex: 'weight',
+      width: 64,
+      render: (v, row) => {
+        const w = (v as number | undefined) ?? (row.priorityCode === 'P0' ? weightP0 : weightP1);
+        return Number(w).toFixed(1);
+      },
+    },
     {
       title: '状态',
       dataIndex: 'status',
-      width: 90,
+      width: 80,
       render: (v: string) => (v === 'DONE' ? <Tag color='success'>已完成</Tag> : <Tag color='processing'>未完成</Tag>),
     },
-    { title: '得分', dataIndex: 'score', width: 70, render: (v?: number) => v ?? 0 },
-    { title: '发布', dataIndex: 'publishedAt', width: 140, render: fmt },
-    { title: '到期', dataIndex: 'dueAt', width: 140, render: fmt },
+    {
+      title: '计入权重',
+      dataIndex: 'earnedWeight',
+      width: 80,
+      render: (v, row) => {
+        if (v != null && v !== '') return Number(v).toFixed(1);
+        return row.status === 'DONE'
+          ? Number(row.weight ?? (row.priorityCode === 'P0' ? weightP0 : weightP1)).toFixed(1)
+          : '0.0';
+      },
+    },
+    { title: '发布', dataIndex: 'publishedAt', width: 128, render: fmt },
+    { title: '到期', dataIndex: 'dueAt', width: 128, render: fmt },
     {
       title: '完成方式',
       dataIndex: 'doneReason',
-      width: 140,
+      width: 100,
+      ellipsis: true,
       render: (v?: string) => (v === 'ONBOARD' ? '入职' : v === 'QUALIFIED_RESUME' ? '合格简历' : v || '—'),
     },
   ];
@@ -133,7 +162,7 @@ const AssessmentPage = memo(function AssessmentPage() {
     <div className='flex h-[calc(100vh-100px)] min-h-0 flex-col gap-3 overflow-hidden p-1'>
       <Card
         size='small'
-        className='shrink-0'
+        className='shrink-0 overflow-x-hidden'
       >
         <Space wrap>
           <span className='text-sm text-neutral-500'>核算月</span>
@@ -148,7 +177,7 @@ const AssessmentPage = memo(function AssessmentPage() {
             mode='multiple'
             allowClear
             placeholder='全部'
-            style={{ minWidth: 220 }}
+            className='max-w-[280px] min-w-[180px]'
             options={userOptions}
             value={owners}
             onChange={setOwners}
@@ -158,7 +187,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           />
           <span className='text-sm text-neutral-500'>状态</span>
           <Select
-            style={{ width: 120 }}
+            className='w-[110px]'
             options={STATUS_OPTIONS}
             value={status}
             onChange={setStatus}
@@ -186,10 +215,55 @@ const AssessmentPage = memo(function AssessmentPage() {
             刷新
           </Button>
         </Space>
+        <Typography.Paragraph
+          type='secondary'
+          className='!mt-2 !mb-0 text-xs leading-relaxed'
+        >
+          {data?.scoreRuleHint ||
+            `基准分${baseScore}分；得分=整体完成率×${baseScore}；P0权重${weightP0}、P1权重${weightP1}；完成计权重、未完成计0；无额外加减分`}
+        </Typography.Paragraph>
       </Card>
 
-      <div className='max-h-[38%] shrink-0 overflow-y-auto'>
+      <div className='max-h-[38%] shrink-0 overflow-x-hidden overflow-y-auto'>
         <Row gutter={[12, 12]}>
+          <Col
+            xs={24}
+            sm={12}
+            lg={8}
+            xl={6}
+          >
+            <Card
+              size='small'
+              className='overflow-hidden border-sky-200 bg-sky-50/60'
+              loading={loading && !data}
+            >
+              <div className='mb-2 truncate font-medium text-sky-800'>整体完成率</div>
+              <Row gutter={8}>
+                <Col span={8}>
+                  <Statistic
+                    title={`得分/${baseScore}`}
+                    value={data?.overallScore ?? 0}
+                    precision={1}
+                  />
+                </Col>
+                <Col span={8}>
+                  <Statistic
+                    title='完成率'
+                    value={pct(data?.overallCompletionRate)}
+                  />
+                </Col>
+                <Col span={8}>
+                  <Statistic
+                    title='加权'
+                    value={`${Number(data?.overallDoneWeight ?? 0).toFixed(1)}/${Number(data?.overallTotalWeight ?? 0).toFixed(1)}`}
+                  />
+                </Col>
+              </Row>
+              <div className='mt-2 text-xs text-neutral-500'>
+                P0权重{Number(weightP0).toFixed(1)} · P1权重{Number(weightP1).toFixed(1)}（考核计分规则）
+              </div>
+            </Card>
+          </Col>
           {(data?.owners ?? []).map((o) => (
             <Col
               key={o.ownerUserId}
@@ -198,30 +272,35 @@ const AssessmentPage = memo(function AssessmentPage() {
               lg={8}
               xl={6}
             >
-              <Card size='small'>
-                <div className='mb-2 font-medium'>{o.ownerName || o.ownerUserId}</div>
+              <Card
+                size='small'
+                className='overflow-hidden'
+              >
+                <div className='mb-2 truncate font-medium'>{o.ownerName || o.ownerUserId}</div>
                 <Row gutter={8}>
                   <Col span={8}>
                     <Statistic
-                      title='得分'
-                      value={o.score}
+                      title={`得分/${baseScore}`}
+                      value={o.score ?? 0}
+                      precision={1}
                     />
                   </Col>
                   <Col span={8}>
                     <Statistic
-                      title='完成'
-                      value={`${o.doneCount}/${o.dueCount}`}
+                      title='完成率'
+                      value={pct(o.completionRate)}
                     />
                   </Col>
                   <Col span={8}>
                     <Statistic
-                      title='未完成'
-                      value={o.openCount}
+                      title='加权'
+                      value={`${Number(o.doneWeight ?? 0).toFixed(1)}/${Number(o.totalWeight ?? 0).toFixed(1)}`}
                     />
                   </Col>
                 </Row>
                 <div className='mt-2 text-xs text-neutral-500'>
-                  P0 {o.p0Done}/{o.p0Due} · P1 {o.p1Done}/{o.p1Due}
+                  任务 {o.doneCount}/{o.dueCount} · 未完成 {o.openCount} · P0 {o.p0Done}/{o.p0Due} · P1 {o.p1Done}/
+                  {o.p1Due}
                 </div>
               </Card>
             </Col>
@@ -243,7 +322,7 @@ const AssessmentPage = memo(function AssessmentPage() {
       >
         <div
           ref={tableHostRef}
-          className='min-h-0 flex-1 overflow-hidden'
+          className='min-h-0 flex-1 overflow-hidden overflow-x-hidden'
         >
           <Table
             rowKey='id'
@@ -251,8 +330,9 @@ const AssessmentPage = memo(function AssessmentPage() {
             loading={loading}
             dataSource={data?.tasks ?? []}
             columns={taskColumns}
-            scroll={{ x: 1200, y: tableBodyY }}
-            pagination={{ pageSize: 20, showSizeChanger: true }}
+            scroll={{ y: tableBodyY }}
+            tableLayout='fixed'
+            pagination={{ pageSize: 20, showSizeChanger: true, size: 'small' }}
           />
         </div>
       </Card>

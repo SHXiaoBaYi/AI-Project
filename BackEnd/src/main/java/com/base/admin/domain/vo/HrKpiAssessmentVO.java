@@ -17,6 +17,30 @@ public class HrKpiAssessmentVO {
     @Schema(description = "核算月（取月初日）")
     private LocalDate settleMonth;
 
+    @Schema(description = "基准分（完成率×基准分=实得分）", example = "30")
+    private Double baseScore;
+
+    @Schema(description = "P0 岗位权重", example = "2.0")
+    private Double weightP0;
+
+    @Schema(description = "P1 岗位权重", example = "1.0")
+    private Double weightP1;
+
+    @Schema(description = "口径说明")
+    private String scoreRuleHint;
+
+    @Schema(description = "整体完成率 0~1（当前筛选范围内全部到期任务）")
+    private Double overallCompletionRate;
+
+    @Schema(description = "整体已完成权重")
+    private Double overallDoneWeight;
+
+    @Schema(description = "整体应计总权重")
+    private Double overallTotalWeight;
+
+    @Schema(description = "整体实得分（完成率×基准分）")
+    private Double overallScore;
+
     @Schema(description = "按人汇总")
     private List<OwnerSummary> owners = new ArrayList<>();
 
@@ -35,7 +59,14 @@ public class HrKpiAssessmentVO {
         private Integer p0Done;
         private Integer p1Due;
         private Integer p1Done;
-        private Integer score;
+        @Schema(description = "应计总权重")
+        private Double totalWeight;
+        @Schema(description = "已完成权重")
+        private Double doneWeight;
+        @Schema(description = "整体完成率 0~1")
+        private Double completionRate;
+        @Schema(description = "30 分基准下实得分（完成率×30，无额外加减分）")
+        private Double score;
     }
 
     @Data
@@ -58,6 +89,12 @@ public class HrKpiAssessmentVO {
         @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
         private LocalDateTime doneAt;
         private String doneReason;
+        @Schema(description = "岗位权重：P0=2 / P1=1")
+        private Double weight;
+        @Schema(description = "计入完成率的权重（完成=weight，未完成=0）")
+        private Double earnedWeight;
+        @Deprecated
+        @Schema(description = "历史单任务记分字段，展示以 weight/earnedWeight 为准")
         private Integer score;
     }
 }

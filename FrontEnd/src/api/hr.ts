@@ -626,6 +626,17 @@ export type HrKpiAssessmentQuery = {
 
 export type HrKpiAssessment = {
   settleMonth?: string;
+  /** 基准分，默认 30 */
+  baseScore?: number;
+  /** 来自考核计分规则 p0Score */
+  weightP0?: number;
+  /** 来自考核计分规则 p1Score */
+  weightP1?: number;
+  scoreRuleHint?: string;
+  overallCompletionRate?: number;
+  overallDoneWeight?: number;
+  overallTotalWeight?: number;
+  overallScore?: number;
   owners: {
     ownerUserId: number;
     ownerName?: string;
@@ -636,6 +647,11 @@ export type HrKpiAssessment = {
     p0Done: number;
     p1Due: number;
     p1Done: number;
+    totalWeight?: number;
+    doneWeight?: number;
+    /** 0~1 */
+    completionRate?: number;
+    /** 完成率×基准分 */
     score: number;
   }[];
   tasks: {
@@ -652,6 +668,8 @@ export type HrKpiAssessment = {
     status: string;
     doneAt?: string;
     doneReason?: string;
+    weight?: number;
+    earnedWeight?: number;
     score?: number;
   }[];
 };
