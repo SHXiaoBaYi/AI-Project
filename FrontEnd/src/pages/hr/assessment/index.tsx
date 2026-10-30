@@ -1,5 +1,20 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { App, Button, Card, Col, DatePicker, Modal, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
+import {
+  App,
+  Button,
+  Card,
+  Col,
+  DatePicker,
+  Modal,
+  Progress,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import PermissionButton from '@/components/Buttons/PermissionButton';
@@ -22,16 +37,19 @@ function fmtDate(value?: string) {
   return String(value).replace('T', ' ').slice(0, 10);
 }
 
-function pct(rate?: number) {
-  if (rate == null || Number.isNaN(rate)) return '—';
-  return `${(rate * 100).toFixed(1)}%`;
-}
-
 /** 展示为「已得分 / 满分」，整数，如 4 / 30、11 / 180 */
 function scoreOverBase(score?: number, base?: number) {
   const s = score == null || Number.isNaN(score) ? 0 : Math.round(Number(score));
   const b = base == null || Number.isNaN(base) || base <= 0 ? 30 : Math.round(Number(base));
   return `${s} / ${b}`;
+}
+
+/** 相对考核满分的达成比例 0~100 */
+function scoreAttainPct(score?: number, max?: number) {
+  const s = score == null || Number.isNaN(score) ? 0 : Math.round(Number(score));
+  const m = max == null || Number.isNaN(max) || max <= 0 ? 0 : Math.round(Number(max));
+  if (m <= 0) return 0;
+  return Math.min(100, Math.round((s / m) * 1000) / 10);
 }
 
 const AssessmentPage = memo(function AssessmentPage() {
@@ -99,6 +117,8 @@ const AssessmentPage = memo(function AssessmentPage() {
   const baseScore = data?.baseScore ?? 30;
   const weightP0 = data?.weightP0 ?? 2;
   const weightP1 = data?.weightP1 ?? 1;
+  const overallMax = data?.overallScoreMax ?? (data?.ownerCount ?? data?.owners?.length ?? 0) * baseScore;
+  const overallAttain = scoreAttainPct(data?.overallScore, overallMax);
 
   const taskColumns: ColumnsType<HrKpiAssessment['tasks'][number]> = [
     {
@@ -227,7 +247,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           className='!mt-2 !mb-0 text-xs leading-relaxed'
         >
           {data?.scoreRuleHint ||
-            `基准分${baseScore}（计分规则可改）；个人=已得分/${baseScore}；整体=各人已得分之和/(负责人数×${baseScore})；P0单任务${weightP0}分、P1单任务${weightP1}分`}
+            `基准分${baseScore}（计分规则可改）；个人得分=已得分/${baseScore}；整体得分=各人已得分之和/(负责人数×${baseScore})；任务进度见卡片底栏件数；P0单任务${weightP0}分、P1单任务${weightP1}分`}
         </Typography.Paragraph>
       </Card>
 
@@ -244,64 +264,59 @@ const AssessmentPage = memo(function AssessmentPage() {
               className='overflow-hidden border-sky-200 bg-sky-50/60'
               loading={loading && !data}
             >
-              <div className='mb-2 truncate font-medium text-sky-800'>整体完成</div>
-              <Row gutter={8}>
-                <Col span={12}>
-                  <Statistic
-                    title='得分'
-                    value={scoreOverBase(
-                      data?.overallScore,
-                      data?.overallScoreMax ?? (data?.owners?.length ?? 0) * baseScore,
-                    )}
-                  />
-                </Col>
-                <Col span={12}>
-                  <Statistic
-                    title='完成率'
-                    value={pct(data?.overallCompletionRate)}
-                  />
-                </Col>
-              </Row>
+              <div className='mb-2 truncate font-medium text-sky-800'>整体得分</div>
+              <Statistic
+                title='考核得分'
+                value={scoreOverBase(data?.overallScore, overallMax)}
+              />
+              <Progress
+                percent={overallAttain}
+                size='small'
+                showInfo={false}
+                className='!mt-2 !mb-1'
+                strokeColor='#0ea5e9'
+              />
+              <div className='text-xs text-neutral-500'>达成 {overallAttain}%</div>
               <div className='mt-2 text-xs text-neutral-500'>
                 各人已得分之和 / ({data?.ownerCount ?? data?.owners?.length ?? 0}人 × 基准分{baseScore})；P0{' '}
                 {Math.round(Number(weightP0))}分 / 任务 · P1 {Math.round(Number(weightP1))}分 / 任务
               </div>
             </Card>
           </Col>
-          {(data?.owners ?? []).map((o) => (
-            <Col
-              key={o.ownerUserId}
-              xs={24}
-              sm={12}
-              lg={8}
-              xl={6}
-            >
-              <Card
-                size='small'
-                className='overflow-hidden'
+          {(data?.owners ?? []).map((o) => {
+            const attain = scoreAttainPct(o.score, baseScore);
+            return (
+              <Col
+                key={o.ownerUserId}
+                xs={24}
+                sm={12}
+                lg={8}
+                xl={6}
               >
-                <div className='mb-2 truncate font-medium'>{o.ownerName || o.ownerUserId}</div>
-                <Row gutter={8}>
-                  <Col span={12}>
-                    <Statistic
-                      title='得分'
-                      value={scoreOverBase(o.score, baseScore)}
-                    />
-                  </Col>
-                  <Col span={12}>
-                    <Statistic
-                      title='完成率'
-                      value={pct(o.completionRate)}
-                    />
-                  </Col>
-                </Row>
-                <div className='mt-2 text-xs text-neutral-500'>
-                  任务 {o.doneCount}/{o.dueCount} · 未完成 {o.openCount} · P0 {o.p0Done}/{o.p0Due} · P1 {o.p1Done}/
-                  {o.p1Due}
-                </div>
-              </Card>
-            </Col>
-          ))}
+                <Card
+                  size='small'
+                  className='overflow-hidden'
+                >
+                  <div className='mb-2 truncate font-medium'>{o.ownerName || o.ownerUserId}</div>
+                  <Statistic
+                    title='考核得分'
+                    value={scoreOverBase(o.score, baseScore)}
+                  />
+                  <Progress
+                    percent={attain}
+                    size='small'
+                    showInfo={false}
+                    className='!mt-2 !mb-1'
+                  />
+                  <div className='text-xs text-neutral-500'>达成 {attain}%</div>
+                  <div className='mt-2 text-xs text-neutral-500'>
+                    任务 {o.doneCount}/{o.dueCount} · 未完成 {o.openCount} · P0 {o.p0Done}/{o.p0Due} · P1 {o.p1Done}/
+                    {o.p1Due}
+                  </div>
+                </Card>
+              </Col>
+            );
+          })}
           {!loading && !(data?.owners ?? []).length ? (
             <Col span={24}>
               <Card size='small'>
