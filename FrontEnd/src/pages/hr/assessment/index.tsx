@@ -174,7 +174,7 @@ const AssessmentPage = memo(function AssessmentPage() {
       width: 72,
       render: (v: string) => <Tag color={v === 'P0' ? 'red' : 'blue'}>{v || '—'}</Tag>,
     },
-    { title: '槽位', dataIndex: 'slotNo', width: 56 },
+    { title: 'HC', dataIndex: 'slotNo', width: 56 },
     {
       title: '记分',
       dataIndex: 'weight',
@@ -307,9 +307,9 @@ const AssessmentPage = memo(function AssessmentPage() {
               <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
                 各人已得分之和 / ({data?.ownerCount ?? data?.owners?.length ?? 0}人 × 基准分{baseScore})
                 <br />
-                P0 入职{overallP0Done}槽 · P1 完成{overallP1Done}槽
+                P0 入职 {overallP0Done} HC · P1 完成 {overallP1Done} HC
                 {overallP1Done > 0 ? `（入职${overallP1Onboard} · 合格简历${overallP1Resume}）` : ''}
-                ；单槽 P0 {Math.round(Number(weightP0))}分 / P1 {Math.round(Number(weightP1))}分
+                ；每 HC：P0 {Math.round(Number(weightP0))}分 / P1 {Math.round(Number(weightP1))}分
               </div>
             </Card>
           </Col>
@@ -340,7 +340,7 @@ const AssessmentPage = memo(function AssessmentPage() {
                   />
                   <div className='text-xs text-neutral-500'>达成 {attain}%</div>
                   <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
-                    任务 {o.doneCount}/{o.dueCount} · 未完成 {o.openCount}
+                    HC {o.doneCount}/{o.dueCount} · 未完成 {o.openCount}
                     <br />
                     P0 {o.p0Done}/{o.p0Due}（入职） · P1 {o.p1Done}/{o.p1Due}
                     {p1BreakdownText(o)}
