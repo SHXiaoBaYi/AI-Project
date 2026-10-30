@@ -629,6 +629,8 @@ public class HrKpiTaskService {
                 o.setP0Done(0);
                 o.setP1Due(0);
                 o.setP1Done(0);
+                o.setP1DoneOnboard(0);
+                o.setP1DoneResume(0);
                 o.setTotalWeight(0.0);
                 o.setDoneWeight(0.0);
                 o.setCompletionRate(0.0);
@@ -653,6 +655,13 @@ public class HrKpiTaskService {
                     s.setP0Done(s.getP0Done() + 1);
                 } else {
                     s.setP1Done(s.getP1Done() + 1);
+                    String reason = t.getDoneReason() == null ? "" : t.getDoneReason().trim();
+                    if ("QUALIFIED_RESUME".equals(reason)) {
+                        s.setP1DoneResume(s.getP1DoneResume() + 1);
+                    } else {
+                        // P1 默认按入职达成（含历史空原因）
+                        s.setP1DoneOnboard(s.getP1DoneOnboard() + 1);
+                    }
                 }
             } else {
                 s.setOpenCount(s.getOpenCount() + 1);

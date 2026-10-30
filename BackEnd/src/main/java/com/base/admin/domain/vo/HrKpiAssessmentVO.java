@@ -65,6 +65,10 @@ public class HrKpiAssessmentVO {
         private Integer p0Done;
         private Integer p1Due;
         private Integer p1Done;
+        @Schema(description = "P1 因入职完成的槽位数")
+        private Integer p1DoneOnboard;
+        @Schema(description = "P1 因合格简历完成的槽位数")
+        private Integer p1DoneResume;
         @Schema(description = "应计总权重")
         private Double totalWeight;
         @Schema(description = "已完成权重")

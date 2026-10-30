@@ -52,6 +52,29 @@ function scoreAttainPct(score?: number, max?: number) {
   return Math.min(100, Math.round((s / m) * 1000) / 10);
 }
 
+function doneReasonLabel(reason?: string, priority?: string) {
+  if (reason === 'QUALIFIED_RESUME') return '合格简历';
+  if (reason === 'ONBOARD') return priority === 'P1' ? '入职达成' : '入职';
+  return reason || '—';
+}
+
+function doneReasonColor(reason?: string) {
+  if (reason === 'QUALIFIED_RESUME') return 'purple';
+  if (reason === 'ONBOARD') return 'cyan';
+  return 'default';
+}
+
+function p1BreakdownText(o: { p1Done?: number; p1DoneOnboard?: number; p1DoneResume?: number }) {
+  const done = o.p1Done ?? 0;
+  if (done <= 0) return '';
+  const onboard = o.p1DoneOnboard ?? 0;
+  const resume = o.p1DoneResume ?? 0;
+  const parts: string[] = [];
+  if (onboard > 0) parts.push(`入职${onboard}`);
+  if (resume > 0) parts.push(`合格简历${resume}`);
+  return parts.length ? `（${parts.join(' · ')}）` : '';
+}
+
 const AssessmentPage = memo(function AssessmentPage() {
   const { message } = App.useApp();
   const [month, setMonth] = useState<Dayjs>(dayjs().startOf('month'));
@@ -119,6 +142,10 @@ const AssessmentPage = memo(function AssessmentPage() {
   const weightP1 = data?.weightP1 ?? 1;
   const overallMax = data?.overallScoreMax ?? (data?.ownerCount ?? data?.owners?.length ?? 0) * baseScore;
   const overallAttain = scoreAttainPct(data?.overallScore, overallMax);
+  const overallP1Onboard = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneOnboard ?? 0), 0);
+  const overallP1Resume = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneResume ?? 0), 0);
+  const overallP0Done = (data?.owners ?? []).reduce((n, o) => n + (o.p0Done ?? 0), 0);
+  const overallP1Done = (data?.owners ?? []).reduce((n, o) => n + (o.p1Done ?? 0), 0);
 
   const taskColumns: ColumnsType<HrKpiAssessment['tasks'][number]> = [
     {
@@ -179,9 +206,9 @@ const AssessmentPage = memo(function AssessmentPage() {
     {
       title: '完成方式',
       dataIndex: 'doneReason',
-      width: 100,
-      ellipsis: true,
-      render: (v?: string) => (v === 'ONBOARD' ? '入职' : v === 'QUALIFIED_RESUME' ? '合格简历' : v || '—'),
+      width: 110,
+      render: (v: string | undefined, row) =>
+        row.status === 'DONE' && v ? <Tag color={doneReasonColor(v)}>{doneReasonLabel(v, row.priorityCode)}</Tag> : '—',
     },
   ];
 
@@ -277,9 +304,12 @@ const AssessmentPage = memo(function AssessmentPage() {
                 strokeColor='#0ea5e9'
               />
               <div className='text-xs text-neutral-500'>达成 {overallAttain}%</div>
-              <div className='mt-2 text-xs text-neutral-500'>
-                各人已得分之和 / ({data?.ownerCount ?? data?.owners?.length ?? 0}人 × 基准分{baseScore})；P0{' '}
-                {Math.round(Number(weightP0))}分 / 任务 · P1 {Math.round(Number(weightP1))}分 / 任务
+              <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
+                各人已得分之和 / ({data?.ownerCount ?? data?.owners?.length ?? 0}人 × 基准分{baseScore})
+                <br />
+                P0 入职{overallP0Done}槽 · P1 完成{overallP1Done}槽
+                {overallP1Done > 0 ? `（入职${overallP1Onboard} · 合格简历${overallP1Resume}）` : ''}
+                ；单槽 P0 {Math.round(Number(weightP0))}分 / P1 {Math.round(Number(weightP1))}分
               </div>
             </Card>
           </Col>
@@ -309,9 +339,11 @@ const AssessmentPage = memo(function AssessmentPage() {
                     className='!mt-2 !mb-1'
                   />
                   <div className='text-xs text-neutral-500'>达成 {attain}%</div>
-                  <div className='mt-2 text-xs text-neutral-500'>
-                    任务 {o.doneCount}/{o.dueCount} · 未完成 {o.openCount} · P0 {o.p0Done}/{o.p0Due} · P1 {o.p1Done}/
-                    {o.p1Due}
+                  <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
+                    任务 {o.doneCount}/{o.dueCount} · 未完成 {o.openCount}
+                    <br />
+                    P0 {o.p0Done}/{o.p0Due}（入职） · P1 {o.p1Done}/{o.p1Due}
+                    {p1BreakdownText(o)}
                   </div>
                 </Card>
               </Col>

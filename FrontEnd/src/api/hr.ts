@@ -652,6 +652,10 @@ export type HrKpiAssessment = {
     p0Done: number;
     p1Due: number;
     p1Done: number;
+    /** P1 因入职完成 */
+    p1DoneOnboard?: number;
+    /** P1 因合格简历完成 */
+    p1DoneResume?: number;
     totalWeight?: number;
     doneWeight?: number;
     /** 0~1 */
