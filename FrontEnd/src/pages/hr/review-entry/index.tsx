@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Result, Spin, Typography } from 'antd';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { dingTalkSsoApi, getDingTalkLoginConfigApi } from '@/api/auth';
-import { getToken, removeToken, setToken } from '@/utils/auth';
+import { removeToken, setToken } from '@/utils/auth';
+import { withBase } from '@/utils/basePath';
 
 const DD_JSAPI = 'https://g.alicdn.com/dingding/dingtalk-jsapi/3.0.25/dingtalk.open.js';
 
@@ -108,11 +109,10 @@ function requestCorpAuthCode(corpId: string) {
 }
 
 /**
- * 钉钉催评落地：企业免登后跳转「我的面试」并打开评价弹窗。
+ * 钉钉催评落地：每次都走企业免登（不沿用扫码/密码 token，不参与账号互踢），再打开「我的面试」评价。
  * 链接形如 /hr/review-entry?inviteId=123&corpId=xxx
  */
 export default function HrReviewEntryPage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [tip, setTip] = useState('正在免登…');
   const [error, setError] = useState('');
@@ -130,38 +130,42 @@ export default function HrReviewEntryPage() {
       try {
         const corpIdFromUrl = (searchParams.get('corpId') || '').trim();
         const oauthCode = searchParams.get('authCode') || searchParams.get('code');
-        if (!getToken()) {
-          if (oauthCode) {
-            setTip('正在登录…');
-            const res = await dingTalkSsoApi(oauthCode, 'oauth');
-            setToken(res.token);
-          } else {
-            setTip('正在免登…');
-            const config = await getDingTalkLoginConfigApi();
-            const corpId = corpIdFromUrl || (config.corpId || '').trim();
-            if (!config?.enabled || !config.clientId) {
-              throw new Error(config?.message || '钉钉登录未配置');
-            }
-            if (!corpId) {
-              throw new Error('缺少 CorpId，请在「钉钉应用配置」填写企业 CorpId 后重发通知');
-            }
-            if (!isDingTalkClient()) {
-              throw new Error('请在钉钉客户端内打开此链接');
-            }
-            await loadDingTalkJsapi();
-            removeToken();
-            const code = await requestCorpAuthCode(corpId);
-            const res = await dingTalkSsoApi(code, 'corp');
-            setToken(res.token);
+        // 丢掉已有登录态，避免把扫码会话带进评价页后触发互踢
+        removeToken();
+        let token = '';
+        if (oauthCode) {
+          setTip('正在登录…');
+          const res = await dingTalkSsoApi(oauthCode, 'oauth');
+          token = res.token;
+        } else {
+          setTip('正在免登…');
+          const config = await getDingTalkLoginConfigApi();
+          const corpId = corpIdFromUrl || (config.corpId || '').trim();
+          if (!config?.enabled || !config.clientId) {
+            throw new Error(config?.message || '钉钉登录未配置');
           }
+          if (!corpId) {
+            throw new Error('缺少 CorpId，请在「钉钉应用配置」填写企业 CorpId 后重发通知');
+          }
+          if (!isDingTalkClient()) {
+            throw new Error('请在钉钉客户端内打开此链接');
+          }
+          await loadDingTalkJsapi();
+          const code = await requestCorpAuthCode(corpId);
+          const res = await dingTalkSsoApi(code, 'corp');
+          token = res.token;
         }
+        if (!token) {
+          throw new Error('免登未返回登录凭证');
+        }
+        setToken(token);
         setTip('正在打开评价…');
-        navigate(`/hr/mine?inviteId=${encodeURIComponent(inviteId)}`, { replace: true });
+        window.location.replace(withBase(`/hr/mine?inviteId=${encodeURIComponent(inviteId)}`));
       } catch (err) {
         setError(err instanceof Error ? err.message : '打开失败');
       }
     })();
-  }, [navigate, searchParams]);
+  }, [searchParams]);
 
   if (error) {
     return (

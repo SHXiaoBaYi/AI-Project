@@ -37,6 +37,7 @@ const DataScopePage = lazy(() => import('@/pages/system/data-scope'));
 const DingTalkBridgePage = lazy(() => import('@/pages/dingtalk/bridge'));
 const CashierAssistantPage = lazy(() => import('@/pages/train/cashier-assistant'));
 const LinkMonitorFillPage = lazy(() => import('@/pages/robot/link-monitor/fill'));
+const HrReviewEntryPage = lazy(() => import('@/pages/hr/review-entry'));
 const EcomLayout = lazy(() => import('@/layouts/EcomLayout'));
 const EcomDataPage = lazy(() => import('@/pages/ecom/data'));
 const EcomShopsPage = lazy(() => import('@/pages/ecom/shops'));
@@ -137,6 +138,11 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
           errorElement: <RouteErrorPage />,
         },
         {
+          path: '/hr/review-entry',
+          element: withSuspense(HrReviewEntryPage),
+          errorElement: <RouteErrorPage />,
+        },
+        {
           path: '*',
           element: (
             <Navigate
@@ -176,6 +182,11 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
       {
         path: '/robot/link-monitor/fill',
         element: withSuspense(LinkMonitorFillPage),
+        errorElement: <RouteErrorPage />,
+      },
+      {
+        path: '/hr/review-entry',
+        element: withSuspense(HrReviewEntryPage),
         errorElement: <RouteErrorPage />,
       },
       {

@@ -21,19 +21,24 @@ export default function App() {
   const routesLoaded = useSelector((state: RootState) => state.menu.routesLoaded);
 
   const fetchingRef = useRef(false);
+  // 催评落地页自己做免登，不能等后台会话，也不能被互踢跳走
+  const onReviewEntry = (window.location.pathname || '').includes('/hr/review-entry');
 
   useEffect(() => {
+    if (onReviewEntry) {
+      return;
+    }
     if (token && !routesLoaded && !fetchingRef.current) {
       fetchingRef.current = true;
       dispatch(getInfo()).finally(() => {
         fetchingRef.current = false;
       });
     }
-  }, [token, routesLoaded, dispatch]);
+  }, [token, routesLoaded, dispatch, onReviewEntry]);
 
-  // 定时探活：被其他设备强制下线后尽快跳回登录页
+  // 定时探活：被其他设备强制下线后尽快跳回登录页。催评免登不参与互踢，这里不探活。
   useEffect(() => {
-    if (!token) {
+    if (!token || onReviewEntry) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -42,10 +47,10 @@ export default function App() {
       });
     }, 10000);
     return () => window.clearInterval(timer);
-  }, [token]);
+  }, [token, onReviewEntry]);
 
-  const isLoggedIn = !!token && routesLoaded;
-  const showLoading = token && !routesLoaded;
+  const isLoggedIn = !!token && routesLoaded && !onReviewEntry;
+  const showLoading = !!token && !routesLoaded && !onReviewEntry;
   // 登录态变化才重建路由；避免每次渲染 new createBrowserRouter 导致导航丢状态
   const router = useMemo(() => createAppRouter(menus, isLoggedIn), [menus, isLoggedIn]);
 

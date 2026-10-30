@@ -44,6 +44,17 @@ public class HrInterviewReviewPushService {
                 LEFT JOIN hr_user_dingtalk d ON d.user_id = i.interviewer_user_id AND d.is_active = 1
                 WHERE i.is_active = 1 AND i.status IN ('SUCCESS','NO_CALENDAR')
                   AND i.interview_at >= ? AND i.interview_at < ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM hr_interview_record rec
+                    WHERE rec.is_active = 1
+                      AND rec.application_id = i.application_id
+                      AND rec.round_no = i.round_no
+                      AND rec.interviewer_user_id = i.interviewer_user_id
+                      AND (
+                        (rec.conclusion IS NOT NULL AND TRIM(rec.conclusion) <> '')
+                        OR (rec.comment IS NOT NULL AND TRIM(rec.comment) <> '')
+                      )
+                  )
                 """, from, to);
         for (Map<String, Object> row : rows) {
             tryPush(row, kind);
@@ -57,11 +68,13 @@ public class HrInterviewReviewPushService {
         if (interviewerUserId == null) {
             return;
         }
-        if (alreadyPushed(inviteId, interviewerUserId, kind)) {
+        if (hasReview(row)) {
+            if (!alreadyPushed(inviteId, interviewerUserId, kind)) {
+                logPush(inviteId, interviewerUserId, kind, "SKIP", "该候选人此轮此面试官已有评价");
+            }
             return;
         }
-        if (hasReview(row)) {
-            logPush(inviteId, interviewerUserId, kind, "SKIP", "已填评价");
+        if (alreadyPushed(inviteId, interviewerUserId, kind)) {
             return;
         }
         String dingUserId = row.get("dingtalk_user_id") == null ? "" : String.valueOf(row.get("dingtalk_user_id")).trim();
@@ -84,7 +97,7 @@ public class HrInterviewReviewPushService {
                 + "- 轮次：第" + roundNo + "面\n\n"
                 + "请尽快填写评价（含「简历是否合格」）。点击下方按钮将免登进入并打开评价。";
         DingTalkCalendarClient.NoticeCall call = dingTalk.notifyActionCard(
-                dingUserId, title, markdown, "去评价", link);
+                dingUserId, title, markdown, "去面试评价", link);
         if (call.success()) {
             logPush(inviteId, interviewerUserId, kind, "OK", "已发工作通知");
         } else {
@@ -92,14 +105,22 @@ public class HrInterviewReviewPushService {
         }
     }
 
+    /** 候选人 + 轮次 + 面试官 已有评价（结论或评语）则不再催。 */
     private boolean hasReview(Map<String, Object> row) {
         Long applicationId = ((Number) row.get("application_id")).longValue();
         int roundNo = ((Number) row.get("round_no")).intValue();
         Long interviewerUserId = ((Number) row.get("interviewer_user_id")).longValue();
         Integer n = jdbc.queryForObject("""
-                SELECT COUNT(1) FROM hr_interview_record
-                WHERE application_id = ? AND round_no = ? AND interviewer_user_id = ?
-                  AND is_active = 1 AND conclusion IS NOT NULL AND TRIM(conclusion) <> ''
+                SELECT COUNT(1)
+                FROM hr_interview_record rec
+                WHERE rec.is_active = 1
+                  AND rec.application_id = ?
+                  AND rec.round_no = ?
+                  AND rec.interviewer_user_id = ?
+                  AND (
+                    (rec.conclusion IS NOT NULL AND TRIM(rec.conclusion) <> '')
+                    OR (rec.comment IS NOT NULL AND TRIM(rec.comment) <> '')
+                  )
                 """, Integer.class, applicationId, roundNo, interviewerUserId);
         return n != null && n > 0;
     }
