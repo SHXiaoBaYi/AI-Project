@@ -548,6 +548,9 @@ public class HrKpiTaskService {
         ScoreRule rule = loadScoreRule();
         double weightP0 = Math.max(0, rule.p0Score());
         double weightP1 = Math.max(0, rule.p1Score());
+        // 当前自然月：本月到期的 DONE + 全部仍 OPEN 的在招任务（负责人不能因到期纠偏到历史月而消失）
+        // 历史月：仅按 due_at 落在该月的任务核算
+        boolean settleCurrentMonth = monthStart.equals(LocalDate.now().withDayOfMonth(1));
 
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.requisition_id, r.job_name, t.owner_user_id, u.nickname owner_name, t.slot_no,
@@ -557,11 +560,16 @@ public class HrKpiTaskService {
                 JOIN hr_requisition r ON r.id = t.requisition_id AND r.is_active = 1
                 LEFT JOIN sys_user u ON u.user_id = t.owner_user_id
                 WHERE t.is_active = 1 AND t.status IN ('OPEN','DONE')
-                  AND t.due_at >= ? AND t.due_at < ?
+                  AND (
+                    (t.due_at >= ? AND t.due_at < ?)
                 """);
         List<Object> args = new ArrayList<>();
         args.add(from);
         args.add(to);
+        if (settleCurrentMonth) {
+            sql.append(" OR t.status = 'OPEN' ");
+        }
+        sql.append(')');
         List<Long> ownerIds = q.getOwnerUserIds() == null ? List.of()
                 : q.getOwnerUserIds().stream().filter(Objects::nonNull).distinct().toList();
         if (!ownerIds.isEmpty()) {
@@ -575,7 +583,7 @@ public class HrKpiTaskService {
             }
             sql.append(')');
         }
-        // 得分始终按本月全部到期任务核算；状态筛选仅作用于明细列表
+        // 得分始终按核算范围内全部任务核算；状态筛选仅作用于明细列表
         sql.append(" ORDER BY t.owner_user_id, t.due_at, t.id");
 
         List<HrKpiAssessmentVO.TaskRow> allTasks = new ArrayList<>();
