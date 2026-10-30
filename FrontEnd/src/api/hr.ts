@@ -628,10 +628,16 @@ export type HrKpiAssessment = {
   settleMonth?: string;
   /** 基准分，默认 30 */
   baseScore?: number;
-  /** 来自考核计分规则 p0Score */
+  /** 来自考核计分规则 p0Score（每 HC 记分） */
   weightP0?: number;
-  /** 来自考核计分规则 p1Score */
+  /** 来自考核计分规则 p1Score（每达标一次记分） */
   weightP1?: number;
+  /** P0：入职几人记一次 */
+  p0OnboardCount?: number;
+  /** P1：合格简历份数门槛 */
+  p1QualifiedResumeCount?: number;
+  /** P1：入职人数门槛 */
+  p1OnboardCount?: number;
   scoreRuleHint?: string;
   overallCompletionRate?: number;
   overallDoneWeight?: number;
@@ -652,15 +658,19 @@ export type HrKpiAssessment = {
     p0Done: number;
     p1Due: number;
     p1Done: number;
-    /** P1 因入职完成 */
+    /** P1 因入职达标次数 */
     p1DoneOnboard?: number;
-    /** P1 因合格简历完成 */
+    /** P1 因合格简历满门槛达标次数 */
     p1DoneResume?: number;
+    /** P1 未满门槛的合格简历进度份数 */
+    p1ResumePartialCount?: number;
+    /** P1 未满门槛简历折算分 */
+    p1ResumePartialScore?: number;
     totalWeight?: number;
     doneWeight?: number;
     /** 0~1 */
     completionRate?: number;
-    /** 已完成得分（计分规则累加，整数），前端展示为 已得分/基准分 */
+    /** 已得分（可含小数），前端展示为 已得分/基准分 */
     score: number;
   }[];
   tasks: {

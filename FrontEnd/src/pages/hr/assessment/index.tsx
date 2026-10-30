@@ -37,24 +37,32 @@ function fmtDate(value?: string) {
   return String(value).replace('T', ' ').slice(0, 10);
 }
 
-/** 展示为「已得分 / 满分」，整数，如 4 / 30、11 / 180 */
+function fmtScore(n?: number) {
+  if (n == null || Number.isNaN(n)) return '0';
+  const v = Math.round(Number(n) * 100) / 100;
+  return Number.isInteger(v) ? String(v) : v.toFixed(2);
+}
+
+/** 展示为「已得分 / 满分」，得分可含小数，如 2.66 / 30 */
 function scoreOverBase(score?: number, base?: number) {
-  const s = score == null || Number.isNaN(score) ? 0 : Math.round(Number(score));
-  const b = base == null || Number.isNaN(base) || base <= 0 ? 30 : Math.round(Number(base));
-  return `${s} / ${b}`;
+  const s = score == null || Number.isNaN(score) ? 0 : Number(score);
+  const b = base == null || Number.isNaN(base) || base <= 0 ? 30 : Number(base);
+  const sText = Number.isInteger(s) ? String(Math.round(s)) : s.toFixed(2);
+  const bText = Number.isInteger(b) ? String(Math.round(b)) : b.toFixed(2);
+  return `${sText} / ${bText}`;
 }
 
 /** 相对考核满分的达成比例 0~100 */
 function scoreAttainPct(score?: number, max?: number) {
-  const s = score == null || Number.isNaN(score) ? 0 : Math.round(Number(score));
-  const m = max == null || Number.isNaN(max) || max <= 0 ? 0 : Math.round(Number(max));
+  const s = score == null || Number.isNaN(score) ? 0 : Number(score);
+  const m = max == null || Number.isNaN(max) || max <= 0 ? 0 : Number(max);
   if (m <= 0) return 0;
   return Math.min(100, Math.round((s / m) * 1000) / 10);
 }
 
 function doneReasonLabel(reason?: string, priority?: string) {
-  if (reason === 'QUALIFIED_RESUME') return '合格简历';
-  if (reason === 'ONBOARD') return priority === 'P1' ? '入职达成' : '入职';
+  if (reason === 'QUALIFIED_RESUME') return '合格简历达标';
+  if (reason === 'ONBOARD') return priority === 'P1' ? '入职达标' : '入职';
   return reason || '—';
 }
 
@@ -64,14 +72,22 @@ function doneReasonColor(reason?: string) {
   return 'default';
 }
 
-function p1BreakdownText(o: { p1Done?: number; p1DoneOnboard?: number; p1DoneResume?: number }) {
-  const done = o.p1Done ?? 0;
-  if (done <= 0) return '';
+/** P1：满门槛达标次数 + 未满门槛简历进度折算 */
+function p1BreakdownText(o: {
+  p1Done?: number;
+  p1DoneOnboard?: number;
+  p1DoneResume?: number;
+  p1ResumePartialCount?: number;
+  p1ResumePartialScore?: number;
+}) {
+  const parts: string[] = [];
   const onboard = o.p1DoneOnboard ?? 0;
   const resume = o.p1DoneResume ?? 0;
-  const parts: string[] = [];
-  if (onboard > 0) parts.push(`入职${onboard}`);
-  if (resume > 0) parts.push(`合格简历${resume}`);
+  const partialCnt = o.p1ResumePartialCount ?? 0;
+  const partialScore = o.p1ResumePartialScore ?? 0;
+  if (onboard > 0) parts.push(`入职达标${onboard}次`);
+  if (resume > 0) parts.push(`简历达标${resume}次`);
+  if (partialCnt > 0) parts.push(`简历进度${partialCnt}份(+${fmtScore(partialScore)}分)`);
   return parts.length ? `（${parts.join(' · ')}）` : '';
 }
 
@@ -140,6 +156,9 @@ const AssessmentPage = memo(function AssessmentPage() {
   const baseScore = data?.baseScore ?? 30;
   const weightP0 = data?.weightP0 ?? 2;
   const weightP1 = data?.weightP1 ?? 1;
+  const p0OnboardNeed = data?.p0OnboardCount ?? 1;
+  const p1ResumeNeed = data?.p1QualifiedResumeCount ?? 3;
+  const p1OnboardNeed = data?.p1OnboardCount ?? 1;
   const overallMax = data?.overallScoreMax ?? (data?.ownerCount ?? data?.owners?.length ?? 0) * baseScore;
   const overallAttain = scoreAttainPct(data?.overallScore, overallMax);
   const overallP1Onboard = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneOnboard ?? 0), 0);
@@ -181,23 +200,30 @@ const AssessmentPage = memo(function AssessmentPage() {
       width: 64,
       render: (v, row) => {
         const w = (v as number | undefined) ?? (row.priorityCode === 'P0' ? weightP0 : weightP1);
-        return String(Math.round(Number(w)));
+        return fmtScore(Number(w));
       },
     },
     {
       title: '状态',
       dataIndex: 'status',
       width: 80,
-      render: (v: string) => (v === 'DONE' ? <Tag color='success'>已完成</Tag> : <Tag color='processing'>未完成</Tag>),
+      render: (v: string, row) =>
+        v === 'DONE' ? (
+          <Tag color='success'>已完成</Tag>
+        ) : Number(row.earnedWeight ?? 0) > 0 ? (
+          <Tag color='gold'>进行中</Tag>
+        ) : (
+          <Tag color='processing'>未完成</Tag>
+        ),
     },
     {
       title: '计入得分',
       dataIndex: 'earnedWeight',
-      width: 80,
+      width: 88,
       render: (v, row) => {
-        if (v != null && v !== '') return String(Math.round(Number(v)));
+        if (v != null && v !== '') return fmtScore(Number(v));
         return row.status === 'DONE'
-          ? String(Math.round(Number(row.weight ?? (row.priorityCode === 'P0' ? weightP0 : weightP1))))
+          ? fmtScore(Number(row.weight ?? (row.priorityCode === 'P0' ? weightP0 : weightP1)))
           : '0';
       },
     },
@@ -206,9 +232,16 @@ const AssessmentPage = memo(function AssessmentPage() {
     {
       title: '完成方式',
       dataIndex: 'doneReason',
-      width: 110,
-      render: (v: string | undefined, row) =>
-        row.status === 'DONE' && v ? <Tag color={doneReasonColor(v)}>{doneReasonLabel(v, row.priorityCode)}</Tag> : '—',
+      width: 120,
+      render: (v: string | undefined, row) => {
+        if (row.status === 'DONE' && v) {
+          return <Tag color={doneReasonColor(v)}>{doneReasonLabel(v, row.priorityCode)}</Tag>;
+        }
+        if (row.status === 'OPEN' && Number(row.earnedWeight ?? 0) > 0 && row.priorityCode === 'P1') {
+          return <Tag color='purple'>合格简历进度</Tag>;
+        }
+        return '—';
+      },
     },
   ];
 
@@ -274,7 +307,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           className='!mt-2 !mb-0 text-xs leading-relaxed'
         >
           {data?.scoreRuleHint ||
-            `基准分${baseScore}（计分规则可改）；个人得分=已得分/${baseScore}；整体得分=各人已得分之和/(负责人数×${baseScore})；任务进度见卡片底栏件数；P0单任务${weightP0}分、P1单任务${weightP1}分`}
+            `基准分${baseScore}；P0每入职${p0OnboardNeed}人记${weightP0}分；P1满${p1ResumeNeed}份合格简历记${weightP1}分（未满按份折算、最后一份补齐；已入职人选简历不计），或入职${p1OnboardNeed}人记${weightP1}分`}
         </Typography.Paragraph>
       </Card>
 
@@ -307,9 +340,11 @@ const AssessmentPage = memo(function AssessmentPage() {
               <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
                 各人已得分之和 / ({data?.ownerCount ?? data?.owners?.length ?? 0}人 × 基准分{baseScore})
                 <br />
-                P0 入职 {overallP0Done} HC · P1 完成 {overallP1Done} HC
-                {overallP1Done > 0 ? `（入职${overallP1Onboard} · 合格简历${overallP1Resume}）` : ''}
-                ；每 HC：P0 {Math.round(Number(weightP0))}分 / P1 {Math.round(Number(weightP1))}分
+                P0 达标 {overallP0Done} 次（每入职{p0OnboardNeed}人记{Math.round(Number(weightP0))}分）
+                <br />
+                P1 满门槛 {overallP1Done} 次（入职{overallP1Onboard} · 简历{overallP1Resume}）；未满按份折算（满
+                {p1ResumeNeed}份={fmtScore(weightP1)}分，已入职人选简历不计）或入职{p1OnboardNeed}人=
+                {fmtScore(weightP1)}分
               </div>
             </Card>
           </Col>
@@ -342,7 +377,7 @@ const AssessmentPage = memo(function AssessmentPage() {
                   <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
                     HC {o.doneCount}/{o.dueCount} · 未完成 {o.openCount}
                     <br />
-                    P0 {o.p0Done}/{o.p0Due}（入职） · P1 {o.p1Done}/{o.p1Due}
+                    P0 达标 {o.p0Done}/{o.p0Due} · P1 达标 {o.p1Done}/{o.p1Due}
                     {p1BreakdownText(o)}
                   </div>
                 </Card>

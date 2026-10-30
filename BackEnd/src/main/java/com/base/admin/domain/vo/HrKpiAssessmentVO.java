@@ -20,11 +20,20 @@ public class HrKpiAssessmentVO {
     @Schema(description = "基准分（完成率×基准分=实得分）", example = "30")
     private Double baseScore;
 
-    @Schema(description = "P0 岗位权重", example = "2.0")
+    @Schema(description = "P0 完成记分（每 HC）", example = "2.0")
     private Double weightP0;
 
-    @Schema(description = "P1 岗位权重", example = "1.0")
+    @Schema(description = "P1 完成记分（每达标一次）", example = "1.0")
     private Double weightP1;
+
+    @Schema(description = "P0：完成多少人入职记一次分", example = "1")
+    private Integer p0OnboardCount;
+
+    @Schema(description = "P1：周期内合格简历份数门槛（与入职二选一）", example = "3")
+    private Integer p1QualifiedResumeCount;
+
+    @Schema(description = "P1：周期内入职人数门槛（与合格简历二选一）", example = "1")
+    private Integer p1OnboardCount;
 
     @Schema(description = "口径说明")
     private String scoreRuleHint;
@@ -65,17 +74,21 @@ public class HrKpiAssessmentVO {
         private Integer p0Done;
         private Integer p1Due;
         private Integer p1Done;
-        @Schema(description = "P1 因入职完成的槽位数")
+        @Schema(description = "P1 因入职达标的次数（每次对应规则中的入职门槛）")
         private Integer p1DoneOnboard;
-        @Schema(description = "P1 因合格简历完成的槽位数")
+        @Schema(description = "P1 因合格简历满门槛达标的次数")
         private Integer p1DoneResume;
+        @Schema(description = "P1 未满门槛的合格简历进度份数（计入折算分）", example = "2")
+        private Integer p1ResumePartialCount;
+        @Schema(description = "P1 未满门槛简历折算分，如 2/3→0.66", example = "0.66")
+        private Double p1ResumePartialScore;
         @Schema(description = "应计总权重")
         private Double totalWeight;
-        @Schema(description = "已完成权重")
+        @Schema(description = "已得权重（含 P1 简历进度折算）")
         private Double doneWeight;
         @Schema(description = "整体完成率 0~1")
         private Double completionRate;
-        @Schema(description = "已完成得分（按计分规则累加的 P0/P1 分，整数；前端展示为 已得分/基准分）")
+        @Schema(description = "已得分（可含小数；前端展示为 已得分/基准分）")
         private Double score;
     }
 

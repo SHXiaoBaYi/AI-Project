@@ -16,6 +16,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -515,11 +516,13 @@ public class HrKpiTaskService {
     }
 
     private List<LocalDateTime> listQualifiedAts(Long requisitionId) {
+        // 已入职人选走入职记分，其合格简历不再计入简历达标，避免重复
         return jdbc.query("""
                 SELECT MIN(COALESCE(rec.interviewed_at, rec.update_time, rec.create_time)) AS hit_at
                 FROM hr_interview_record rec
                 JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
                 WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
+                  AND a.current_stage <> 'ONBOARDED'
                 GROUP BY rec.application_id
                 ORDER BY hit_at ASC
                 """, (rs, i) -> rs.getTimestamp("hit_at").toLocalDateTime(), requisitionId);
@@ -614,6 +617,9 @@ public class HrKpiTaskService {
             }
         }, args.toArray());
 
+        // P1 未满门槛的合格简历：按进度折算（1/3→0.33，最后一份补齐到满分）
+        applyP1ResumePartialScores(allTasks, rule.p1QualifiedResumeCount(), weightP1);
+
         Map<Long, HrKpiAssessmentVO.OwnerSummary> owners = new LinkedHashMap<>();
         double overallTotalWeight = 0.0;
         double overallDoneWeight = 0.0;
@@ -631,6 +637,8 @@ public class HrKpiTaskService {
                 o.setP1Done(0);
                 o.setP1DoneOnboard(0);
                 o.setP1DoneResume(0);
+                o.setP1ResumePartialCount(0);
+                o.setP1ResumePartialScore(0.0);
                 o.setTotalWeight(0.0);
                 o.setDoneWeight(0.0);
                 o.setCompletionRate(0.0);
@@ -638,6 +646,7 @@ public class HrKpiTaskService {
                 return o;
             });
             double weight = t.getWeight() == null ? assessWeight(t.getPriorityCode(), weightP0, weightP1) : t.getWeight();
+            double earned = t.getEarnedWeight() == null ? 0.0 : t.getEarnedWeight();
             s.setDueCount(s.getDueCount() + 1);
             s.setTotalWeight(round2(s.getTotalWeight() + weight));
             overallTotalWeight += weight;
@@ -649,8 +658,8 @@ public class HrKpiTaskService {
             }
             if ("DONE".equals(t.getStatus())) {
                 s.setDoneCount(s.getDoneCount() + 1);
-                s.setDoneWeight(round2(s.getDoneWeight() + weight));
-                overallDoneWeight += weight;
+                s.setDoneWeight(round2(s.getDoneWeight() + earned));
+                overallDoneWeight += earned;
                 if (p0) {
                     s.setP0Done(s.getP0Done() + 1);
                 } else {
@@ -659,12 +668,24 @@ public class HrKpiTaskService {
                     if ("QUALIFIED_RESUME".equals(reason)) {
                         s.setP1DoneResume(s.getP1DoneResume() + 1);
                     } else {
-                        // P1 默认按入职达成（含历史空原因）
                         s.setP1DoneOnboard(s.getP1DoneOnboard() + 1);
                     }
                 }
             } else {
                 s.setOpenCount(s.getOpenCount() + 1);
+                // OPEN 但已有简历进度折算分
+                if (earned > 0) {
+                    s.setDoneWeight(round2(s.getDoneWeight() + earned));
+                    overallDoneWeight += earned;
+                    if (!p0) {
+                        s.setP1ResumePartialScore(round2(
+                                (s.getP1ResumePartialScore() == null ? 0.0 : s.getP1ResumePartialScore()) + earned));
+                        double unit = partialResumeUnit(weightP1, rule.p1QualifiedResumeCount());
+                        int partialCnt = unit > 0 ? (int) Math.round(earned / unit) : 0;
+                        s.setP1ResumePartialCount(
+                                (s.getP1ResumePartialCount() == null ? 0 : s.getP1ResumePartialCount()) + partialCnt);
+                    }
+                }
             }
         }
         double sumOwnerEarned = 0.0;
@@ -673,18 +694,18 @@ public class HrKpiTaskService {
             double done = s.getDoneWeight() == null ? 0.0 : s.getDoneWeight();
             double rate = total > 0 ? done / total : 0.0;
             s.setCompletionRate(round4(rate));
-            // 个人已完成得分=计分规则累加（整数）；前端展示为 已得分/基准分
-            double earned = round0(done);
+            // 个人得分可含小数（P1 简历进度折算）
+            double earned = round2(done);
             s.setScore(earned);
             s.setDoneWeight(earned);
-            s.setTotalWeight(round0(total));
+            s.setTotalWeight(round2(total));
             sumOwnerEarned += earned;
         }
 
         double overallRate = overallTotalWeight > 0 ? overallDoneWeight / overallTotalWeight : 0.0;
         int ownerCount = owners.size();
-        // 整体展示：各人已得分之和 / (负责人数 × 基准分)，如 11 / 180
-        double overallEarned = round0(sumOwnerEarned);
+        // 整体展示：各人已得分之和 / (负责人数 × 基准分)
+        double overallEarned = round2(sumOwnerEarned);
         double overallMax = round0(ownerCount * baseScore);
 
         String statusFilter = StringUtils.hasText(q.getStatus()) ? q.getStatus().trim().toUpperCase() : "";
@@ -696,22 +717,103 @@ public class HrKpiTaskService {
         vo.setBaseScore(baseScore);
         vo.setWeightP0(weightP0);
         vo.setWeightP1(weightP1);
+        vo.setP0OnboardCount(rule.p0OnboardCount());
+        vo.setP1QualifiedResumeCount(rule.p1QualifiedResumeCount());
+        vo.setP1OnboardCount(rule.p1OnboardCount());
         vo.setOwnerCount(ownerCount);
-        vo.setOverallTotalWeight(round0(overallTotalWeight));
+        vo.setOverallTotalWeight(round2(overallTotalWeight));
         vo.setOverallDoneWeight(overallEarned);
         vo.setOverallCompletionRate(round4(overallRate));
         vo.setOverallScore(overallEarned);
         vo.setOverallScoreMax(overallMax);
         vo.setScoreRuleHint(String.format(
-                "基准分%.0f（计分规则可改）；个人得分展示为 已得分/%.0f（整数）；整体得分展示为 各人已得分之和/(负责人数×基准分)；P0单任务%.0f分、P1单任务%.0f分；未完成计0",
-                baseScore, baseScore, weightP0, weightP1));
+                "基准分%.0f；个人/整体得分可含小数；P0：每入职%d人记%.0f分；"
+                        + "P1：满%d份合格简历记%.0f分（未满按份折算，如1份≈%.2f、最后一份补齐；已入职人选的简历不计），或入职%d人记%.0f分",
+                baseScore,
+                rule.p0OnboardCount(), weightP0,
+                rule.p1QualifiedResumeCount(), weightP1,
+                partialResumeUnit(weightP1, rule.p1QualifiedResumeCount()),
+                rule.p1OnboardCount(), weightP1));
         vo.setOwners(new ArrayList<>(owners.values()));
         vo.setTasks(tasks);
         return vo;
     }
 
+    /**
+     * 对每个「需求+负责人」最早的 OPEN P1 任务：按未消耗的合格简历份数写入折算分。
+     * 例 need=3、满分1：1份=0.33，2份=0.66，3份本应整任务 DONE=1（此处仅处理未满门槛）。
+     */
+    private void applyP1ResumePartialScores(List<HrKpiAssessmentVO.TaskRow> tasks, int need, double p1Score) {
+        if (tasks == null || tasks.isEmpty() || need <= 0 || p1Score <= 0) {
+            return;
+        }
+        record Key(long requisitionId, long ownerUserId) {
+        }
+        Map<Key, List<HrKpiAssessmentVO.TaskRow>> groups = new LinkedHashMap<>();
+        for (HrKpiAssessmentVO.TaskRow t : tasks) {
+            if (t.getRequisitionId() == null || t.getOwnerUserId() == null) {
+                continue;
+            }
+            if (!"P1".equalsIgnoreCase(t.getPriorityCode())) {
+                continue;
+            }
+            groups.computeIfAbsent(new Key(t.getRequisitionId(), t.getOwnerUserId()), k -> new ArrayList<>()).add(t);
+        }
+        for (Map.Entry<Key, List<HrKpiAssessmentVO.TaskRow>> e : groups.entrySet()) {
+            List<HrKpiAssessmentVO.TaskRow> list = e.getValue();
+            list.sort(Comparator
+                    .comparing(HrKpiAssessmentVO.TaskRow::getSlotNo, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(HrKpiAssessmentVO.TaskRow::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+            HrKpiAssessmentVO.TaskRow open = list.stream()
+                    .filter(t -> "OPEN".equals(t.getStatus()))
+                    .findFirst()
+                    .orElse(null);
+            if (open == null || open.getPublishedAt() == null || open.getDueAt() == null) {
+                continue;
+            }
+            int doneByResume = (int) list.stream()
+                    .filter(t -> "DONE".equals(t.getStatus()) && "QUALIFIED_RESUME".equals(nz(t.getDoneReason())))
+                    .count();
+            int qualified = countQualifiedResumes(open.getRequisitionId(), open.getPublishedAt(), open.getDueAt());
+            int progress = Math.max(0, qualified - doneByResume * need);
+            if (progress <= 0) {
+                continue;
+            }
+            if (progress >= need) {
+                // 同步应已 DONE；兜底按满分计
+                open.setEarnedWeight(round2(p1Score));
+                continue;
+            }
+            open.setEarnedWeight(partialResumeScore(progress, need, p1Score));
+        }
+    }
+
+    /** 未满门槛：前 need-1 份按截断到分位的单价累计；满门槛返回满分（补齐余数） */
+    static double partialResumeScore(int resumes, int need, double fullScore) {
+        if (resumes <= 0 || need <= 0 || fullScore <= 0) {
+            return 0;
+        }
+        int n = Math.min(resumes, need);
+        if (n >= need) {
+            return round2(fullScore);
+        }
+        return round2(partialResumeUnit(fullScore, need) * n);
+    }
+
+    static double partialResumeUnit(double fullScore, int need) {
+        if (need <= 0 || fullScore <= 0) {
+            return 0;
+        }
+        // 1/3 → 0.33；满 3 份时用满分补齐余数（0.33*2+0.34=1）
+        return Math.floor(fullScore / need * 100.0) / 100.0;
+    }
+
     private static double assessWeight(String priorityCode, double weightP0, double weightP1) {
         return "P0".equalsIgnoreCase(priorityCode) ? weightP0 : weightP1;
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s.trim();
     }
 
     private static double round0(double v) {
@@ -887,12 +989,16 @@ public class HrKpiTaskService {
                 """, doneAt, reason, applicationId, score, taskId);
     }
 
+    /**
+     * 统计合格简历份数；已入职人选排除（P1 入职已单独记分，简历路径不再重复计）。
+     */
     private int countQualifiedResumes(Long requisitionId, LocalDateTime from, LocalDateTime to) {
         Integer n = jdbc.queryForObject("""
                 SELECT COUNT(DISTINCT rec.application_id)
                 FROM hr_interview_record rec
                 JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
                 WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
+                  AND a.current_stage <> 'ONBOARDED'
                   AND COALESCE(rec.interviewed_at, rec.update_time, rec.create_time) >= ?
                   AND COALESCE(rec.interviewed_at, rec.update_time, rec.create_time) <= ?
                 """, Integer.class, requisitionId, from, to);
