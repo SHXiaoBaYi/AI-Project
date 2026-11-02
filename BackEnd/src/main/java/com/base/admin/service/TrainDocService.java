@@ -512,15 +512,7 @@ public class TrainDocService {
         }
     }
 
-    private static boolean confidentAsk(TrainAssistantAskVO vo) {
-        if (vo == null || vo.getStatus() == null) {
-            return false;
-        }
-        // HIT 直出；SUGGEST 给点选原题（均已过检索闸门）。NEED_OLD/NOT_FOUND 不算自信命中。
-        return "HIT".equals(vo.getStatus()) || "SUGGEST".equals(vo.getStatus());
-    }
-
-    /** 仅 HIT 算直接命中；SUGGEST 不能压过已校准准确答案。 */
+    /** 仅 HIT 算直接命中；未命中/建议都不能当答案直出。 */
     private static boolean isDirectHit(TrainAssistantAskVO vo) {
         return vo != null && "HIT".equals(vo.getStatus())
                 && vo.getItems() != null && !vo.getItems().isEmpty();
@@ -539,15 +531,6 @@ public class TrainDocService {
         }
         return sameOperationTitle(question, latestHit.getItems().get(0).getQuestion(),
                 calibrated.item().getQuestion());
-    }
-
-    private static boolean latestExtractSameOperation(String question,
-                                                      TrainAssistantAskVO.QaItem latestItem,
-                                                      TrainQaCalibrateService.AccurateHit calibrated) {
-        if (calibrated == null || calibrated.item() == null || latestItem == null) {
-            return true;
-        }
-        return sameOperationTitle(question, latestItem.getQuestion(), calibrated.item().getQuestion());
     }
 
     private static boolean sameOperationTitle(String question, String latestTitle, String calibrateTitle) {
@@ -908,16 +891,16 @@ public class TrainDocService {
         boolean searchOld = Boolean.TRUE.equals(dto.getSearchOld());
         if (!searchOld) {
             /*
-             * 答疑优先级：
-             * 1) 校准有准确答案且绑定最新文档版 → 直接返回校准答案
-             * 2) 校准有准确答案但绑定旧版 → 先搜最新文档同意图；有则返回文档答案；
-             *    无则返回校准答案并备注「参考 XXX 版本」
-             * 3) 校准无准确答案 → 搜最新文档；有则返回；无则找不到答案
+             * 精确率优先：
+             * 1) 最新版人工校准 → HIT（答案只读）
+             * 2) 结构化题录：意图 → 点选同一操作题 → HIT；否则未命中
+             * 3) 旧版校准且最新未命中同意图 → 返回旧校准并注明版本
+             * 4) 无题录时才回退文档抽段；有题录则禁止抽段瞎凑
+             * 5) 未命中一律记 miss
              */
             TrainQaCalibrateService.AccurateHit calibrated =
                     trainQaCalibrateService.findAccurateHit(question, latest.docId, latest.versionId);
 
-            // 一：最新版校准直接返回（不必再搜文档）
             if (calibrated != null && calibrated.onLatest()) {
                 TrainAssistantAskVO vo = new TrainAssistantAskVO();
                 vo.setStatus("HIT");
@@ -930,59 +913,30 @@ public class TrainDocService {
                 return vo;
             }
 
-            List<TrainAssistantAskVO.QaItem> latestHits;
-            Optional<TrainAssistantAskVO> vectorHit = trainQaSearchService.trySearch(question, cat, false);
-            if (vectorHit.isPresent() && (isDirectHit(vectorHit.get()) || !trainQaSearchService.hasUnindexedLatest(cat))) {
-                TrainAssistantAskVO vectorVo = vectorHit.get();
-                applyPublicImages(vectorVo);
-                // 仅 HIT 才直出。SUGGEST 不算自信命中，避免「沾边建议」盖过旧版准确校准。
-                if (isDirectHit(vectorVo)) {
-                    if (calibrated == null || calibrated.onLatest()
-                            || latestHitSameOperation(question, vectorVo, calibrated)) {
-                        return vectorVo;
-                    }
-                    // 最新版 HIT 与旧校准不是同一操作（如退单→「找不到单据」）→ 改用旧校准
-                    latestHits = List.of();
-                } else if (calibrated == null) {
-                    return recordStructuredMiss(vectorVo, question, cat);
-                } else {
-                    latestHits = List.of();
+            boolean hasCatalog = trainQaSearchService.hasCatalog(cat, false);
+            Optional<TrainAssistantAskVO> catalogHit = trainQaSearchService.trySearch(question, cat, false);
+
+            if (catalogHit.isPresent() && isDirectHit(catalogHit.get())) {
+                TrainAssistantAskVO hitVo = catalogHit.get();
+                applyPublicImages(hitVo);
+                if (calibrated == null || latestHitSameOperation(question, hitVo, calibrated)) {
+                    return hitVo;
                 }
-            } else {
-                latestHits = aiExtractQa(question, latest);
+                // 最新题录 HIT 与旧校准不是同一操作 → 用旧校准
+                return hitFromOldCalibrate(calibrated, latest);
             }
 
-            // 二：旧版校准存在
             if (calibrated != null) {
-                if (!latestHits.isEmpty()
-                        && latestExtractSameOperation(question, latestHits.get(0), calibrated)) {
-                    TrainAssistantAskVO vo = new TrainAssistantAskVO();
-                    vo.setStatus("HIT");
-                    vo.setMessage("已根据最新版培训文档找到相关问答");
-                    vo.setItems(withPublicImages(latestHits));
-                    vo.setVersionLabel(latest.versionLabel);
-                    vo.setHasOlderVersions(latest.hasOlder);
-                    vo.setDocId(latest.docId);
-                    vo.setVersionId(latest.versionId);
-                    return vo;
-                }
-                TrainAssistantAskVO.QaItem item = calibrated.item();
-                String refLabel = StringUtils.hasText(calibrated.versionLabel())
-                        ? calibrated.versionLabel()
-                        : ("版本#" + calibrated.versionId());
-                item.setReferenceNote("该答案是参考「" + refLabel + "」版本的培训文档");
-                TrainAssistantAskVO vo = new TrainAssistantAskVO();
-                vo.setStatus("HIT");
-                vo.setMessage("已命中校准答案（参考历史版本）");
-                vo.setItems(withPublicImages(List.of(item)));
-                vo.setVersionLabel(latest.versionLabel);
-                vo.setHasOlderVersions(latest.hasOlder);
-                vo.setDocId(latest.docId);
-                vo.setVersionId(latest.versionId);
-                return vo;
+                return hitFromOldCalibrate(calibrated, latest);
             }
 
-            // 三：无校准准确答案 → 仅依赖最新文档
+            // 有结构化题录：未命中即记 miss，不再用全文抽段凑答案
+            if (hasCatalog && catalogHit.isPresent()) {
+                return recordStructuredMiss(catalogHit.get(), question, cat);
+            }
+
+            // 无题录（尚未拆题/未装载）：兜底抽段
+            List<TrainAssistantAskVO.QaItem> latestHits = aiExtractQa(question, latest);
             if (!latestHits.isEmpty()) {
                 TrainAssistantAskVO vo = new TrainAssistantAskVO();
                 vo.setStatus("HIT");
@@ -1021,11 +975,23 @@ public class TrainDocService {
             trainQaMissService.record(question, cat, "NOT_FOUND", latest.docId, latest.versionId);
             return vo;
         }
-        Optional<TrainAssistantAskVO> oldVector = trainQaSearchService.trySearch(question, cat, true);
-        if (oldVector.isPresent() && confidentAsk(oldVector.get())) {
-            TrainAssistantAskVO vectorVo = oldVector.get();
+        Optional<TrainAssistantAskVO> oldCatalog = trainQaSearchService.trySearch(question, cat, true);
+        if (oldCatalog.isPresent() && isDirectHit(oldCatalog.get())) {
+            TrainAssistantAskVO vectorVo = oldCatalog.get();
             applyPublicImages(vectorVo);
             return vectorVo;
+        }
+        // 旧版有结构化题录则不再抽段凑答
+        if (trainQaSearchService.hasCatalog(cat, true)) {
+            TrainAssistantAskVO vo = new TrainAssistantAskVO();
+            vo.setStatus("NOT_FOUND");
+            vo.setMessage("没有找到与该问题匹配的培训说明，请换个问法后再试。");
+            vo.setHasOlderVersions(false);
+            vo.setVersionLabel(latest.versionLabel);
+            vo.setDocId(latest.docId);
+            vo.setVersionId(latest.versionId);
+            trainQaMissService.record(question, cat, "NOT_FOUND", latest.docId, latest.versionId);
+            return vo;
         }
         List<TrainAssistantAskVO.QaItem> all = new ArrayList<>();
         for (DocBundle old : older) {
@@ -1043,6 +1009,23 @@ public class TrainDocService {
             vo.setItems(withPublicImages(all));
             vo.setVersionLabel(all.get(0).getVersionLabel());
         }
+        return vo;
+    }
+
+    private TrainAssistantAskVO hitFromOldCalibrate(TrainQaCalibrateService.AccurateHit calibrated, DocBundle latest) {
+        TrainAssistantAskVO.QaItem item = calibrated.item();
+        String refLabel = StringUtils.hasText(calibrated.versionLabel())
+                ? calibrated.versionLabel()
+                : ("版本#" + calibrated.versionId());
+        item.setReferenceNote("该答案是参考「" + refLabel + "」版本的培训文档");
+        TrainAssistantAskVO vo = new TrainAssistantAskVO();
+        vo.setStatus("HIT");
+        vo.setMessage("已命中校准答案（参考历史版本）");
+        vo.setItems(withPublicImages(List.of(item)));
+        vo.setVersionLabel(latest.versionLabel);
+        vo.setHasOlderVersions(latest.hasOlder);
+        vo.setDocId(latest.docId);
+        vo.setVersionId(latest.versionId);
         return vo;
     }
 

@@ -29,6 +29,7 @@ public class TrainQaVectorIndex {
 
     public void reload() {
         try {
+            // 含未嵌入题：意图点选看全量题录；向量召回仅用有 embedding 的条目
             List<Entry> loaded = jdbc.query("""
                     SELECT i.id, i.doc_id, i.version_id, i.category, i.question, i.aliases_json,
                            i.answer_text, i.answer_html, i.images_json, i.embedding,
@@ -37,12 +38,8 @@ public class TrainQaVectorIndex {
                     FROM train_qa_item i
                     JOIN train_doc d ON d.id = i.doc_id AND d.is_active = 1 AND d.status = 0
                     JOIN train_doc_version v ON v.id = i.version_id AND v.is_active = 1
-                    WHERE i.is_active = 1 AND i.embedding IS NOT NULL
+                    WHERE i.is_active = 1
                     """, (rs, i) -> {
-                float[] vec = TrainQaVectors.fromBytes(rs.getBytes("embedding"));
-                if (vec == null) {
-                    return null;
-                }
                 Entry e = new Entry();
                 e.id = rs.getLong("id");
                 e.docId = rs.getLong("doc_id");
@@ -55,20 +52,29 @@ public class TrainQaVectorIndex {
                 e.images = parseAliases(rs.getString("images_json"));
                 e.versionLabel = rs.getString("version_label") == null ? "" : rs.getString("version_label");
                 e.latest = rs.getInt("latest") == 1;
-                e.vector = vec;
+                e.vector = TrainQaVectors.fromBytes(rs.getBytes("embedding"));
                 return e;
             });
             List<Entry> clean = new ArrayList<>();
+            int withVec = 0;
             for (Entry e : loaded) {
                 if (e != null && StringUtils.hasText(e.question)) {
                     clean.add(e);
+                    if (e.vector != null) {
+                        withVec++;
+                    }
                 }
             }
             snapshot = List.copyOf(clean);
-            log.info("收银答疑题目向量已装载 count={}", clean.size());
+            log.info("收银答疑题目录已装载 count={} embedded={}", clean.size(), withVec);
         } catch (Exception e) {
-            log.warn("装载题目向量失败，提问将回退原检索: {}", e.getMessage());
+            log.warn("装载题目录失败，提问将回退原检索: {}", e.getMessage());
         }
+    }
+
+    /** 是否有结构化题干可点选（不依赖向量）。 */
+    public boolean hasCatalog(String category, boolean oldVersions) {
+        return !snapshot(category, oldVersions).isEmpty();
     }
 
     public List<Entry> snapshot(String category, boolean oldVersions) {

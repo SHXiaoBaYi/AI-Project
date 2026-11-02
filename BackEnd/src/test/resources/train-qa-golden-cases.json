@@ -1,0 +1,37 @@
+[
+  {
+    "question": "顾客申请退款怎么处理？",
+    "expect": "HIT_REFUND_OR_MISS",
+    "must_not_title_contains": ["寄存"]
+  },
+  {
+    "question": "会员怎么登记信息？",
+    "expect": "MISS_IF_NO_REGISTER_ITEM",
+    "must_not_title_contains": ["积分兑换", "取消积分"]
+  },
+  {
+    "question": "输入会员登记信息。电话，能否复制粘贴",
+    "expect": "MISS_IF_NO_REGISTER_ITEM",
+    "must_not_title_contains": ["积分兑换"]
+  },
+  {
+    "question": "使用肉票卡怎么结算。",
+    "expect": "HIT_MEAT_OR_STORED_PAY_OR_MISS",
+    "must_not_title_contains": ["长短款", "收银差"]
+  },
+  {
+    "question": "肉票卡购买家庭套餐，怎么样出票。",
+    "expect": "HIT_MEAT_PAY_OR_MISS",
+    "must_not_title_contains": ["长短款"]
+  },
+  {
+    "question": "退单怎么处理？",
+    "expect": "HIT_REFUND_STEPS_OR_CALIBRATE",
+    "must_not_title_contains": ["找不到", "无法退单"]
+  },
+  {
+    "question": "寄存货品怎么操作。",
+    "expect": "HIT_DEPOSIT_OR_MISS",
+    "must_not_title_contains": ["销售流水", "查销售"]
+  }
+]
