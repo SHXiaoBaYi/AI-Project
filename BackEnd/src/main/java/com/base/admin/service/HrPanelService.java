@@ -32,8 +32,15 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class HrPanelService {
 
+    /** 区间进展展示顺序：到面与结论拆开，避免把「已到面」误看成已出面试结果 */
     private static final List<String> PROGRESS_ORDER = List.of(
-            "筛选简历", "电话沟通", "约面", "面试", "背调中", "待入职", "已入职");
+            "筛选简历", "电话沟通", "约面", "已到面",
+            "一面未通过", "一面待定", "一面待商榷", "一面通过",
+            "二面未通过", "二面待定", "二面待商榷", "二面通过",
+            "三面未通过", "三面待定", "三面待商榷", "三面通过",
+            "四面未通过", "四面待定", "四面待商榷", "四面通过",
+            "五面未通过", "五面待定", "五面待商榷", "五面通过",
+            "终面通过", "面试", "背调中", "待入职", "已入职");
     private static final DateTimeFormatter OCCURRED_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter DAY_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final String OWNER_SQL = """
@@ -492,8 +499,18 @@ public class HrPanelService {
         if ("PHONE_PASS".equals(code) || "PHONE_FAIL".equals(code)) {
             return "电话沟通";
         }
-        if ("SHOW_UP".equals(code) || "FIRST_ROUND".equals(code) || "SECOND_ROUND".equals(code) || "FINAL".equals(code)) {
-            return "面试";
+        // 已到面 ≠ 已出面试结论；结论阶段用 stage_def 名称（一面未通过/一面通过…）
+        if ("SHOW_UP".equals(code) || "已到面".equals(name)) {
+            return "已到面";
+        }
+        if ("FIRST_ROUND".equals(code)) {
+            return "一面通过";
+        }
+        if ("SECOND_ROUND".equals(code)) {
+            return "二面通过";
+        }
+        if ("FINAL".equals(code)) {
+            return "终面通过";
         }
         if ("BG_CHECK".equals(code)) {
             return "背调中";

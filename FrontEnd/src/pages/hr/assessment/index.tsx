@@ -5,7 +5,6 @@ import {
   Card,
   Col,
   DatePicker,
-  Modal,
   Progress,
   Row,
   Select,
@@ -18,13 +17,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import PermissionButton from '@/components/Buttons/PermissionButton';
-import {
-  backfillHrKpiAssessmentApi,
-  getHrKpiAssessmentApi,
-  getHrUsersApi,
-  updateHrKpiTaskDueApi,
-  type HrKpiAssessment,
-} from '@/api/hr';
+import { backfillHrKpiAssessmentApi, getHrKpiAssessmentApi, getHrUsersApi, type HrKpiAssessment } from '@/api/hr';
 
 const STATUS_OPTIONS = [
   { label: '全部', value: '' },
@@ -43,10 +36,10 @@ function fmtScore(n?: number) {
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }
 
-/** 展示为「已得分 / 满分」，得分可含小数，如 2.66 / 30 */
+/** 展示为「已得分 / 满分」，得分可含小数；满分为当月已配置岗位任务总分 */
 function scoreOverBase(score?: number, base?: number) {
   const s = score == null || Number.isNaN(score) ? 0 : Number(score);
-  const b = base == null || Number.isNaN(base) || base <= 0 ? 30 : Number(base);
+  const b = base == null || Number.isNaN(base) || base < 0 ? 0 : Number(base);
   const sText = Number.isInteger(s) ? String(Math.round(s)) : s.toFixed(2);
   const bText = Number.isInteger(b) ? String(Math.round(b)) : b.toFixed(2);
   return `${sText} / ${bText}`;
@@ -98,9 +91,6 @@ const AssessmentPage = memo(function AssessmentPage() {
   const [userOptions, setUserOptions] = useState<{ value: number; label: string }[]>([]);
   const [data, setData] = useState<HrKpiAssessment | null>(null);
   const [loading, setLoading] = useState(false);
-  const [dueEdit, setDueEdit] = useState<{ id: number; dueAt?: string; jobName?: string } | null>(null);
-  const [dueValue, setDueValue] = useState<Dayjs | null>(null);
-  const [savingDue, setSavingDue] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const tableHostRef = useRef<HTMLDivElement>(null);
   const [tableBodyY, setTableBodyY] = useState(320);
@@ -152,34 +142,16 @@ const AssessmentPage = memo(function AssessmentPage() {
     return () => ro.disconnect();
   }, [data?.tasks?.length, loading]);
 
-  const baseScore = data?.baseScore ?? 30;
   const weightP0 = data?.weightP0 ?? 2;
   const weightP1 = data?.weightP1 ?? 1;
-  const overallMax = data?.overallScoreMax ?? (data?.ownerCount ?? data?.owners?.length ?? 0) * baseScore;
+  /** 整体满分 = 当月已配置岗位任务得分之和 */
+  const overallMax = data?.overallScoreMax ?? 0;
   const overallAttain = scoreAttainPct(data?.overallScore, overallMax);
   const overallP0Done = (data?.owners ?? []).reduce((n, o) => n + (o.p0Done ?? 0), 0);
   const overallP1Onboard = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneOnboard ?? 0), 0);
   const overallP1ResumeDone = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneResume ?? 0), 0);
 
   const taskColumns: ColumnsType<HrKpiAssessment['tasks'][number]> = [
-    {
-      title: '操作',
-      fixed: 'left',
-      width: 72,
-      render: (_, row) =>
-        row.status === 'OPEN' ? (
-          <a
-            onClick={() => {
-              setDueEdit({ id: row.id, dueAt: row.dueAt, jobName: row.jobName });
-              setDueValue(row.dueAt ? dayjs(row.dueAt) : dayjs());
-            }}
-          >
-            延期
-          </a>
-        ) : (
-          '—'
-        ),
-    },
     { title: '负责人', dataIndex: 'ownerName', width: 88, ellipsis: true },
     { title: '岗位', dataIndex: 'jobName', ellipsis: true },
     {
@@ -331,7 +303,7 @@ const AssessmentPage = memo(function AssessmentPage() {
               />
               <div className='text-xs text-neutral-500'>达成 {overallAttain}%</div>
               <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
-                各人已得分之和 / 本月已配置任务应得分合计
+                各人已得分之和 / 本月已配置岗位任务总分
                 <br />
                 必须到岗 {overallP0Done} · 灵活到岗-入职 {overallP1Onboard}
                 {overallP1ResumeDone > 0 ? ` · 灵活到岗-简历 ${overallP1ResumeDone}` : ''}
@@ -339,7 +311,7 @@ const AssessmentPage = memo(function AssessmentPage() {
             </Card>
           </Col>
           {(data?.owners ?? []).map((o) => {
-            const ownerMax = o.totalWeight != null && o.totalWeight > 0 ? o.totalWeight : baseScore;
+            const ownerMax = o.totalWeight != null && o.totalWeight > 0 ? o.totalWeight : 0;
             const attain = scoreAttainPct(o.score, ownerMax);
             return (
               <Col
@@ -406,35 +378,6 @@ const AssessmentPage = memo(function AssessmentPage() {
         </div>
       </Card>
 
-      <Modal
-        title={dueEdit ? `延期：${dueEdit.jobName || ''}` : '延期'}
-        open={!!dueEdit}
-        confirmLoading={savingDue}
-        onCancel={() => setDueEdit(null)}
-        onOk={async () => {
-          if (!dueEdit || !dueValue) {
-            message.warning('请选择新的到期时间');
-            return;
-          }
-          setSavingDue(true);
-          try {
-            await updateHrKpiTaskDueApi(dueEdit.id, dueValue.format('YYYY-MM-DD HH:mm:ss'));
-            message.success('已延期');
-            setDueEdit(null);
-            load();
-          } finally {
-            setSavingDue(false);
-          }
-        }}
-      >
-        <div className='mb-2 text-sm text-neutral-500'>任何人可将未完成任务的到期日改到其他月份</div>
-        <DatePicker
-          showTime
-          className='w-full'
-          value={dueValue}
-          onChange={setDueValue}
-        />
-      </Modal>
     </div>
   );
 });

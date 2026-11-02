@@ -25,6 +25,12 @@ public class HrRequisitionLogVO {
     @Schema(description = "做了什么")
     private String summary;
 
+    @Schema(description = "入口 REQUISITION/PANEL")
+    private String entrySource;
+
+    @Schema(description = "入口中文")
+    private String entrySourceLabel;
+
     @Schema(description = "变更前JSON")
     private String beforeJson;
 

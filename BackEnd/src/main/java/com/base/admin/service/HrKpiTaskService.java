@@ -695,7 +695,9 @@ public class HrKpiTaskService {
         double overallRate = overallTotalWeight > 0 ? overallDoneWeight / overallTotalWeight : 0.0;
         int ownerCount = owners.size();
         double overallEarned = round2(sumOwnerEarned);
-        double overallMax = round2(sumOwnerMax);
+        // 整体满分 = 选中月已配置岗位任务得分之和（每岗一条，不按负责人翻倍，也不回退 30）
+        double configuredMonthTotal = monthRules.values().stream().mapToInt(MonthTaskRule::score).sum();
+        double overallMax = round2(configuredMonthTotal);
 
         String statusFilter = StringUtils.hasText(q.getStatus()) ? q.getStatus().trim().toUpperCase() : "";
         List<HrKpiAssessmentVO.TaskRow> tasks = statusFilter.isEmpty() ? allTasks
@@ -712,24 +714,24 @@ public class HrKpiTaskService {
 
         HrKpiAssessmentVO vo = new HrKpiAssessmentVO();
         vo.setSettleMonth(monthStart);
-        // baseScore 改为「本月任务总分」口径：个人展示 已得分/应得分
-        vo.setBaseScore(ownerCount > 0 ? round2(overallMax / Math.max(ownerCount, 1)) : ASSESS_BASE_SCORE_DEFAULT);
+        // 个人卡片分母仍用各自任务权重；整体分母用当月岗位配置总分
+        vo.setBaseScore(overallMax);
         vo.setWeightP0(round2(avgP0));
         vo.setWeightP1(round2(avgP1));
         vo.setP0OnboardCount(sampleOnboardNeed);
         vo.setP1QualifiedResumeCount(sampleResumeNeed);
         vo.setP1OnboardCount(sampleOnboardNeed);
         vo.setOwnerCount(ownerCount);
-        vo.setOverallTotalWeight(round2(overallTotalWeight));
+        vo.setOverallTotalWeight(round2(Math.max(overallTotalWeight, sumOwnerMax)));
         vo.setOverallDoneWeight(overallEarned);
         vo.setOverallCompletionRate(round4(overallRate));
         vo.setOverallScore(overallEarned);
         vo.setOverallScoreMax(overallMax);
         int configuredJobs = monthRules.size();
         vo.setScoreRuleHint(String.format(
-                "%s 已配置 %d 个岗位月度任务：必须到岗按入职达标计分；灵活到岗为入职或合格简历任一达标即得分；"
-                        + "每岗位每月只记一次配置分（超标不加分）；未达不得分；未配置岗位本月不计分。",
-                settleMonthKey, configuredJobs));
+                "%s 已配置 %d 个岗位月度任务（配置总分 %.0f）：必须到岗按入职达标；灵活到岗入职或合格简历任一达标；"
+                        + "每岗位每月只记一次；未达不得分；未配置岗位本月不计分。",
+                settleMonthKey, configuredJobs, overallMax));
         vo.setOwners(new ArrayList<>(owners.values()));
         vo.setTasks(tasks);
         return vo;

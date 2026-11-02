@@ -1031,6 +1031,8 @@ export function deleteHrRequisitionBatchApi(ids: number[]) {
   return request.delete('/hr/requisition/batch', { data: ids });
 }
 
+export type HrRequisitionLogEntrySource = 'REQUISITION' | 'PANEL';
+
 export type HrRequisitionLog = {
   id: number;
   requisitionId?: number;
@@ -1038,6 +1040,8 @@ export type HrRequisitionLog = {
   action?: string;
   actionLabel?: string;
   summary?: string;
+  entrySource?: HrRequisitionLogEntrySource | string;
+  entrySourceLabel?: string;
   beforeJson?: string;
   afterJson?: string;
   operatorUserId?: number;
@@ -1051,6 +1055,7 @@ export function listHrRequisitionLogsApi(data: {
   pageSize?: number;
   requisitionId?: number;
   action?: string;
+  entrySource?: string;
   keyword?: string;
   createTimeStart?: string;
   createTimeEnd?: string;
@@ -1089,12 +1094,15 @@ export function saveHrRequisitionMonthTaskApi(data: {
   resumeTarget?: number;
   score: number;
   remark?: string;
+  entrySource?: HrRequisitionLogEntrySource;
 }) {
   return request.put<unknown, number>('/hr/requisition/month-task', data);
 }
 
-export function deleteHrRequisitionMonthTaskApi(id: number) {
-  return request.delete(`/hr/requisition/month-task/${id}`);
+export function deleteHrRequisitionMonthTaskApi(id: number, entrySource?: HrRequisitionLogEntrySource) {
+  return request.delete(`/hr/requisition/month-task/${id}`, {
+    params: entrySource ? { entrySource } : undefined,
+  });
 }
 
 export function getHrChannelsApi() {

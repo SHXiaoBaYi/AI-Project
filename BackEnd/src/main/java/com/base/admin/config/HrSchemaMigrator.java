@@ -207,6 +207,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private void seedRoles() {
+        // 数据同步可能清空 sys_role；本地/测试缺超管时补回，避免菜单授权与登录账号断掉
+        insertRole("超级管理员", "admin", 1, "超级管理员拥有所有权限");
         insertRole("招聘管理员", "hr_admin", 10, "全部招聘数据、导出、邀约、主数据");
         insertRole("招聘负责人", "hr_owner", 11, "只看自己负责的需求");
         insertRole("高管", "hr_exec", 12, "全公司看板可下钻，不可改主数据");
@@ -227,6 +229,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
 
     private void seedUsers() {
         String hash = passwordEncoder.encode(DEFAULT_PASSWORD);
+        // schema 默认 admin123；仅在账号不存在时创建，不覆盖已有密码
+        String adminHash = "$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2";
+        Long adminRole = roleIdOrNull("admin");
+        if (adminRole != null) {
+            user("admin", "管理员", adminHash, "系统管理员", adminRole);
+        }
         long hrAdmin = roleId("hr_admin");
         long owner = roleId("hr_owner");
         long interviewer = roleId("hr_interviewer");
@@ -263,7 +271,20 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private long roleId(String key) {
-        return jdbc.queryForObject("SELECT role_id FROM sys_role WHERE role_key = ?", Long.class, key);
+        Long id = jdbc.query("""
+                SELECT role_id FROM sys_role WHERE role_key = ? AND is_active = 1 LIMIT 1
+                """, rs -> rs.next() ? rs.getLong(1) : null, key);
+        if (id == null) {
+            throw new IllegalStateException("缺少角色 role_key=" + key);
+        }
+        return id;
+    }
+
+    /** 角色不存在时返回 null（如测试库可能没有系统 admin），调用方跳过授权即可。 */
+    private Long roleIdOrNull(String key) {
+        return jdbc.query("""
+                SELECT role_id FROM sys_role WHERE role_key = ? AND is_active = 1 LIMIT 1
+                """, rs -> rs.next() ? rs.getLong(1) : null, key);
     }
 
     private void seedMenus() {
@@ -329,13 +350,15 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(226, "面试记录修改", 221, 2, "", "", "F", "hr:record:edit", "#", "");
         menu(227, "面试记录删除", 221, 3, "", "", "F", "hr:record:delete", "#", "");
 
-        long admin = roleId("admin");
+        Long admin = roleIdOrNull("admin");
         long hrAdmin = roleId("hr_admin");
         long owner = roleId("hr_owner");
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 265, 266);
+        if (admin != null) {
+            grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 265, 266);
+        }
         grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 265, 266);
         grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262);
         grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261, 262);
@@ -505,6 +528,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
                   KEY idx_hr_req_log_action (action)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘需求CUD操作日志'
                 """);
+        addColumnIfMissing("hr_requisition_log", "entry_source",
+                "ALTER TABLE hr_requisition_log ADD COLUMN entry_source VARCHAR(32) DEFAULT '' COMMENT '入口：REQUISITION招聘需求/PANEL招聘面板' AFTER summary");
     }
 
     /** 岗位按月任务要求：P0 入职计分；P1 入职或合格简历二选一 */

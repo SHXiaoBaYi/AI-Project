@@ -6,7 +6,11 @@ import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
+import ActionButtons from '@/components/Buttons/ActionButtons';
+import PermissionButton from '@/components/Buttons/PermissionButton';
 import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
+import HrRequisitionLogDrawer from '@/components/hr/HrRequisitionLogDrawer';
+import HrRequisitionMonthTaskDrawer, { type HrMonthTaskTarget } from '@/components/hr/HrRequisitionMonthTaskDrawer';
 import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
 import { downloadElementImage } from '@/utils/downloadElementImage';
 import {
@@ -86,6 +90,9 @@ const HrPanelPage = memo(function HrPanelPage() {
   const [jobRows, setJobRows] = useState<HrPanelJobRow[]>([]);
   const [peopleRows, setPeopleRows] = useState<HrPanelPersonRow[]>([]);
   const [jobDetail, setJobDetail] = useState<HrPanelJobRow | null>(null);
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [taskTarget, setTaskTarget] = useState<HrMonthTaskTarget | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
 
   useEffect(() => {
     void getHrDepartmentsApi().then((tree) => setDepts(flattenDepts((tree ?? []) as unknown as Dept[])));
@@ -142,6 +149,26 @@ const HrPanelPage = memo(function HrPanelPage() {
 
   const columns: ProColumnType<HrPanelJobRow>[] = useMemo(
     () => [
+      {
+        title: '操作',
+        valueType: 'option',
+        width: 100,
+        render: (_, record) => (
+          <ActionButtons
+            items={[
+              {
+                key: 'monthTask',
+                label: '任务要求',
+                perm: 'hr:requisition:task',
+                onClick: () => {
+                  setTaskTarget({ id: record.id, jobName: record.jobName });
+                  setTaskOpen(true);
+                },
+              },
+            ]}
+          />
+        ),
+      },
       {
         title: '岗位状态',
         dataIndex: 'panelStatus',
@@ -422,6 +449,15 @@ const HrPanelPage = memo(function HrPanelPage() {
         params={dateQuery}
         pagination={{ defaultPageSize: 10 }}
         scroll={{ x: 1480 }}
+        toolBarRender={() => [
+          <PermissionButton
+            key='log'
+            perm='hr:requisition:log'
+            onClick={() => setLogOpen(true)}
+          >
+            操作日志
+          </PermissionButton>,
+        ]}
         tableExtraRender={() => (
           <div className='mb-3 grid grid-cols-2 gap-3 md:grid-cols-4'>
             {STATS.map((item) => (
@@ -526,6 +562,19 @@ const HrPanelPage = memo(function HrPanelPage() {
           statusLabel: jobDetail?.panelStatusLabel,
         }}
         onClose={() => setJobDetail(null)}
+      />
+      <HrRequisitionMonthTaskDrawer
+        open={taskOpen}
+        onClose={() => {
+          setTaskOpen(false);
+          setTaskTarget(null);
+        }}
+        target={taskTarget}
+        entrySource='PANEL'
+      />
+      <HrRequisitionLogDrawer
+        open={logOpen}
+        onClose={() => setLogOpen(false)}
       />
     </div>
   );

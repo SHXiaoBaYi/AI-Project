@@ -193,8 +193,9 @@ public class HrMasterController {
     @DeleteMapping("/requisition/month-task/{id}")
     @RequiresPermission("hr:requisition:task")
     @Log(title = "招聘需求-月度任务要求", businessType = 3)
-    public Result<Void> deleteMonthTask(@PathVariable Long id) {
-        requisitionMonthTaskService.delete(id);
+    public Result<Void> deleteMonthTask(@PathVariable Long id,
+                                        @RequestParam(required = false) String entrySource) {
+        requisitionMonthTaskService.delete(id, entrySource);
         return Result.ok();
     }
 

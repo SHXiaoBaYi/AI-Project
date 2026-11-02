@@ -157,7 +157,8 @@ public class HrRequisitionMonthTaskService {
 
         Map<String, Object> after = snapshot(dto.getRequisitionId(), month);
         requisitionLogService.write(dto.getRequisitionId(), jobName, HrRequisitionLogService.ACTION_TASK,
-                buildTaskSummary(before, after, month), before.isEmpty() ? null : before, after);
+                buildTaskSummary(before, after, month), before.isEmpty() ? null : before, after,
+                dto.getEntrySource());
 
         kpiTaskService.syncForRequisition(dto.getRequisitionId());
         kpiTaskService.reevaluateCompletion(dto.getRequisitionId());
@@ -166,6 +167,11 @@ public class HrRequisitionMonthTaskService {
 
     @Transactional
     public void delete(Long id) {
+        delete(id, HrRequisitionLogService.ENTRY_REQUISITION);
+    }
+
+    @Transactional
+    public void delete(Long id, String entrySource) {
         if (id == null) {
             throw new BusinessException("请选择要删除的任务要求");
         }
@@ -197,7 +203,7 @@ public class HrRequisitionMonthTaskService {
                 WHERE id = ?
                 """, safeUser(), id);
         requisitionLogService.write(requisitionId, jobName, HrRequisitionLogService.ACTION_TASK,
-                "删除 " + month + " 任务要求", before, null);
+                "删除 " + month + " 任务要求", before, null, entrySource);
         kpiTaskService.syncForRequisition(requisitionId);
     }
 

@@ -48,4 +48,7 @@ public class HrRequisitionMonthTaskDTO {
 
     @Schema(description = "备注")
     private String remark;
+
+    @Schema(description = "操作入口：REQUISITION=招聘需求，PANEL=招聘面板")
+    private String entrySource;
 }

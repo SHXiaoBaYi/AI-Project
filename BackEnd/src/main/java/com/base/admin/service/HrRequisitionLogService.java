@@ -33,24 +33,37 @@ public class HrRequisitionLogService {
     public static final String ACTION_STATUS = "STATUS";
     /** 按月任务要求新增/修改/删除 */
     public static final String ACTION_TASK = "TASK";
+    public static final String ENTRY_REQUISITION = "REQUISITION";
+    public static final String ENTRY_PANEL = "PANEL";
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
     public void write(Long requisitionId, String jobName, String action, String summary,
                       Map<String, Object> before, Map<String, Object> after) {
+        write(requisitionId, jobName, action, summary, before, after, ENTRY_REQUISITION);
+    }
+
+    public void write(Long requisitionId, String jobName, String action, String summary,
+                      Map<String, Object> before, Map<String, Object> after, String entrySource) {
         Operator op = currentOperator();
+        String source = normalizeEntry(entrySource);
+        String finalSummary = summary == null ? "" : summary;
+        if (StringUtils.hasText(source) && !finalSummary.contains("来源：")) {
+            finalSummary = "[" + entryLabel(source) + "] " + finalSummary;
+        }
         try {
             jdbc.update("""
                     INSERT INTO hr_requisition_log
-                      (requisition_id, job_name, action, summary, before_json, after_json,
+                      (requisition_id, job_name, action, summary, entry_source, before_json, after_json,
                        operator_user_id, operator_username, operator_nickname, operated_at, is_active)
-                    VALUES (?,?,?,?,?,?,?,?,?,NOW(),1)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,NOW(),1)
                     """,
                     requisitionId,
                     jobName == null ? "" : jobName,
                     action,
-                    summary == null ? "" : truncate(summary, 1000),
+                    truncate(finalSummary, 1000),
+                    source,
                     toJson(before),
                     toJson(after),
                     op.userId(),
@@ -59,6 +72,21 @@ public class HrRequisitionLogService {
         } catch (Exception e) {
             log.warn("招聘需求操作日志写入失败 action={} reqId={}: {}", action, requisitionId, e.getMessage());
         }
+    }
+
+    public static String normalizeEntry(String entrySource) {
+        if (!StringUtils.hasText(entrySource)) {
+            return ENTRY_REQUISITION;
+        }
+        String s = entrySource.trim().toUpperCase(Locale.ROOT);
+        if (ENTRY_PANEL.equals(s)) {
+            return ENTRY_PANEL;
+        }
+        return ENTRY_REQUISITION;
+    }
+
+    public static String entryLabel(String entrySource) {
+        return ENTRY_PANEL.equalsIgnoreCase(entrySource) ? "招聘面板" : "招聘需求";
     }
 
     public Map<String, Object> loadSnapshot(Long requisitionId) {
@@ -172,6 +200,16 @@ public class HrRequisitionLogService {
             where.append(" AND action = ? ");
             args.add(query.getAction().trim().toUpperCase(Locale.ROOT));
         }
+        if (StringUtils.hasText(query.getEntrySource())) {
+            String entry = normalizeEntry(query.getEntrySource());
+            if (ENTRY_REQUISITION.equals(entry)) {
+                where.append(" AND (entry_source = ? OR entry_source IS NULL OR entry_source = '') ");
+                args.add(entry);
+            } else {
+                where.append(" AND entry_source = ? ");
+                args.add(entry);
+            }
+        }
         if (StringUtils.hasText(query.getKeyword())) {
             String like = "%" + query.getKeyword().trim() + "%";
             where.append(" AND (job_name LIKE ? OR operator_nickname LIKE ? OR operator_username LIKE ? OR summary LIKE ?) ");
@@ -195,7 +233,7 @@ public class HrRequisitionLogService {
         listArgs.add(pageSize);
         listArgs.add(offset);
         List<HrRequisitionLogVO> rows = jdbc.query("""
-                SELECT id, requisition_id, job_name, action, summary, before_json, after_json,
+                SELECT id, requisition_id, job_name, action, summary, entry_source, before_json, after_json,
                        operator_user_id, operator_username, operator_nickname, operated_at
                 FROM hr_requisition_log
                 """ + where + " ORDER BY operated_at DESC, id DESC LIMIT ? OFFSET ?",
@@ -209,6 +247,14 @@ public class HrRequisitionLogService {
                     vo.setAction(action);
                     vo.setActionLabel(actionLabel(action));
                     vo.setSummary(rs.getString("summary"));
+                    String entry = "";
+                    try {
+                        entry = rs.getString("entry_source");
+                    } catch (Exception ignored) {
+                        // 旧库无列
+                    }
+                    vo.setEntrySource(entry);
+                    vo.setEntrySourceLabel(entryLabel(entry));
                     vo.setBeforeJson(rs.getString("before_json"));
                     vo.setAfterJson(rs.getString("after_json"));
                     long uid = rs.getLong("operator_user_id");
