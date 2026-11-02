@@ -29,9 +29,12 @@ import com.base.admin.domain.dto.HrJobCandidateQueryDTO;
 import com.base.admin.domain.dto.HrJobCommStatsQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
 import com.base.admin.domain.dto.HrRequisitionLogQueryDTO;
+import com.base.admin.domain.dto.HrRequisitionMonthTaskDTO;
 import com.base.admin.domain.dto.HrRequisitionStatusDTO;
 import com.base.admin.domain.vo.HrRequisitionLogVO;
+import com.base.admin.domain.vo.HrRequisitionMonthTaskVO;
 import com.base.admin.service.HrRequisitionLogService;
+import com.base.admin.service.HrRequisitionMonthTaskService;
 import com.base.admin.domain.dto.HrBaseDictDTO;
 import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
@@ -88,6 +91,7 @@ public class HrMasterController {
     private final HrApplicationAiService applicationAiService;
     private final com.base.admin.service.HrResumeParseService resumeParseService;
     private final HrRequisitionLogService requisitionLogService;
+    private final HrRequisitionMonthTaskService requisitionMonthTaskService;
 
     @Operation(summary = "需求列表")
     @PostMapping("/requisition/list")
@@ -168,6 +172,30 @@ public class HrMasterController {
     @RequiresPermission("hr:requisition:log")
     public Result<PageResult<HrRequisitionLogVO>> requisitionLogs(@RequestBody(required = false) HrRequisitionLogQueryDTO query) {
         return Result.ok(requisitionLogService.page(query == null ? new HrRequisitionLogQueryDTO() : query));
+    }
+
+    @Operation(summary = "岗位按月任务要求列表")
+    @GetMapping("/requisition/{id}/month-tasks")
+    @RequiresPermission({"hr:requisition:task", "hr:requisition:list"})
+    public Result<List<HrRequisitionMonthTaskVO>> listMonthTasks(@PathVariable Long id) {
+        return Result.ok(requisitionMonthTaskService.listByRequisition(id));
+    }
+
+    @Operation(summary = "保存岗位按月任务要求（仅招聘管理员）")
+    @PutMapping("/requisition/month-task")
+    @RequiresPermission("hr:requisition:task")
+    @Log(title = "招聘需求-月度任务要求", businessType = 2)
+    public Result<Long> saveMonthTask(@Valid @RequestBody HrRequisitionMonthTaskDTO dto) {
+        return Result.ok(requisitionMonthTaskService.save(dto));
+    }
+
+    @Operation(summary = "删除岗位按月任务要求（仅招聘管理员）")
+    @DeleteMapping("/requisition/month-task/{id}")
+    @RequiresPermission("hr:requisition:task")
+    @Log(title = "招聘需求-月度任务要求", businessType = 3)
+    public Result<Void> deleteMonthTask(@PathVariable Long id) {
+        requisitionMonthTaskService.delete(id);
+        return Result.ok();
     }
 
     @Operation(summary = "投递列表")

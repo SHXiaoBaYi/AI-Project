@@ -31,6 +31,8 @@ public class HrRequisitionLogService {
     public static final String ACTION_UPDATE = "UPDATE";
     public static final String ACTION_DELETE = "DELETE";
     public static final String ACTION_STATUS = "STATUS";
+    /** 按月任务要求新增/修改/删除 */
+    public static final String ACTION_TASK = "TASK";
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -228,6 +230,7 @@ public class HrRequisitionLogService {
             case ACTION_UPDATE -> "修改";
             case ACTION_DELETE -> "删除";
             case ACTION_STATUS -> "改状态";
+            case ACTION_TASK -> "任务要求";
             default -> action;
         };
     }

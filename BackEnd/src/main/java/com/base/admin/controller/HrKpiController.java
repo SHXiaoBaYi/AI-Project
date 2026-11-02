@@ -4,11 +4,9 @@ import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.Result;
 import com.base.admin.domain.dto.HrKpiAssessmentQueryDTO;
 import com.base.admin.domain.dto.HrKpiQueryDTO;
-import com.base.admin.domain.dto.HrKpiScoreRuleDTO;
 import com.base.admin.domain.dto.HrKpiTaskDueUpdateDTO;
 import com.base.admin.domain.vo.HrKpiAssessmentVO;
 import com.base.admin.domain.vo.HrKpiBoardVO;
-import com.base.admin.domain.vo.HrKpiScoreRuleVO;
 import com.base.admin.service.HrKpiService;
 import com.base.admin.service.HrKpiTaskService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,7 +14,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -62,24 +59,9 @@ public class HrKpiController {
         return Result.ok();
     }
 
-    @Operation(summary = "考核计分规则")
-    @GetMapping("/score-rule")
-    @RequiresPermission({"hr:kpi-rule:view", "hr:kpi:view"})
-    public Result<HrKpiScoreRuleVO> scoreRule() {
-        return Result.ok(kpiTaskService.getScoreRule());
-    }
-
-    @Operation(summary = "保存考核计分规则")
-    @PutMapping("/score-rule")
-    @RequiresPermission("hr:kpi-rule:edit")
-    public Result<Void> saveScoreRule(@Valid @RequestBody HrKpiScoreRuleDTO dto) {
-        kpiTaskService.saveScoreRule(dto);
-        return Result.ok();
-    }
-
-    @Operation(summary = "按历史入职/合格简历全量回填考核任务")
+    @Operation(summary = "按历史入职/合格简历全量回填考核任务（按岗位月度任务要求）")
     @PostMapping("/assessment/backfill")
-    @RequiresPermission({"hr:kpi-rule:edit", "hr:kpi:view"})
+    @RequiresPermission("hr:kpi:view")
     public Result<Integer> backfillAssessment() {
         return Result.ok(kpiTaskService.backfillAllHistorical());
     }

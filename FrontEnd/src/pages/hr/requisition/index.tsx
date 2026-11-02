@@ -1,6 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Drawer, Modal, Tag } from 'antd';
+import { App, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Select, Space, Tag } from 'antd';
 import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
@@ -10,14 +10,18 @@ import {
   changeHrRequisitionStatusApi,
   deleteHrRequisitionApi,
   deleteHrRequisitionBatchApi,
+  deleteHrRequisitionMonthTaskApi,
   getHrDepartmentsApi,
   getHrDictOptionsApi,
   getHrRequisitionsApi,
   getHrTargetOptionsApi,
   getHrUsersApi,
   listHrRequisitionLogsApi,
+  listHrRequisitionMonthTasksApi,
   saveHrRequisitionApi,
+  saveHrRequisitionMonthTaskApi,
   type HrRequisitionLog,
+  type HrRequisitionMonthTask,
 } from '@/api/hr';
 
 const LOG_ACTIONS = [
@@ -25,6 +29,7 @@ const LOG_ACTIONS = [
   { label: '修改', value: 'UPDATE' },
   { label: '删除', value: 'DELETE' },
   { label: '改状态', value: 'STATUS' },
+  { label: '任务要求', value: 'TASK' },
 ];
 
 const STATUS = [
@@ -78,7 +83,6 @@ interface Req {
   educationReq?: string;
   experienceReq?: string;
   skillReq?: string;
-  taskRequirement?: string;
   status: string;
   locationCode: string;
   deptId?: number;
@@ -161,7 +165,6 @@ function mapRow(raw: Record<string, unknown>): Req {
     educationReq: textOf(raw.education_req),
     experienceReq: textOf(raw.experience_req),
     skillReq: textOf(raw.skill_req),
-    taskRequirement: textOf(raw.task_requirement),
     status: String(raw.status ?? ''),
     locationCode: String(raw.location_code ?? ''),
     deptId: raw.dept_id == null ? undefined : Number(raw.dept_id),
@@ -208,6 +211,20 @@ const RequisitionPage = memo(function RequisitionPage() {
   const [editing, setEditing] = useState<Req | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const logActionRef = useRef<ActionType>(null);
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [taskReq, setTaskReq] = useState<Req | null>(null);
+  const [monthTasks, setMonthTasks] = useState<HrRequisitionMonthTask[]>([]);
+  const [taskLoading, setTaskLoading] = useState(false);
+  const [taskSaving, setTaskSaving] = useState(false);
+  const [taskForm] = Form.useForm<{
+    settleMonth: dayjs.Dayjs;
+    priorityCode: string;
+    achieveMode: string;
+    targetCount: number;
+    score: number;
+    remark?: string;
+  }>();
+  const taskPriority = Form.useWatch('priorityCode', taskForm);
   const [depts, setDepts] = useState<{ value: number; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [interviewers, setInterviewers] = useState<{ value: number; label: string }[]>([]);
@@ -221,6 +238,33 @@ const RequisitionPage = memo(function RequisitionPage() {
     });
     return [...map.entries()].map(([value, label]) => ({ value, label }));
   }, [users, interviewers]);
+
+  const reloadMonthTasks = useCallback(async (requisitionId: number) => {
+    setTaskLoading(true);
+    try {
+      const rows = await listHrRequisitionMonthTasksApi(requisitionId);
+      setMonthTasks(rows || []);
+    } finally {
+      setTaskLoading(false);
+    }
+  }, []);
+
+  const openMonthTaskDrawer = useCallback(
+    (record: Req) => {
+      setTaskReq(record);
+      setTaskOpen(true);
+      taskForm.setFieldsValue({
+        settleMonth: dayjs().startOf('month'),
+        priorityCode: record.jobPriorityCode === 'P1' ? 'P1' : 'P0',
+        achieveMode: 'ONBOARD',
+        targetCount: 1,
+        score: 1,
+        remark: undefined,
+      });
+      void reloadMonthTasks(record.id);
+    },
+    [reloadMonthTasks, taskForm],
+  );
 
   useEffect(() => {
     getHrDepartmentsApi().then((tree) => setDepts(flattenDepts(tree as unknown as Dept[])));
@@ -319,21 +363,6 @@ const RequisitionPage = memo(function RequisitionPage() {
         search: false,
         fieldProps: { options: jobPriorities, allowClear: true, showSearch: true, optionFilterProp: 'label' },
         render: (_, record) => jobPriorities.find((item) => item.value === record.jobPriorityCode)?.label || '—',
-      },
-      {
-        title: '任务要求',
-        dataIndex: 'taskRequirement',
-        valueType: 'textarea',
-        search: false,
-        width: 200,
-        ellipsis: true,
-        fieldProps: {
-          rows: 2,
-          maxLength: 500,
-          showCount: true,
-          placeholder: '如 P0 入职计分、P1 合格简历 N 份等',
-        },
-        render: (_, record) => record.taskRequirement || '—',
       },
       {
         title: '重要性',
@@ -500,6 +529,12 @@ const RequisitionPage = memo(function RequisitionPage() {
                   setOpen(true);
                 },
               },
+              {
+                key: 'monthTask',
+                label: '任务要求',
+                perm: 'hr:requisition:task',
+                onClick: () => openMonthTaskDrawer(record),
+              },
               ...(record.status === 'OPEN'
                 ? [
                     {
@@ -561,7 +596,7 @@ const RequisitionPage = memo(function RequisitionPage() {
         ),
       },
     ],
-    [ccOptions, depts, interviewers, jobPriorities, message, targets, users, workAddresses],
+    [ccOptions, depts, interviewers, jobPriorities, message, openMonthTaskDrawer, targets, users, workAddresses],
   );
 
   return (
@@ -689,7 +724,6 @@ const RequisitionPage = memo(function RequisitionPage() {
             educationReq: form.educationReq,
             experienceReq: form.experienceReq,
             skillReq: form.skillReq,
-            taskRequirement: form.taskRequirement,
             workAddressId: form.workAddressId,
             deptId: form.deptId,
             headcount: form.headcount,
@@ -787,7 +821,9 @@ const RequisitionPage = memo(function RequisitionPage() {
                       ? 'error'
                       : r.action === 'STATUS'
                         ? 'warning'
-                        : 'processing';
+                        : r.action === 'TASK'
+                          ? 'geekblue'
+                          : 'processing';
                 return <Tag color={color}>{r.actionLabel || r.action || '—'}</Tag>;
               },
             },
@@ -842,6 +878,208 @@ const RequisitionPage = memo(function RequisitionPage() {
             });
             return { data: res.rows || [], success: true, total: res.total || 0 };
           }}
+        />
+      </Drawer>
+      <Drawer
+        title={taskReq ? `月度任务要求 · ${taskReq.jobName}` : '月度任务要求'}
+        width={720}
+        open={taskOpen}
+        onClose={() => {
+          setTaskOpen(false);
+          setTaskReq(null);
+          setMonthTasks([]);
+        }}
+        destroyOnClose
+      >
+        <div className='mb-4 text-xs leading-relaxed text-neutral-500'>
+          按自然月配置本岗位考核口径：P0 仅「到岗 x 人得 y 分」；P1
+          在「到岗」与「合格简历」中二选一。仅招聘管理员可改，变更写入操作日志。
+        </div>
+        <Form
+          form={taskForm}
+          layout='vertical'
+          className='mb-4 rounded border border-neutral-200 p-3'
+          onFinish={async (values) => {
+            if (!taskReq) return;
+            setTaskSaving(true);
+            try {
+              const priority = values.priorityCode;
+              const mode = priority === 'P0' ? 'ONBOARD' : values.achieveMode;
+              await saveHrRequisitionMonthTaskApi({
+                requisitionId: taskReq.id,
+                settleMonth: values.settleMonth.format('YYYY-MM'),
+                priorityCode: priority,
+                achieveMode: mode,
+                targetCount: Number(values.targetCount),
+                score: Number(values.score),
+                remark: values.remark,
+              });
+              message.success('已保存月度任务要求');
+              await reloadMonthTasks(taskReq.id);
+            } finally {
+              setTaskSaving(false);
+            }
+          }}
+        >
+          <div className='grid grid-cols-2 gap-x-3'>
+            <Form.Item
+              name='settleMonth'
+              label='月份'
+              rules={[{ required: true, message: '请选择月份' }]}
+            >
+              <DatePicker
+                picker='month'
+                className='w-full'
+                allowClear={false}
+              />
+            </Form.Item>
+            <Form.Item
+              name='priorityCode'
+              label='当月优先级'
+              rules={[{ required: true, message: '请选择 P0/P1' }]}
+            >
+              <Select
+                options={[
+                  { label: 'P0', value: 'P0' },
+                  { label: 'P1', value: 'P1' },
+                ]}
+                onChange={(v) => {
+                  if (v === 'P0') taskForm.setFieldValue('achieveMode', 'ONBOARD');
+                }}
+              />
+            </Form.Item>
+          </div>
+          <Form.Item
+            name='achieveMode'
+            label='达成方式'
+            rules={[{ required: true, message: '请选择达成方式' }]}
+            extra={taskPriority === 'P0' ? 'P0 固定为到岗' : 'P1 只能二选一'}
+          >
+            <Radio.Group disabled={taskPriority === 'P0'}>
+              <Radio value='ONBOARD'>到岗（入职）</Radio>
+              <Radio value='QUALIFIED_RESUME'>合格简历</Radio>
+            </Radio.Group>
+          </Form.Item>
+          <div className='grid grid-cols-2 gap-x-3'>
+            <Form.Item
+              name='targetCount'
+              label='目标数量'
+              rules={[{ required: true, message: '请填写目标数量' }]}
+            >
+              <InputNumber
+                min={1}
+                max={999}
+                precision={0}
+                className='w-full'
+                addonAfter={
+                  taskPriority === 'P1' && taskForm.getFieldValue('achieveMode') === 'QUALIFIED_RESUME' ? '份' : '人'
+                }
+              />
+            </Form.Item>
+            <Form.Item
+              name='score'
+              label='达成得分'
+              rules={[{ required: true, message: '请填写得分' }]}
+            >
+              <InputNumber
+                min={0}
+                max={999}
+                precision={0}
+                className='w-full'
+                addonAfter='分'
+              />
+            </Form.Item>
+          </div>
+          <Form.Item
+            name='remark'
+            label='备注'
+          >
+            <Input.TextArea
+              rows={2}
+              maxLength={255}
+              showCount
+            />
+          </Form.Item>
+          <Space>
+            <PermissionButton
+              type='primary'
+              htmlType='submit'
+              perm='hr:requisition:task'
+              loading={taskSaving}
+            >
+              保存本月配置
+            </PermissionButton>
+          </Space>
+        </Form>
+        <BaseProTable<HrRequisitionMonthTask>
+          rowKey='id'
+          headerTitle='已配置月份'
+          search={false}
+          options={false}
+          pagination={false}
+          loading={taskLoading}
+          dataSource={monthTasks}
+          columns={[
+            {
+              title: '操作',
+              valueType: 'option',
+              width: 140,
+              render: (_, row) => (
+                <ActionButtons
+                  items={[
+                    {
+                      key: 'edit',
+                      label: '载入编辑',
+                      perm: 'hr:requisition:task',
+                      onClick: () => {
+                        taskForm.setFieldsValue({
+                          settleMonth: dayjs(`${row.settleMonth}-01`),
+                          priorityCode: row.priorityCode,
+                          achieveMode: row.priorityCode === 'P0' ? 'ONBOARD' : row.achieveMode,
+                          targetCount: row.targetCount,
+                          score: row.score,
+                          remark: row.remark,
+                        });
+                      },
+                    },
+                    {
+                      key: 'delete',
+                      label: '删除',
+                      perm: 'hr:requisition:task',
+                      confirmTitle: `确认删除 ${row.settleMonth} 的任务要求？`,
+                      onClick: async () => {
+                        if (!row.id || !taskReq) return;
+                        await deleteHrRequisitionMonthTaskApi(row.id);
+                        message.success('已删除');
+                        await reloadMonthTasks(taskReq.id);
+                      },
+                    },
+                  ]}
+                />
+              ),
+            },
+            { title: '月份', dataIndex: 'settleMonth', width: 100 },
+            {
+              title: '优先级',
+              dataIndex: 'priorityCode',
+              width: 72,
+              render: (_, r) => <Tag color={r.priorityCode === 'P0' ? 'red' : 'blue'}>{r.priorityCode}</Tag>,
+            },
+            {
+              title: '达成方式',
+              dataIndex: 'achieveModeLabel',
+              width: 100,
+              render: (_, r) => r.achieveModeLabel || r.achieveMode,
+            },
+            {
+              title: '目标',
+              width: 90,
+              render: (_, r) => `${r.targetCount}${r.achieveMode === 'QUALIFIED_RESUME' ? '份' : '人'}`,
+            },
+            { title: '得分', dataIndex: 'score', width: 72 },
+            { title: '更新人', dataIndex: 'updateBy', width: 90, ellipsis: true },
+            { title: '更新时间', dataIndex: 'updateTime', width: 160, ellipsis: true },
+          ]}
         />
       </Drawer>
     </>

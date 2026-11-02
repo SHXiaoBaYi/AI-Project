@@ -49,6 +49,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureBaseDictTable();
         ensureRequisitionPanelColumns();
         ensureRequisitionTaskRequirementAndLog();
+        ensureRequisitionMonthTaskTable();
+        deactivateKpiScoreRuleMenus();
         backfillWorkAddressFromLocation();
         ensureCandidateProfileColumns();
         alignStageDisplayNames();
@@ -304,8 +306,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(246, "电话&面试不合适理由编辑", 245, 1, "", "", "F", "hr:unsuitable:edit", "#", "");
         menu(247, "岗位优先级", 218, 8, "hr/job-priority", "hr/job-priority/index", "C", "hr:job-priority:list", "ThunderboltOutlined", "P0/P1等到岗优先级，独立于紧急/优先/常规");
         menu(248, "岗位优先级编辑", 247, 1, "", "", "F", "hr:job-priority:edit", "#", "");
-        menu(263, "考核计分规则", 218, 9, "hr/kpi-rule", "hr/kpi-rule/index", "C", "hr:kpi-rule:view", "SettingOutlined", "P0入职计分、P1合格简历或入职、任务周期");
-        menu(264, "考核计分规则编辑", 263, 1, "", "", "F", "hr:kpi-rule:edit", "#", "");
+        // 263/264 考核计分规则已废弃（改按岗位按月任务要求），由 deactivateKpiScoreRuleMenus 下线
         menu(205, "发起邀约", 203, 1, "", "", "F", "hr:invite:add", "#", "");
         menu(206, "取消邀约", 203, 2, "", "", "F", "hr:invite:cancel", "#", "");
         menu(207, "看板导出", 201, 1, "", "", "F", "hr:board:export", "#", "");
@@ -317,6 +318,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(213, "需求修改", 202, 2, "", "", "F", "hr:requisition:edit", "#", "含暂缓、归档、恢复");
         menu(214, "需求删除", 202, 3, "", "", "F", "hr:requisition:delete", "#", "");
         menu(265, "需求操作日志", 202, 4, "", "", "F", "hr:requisition:log", "#", "仅招聘管理员可查看招聘需求CUD日志");
+        menu(266, "月度任务要求", 202, 5, "", "", "F", "hr:requisition:task", "#", "按岗位按月配置P0/P1任务要求，仅招聘管理员");
         menu(215, "候选人新增", 203, 3, "", "", "F", "hr:application:add", "#", "");
         menu(216, "候选人修改", 203, 4, "", "", "F", "hr:application:edit", "#", "");
         menu(217, "候选人删除", 203, 5, "", "", "F", "hr:application:delete", "#", "");
@@ -332,10 +334,10 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 263, 264, 265);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 263, 264, 265);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262, 263);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261, 262, 263);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 265, 266);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 265, 266);
+        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262);
+        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261, 262);
         grant(plain, 200, 201, 209, 234, 235, 237, 249);
         grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235, 249, 261);
     }
@@ -477,16 +479,16 @@ public class HrSchemaMigrator implements ApplicationRunner {
         // 历史列 dingtalk_open_conversation_id 已废弃（催评改发面试官工作通知），保留列以免破坏存量库
     }
 
-    /** 招聘需求任务要求字段 + CUD 操作日志表 */
+    /** 招聘需求 CUD / 月度任务要求 操作日志表（旧自由文本 task_requirement 列保留但不使用） */
     private void ensureRequisitionTaskRequirementAndLog() {
         addColumnIfMissing("hr_requisition", "task_requirement",
-                "ALTER TABLE hr_requisition ADD COLUMN task_requirement VARCHAR(500) NULL COMMENT '任务要求，如P0/P1及简历份数等' AFTER skill_req");
+                "ALTER TABLE hr_requisition ADD COLUMN task_requirement VARCHAR(500) NULL COMMENT '已废弃：改用按月任务要求表' AFTER skill_req");
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS hr_requisition_log (
                   id                  BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
                   requisition_id      BIGINT       NULL                    COMMENT '需求ID，删除后仍保留',
                   job_name            VARCHAR(128) DEFAULT ''             COMMENT '岗位名快照',
-                  action              VARCHAR(32)  NOT NULL                COMMENT 'CREATE/UPDATE/DELETE/STATUS',
+                  action              VARCHAR(32)  NOT NULL                COMMENT 'CREATE/UPDATE/DELETE/STATUS/TASK',
                   summary             VARCHAR(1000) DEFAULT ''            COMMENT '做了什么（可读摘要）',
                   before_json         MEDIUMTEXT   NULL                    COMMENT '变更前快照JSON',
                   after_json          MEDIUMTEXT   NULL                    COMMENT '变更后快照JSON',
@@ -502,6 +504,42 @@ public class HrSchemaMigrator implements ApplicationRunner {
                   KEY idx_hr_req_log_action (action)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘需求CUD操作日志'
                 """);
+    }
+
+    /** 岗位按月任务要求：P0 入职计分；P1 入职或合格简历二选一 */
+    private void ensureRequisitionMonthTaskTable() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_requisition_month_task (
+                  id               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  requisition_id   BIGINT       NOT NULL                COMMENT '招聘需求',
+                  settle_month     CHAR(7)      NOT NULL                COMMENT '核算月 YYYY-MM',
+                  priority_code    VARCHAR(8)   NOT NULL                COMMENT 'P0/P1',
+                  achieve_mode     VARCHAR(32)  NOT NULL                COMMENT 'ONBOARD入职 / QUALIFIED_RESUME合格简历',
+                  target_count     INT          NOT NULL DEFAULT 1      COMMENT '入职人数或合格简历份数',
+                  score            INT          NOT NULL DEFAULT 1      COMMENT '达成后得几分',
+                  remark           VARCHAR(255) NULL                    COMMENT '备注',
+                  create_by        VARCHAR(64)  DEFAULT ''              COMMENT '创建者',
+                  create_time      DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  update_by        VARCHAR(64)  DEFAULT ''              COMMENT '更新者',
+                  update_time      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  is_active        TINYINT      NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+                  PRIMARY KEY (id),
+                  UNIQUE KEY uk_hr_req_month_task (requisition_id, settle_month),
+                  KEY idx_hr_req_month_task_month (settle_month)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘需求按月任务要求'
+                """);
+    }
+
+    /** 统一考核计分规则菜单下线（改按岗位按月配置） */
+    private void deactivateKpiScoreRuleMenus() {
+        int n = jdbc.update("""
+                UPDATE sys_menu SET is_active = 0, visible = 0, status = 1,
+                  remark = CONCAT(IFNULL(remark,''), ' [已废弃：改按岗位按月任务要求]')
+                WHERE menu_id IN (263, 264) AND is_active = 1
+                """);
+        if (n > 0) {
+            log.info("已下线考核计分规则菜单 menu_id=263/264 count={}", n);
+        }
     }
 
     /** P0/P1 考核任务 + 面试「简历是否合格」字段 */

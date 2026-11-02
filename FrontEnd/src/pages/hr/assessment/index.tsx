@@ -162,9 +162,7 @@ const AssessmentPage = memo(function AssessmentPage() {
   const baseScore = data?.baseScore ?? 30;
   const weightP0 = data?.weightP0 ?? 2;
   const weightP1 = data?.weightP1 ?? 1;
-  const p0OnboardNeed = data?.p0OnboardCount ?? 1;
   const p1ResumeNeed = data?.p1QualifiedResumeCount ?? 3;
-  const p1OnboardNeed = data?.p1OnboardCount ?? 1;
   const overallMax = data?.overallScoreMax ?? (data?.ownerCount ?? data?.owners?.length ?? 0) * baseScore;
   const overallAttain = scoreAttainPct(data?.overallScore, overallMax);
   const overallP0Done = (data?.owners ?? []).reduce((n, o) => n + (o.p0Done ?? 0), 0);
@@ -315,8 +313,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           type='secondary'
           className='!mt-2 !mb-0 text-xs leading-relaxed'
         >
-          {data?.scoreRuleHint ||
-            `基准分${baseScore}；P0每入职${p0OnboardNeed}人记${weightP0}分；P1满${p1ResumeNeed}份合格简历记${weightP1}分（未满按份折算、最后一份补齐；已入职人选简历不计），或入职${p1OnboardNeed}人记${weightP1}分`}
+          {data?.scoreRuleHint || '按各岗位当月任务要求（P0/P1、到岗或合格简历二选一）计分；未配置岗位本月不计分。'}
         </Typography.Paragraph>
       </Card>
 
@@ -347,7 +344,7 @@ const AssessmentPage = memo(function AssessmentPage() {
               />
               <div className='text-xs text-neutral-500'>达成 {overallAttain}%</div>
               <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
-                各人已得分之和 / ({data?.ownerCount ?? data?.owners?.length ?? 0}人 × 基准分{baseScore})
+                各人已得分之和 / 本月已配置任务应得分合计
                 <br />
                 P0 入职 {overallP0Done} · P1 入职 {overallP1Onboard}
                 {overallResumeCnt > 0 ? `  简历合格${overallResumeCnt}份(+${fmtScore(overallResumeScore)})` : ''}
@@ -355,7 +352,8 @@ const AssessmentPage = memo(function AssessmentPage() {
             </Card>
           </Col>
           {(data?.owners ?? []).map((o) => {
-            const attain = scoreAttainPct(o.score, baseScore);
+            const ownerMax = o.totalWeight != null && o.totalWeight > 0 ? o.totalWeight : baseScore;
+            const attain = scoreAttainPct(o.score, ownerMax);
             return (
               <Col
                 key={o.ownerUserId}
@@ -371,7 +369,7 @@ const AssessmentPage = memo(function AssessmentPage() {
                   <div className='mb-2 truncate font-medium'>{o.ownerName || o.ownerUserId}</div>
                   <Statistic
                     title='考核得分'
-                    value={scoreOverBase(o.score, baseScore)}
+                    value={scoreOverBase(o.score, ownerMax)}
                   />
                   <Progress
                     percent={attain}

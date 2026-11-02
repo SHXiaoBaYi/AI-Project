@@ -1058,6 +1058,42 @@ export function listHrRequisitionLogsApi(data: {
   return request.post<unknown, { total: number; rows: HrRequisitionLog[] }>('/hr/requisition/log/list', data);
 }
 
+export type HrRequisitionMonthTask = {
+  id?: number;
+  requisitionId: number;
+  jobName?: string;
+  settleMonth: string;
+  priorityCode: string;
+  achieveMode: string;
+  achieveModeLabel?: string;
+  targetCount: number;
+  score: number;
+  remark?: string;
+  updateBy?: string;
+  updateTime?: string;
+};
+
+export function listHrRequisitionMonthTasksApi(requisitionId: number) {
+  return request.get<unknown, HrRequisitionMonthTask[]>(`/hr/requisition/${requisitionId}/month-tasks`);
+}
+
+export function saveHrRequisitionMonthTaskApi(data: {
+  id?: number;
+  requisitionId: number;
+  settleMonth: string;
+  priorityCode: string;
+  achieveMode: string;
+  targetCount: number;
+  score: number;
+  remark?: string;
+}) {
+  return request.put<unknown, number>('/hr/requisition/month-task', data);
+}
+
+export function deleteHrRequisitionMonthTaskApi(id: number) {
+  return request.delete(`/hr/requisition/month-task/${id}`);
+}
+
 export function getHrChannelsApi() {
   return request.get<unknown, { channelCode: string; channelName: string }[]>('/hr/channel/options');
 }
