@@ -18,14 +18,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 扫码提问：全库向量(+关键词)召回 → 小池 AI 精排 → 硬闸门后才 HIT。
+ * 扫码提问：先理解用户意图，再在题录里选同一操作的题目。
  * <ul>
- *   <li>召回：全库算分，取 Top {@link #RECALL_TOP}</li>
- *   <li>精排：Top {@link #RERANK_POOL} 交 AI 打意图分</li>
- *   <li>≥0.9 且硬闸门通过：HIT 直出答案</li>
- *   <li>[0.8, 0.9)：相近原题点选</li>
- *   <li>[0.75, 0.8)：不确定建议</li>
- *   <li>更低：未命中（弱向量建议仅保留有词面/族重合的）</li>
+ *   <li>AI 先抽出简短意图（在问什么操作）</li>
+ *   <li>题量不大时直接全量题录交给 AI 点选；否则向量粗召回后再点选</li>
+ *   <li>AI 必须选出「同一操作」的题，或明确 index=0（题录没有）</li>
+ *   <li>≥0.9 且硬闸门通过才 HIT；否则建议/未命中，绝不硬凑答案</li>
  * </ul>
  */
 @Slf4j
@@ -38,10 +36,12 @@ public class TrainQaSearchService {
     private static final float NEAR = 0.80f;
     /** [SUGGEST, NEAR)：不确定建议 */
     private static final float SUGGEST = 0.75f;
-    /** 全库粗召回条数 */
+    /** 全库粗召回条数（仅题太多时） */
     private static final int RECALL_TOP = 100;
-    /** 交给 AI 精排的条数 */
-    private static final int RERANK_POOL = 20;
+    /** 向量粗召回后交给 AI 点选的条数 */
+    private static final int RERANK_POOL = 40;
+    /** 题量不超过此数时，跳过向量，直接全量题录给 AI */
+    private static final int FULL_CATALOG_LIMIT = 120;
     private static final int SUGGEST_LIMIT = 3;
     /** 关键词重合对召回分的加成上限 */
     private static final float KEYWORD_BONUS = 0.18f;
@@ -85,14 +85,22 @@ public class TrainQaSearchService {
         if (entries.isEmpty()) {
             return java.util.Optional.empty();
         }
-        List<Scored> ranked = rank(question, entries);
-        if (ranked.isEmpty()) {
-            return java.util.Optional.of(miss(cat, oldVersions));
+
+        List<Scored> pool;
+        if (aiChatService.isEnabled() && entries.size() <= FULL_CATALOG_LIMIT) {
+            pool = catalogPool(entries);
+        } else {
+            List<Scored> ranked = rank(question, entries);
+            if (ranked.isEmpty()) {
+                return java.util.Optional.of(miss(cat, oldVersions));
+            }
+            pool = new ArrayList<>(ranked.subList(0, Math.min(RERANK_POOL, ranked.size())));
         }
 
-        List<Scored> pool = new ArrayList<>(ranked.subList(0, Math.min(RERANK_POOL, ranked.size())));
+        String intent = null;
         if (aiChatService.isEnabled()) {
-            applyIntentScores(question, pool);
+            intent = extractIntent(question);
+            applyIntentPick(question, intent, pool);
             pool.sort(Comparator.comparingDouble((Scored s) -> s.intent).reversed());
         } else {
             for (Scored s : pool) {
@@ -101,13 +109,14 @@ public class TrainQaSearchService {
             pool.sort(Comparator.comparingDouble((Scored s) -> s.intent).reversed());
         }
 
-        // HIT：意图够高且硬闸门通过；高分但闸门失败则降级，避免错答
+        // HIT：AI 确认同一操作且硬闸门通过；高分但闸门失败则降级
         for (Scored s : pool) {
             if (s.intent < HIT) {
                 break;
             }
             if (passesEntryGate(question, s.entry)) {
-                log.info("答疑向量HIT question={} score={} title={}", question, s.intent, s.entry.question);
+                log.info("答疑HIT question={} intent={} score={} title={}",
+                        question, intent, s.intent, s.entry.question);
                 return java.util.Optional.of(hit(s.entry, MSG_HIT));
             }
             log.info("答疑HIT被硬闸门拦截 question={} score={} title={}", question, s.intent, s.entry.question);
@@ -123,9 +132,12 @@ public class TrainQaSearchService {
         if (best >= SUGGEST) {
             return java.util.Optional.of(suggestByIntent(gatedPool, MSG_SUGGEST, SUGGEST));
         }
-        TrainAssistantAskVO related = suggestByVector(question, ranked, MSG_NEAR);
-        if (related.getItems() != null && !related.getItems().isEmpty()) {
-            return java.util.Optional.of(related);
+        if (!aiChatService.isEnabled() || entries.size() > FULL_CATALOG_LIMIT) {
+            List<Scored> ranked = rank(question, entries);
+            TrainAssistantAskVO related = suggestByVector(question, ranked, MSG_NEAR);
+            if (related.getItems() != null && !related.getItems().isEmpty()) {
+                return java.util.Optional.of(related);
+            }
         }
         return java.util.Optional.of(miss(cat, oldVersions));
     }
@@ -148,6 +160,20 @@ public class TrainQaSearchService {
                   )
                 """, Integer.class, cat);
         return n != null && n > 0;
+    }
+
+    private List<Scored> catalogPool(List<TrainQaVectorIndex.Entry> entries) {
+        List<Scored> pool = new ArrayList<>(entries.size());
+        for (TrainQaVectorIndex.Entry e : entries) {
+            Scored s = new Scored();
+            s.entry = e;
+            s.raw = 0f;
+            s.keyword = TrainQaIntentMatcher.keywordOverlap("", e.question);
+            s.rank = 0f;
+            s.intent = 0f;
+            pool.add(s);
+        }
+        return pool;
     }
 
     /** 全库打分，取 Top {@link #RECALL_TOP}：向量 + 关键词重合 + 措辞命中。 */
@@ -197,47 +223,133 @@ public class TrainQaSearchService {
     }
 
     /**
-     * 让模型给每个候选题干打「用户意图吻合度」0～1。
-     * 解析失败时保留向量/关键词分；不再把「仅 index」抬到 HIT，避免千题错配。
+     * 第一步：把口语问法收敛成「在问什么操作」的短意图，供后续点选题录。
      */
-    private void applyIntentScores(String question, List<Scored> pool) {
+    private String extractIntent(String question) {
+        String system = """
+                你是收银门店操作培训的意图理解助手。
+                根据用户原话，用一句短中文说明「用户想完成的操作」，不要回答操作步骤。
+                规则：
+                - 只描述用户意图，15~40 字
+                - 区分易混操作：退款/退货/退单 ≠ 寄存；会员登记/开卡 ≠ 积分兑换；肉票/储值卡结算 ≠ 长短款对账；出票 ≠ 查流水
+                - 若原话在抱怨界面/功能缺失（如不能复制粘贴），意图里要保留该具体诉求
+                只输出 JSON：{"intent":"..."}
+                """;
+        String user = "用户原话：\n" + question;
+        try {
+            String raw = aiChatService.chat(system, user, null, 0.1);
+            String intent = parseIntentJson(raw);
+            if (StringUtils.hasText(intent)) {
+                log.info("答疑意图抽取 question={} intent={}", question, intent);
+                return intent.trim();
+            }
+        } catch (Exception e) {
+            log.warn("答疑意图抽取失败: {}", e.getMessage());
+        }
+        return question;
+    }
+
+    private String parseIntentJson(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(extractJsonObject(raw));
+            JsonNode intent = root.get("intent");
+            if (intent != null && intent.isTextual() && StringUtils.hasText(intent.asText())) {
+                return intent.asText().trim();
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        return null;
+    }
+
+    /**
+     * 第二步：按「已理解的意图」在候选题录里点选同一操作的题目。
+     * 题录没有对应操作时必须 index=0，禁止用沾边题凑答案。
+     */
+    private void applyIntentPick(String question, String intent, List<Scored> pool) {
         if (pool == null || pool.isEmpty()) {
             return;
         }
         for (Scored s : pool) {
-            s.intent = clamp01(Math.max(s.raw, s.keyword * 0.9f));
+            s.intent = 0f;
         }
         StringBuilder catalog = new StringBuilder();
         for (int i = 0; i < pool.size(); i++) {
             catalog.append(i + 1).append(". ").append(pool.get(i).entry.question).append('\n');
         }
+        String intentLine = StringUtils.hasText(intent) ? intent : question;
         String system = """
-                你是收银操作培训答疑的意图匹配助手。
-                根据「用户原话」与每条「候选题干」是否在问同一件事，给出吻合度 score（0~1）。
-                规则：
-                - 0.9 及以上：同一操作问题（允许口语、同义、倒装）
-                - 0.8~0.9：相关但不确定是否同一题
-                - 0.75~0.8：勉强相关
-                - 低于 0.75：不相关或答非所问
-                - 业务域不同必须低分（例：寄存/暂存 ≠ 销售流水/查顾客销售；订货 ≠ 退货）
+                你是收银操作培训答疑的题录点选助手。
+                已知用户意图，请在「候选题干」中选出与该意图为「同一操作」的题目。
+                硬性规则：
+                1. 只有操作目标一致才可选（允许口语/同义/倒装）
+                2. 仅主题沾边、场景相关、同属收银但操作不同 → 必须选 0
+                3. 题录里没有该操作 → 必须选 0（宁可未命中，禁止答非所问）
+                4. 易混对照（不同操作，禁止互配）：
+                   - 退款/退货/退单 ≠ 寄存/暂存
+                   - 会员登记/开卡/录入手机号/能否复制粘贴 ≠ 积分兑换/取消兑换
+                   - 肉票卡/储值卡结算/出票 ≠ 长短款/收银差/对账
+                   - 查流水/查销售 ≠ 寄存
+                   - 一般退单步骤 ≠ 「退单找不到/超期无法退」这类异常说明（用户未提到找不到/超期时不要选异常题）
+                5. score：同一操作 ≥0.9；相关但不确定 0.75~0.89；否则 <0.75 且 index 必须为 0
                 只输出 JSON，不要其它文字：
-                {"scores":[{"index":1,"score":0.92},{"index":2,"score":0.41}]}
-                index 从 1 开始，必须覆盖全部候选。
+                {"index":3,"score":0.95,"reason":"同一操作：退货退款"}
+                或 {"index":0,"score":0,"reason":"题录无会员登记"}
+                index 从 1 起；没有合适题时 index=0。
                 """;
-        String user = "用户原话：\n" + question + "\n\n候选题干：\n" + catalog;
+        String user = "用户原话：\n" + question
+                + "\n\n用户意图：\n" + intentLine
+                + "\n\n候选题干：\n" + catalog;
         try {
             String raw = aiChatService.chat(system, user, null, 0.1);
+            if (applyPickJson(raw, pool)) {
+                return;
+            }
             if (!applyScoreJson(raw, pool)) {
-                // 旧格式只回 index：仅作「略抬、不超过 NEAR」，禁止直接 HIT
                 int pick = parseIndexOnly(raw);
                 if (pick > 0 && pick <= pool.size()) {
                     Scored s = pool.get(pick - 1);
                     s.intent = Math.min(NEAR - 0.01f, Math.max(s.intent, 0.82f));
-                    log.info("答疑意图仅返回index，不抬到HIT index={} title={}", pick, s.entry.question);
+                    log.info("答疑点选仅返回index，不抬到HIT index={} title={}", pick, s.entry.question);
+                } else if (pick == 0) {
+                    log.info("答疑点选明确无匹配 question={} intent={}", question, intentLine);
                 }
             }
         } catch (Exception e) {
-            log.warn("答疑意图打分失败，退回向量分: {}", e.getMessage());
+            log.warn("答疑题录点选失败，退回未命中分: {}", e.getMessage());
+        }
+    }
+
+    /** 解析点选结果：只抬高被选中的那一道；其余保持 0。index=0 表示无匹配。 */
+    private boolean applyPickJson(String raw, List<Scored> pool) {
+        if (!StringUtils.hasText(raw)) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(extractJsonObject(raw));
+            if (!root.has("index")) {
+                return false;
+            }
+            int index = root.get("index").asInt(-1);
+            float score = root.has("score") ? (float) root.get("score").asDouble(0) : 0f;
+            String reason = root.has("reason") && root.get("reason").isTextual()
+                    ? root.get("reason").asText() : "";
+            if (index == 0) {
+                log.info("答疑点选无匹配 reason={}", reason);
+                return true;
+            }
+            if (index < 1 || index > pool.size()) {
+                return false;
+            }
+            pool.get(index - 1).intent = clamp01(score);
+            log.info("答疑点选 index={} score={} reason={} title={}",
+                    index, score, reason, pool.get(index - 1).entry.question);
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -491,7 +603,7 @@ public class TrainQaSearchService {
         float raw;
         float keyword;
         float rank;
-        /** 用户意图与题干吻合度（优先 AI，否则为向量/关键词分） */
+        /** 用户意图与题干吻合度（优先 AI 点选，否则为向量/关键词分） */
         float intent;
     }
 }

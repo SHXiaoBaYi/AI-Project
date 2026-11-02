@@ -520,6 +520,84 @@ public class TrainDocService {
         return "HIT".equals(vo.getStatus()) || "SUGGEST".equals(vo.getStatus());
     }
 
+    /** 仅 HIT 算直接命中；SUGGEST 不能压过已校准准确答案。 */
+    private static boolean isDirectHit(TrainAssistantAskVO vo) {
+        return vo != null && "HIT".equals(vo.getStatus())
+                && vo.getItems() != null && !vo.getItems().isEmpty();
+    }
+
+    /**
+     * 最新版检索 HIT 是否与旧版校准是同一操作。
+     * 否 → 保留旧校准（避免「退单」被最新版「退单找不到」抢走）。
+     */
+    private static boolean latestHitSameOperation(String question,
+                                                 TrainAssistantAskVO latestHit,
+                                                 TrainQaCalibrateService.AccurateHit calibrated) {
+        if (calibrated == null || calibrated.item() == null || latestHit.getItems() == null
+                || latestHit.getItems().isEmpty()) {
+            return true;
+        }
+        return sameOperationTitle(question, latestHit.getItems().get(0).getQuestion(),
+                calibrated.item().getQuestion());
+    }
+
+    private static boolean latestExtractSameOperation(String question,
+                                                      TrainAssistantAskVO.QaItem latestItem,
+                                                      TrainQaCalibrateService.AccurateHit calibrated) {
+        if (calibrated == null || calibrated.item() == null || latestItem == null) {
+            return true;
+        }
+        return sameOperationTitle(question, latestItem.getQuestion(), calibrated.item().getQuestion());
+    }
+
+    private static boolean sameOperationTitle(String question, String latestTitle, String calibrateTitle) {
+        if (!StringUtils.hasText(latestTitle)) {
+            return false;
+        }
+        if (!TrainQaIntentMatcher.passesHardGate(question, latestTitle)) {
+            return false;
+        }
+        if (!StringUtils.hasText(calibrateTitle)) {
+            return true;
+        }
+        // 最新题与校准题互相冲突（不同业务族）→ 不是同一操作
+        if (!TrainQaIntentMatcher.passesHardGate(calibrateTitle, latestTitle)
+                && !TrainQaIntentMatcher.titleMatches(calibrateTitle, latestTitle)) {
+            return false;
+        }
+        // 用户问的是常规操作，最新版却命中「找不到/无法/超期」异常说明 → 不覆盖已校准的正常步骤
+        if (TrainQaIntentMatcher.titleMatches(question, calibrateTitle)
+                && isExceptionBranchTitle(latestTitle)
+                && !mentionsExceptionBranch(question)) {
+            return false;
+        }
+        // 用户核心已能对上校准题，但最新题只是弱重合 → 不覆盖校准
+        String canon = TrainQaIntentMatcher.canonicalCore(question);
+        if (canon.length() >= 2
+                && TrainQaIntentMatcher.titleMatches(question, calibrateTitle)
+                && TrainQaIntentMatcher.keywordOverlap(question, latestTitle) < 0.45f
+                && !TrainQaIntentMatcher.titleMatches(question, latestTitle)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isExceptionBranchTitle(String title) {
+        if (!StringUtils.hasText(title)) {
+            return false;
+        }
+        return title.contains("找不到") || title.contains("无法") || title.contains("不存在")
+                || title.contains("超期") || title.contains("超过");
+    }
+
+    private static boolean mentionsExceptionBranch(String question) {
+        if (!StringUtils.hasText(question)) {
+            return false;
+        }
+        return question.contains("找不到") || question.contains("无法") || question.contains("不存在")
+                || question.contains("超期") || question.contains("超过") || question.contains("搜不到");
+    }
+
     private TrainAssistantAskVO recordStructuredMiss(TrainAssistantAskVO vo, String question, String cat) {
         if (vo != null && ("NOT_FOUND".equals(vo.getStatus()) || "NEED_OLD".equals(vo.getStatus()))) {
             trainQaMissService.record(question, cat, vo.getStatus(), vo.getDocId(), vo.getVersionId());
@@ -854,23 +932,30 @@ public class TrainDocService {
 
             List<TrainAssistantAskVO.QaItem> latestHits;
             Optional<TrainAssistantAskVO> vectorHit = trainQaSearchService.trySearch(question, cat, false);
-            if (vectorHit.isPresent() && (confidentAsk(vectorHit.get()) || !trainQaSearchService.hasUnindexedLatest(cat))) {
+            if (vectorHit.isPresent() && (isDirectHit(vectorHit.get()) || !trainQaSearchService.hasUnindexedLatest(cat))) {
                 TrainAssistantAskVO vectorVo = vectorHit.get();
                 applyPublicImages(vectorVo);
-                if (confidentAsk(vectorVo)) {
-                    return vectorVo;
-                }
-                if (calibrated == null) {
+                // 仅 HIT 才直出。SUGGEST 不算自信命中，避免「沾边建议」盖过旧版准确校准。
+                if (isDirectHit(vectorVo)) {
+                    if (calibrated == null || calibrated.onLatest()
+                            || latestHitSameOperation(question, vectorVo, calibrated)) {
+                        return vectorVo;
+                    }
+                    // 最新版 HIT 与旧校准不是同一操作（如退单→「找不到单据」）→ 改用旧校准
+                    latestHits = List.of();
+                } else if (calibrated == null) {
                     return recordStructuredMiss(vectorVo, question, cat);
+                } else {
+                    latestHits = List.of();
                 }
-                latestHits = List.of();
             } else {
                 latestHits = aiExtractQa(question, latest);
             }
 
             // 二：旧版校准存在
             if (calibrated != null) {
-                if (!latestHits.isEmpty()) {
+                if (!latestHits.isEmpty()
+                        && latestExtractSameOperation(question, latestHits.get(0), calibrated)) {
                     TrainAssistantAskVO vo = new TrainAssistantAskVO();
                     vo.setStatus("HIT");
                     vo.setMessage("已根据最新版培训文档找到相关问答");
