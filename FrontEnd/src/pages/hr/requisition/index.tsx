@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Modal } from 'antd';
+import { App, Drawer, Modal, Tag } from 'antd';
 import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
@@ -15,8 +15,17 @@ import {
   getHrRequisitionsApi,
   getHrTargetOptionsApi,
   getHrUsersApi,
+  listHrRequisitionLogsApi,
   saveHrRequisitionApi,
+  type HrRequisitionLog,
 } from '@/api/hr';
+
+const LOG_ACTIONS = [
+  { label: '新增', value: 'CREATE' },
+  { label: '修改', value: 'UPDATE' },
+  { label: '删除', value: 'DELETE' },
+  { label: '改状态', value: 'STATUS' },
+];
 
 const STATUS = [
   { label: '招聘中', value: 'OPEN' },
@@ -69,6 +78,7 @@ interface Req {
   educationReq?: string;
   experienceReq?: string;
   skillReq?: string;
+  taskRequirement?: string;
   status: string;
   locationCode: string;
   deptId?: number;
@@ -151,6 +161,7 @@ function mapRow(raw: Record<string, unknown>): Req {
     educationReq: textOf(raw.education_req),
     experienceReq: textOf(raw.experience_req),
     skillReq: textOf(raw.skill_req),
+    taskRequirement: textOf(raw.task_requirement),
     status: String(raw.status ?? ''),
     locationCode: String(raw.location_code ?? ''),
     deptId: raw.dept_id == null ? undefined : Number(raw.dept_id),
@@ -195,6 +206,8 @@ const RequisitionPage = memo(function RequisitionPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Req | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
+  const logActionRef = useRef<ActionType>(null);
   const [depts, setDepts] = useState<{ value: number; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [interviewers, setInterviewers] = useState<{ value: number; label: string }[]>([]);
@@ -306,6 +319,21 @@ const RequisitionPage = memo(function RequisitionPage() {
         search: false,
         fieldProps: { options: jobPriorities, allowClear: true, showSearch: true, optionFilterProp: 'label' },
         render: (_, record) => jobPriorities.find((item) => item.value === record.jobPriorityCode)?.label || '—',
+      },
+      {
+        title: '任务要求',
+        dataIndex: 'taskRequirement',
+        valueType: 'textarea',
+        search: false,
+        width: 200,
+        ellipsis: true,
+        fieldProps: {
+          rows: 2,
+          maxLength: 500,
+          showCount: true,
+          placeholder: '如 P0 入职计分、P1 合格简历 N 份等',
+        },
+        render: (_, record) => record.taskRequirement || '—',
       },
       {
         title: '重要性',
@@ -605,6 +633,16 @@ const RequisitionPage = memo(function RequisitionPage() {
             批量删除
           </PermissionButton>,
           <PermissionButton
+            key='log'
+            perm='hr:requisition:log'
+            onClick={() => {
+              setLogOpen(true);
+              setTimeout(() => logActionRef.current?.reload(), 0);
+            }}
+          >
+            操作日志
+          </PermissionButton>,
+          <PermissionButton
             key='add'
             type='primary'
             perm='hr:requisition:add'
@@ -651,6 +689,7 @@ const RequisitionPage = memo(function RequisitionPage() {
             educationReq: form.educationReq,
             experienceReq: form.experienceReq,
             skillReq: form.skillReq,
+            taskRequirement: form.taskRequirement,
             workAddressId: form.workAddressId,
             deptId: form.deptId,
             headcount: form.headcount,
@@ -673,8 +712,149 @@ const RequisitionPage = memo(function RequisitionPage() {
           return true;
         }}
       />
+      <Drawer
+        title='招聘需求操作日志'
+        width={960}
+        open={logOpen}
+        onClose={() => setLogOpen(false)}
+        destroyOnClose
+      >
+        <BaseProTable<HrRequisitionLog>
+          rowKey='id'
+          actionRef={logActionRef}
+          headerTitle='操作日志'
+          columns={[
+            {
+              title: '操作',
+              valueType: 'option',
+              width: 72,
+              render: (_, record) => (
+                <ActionButtons
+                  items={[
+                    {
+                      key: 'detail',
+                      label: '详情',
+                      onClick: () => {
+                        Modal.info({
+                          title: `操作详情 · ${record.jobName || record.requisitionId || ''}`,
+                          width: 720,
+                          content: (
+                            <div className='space-y-3 text-sm'>
+                              <div>
+                                <div className='mb-1 font-medium'>做了什么</div>
+                                <div className='break-all whitespace-pre-wrap text-gray-700'>
+                                  {record.summary || '—'}
+                                </div>
+                              </div>
+                              <div>
+                                <div className='mb-1 font-medium'>原值</div>
+                                <pre className='max-h-56 overflow-auto rounded bg-gray-50 p-2 text-xs'>
+                                  {prettyJson(record.beforeJson)}
+                                </pre>
+                              </div>
+                              <div>
+                                <div className='mb-1 font-medium'>新值</div>
+                                <pre className='max-h-56 overflow-auto rounded bg-gray-50 p-2 text-xs'>
+                                  {prettyJson(record.afterJson)}
+                                </pre>
+                              </div>
+                            </div>
+                          ),
+                        });
+                      },
+                    },
+                  ]}
+                />
+              ),
+            },
+            {
+              title: '关键词',
+              dataIndex: 'keyword',
+              hideInTable: true,
+              fieldProps: { allowClear: true, placeholder: '岗位 / 操作人 / 摘要' },
+            },
+            {
+              title: '动作',
+              dataIndex: 'action',
+              valueType: 'select',
+              width: 90,
+              fieldProps: { options: LOG_ACTIONS, allowClear: true },
+              render: (_, r) => {
+                const color =
+                  r.action === 'CREATE'
+                    ? 'success'
+                    : r.action === 'DELETE'
+                      ? 'error'
+                      : r.action === 'STATUS'
+                        ? 'warning'
+                        : 'processing';
+                return <Tag color={color}>{r.actionLabel || r.action || '—'}</Tag>;
+              },
+            },
+            {
+              title: '操作时间',
+              dataIndex: 'operatedAtRange',
+              valueType: 'dateRange',
+              hideInTable: true,
+              search: {
+                transform: (value) => ({
+                  createTimeStart: value?.[0],
+                  createTimeEnd: value?.[1],
+                }),
+              },
+              fieldProps: { allowClear: true },
+            },
+            {
+              title: '时间',
+              dataIndex: 'operatedAt',
+              search: false,
+              width: 170,
+            },
+            {
+              title: '操作人',
+              dataIndex: 'operatorNickname',
+              search: false,
+              width: 100,
+              render: (_, r) => r.operatorNickname || r.operatorUsername || '—',
+            },
+            {
+              title: '岗位',
+              dataIndex: 'jobName',
+              search: false,
+              ellipsis: true,
+              width: 140,
+            },
+            {
+              title: '做了什么',
+              dataIndex: 'summary',
+              search: false,
+              ellipsis: true,
+            },
+          ]}
+          request={async (params) => {
+            const res = await listHrRequisitionLogsApi({
+              pageNum: params.current,
+              pageSize: params.pageSize,
+              action: params.action,
+              keyword: params.keyword,
+              createTimeStart: params.createTimeStart,
+              createTimeEnd: params.createTimeEnd,
+            });
+            return { data: res.rows || [], success: true, total: res.total || 0 };
+          }}
+        />
+      </Drawer>
     </>
   );
 });
+
+function prettyJson(raw?: string) {
+  if (!raw) return '（无）';
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
 
 export default RequisitionPage;

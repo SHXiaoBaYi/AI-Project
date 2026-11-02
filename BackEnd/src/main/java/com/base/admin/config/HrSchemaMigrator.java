@@ -48,6 +48,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureKpiGradeColumns();
         ensureBaseDictTable();
         ensureRequisitionPanelColumns();
+        ensureRequisitionTaskRequirementAndLog();
         backfillWorkAddressFromLocation();
         ensureCandidateProfileColumns();
         alignStageDisplayNames();
@@ -315,6 +316,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(212, "需求新增", 202, 1, "", "", "F", "hr:requisition:add", "#", "");
         menu(213, "需求修改", 202, 2, "", "", "F", "hr:requisition:edit", "#", "含暂缓、归档、恢复");
         menu(214, "需求删除", 202, 3, "", "", "F", "hr:requisition:delete", "#", "");
+        menu(265, "需求操作日志", 202, 4, "", "", "F", "hr:requisition:log", "#", "仅招聘管理员可查看招聘需求CUD日志");
         menu(215, "候选人新增", 203, 3, "", "", "F", "hr:application:add", "#", "");
         menu(216, "候选人修改", 203, 4, "", "", "F", "hr:application:edit", "#", "");
         menu(217, "候选人删除", 203, 5, "", "", "F", "hr:application:delete", "#", "");
@@ -330,8 +332,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
         long exec = roleId("hr_exec");
         long plain = roleId("hr_user");
         long interviewer = roleId("hr_interviewer");
-        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 263, 264);
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 263, 264);
+        grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 263, 264, 265);
+        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 263, 264, 265);
         grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262, 263);
         grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261, 262, 263);
         grant(plain, 200, 201, 209, 234, 235, 237, 249);
@@ -473,6 +475,33 @@ public class HrSchemaMigrator implements ApplicationRunner {
         addColumnIfMissing("hr_requisition", "work_address_id",
                 "ALTER TABLE hr_requisition ADD COLUMN work_address_id BIGINT NULL COMMENT '工作地址hr_base_dict.id' AFTER location_code");
         // 历史列 dingtalk_open_conversation_id 已废弃（催评改发面试官工作通知），保留列以免破坏存量库
+    }
+
+    /** 招聘需求任务要求字段 + CUD 操作日志表 */
+    private void ensureRequisitionTaskRequirementAndLog() {
+        addColumnIfMissing("hr_requisition", "task_requirement",
+                "ALTER TABLE hr_requisition ADD COLUMN task_requirement VARCHAR(500) NULL COMMENT '任务要求，如P0/P1及简历份数等' AFTER skill_req");
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_requisition_log (
+                  id                  BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  requisition_id      BIGINT       NULL                    COMMENT '需求ID，删除后仍保留',
+                  job_name            VARCHAR(128) DEFAULT ''             COMMENT '岗位名快照',
+                  action              VARCHAR(32)  NOT NULL                COMMENT 'CREATE/UPDATE/DELETE/STATUS',
+                  summary             VARCHAR(1000) DEFAULT ''            COMMENT '做了什么（可读摘要）',
+                  before_json         MEDIUMTEXT   NULL                    COMMENT '变更前快照JSON',
+                  after_json          MEDIUMTEXT   NULL                    COMMENT '变更后快照JSON',
+                  operator_user_id    BIGINT       NULL                    COMMENT '操作人用户ID',
+                  operator_username   VARCHAR(64)  DEFAULT ''             COMMENT '操作人登录名',
+                  operator_nickname   VARCHAR(64)  DEFAULT ''             COMMENT '操作人昵称',
+                  operated_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+                  create_time         DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  is_active           TINYINT      NOT NULL DEFAULT 1      COMMENT '1有效',
+                  PRIMARY KEY (id),
+                  KEY idx_hr_req_log_req (requisition_id),
+                  KEY idx_hr_req_log_time (operated_at),
+                  KEY idx_hr_req_log_action (action)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘需求CUD操作日志'
+                """);
     }
 
     /** P0/P1 考核任务 + 面试「简历是否合格」字段 */

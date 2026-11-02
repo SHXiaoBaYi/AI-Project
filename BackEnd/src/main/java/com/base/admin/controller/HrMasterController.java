@@ -28,7 +28,10 @@ import com.base.admin.domain.dto.HrJobCardQueryDTO;
 import com.base.admin.domain.dto.HrJobCandidateQueryDTO;
 import com.base.admin.domain.dto.HrJobCommStatsQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionDTO;
+import com.base.admin.domain.dto.HrRequisitionLogQueryDTO;
 import com.base.admin.domain.dto.HrRequisitionStatusDTO;
+import com.base.admin.domain.vo.HrRequisitionLogVO;
+import com.base.admin.service.HrRequisitionLogService;
 import com.base.admin.domain.dto.HrBaseDictDTO;
 import com.base.admin.domain.dto.HrFailReasonDTO;
 import com.base.admin.domain.dto.HrTargetOptionDTO;
@@ -84,6 +87,7 @@ public class HrMasterController {
     private final HrApplicationImportService applicationImportService;
     private final HrApplicationAiService applicationAiService;
     private final com.base.admin.service.HrResumeParseService resumeParseService;
+    private final HrRequisitionLogService requisitionLogService;
 
     @Operation(summary = "需求列表")
     @PostMapping("/requisition/list")
@@ -157,6 +161,13 @@ public class HrMasterController {
     public Result<Void> deleteRequisitionBatch(@RequestBody List<Long> ids) {
         masterService.deleteRequisitionBatch(ids);
         return Result.ok();
+    }
+
+    @Operation(summary = "招聘需求操作日志（仅招聘管理员）")
+    @PostMapping("/requisition/log/list")
+    @RequiresPermission("hr:requisition:log")
+    public Result<PageResult<HrRequisitionLogVO>> requisitionLogs(@RequestBody(required = false) HrRequisitionLogQueryDTO query) {
+        return Result.ok(requisitionLogService.page(query == null ? new HrRequisitionLogQueryDTO() : query));
     }
 
     @Operation(summary = "投递列表")

@@ -35,6 +35,9 @@ public class HrRequisitionDTO {
     @Schema(description = "技能要求")
     private String skillReq;
 
+    @Schema(description = "任务要求，如 P0/P1 及简历份数等")
+    private String taskRequirement;
+
     @Schema(description = "工作地 SH/XJ，由工作地址回写，可空")
     private String locationCode;
 

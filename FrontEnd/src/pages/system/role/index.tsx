@@ -26,11 +26,12 @@ export default function RoleManage() {
   const [checkedKeys, setCheckedKeys] = useState<number[]>([]);
   const [allMenuIds, setAllMenuIds] = useState<number[]>([]);
   const parentMap = useMemo(() => buildParentMap(menuTree), [menuTree]);
-  const leafIdSet = useMemo(() => collectLeafIds(menuTree), [menuTree]);
+  /** C=页面查看、F=按钮；可独立勾选。M 目录不单独勾，保存时随子级自动带上 */
+  const assignableIdSet = useMemo(() => collectAssignableIds(menuTree), [menuTree]);
   const disabledMenuIds = useMemo(() => collectDisabledIds(menuTree), [menuTree]);
-  const enabledLeafIds = useMemo(
-    () => new Set([...leafIdSet].filter((id) => !disabledMenuIds.has(id))),
-    [leafIdSet, disabledMenuIds],
+  const enabledAssignableIds = useMemo(
+    () => new Set([...assignableIdSet].filter((id) => !disabledMenuIds.has(id))),
+    [assignableIdSet, disabledMenuIds],
   );
   const [saving, setSaving] = useState(false);
   const [editingRole, setEditingRole] = useState<RoleVO | null>(null);
@@ -64,11 +65,13 @@ export default function RoleManage() {
     })();
   }, []);
 
+  const toCheckedAssignable = (menuIds?: number[]) =>
+    (menuIds || []).filter((id) => assignableIdSet.has(id) && !disabledMenuIds.has(id));
+
   const handleSelectRole = async (role: RoleVO) => {
     const detail = await getRoleByIdApi(role.roleId);
     setSelectedRole(detail);
-    const leafChecked = (detail.menuIds || []).filter((id) => leafIdSet.has(id));
-    setCheckedKeys(leafChecked);
+    setCheckedKeys(toCheckedAssignable(detail.menuIds));
     setExpandedKeys(allMenuIds);
     setIsExpanded(true);
   };
@@ -77,8 +80,9 @@ export default function RoleManage() {
     if (!selectedRole) return;
     setSaving(true);
     try {
-      const allIds = new Set(checkedKeys);
-      for (const id of checkedKeys) {
+      // 只保存勾选的 C/F；目录 M 由祖先链补齐，保证侧栏能展开
+      const allIds = new Set(checkedKeys.filter((id) => assignableIdSet.has(id)));
+      for (const id of [...allIds]) {
         let parent = parentMap.get(id);
         while (parent !== undefined) {
           allIds.add(parent);
@@ -89,18 +93,19 @@ export default function RoleManage() {
       await assignMenusApi(selectedRole.roleId, savedIds);
       message.success('已分配权限');
       setSelectedRole((prev) => (prev ? { ...prev, menuIds: savedIds } : prev));
+      setCheckedKeys(toCheckedAssignable(savedIds));
       loadRoles();
     } catch {
       const detail = await getRoleByIdApi(selectedRole.roleId);
       setSelectedRole(detail);
-      setCheckedKeys((detail.menuIds || []).filter((id) => leafIdSet.has(id)));
+      setCheckedKeys(toCheckedAssignable(detail.menuIds));
     } finally {
       setSaving(false);
     }
   };
 
   const handleSelectAll = () => {
-    setCheckedKeys(allMenuIds.filter((id) => !disabledMenuIds.has(id)));
+    setCheckedKeys([...enabledAssignableIds]);
   };
 
   const handleDeselectAll = () => {
@@ -253,17 +258,19 @@ export default function RoleManage() {
                   <span>存在已禁用的菜单，勾选框已置灰不可选。如需分配，请前往菜单管理启用对应菜单</span>
                 </div>
               )}
+              <div className='mt-2 text-xs text-gray-500'>
+                页面菜单=查看；其下按钮=新增/编辑/删除等，可单独勾选（互不联动）
+              </div>
             </div>
             <div className='mb-3 flex items-center gap-4'>
               <Checkbox
                 checked={
-                  checkedKeys.length > 0 &&
-                  enabledLeafIds.size > 0 &&
-                  checkedKeys.filter((id) => enabledLeafIds.has(id)).length === enabledLeafIds.size
+                  enabledAssignableIds.size > 0 &&
+                  checkedKeys.filter((id) => enabledAssignableIds.has(id)).length === enabledAssignableIds.size
                 }
                 indeterminate={
-                  checkedKeys.some((id) => enabledLeafIds.has(id)) &&
-                  checkedKeys.filter((id) => enabledLeafIds.has(id)).length < enabledLeafIds.size
+                  checkedKeys.some((id) => enabledAssignableIds.has(id)) &&
+                  checkedKeys.filter((id) => enabledAssignableIds.has(id)).length < enabledAssignableIds.size
                 }
                 onChange={(e) => (e.target.checked ? handleSelectAll() : handleDeselectAll())}
               >
@@ -283,16 +290,20 @@ export default function RoleManage() {
                 </Space>
               </Checkbox>
               <span className='text-xs text-gray-400'>
-                已选 {checkedKeys.filter((id) => enabledLeafIds.has(id)).length} / {enabledLeafIds.size} 项
+                已选 {checkedKeys.filter((id) => enabledAssignableIds.has(id)).length} / {enabledAssignableIds.size} 项
               </span>
             </div>
             <div className='flex-1 overflow-auto'>
               <Tree
                 checkable
+                checkStrictly
                 expandedKeys={expandedKeys}
                 onExpand={(keys) => setExpandedKeys(keys as number[])}
                 checkedKeys={checkedKeys}
-                onCheck={(keys: any) => setCheckedKeys(Array.isArray(keys) ? keys : keys.checked)}
+                onCheck={(keys) => {
+                  const next = Array.isArray(keys) ? keys : keys.checked;
+                  setCheckedKeys((next as number[]).filter((id) => assignableIdSet.has(id)));
+                }}
                 treeData={menuTree.map((t) => convertTreeData(t, disabledMenuIds))}
               />
             </div>
@@ -303,8 +314,7 @@ export default function RoleManage() {
               <Space>
                 <Button
                   onClick={() => {
-                    const ids = (selectedRole.menuIds || []).filter((id) => leafIdSet.has(id));
-                    setCheckedKeys(ids);
+                    setCheckedKeys(toCheckedAssignable(selectedRole.menuIds));
                   }}
                 >
                   重置
@@ -383,10 +393,20 @@ export default function RoleManage() {
 }
 
 function convertTreeData(tree: MenuTree, disabledIds: Set<number>): any {
+  const isDir = tree.menuType === 'M';
+  const hint = tree.menuType === 'C' ? '查看' : tree.menuType === 'F' ? '按钮' : tree.menuType === 'M' ? '目录' : '';
   return {
     key: tree.menuId,
-    title: tree.menuName,
-    disableCheckbox: disabledIds.has(tree.menuId),
+    title: hint ? (
+      <span>
+        {tree.menuName}
+        <span className='ml-1 text-xs text-gray-400'>({hint})</span>
+      </span>
+    ) : (
+      tree.menuName
+    ),
+    // 目录不可单独勾选，由子级保存时自动带上
+    disableCheckbox: disabledIds.has(tree.menuId) || isDir,
     children: tree.children?.map((t) => convertTreeData(t, disabledIds)),
   };
 }
@@ -403,12 +423,18 @@ function buildParentMap(tree: MenuTree[]): Map<number, number> {
   return map;
 }
 
-function collectLeafIds(tree: MenuTree[]): Set<number> {
+/** 可独立勾选：页面 C（=查看）与按钮 F；目录 M 不计入 */
+function collectAssignableIds(tree: MenuTree[]): Set<number> {
   const ids = new Set<number>();
   const walk = (nodes: MenuTree[]) => {
     for (const node of nodes) {
-      if (!node.children?.length) ids.add(node.menuId);
-      else walk(node.children);
+      if (node.menuType === 'C' || node.menuType === 'F') {
+        ids.add(node.menuId);
+      } else if (!node.menuType && !node.children?.length) {
+        // 兼容旧数据未带回 menuType 的叶子
+        ids.add(node.menuId);
+      }
+      if (node.children?.length) walk(node.children);
     }
   };
   walk(tree);

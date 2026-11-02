@@ -70,11 +70,13 @@ public class HrMasterService {
     private final FileStorageService fileStorage;
     private final HrStageCatalog stageCatalog;
     private final HrKpiTaskService kpiTaskService;
+    private final HrRequisitionLogService requisitionLogService;
 
     public List<Map<String, Object>> requisitions(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
         StringBuilder sql = new StringBuilder("""
                 SELECT r.id, r.job_name, r.job_desc, r.salary_range, r.education_req, r.experience_req, r.skill_req,
+                       r.task_requirement,
                        r.status, r.location_code, r.headcount, r.target_text, r.priority,
                        r.job_priority_code, r.work_address_id,
                        r.importance_level, r.urgency_level, r.difficulty_level,
@@ -493,18 +495,22 @@ public class HrMasterService {
         Long workAddressId = resolveWorkAddressId(dto.getWorkAddressId(), dto.getLocationCode());
         Long requisitionId = dto.getId();
         String locationCode = resolveLocationCode(requisitionId, workAddressId, dto.getLocationCode());
+        boolean creating = requisitionId == null;
+        Map<String, Object> beforeSnap = creating ? Map.of() : requisitionLogService.loadSnapshot(requisitionId);
         if (requisitionId == null) {
             // urgency_level 与 priority 同源：紧急=1，其余按常规=2 冗余同步，展示以 priority 为准
             Integer urgency = dto.getPriority() != null && dto.getPriority() == 1 ? 1 : 2;
             jdbc.update("""
                     INSERT INTO hr_requisition (job_name, job_desc, salary_range, education_req, experience_req, skill_req,
+                                               task_requirement,
                                                status, location_code, dept_id, headcount, target_text, priority,
                                                job_priority_code, work_address_id,
                                                importance_level, urgency_level, difficulty_level,
                                                received_date, onboard_date, create_by, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
                     emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
+                    emptyToNull(dto.getTaskRequirement()),
                     locationCode, dto.getDeptId(), headcount, target, dto.getPriority(),
                     jobPriorityCode, workAddressId,
                     dto.getImportanceLevel(), urgency, dto.getDifficultyLevel(),
@@ -516,6 +522,7 @@ public class HrMasterService {
             int updated = jdbc.update("""
                     UPDATE hr_requisition
                     SET job_name = ?, job_desc = ?, salary_range = ?, education_req = ?, experience_req = ?, skill_req = ?,
+                        task_requirement = ?,
                         location_code = ?, dept_id = ?, headcount = ?, target_text = ?,
                         priority = ?, job_priority_code = ?, work_address_id = ?,
                         importance_level = ?, urgency_level = ?, difficulty_level = ?,
@@ -523,6 +530,7 @@ public class HrMasterService {
                     WHERE id = ? AND is_active = 1
                     """, dto.getJobName().trim(), emptyToNull(dto.getJobDesc()), emptyToNull(dto.getSalaryRange()),
                     emptyToNull(dto.getEducationReq()), emptyToNull(dto.getExperienceReq()), emptyToNull(dto.getSkillReq()),
+                    emptyToNull(dto.getTaskRequirement()),
                     locationCode, dto.getDeptId(), headcount, target, dto.getPriority(),
                     jobPriorityCode, workAddressId,
                     dto.getImportanceLevel(), urgency, dto.getDifficultyLevel(),
@@ -534,6 +542,16 @@ public class HrMasterService {
         replaceOwners(requisitionId, dto.getOwnerUserIds());
         replaceRounds(requisitionId, dto.getInterviewRounds());
         kpiTaskService.syncForRequisition(requisitionId);
+        Map<String, Object> afterSnap = requisitionLogService.loadSnapshot(requisitionId);
+        if (creating) {
+            requisitionLogService.write(requisitionId, dto.getJobName().trim(),
+                    HrRequisitionLogService.ACTION_CREATE, "新建招聘需求", null, afterSnap);
+        } else {
+            requisitionLogService.write(requisitionId, dto.getJobName().trim(),
+                    HrRequisitionLogService.ACTION_UPDATE,
+                    requisitionLogService.diffSummary(beforeSnap, afterSnap),
+                    beforeSnap, afterSnap);
+        }
         return requisitionId;
     }
 
@@ -541,18 +559,34 @@ public class HrMasterService {
         if (!java.util.Set.of("OPEN", "PAUSED", "ARCHIVED", "DONE", "STOPPED").contains(status)) {
             throw new BusinessException("不支持的需求状态");
         }
+        Map<String, Object> beforeSnap = requisitionLogService.loadSnapshot(id);
+        if (beforeSnap.isEmpty()) {
+            throw new BusinessException("需求不存在");
+        }
+        String oldStatus = String.valueOf(beforeSnap.getOrDefault("status", ""));
         int updated = jdbc.update("UPDATE hr_requisition SET status = ? WHERE id = ? AND is_active = 1", status, id);
         if (updated == 0) {
             throw new BusinessException("需求不存在");
         }
         kpiTaskService.syncForRequisition(id);
+        Map<String, Object> afterSnap = requisitionLogService.loadSnapshot(id);
+        String jobName = String.valueOf(afterSnap.getOrDefault("jobName", beforeSnap.getOrDefault("jobName", "")));
+        requisitionLogService.write(id, jobName, HrRequisitionLogService.ACTION_STATUS,
+                "状态：" + oldStatus + " → " + status, beforeSnap, afterSnap);
     }
 
     public void deleteRequisition(Long id) {
+        Map<String, Object> beforeSnap = requisitionLogService.loadSnapshot(id);
+        if (beforeSnap.isEmpty() || isInactiveFlag(beforeSnap.get("isActive"))) {
+            throw new BusinessException("需求不存在");
+        }
         int updated = jdbc.update("UPDATE hr_requisition SET is_active = 0 WHERE id = ? AND is_active = 1", id);
         if (updated == 0) {
             throw new BusinessException("需求不存在");
         }
+        String jobName = String.valueOf(beforeSnap.getOrDefault("jobName", ""));
+        requisitionLogService.write(id, jobName, HrRequisitionLogService.ACTION_DELETE,
+                "删除招聘需求", beforeSnap, null);
     }
 
     public void deleteRequisitionBatch(java.util.List<Long> ids) {
@@ -724,6 +758,20 @@ public class HrMasterService {
 
     private static String emptyToNull(String text) {
         return text == null || text.isBlank() ? null : text.trim();
+    }
+
+    private static boolean isInactiveFlag(Object isActive) {
+        if (isActive == null) {
+            return true;
+        }
+        if (isActive instanceof Number n) {
+            return n.intValue() == 0;
+        }
+        if (isActive instanceof Boolean b) {
+            return !b;
+        }
+        String s = String.valueOf(isActive).trim();
+        return "0".equals(s) || "false".equalsIgnoreCase(s);
     }
 
     private void ensureCandidateNo(Long candidateId, String candidateNo) {

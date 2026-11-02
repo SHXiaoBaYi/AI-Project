@@ -1031,6 +1031,33 @@ export function deleteHrRequisitionBatchApi(ids: number[]) {
   return request.delete('/hr/requisition/batch', { data: ids });
 }
 
+export type HrRequisitionLog = {
+  id: number;
+  requisitionId?: number;
+  jobName?: string;
+  action?: string;
+  actionLabel?: string;
+  summary?: string;
+  beforeJson?: string;
+  afterJson?: string;
+  operatorUserId?: number;
+  operatorUsername?: string;
+  operatorNickname?: string;
+  operatedAt?: string;
+};
+
+export function listHrRequisitionLogsApi(data: {
+  pageNum?: number;
+  pageSize?: number;
+  requisitionId?: number;
+  action?: string;
+  keyword?: string;
+  createTimeStart?: string;
+  createTimeEnd?: string;
+}) {
+  return request.post<unknown, { total: number; rows: HrRequisitionLog[] }>('/hr/requisition/log/list', data);
+}
+
 export function getHrChannelsApi() {
   return request.get<unknown, { channelCode: string; channelName: string }[]>('/hr/channel/options');
 }
