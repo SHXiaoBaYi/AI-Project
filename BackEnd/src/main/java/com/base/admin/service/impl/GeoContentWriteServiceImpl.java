@@ -810,9 +810,15 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                         .eq(GeoContentPlacementItem::getPlacementId, placement.getId())
                         .orderByAsc(GeoContentPlacementItem::getContentUpdatedAt)
                         .orderByAsc(GeoContentPlacementItem::getId));
+        // 优先独立稿；若 mode 未标 custom 但 item 上已有正文，同样纳入（避免审核空白）
         GeoContentPlacementItem primary = items.stream()
-                .filter(item -> Constants.CONTENT_MODE_CUSTOM.equals(normalizeContentMode(item.getContentMode())))
                 .filter(item -> StringUtils.hasText(nz(item.getContentBody())))
+                .sorted(Comparator
+                        .comparing((GeoContentPlacementItem item) -> !Constants.CONTENT_MODE_CUSTOM.equals(
+                                normalizeContentMode(item.getContentMode())))
+                        .thenComparing(GeoContentPlacementItem::getContentUpdatedAt,
+                                Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(GeoContentPlacementItem::getId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .findFirst()
                 .orElse(null);
         if (primary != null) {

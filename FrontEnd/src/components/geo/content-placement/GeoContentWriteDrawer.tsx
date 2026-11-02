@@ -205,11 +205,15 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     if (prefer != null) return prefer;
     const sharedBody = (data.shared?.contentBody || '').trim();
     if (sharedBody) return 'shared';
-    // 审核打开且无统一稿正文：落到最早有正文的内容平台独立稿
-    const custom = (data.articles ?? []).find(
-      (a) => a.contentMode === 'custom' && (a.contentBody || '').trim() && a.itemId != null,
-    );
-    if (custom?.itemId != null) return custom.itemId;
+    // 审核打开且无统一稿正文：落到有正文的内容平台稿（优先独立稿）
+    const withBody = [...(data.articles ?? [])]
+      .filter((a) => (a.contentBody || '').trim() && a.itemId != null)
+      .sort((a, b) => {
+        const ac = a.contentMode === 'custom' ? 0 : 1;
+        const bc = b.contentMode === 'custom' ? 0 : 1;
+        return ac - bc;
+      });
+    if (withBody[0]?.itemId != null) return withBody[0].itemId;
     return 'shared';
   };
 
@@ -302,9 +306,13 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         }
         const stage = focusFilled.stageNo === 2 ? '二审' : focusFilled.stageNo === 1 ? '一审' : '';
         const annos = focusFilled.annotations ?? [];
+        // 无统一稿快照时，再用当前打开的平台稿正文兜底，避免审核人划词区空白
+        const platformBody =
+          (bundleRef.current?.articles ?? []).find((a) => (a.contentBody || '').trim())?.contentBody || '';
         setReviewHints({
           roundLabel: `${stage ? `${stage}·` : ''}第${focusFilled.roundNo ?? '-'}轮`,
-          contentBody: focusFilled.contentBody || res.currentDraft?.contentBody || '',
+          contentBody:
+            focusFilled.contentBody || res.currentDraft?.contentBody || platformBody || bodyRef.current || '',
           annotations: annos,
           reviewers: focusFilled.reviewers ?? [],
         });
