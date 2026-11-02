@@ -217,11 +217,11 @@ const RequisitionPage = memo(function RequisitionPage() {
   const [taskLoading, setTaskLoading] = useState(false);
   const [taskSaving, setTaskSaving] = useState(false);
   const [taskForm] = Form.useForm<{
-    settleMonth: dayjs.Dayjs;
-    priorityCode: string;
-    targetCount: number;
+    settleMonth?: dayjs.Dayjs;
+    priorityCode?: string;
+    targetCount?: number;
     resumeTarget?: number;
-    score: number;
+    score?: number;
     remark?: string;
   }>();
   const taskPriority = Form.useWatch('priorityCode', taskForm);
@@ -242,29 +242,45 @@ const RequisitionPage = memo(function RequisitionPage() {
     return [...map.entries()].map(([value, label]) => ({ value, label }));
   }, [users, interviewers]);
 
-  const reloadMonthTasks = useCallback(async (requisitionId: number) => {
-    setTaskLoading(true);
-    try {
-      const rows = await listHrRequisitionMonthTasksApi(requisitionId);
-      setMonthTasks(rows || []);
-    } finally {
-      setTaskLoading(false);
-    }
-  }, []);
+  const fillMonthTaskForm = useCallback(
+    (rows: HrRequisitionMonthTask[], month = dayjs().format('YYYY-MM')) => {
+      const hit = rows.find((t) => t.settleMonth === month);
+      taskForm.setFieldsValue({
+        settleMonth: dayjs(`${month}-01`).startOf('month'),
+        priorityCode: hit?.priorityCode,
+        targetCount: hit != null ? hit.targetCount : undefined,
+        resumeTarget: hit != null ? hit.resumeTarget : undefined,
+        score: hit != null ? hit.score : undefined,
+        remark: hit?.remark,
+      });
+    },
+    [taskForm],
+  );
+
+  const reloadMonthTasks = useCallback(
+    async (requisitionId: number, preferMonth?: string) => {
+      setTaskLoading(true);
+      try {
+        const rows = await listHrRequisitionMonthTasksApi(requisitionId);
+        const list = rows || [];
+        setMonthTasks(list);
+        fillMonthTaskForm(list, preferMonth || dayjs().format('YYYY-MM'));
+        return list;
+      } finally {
+        setTaskLoading(false);
+      }
+    },
+    [fillMonthTaskForm],
+  );
 
   const openMonthTaskDrawer = useCallback(
     (record: Req) => {
       setTaskReq(record);
       setTaskOpen(true);
-      taskForm.setFieldsValue({
-        settleMonth: dayjs().startOf('month'),
-        priorityCode: record.jobPriorityCode === 'P1' ? 'P1' : 'P0',
-        targetCount: 1,
-        resumeTarget: record.jobPriorityCode === 'P1' ? 1 : 0,
-        score: 1,
-        remark: undefined,
-      });
-      void reloadMonthTasks(record.id);
+      taskForm.resetFields();
+      const month = dayjs().format('YYYY-MM');
+      taskForm.setFieldsValue({ settleMonth: dayjs().startOf('month') });
+      void reloadMonthTasks(record.id, month);
     },
     [reloadMonthTasks, taskForm],
   );
@@ -940,7 +956,7 @@ const RequisitionPage = memo(function RequisitionPage() {
                 remark: values.remark,
               });
               message.success(existed ? `已覆盖 ${month} 的任务要求` : '已保存月度任务要求');
-              await reloadMonthTasks(taskReq.id);
+              await reloadMonthTasks(taskReq.id, month);
             } finally {
               setTaskSaving(false);
             }
@@ -960,6 +976,10 @@ const RequisitionPage = memo(function RequisitionPage() {
                 picker='month'
                 className='w-full'
                 allowClear={false}
+                onChange={(v) => {
+                  if (!v) return;
+                  fillMonthTaskForm(monthTasks, v.format('YYYY-MM'));
+                }}
               />
             </Form.Item>
             <Form.Item
@@ -977,12 +997,7 @@ const RequisitionPage = memo(function RequisitionPage() {
                 ]}
                 onChange={(e) => {
                   if (e.target.value === 'P0') {
-                    taskForm.setFieldValue('resumeTarget', 0);
-                    if (!taskForm.getFieldValue('targetCount')) {
-                      taskForm.setFieldValue('targetCount', 1);
-                    }
-                  } else if (!taskForm.getFieldValue('resumeTarget')) {
-                    taskForm.setFieldValue('resumeTarget', 1);
+                    taskForm.setFieldValue('resumeTarget', undefined);
                   }
                 }}
               />
