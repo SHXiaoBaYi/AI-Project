@@ -239,10 +239,12 @@ public class TrainQaCalibrateService {
                 SELECT c.id, c.doc_id, d.title doc_title, c.version_id, v.version_label,
                        d.latest_version_id, c.category, c.user_question, c.aliases_json, c.topic_title,
                        c.answer_text, c.answer_html, c.images_json, c.status, c.hit_count, c.source,
-                       c.remark, c.handle_status, c.handle_by, c.handle_time, c.update_by, c.update_time
+                       c.remark, c.handle_status, c.handle_by, c.handle_time, c.update_by, c.update_time,
+                       COALESCE(NULLIF(TRIM(uu.nickname), ''), c.update_by) update_by_name
                 FROM train_qa_calibrate c
                 JOIN train_doc d ON d.id = c.doc_id
                 LEFT JOIN train_doc_version v ON v.id = c.version_id
+                LEFT JOIN sys_user uu ON uu.username = c.update_by AND uu.is_active = 1
                 """ + where + " ORDER BY c.update_time DESC LIMIT ? OFFSET ?";
         List<Object> listArgs = new ArrayList<>(args);
         listArgs.add(pageSize);
@@ -275,7 +277,7 @@ public class TrainQaCalibrateService {
             vo.setHandled(TrainQaHandleStatuses.isHandled(handleStatus));
             vo.setHandleBy(rs.getString("handle_by"));
             vo.setHandleTime(rs.getString("handle_time"));
-            vo.setUpdateBy(rs.getString("update_by"));
+            vo.setUpdateBy(rs.getString("update_by_name"));
             vo.setUpdateTime(rs.getString("update_time"));
             return vo;
         }, listArgs.toArray());
