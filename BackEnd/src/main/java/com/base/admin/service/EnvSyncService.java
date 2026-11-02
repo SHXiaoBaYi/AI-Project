@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 /**
  * 仅测试环境：生产数据 → 测试；测试表结构 → 生产。
  * 数据同步不改表结构；结构同步只增不删（缺表建表、缺列加列）。
+ * 数据同步：测试库全表 TRUNCATE 后导入生产全量数据（含用户/角色）。
  */
 @Slf4j
 @Service
@@ -95,7 +96,7 @@ public class EnvSyncService {
             ), dumpFile, null, 30, TimeUnit.MINUTES);
             details.add("dump 大小: " + Files.size(dumpFile) + " bytes");
 
-            details.add("清空测试库业务表数据(保留表结构)");
+            details.add("清空测试库全部表数据(保留表结构)");
             int truncated = truncateAllTables(testHost, testPort, testDb, testUsername, testPassword);
             details.add("已 TRUNCATE 表数: " + truncated);
 

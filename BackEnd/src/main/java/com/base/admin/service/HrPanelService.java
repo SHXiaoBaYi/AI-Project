@@ -426,13 +426,14 @@ public class HrPanelService {
         List<Object> eventArgs = new ArrayList<>(ids);
         eventArgs.add(window.from());
         eventArgs.add(window.toExclusive());
+        // 用 create_time：event_at 常是邀约/简历时间，面试结论当天写库也会被算到旧日期（如王晴晴一面未通过）
         jdbc.query("""
                 SELECT a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code) stage_name, COUNT(DISTINCT a.id) cnt
                 FROM hr_stage_event e
                 JOIN hr_application a ON a.id = e.application_id AND a.is_active = 1
                 LEFT JOIN hr_stage_def s ON s.stage_code = e.stage_code AND s.is_active = 1
                 WHERE e.is_active = 1 AND a.requisition_id IN (%s)
-                  AND COALESCE(e.event_at, e.create_time) >= ? AND COALESCE(e.event_at, e.create_time) < ?
+                  AND COALESCE(e.create_time, e.event_at) >= ? AND COALESCE(e.create_time, e.event_at) < ?
                 GROUP BY a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code), COALESCE(s.sort_no, 999)
                 ORDER BY a.requisition_id, COALESCE(s.sort_no, 999)
                 """.formatted(placeholders), rs -> {

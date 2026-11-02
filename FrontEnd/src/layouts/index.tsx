@@ -89,7 +89,7 @@ export default function BasicLayout() {
   const runSyncData = () => {
     modal.confirm({
       title: '同步生产数据到测试',
-      content: '将用生产库「数据」覆盖测试库（TRUNCATE 后导入），不修改表结构。测试环境当前数据会被清空，确定继续？',
+      content: '将先清空测试库全部表数据，再导入生产全量数据（含用户），不修改表结构。确定继续？',
       okText: '开始同步',
       okButtonProps: { danger: true },
       onOk: async () => {

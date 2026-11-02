@@ -621,12 +621,18 @@ public class HrInterviewRecordService {
 
     private void applyStage(Long applicationId, String stageCode) {
         jdbc.update("UPDATE hr_application SET current_stage = ? WHERE id = ? AND is_active = 1", stageCode, applicationId);
-        // 保留首次触发时间，勿刷新 event_at（否则日/周进展会变成实时快照）
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        // 面试结论写入时刷新 event_at：简历导入可能已有同 stage 且 event_at 是旧日期，不刷新会导致面板「区间进展」漏计
         jdbc.update("""
                 INSERT INTO hr_stage_event (application_id, stage_code, event_at, source_sheet, create_by, is_active)
                 VALUES (?, ?, ?, 'INTERVIEW', ?, 1)
-                ON DUPLICATE KEY UPDATE is_active = 1
-                """, applicationId, stageCode, LocalDateTime.now(), SecurityUtils.getCurrentUsername());
+                ON DUPLICATE KEY UPDATE
+                  is_active = 1,
+                  event_at = VALUES(event_at),
+                  source_sheet = VALUES(source_sheet),
+                  update_by = VALUES(create_by),
+                  update_time = NOW()
+                """, applicationId, stageCode, now, SecurityUtils.getCurrentUsername());
     }
 
     private String stageCode(Integer roundNo, String conclusion, boolean finalRound) {
