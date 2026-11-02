@@ -75,8 +75,7 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
         mount.className = 'lakex-editor-root h-full min-h-[480px] w-full';
         rootRef.current.appendChild(mount);
 
-        const create = readOnly ? Doc.createOpenViewer : Doc.createOpenEditor;
-        const editor = create(mount, {
+        const options = {
           defaultFontsize: 15,
           darkMode: false,
           // 滚动交给外层 .lakex-host，避免 overflow 裁剪工具栏下拉
@@ -114,17 +113,34 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
                 }
               : {}),
           },
-        });
+        };
+
+        const initial = valueRef.current || '';
+        lastSetRef.current = initial;
+        // 只读预览优先用 Viewer。平台稿若是 HTML 包进 Lake 壳，Viewer 会抛错，再改用编辑器打开并锁住编辑。
+        let editor = (readOnly ? Doc.createOpenViewer : Doc.createOpenEditor)(mount, options);
+        try {
+          editor.setDocument?.(LAKE_SCHEME, initial);
+        } catch (openErr) {
+          if (!readOnly) throw openErr;
+          try {
+            editor.destroy?.();
+          } catch {
+            /* ignore */
+          }
+          mount.innerHTML = '';
+          editor = Doc.createOpenEditor(mount, options);
+          editor.setDocument?.(LAKE_SCHEME, initial);
+          mount.querySelectorAll<HTMLElement>('[contenteditable="true"]').forEach((el) => {
+            el.setAttribute('contenteditable', 'false');
+          });
+        }
 
         if (disposed) {
           editor.destroy?.();
           return;
         }
         editorRef.current = editor;
-
-        const initial = valueRef.current || '';
-        lastSetRef.current = initial;
-        editor.setDocument?.(LAKE_SCHEME, initial);
 
         if (typeof editor.on === 'function' && !readOnly) {
           const off = editor.on('contentchange', () => {
