@@ -86,6 +86,24 @@ function statusMeta(status?: string) {
   return STATUS_LABEL[status || 'drafting'] || STATUS_LABEL.drafting;
 }
 
+/** 去掉 Lake 空壳和标签后的可见文字。只打开过编辑器时统一稿会留下空壳。 */
+function articlePlain(raw?: string) {
+  return (raw || '')
+    .replace(/<!doctype[^>]*>/gi, ' ')
+    .replace(/<meta\b[^>]*>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function firstVisibleArticle(...parts: Array<string | undefined>) {
+  for (const part of parts) {
+    if (articlePlain(part)) return part || '';
+  }
+  return '';
+}
+
 export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [editorReady, setEditorReady] = useState(false);
@@ -171,8 +189,12 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     mode === 'review' ||
     (active !== 'shared' && article != null && !article.editable && article.contentMode === 'custom');
   const sharedEditable = mode === 'write' && (active === 'shared' || article?.contentMode !== 'custom');
-  /** 审核划词优先用提审快照，否则用当前打开的正文 */
-  const annotateBody = (reviewHints?.contentBody || body || '').trim();
+  /** 审核划词：快照、当前稿、各平台稿里，跳过空 Lake 壳，用第一篇有文字的正文 */
+  const annotateBody = firstVisibleArticle(
+    reviewHints?.contentBody,
+    body,
+    (bundle?.articles ?? []).find((row) => articlePlain(row.contentBody))?.contentBody,
+  );
 
   const clearTimer = () => {
     if (timerRef.current != null) {
@@ -306,13 +328,16 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
         }
         const stage = focusFilled.stageNo === 2 ? '二审' : focusFilled.stageNo === 1 ? '一审' : '';
         const annos = focusFilled.annotations ?? [];
-        // 无统一稿快照时，再用当前打开的平台稿正文兜底，避免审核人划词区空白
-        const platformBody =
-          (bundleRef.current?.articles ?? []).find((a) => (a.contentBody || '').trim())?.contentBody || '';
+        // 无统一稿、或统一稿只是空 Lake 壳时，用有文字的内容平台稿
+        const platformBody = (bundleRef.current?.articles ?? []).find((a) => articlePlain(a.contentBody))?.contentBody;
         setReviewHints({
           roundLabel: `${stage ? `${stage}·` : ''}第${focusFilled.roundNo ?? '-'}轮`,
-          contentBody:
-            focusFilled.contentBody || res.currentDraft?.contentBody || platformBody || bodyRef.current || '',
+          contentBody: firstVisibleArticle(
+            focusFilled.contentBody,
+            res.currentDraft?.contentBody,
+            platformBody,
+            bodyRef.current,
+          ),
           annotations: annos,
           reviewers: focusFilled.reviewers ?? [],
         });

@@ -793,7 +793,8 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         }
         String sharedTitle = nz(placement.getContentTitle());
         String sharedBody = nz(placement.getContentBody());
-        if (StringUtils.hasText(sharedBody)) {
+        // 只打开过编辑器时统一稿会留下空 Lake 壳，不能把它当成已有正文，否则审核原文一直打不开
+        if (hasVisibleArticle(sharedBody)) {
             return new ReviewArticleSnapshot(
                     sharedTitle,
                     sharedBody,
@@ -812,7 +813,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
                         .orderByAsc(GeoContentPlacementItem::getId));
         // 优先独立稿；若 mode 未标 custom 但 item 上已有正文，同样纳入（避免审核空白）
         GeoContentPlacementItem primary = items.stream()
-                .filter(item -> StringUtils.hasText(nz(item.getContentBody())))
+                .filter(item -> hasVisibleArticle(item.getContentBody()))
                 .sorted(Comparator
                         .comparing((GeoContentPlacementItem item) -> !Constants.CONTENT_MODE_CUSTOM.equals(
                                 normalizeContentMode(item.getContentMode())))
@@ -866,6 +867,21 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         return new ReviewArticleSnapshot("", "", Constants.CONTENT_FORMAT_LAKE, 0L, null);
     }
 
+    /** 去掉 Lake 空壳和标签后还有没有可见文字。空壳不能当作统一稿。 */
+    private static boolean hasVisibleArticle(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return false;
+        }
+        String text = raw
+                .replaceAll("(?i)<!doctype[^>]*>", " ")
+                .replaceAll("(?i)<meta\\b[^>]*>", " ")
+                .replaceAll("<[^>]+>", " ")
+                .replace("&nbsp;", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return StringUtils.hasText(text);
+    }
+
     private static String normalizeContentMode(String mode) {
         if (Constants.CONTENT_MODE_CUSTOM.equals(mode)) {
             return Constants.CONTENT_MODE_CUSTOM;
@@ -890,7 +906,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         if (saved == null) {
             return;
         }
-        if (StringUtils.hasText(saved.getContentBody())) {
+        if (hasVisibleArticle(saved.getContentBody())) {
             return;
         }
         applyArticleSnapshot(saved, placement);
@@ -901,7 +917,7 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
         if (review == null || placement == null) {
             return;
         }
-        if (StringUtils.hasText(review.getContentBody())) {
+        if (hasVisibleArticle(review.getContentBody())) {
             return;
         }
         applyArticleSnapshot(review, placement);
@@ -920,12 +936,12 @@ public class GeoContentWriteServiceImpl implements GeoContentWriteService {
             return;
         }
         ReviewArticleSnapshot snap = resolveReviewArticle(placement);
-        if (!StringUtils.hasText(snap.body())) {
+        if (!hasVisibleArticle(snap.body())) {
             return;
         }
         long currentVersion = snap.version();
         for (GeoContentReview review : reviews) {
-            if (StringUtils.hasText(review.getContentBody())) {
+            if (hasVisibleArticle(review.getContentBody())) {
                 continue;
             }
             boolean pending = "pending".equals(review.getStatus());

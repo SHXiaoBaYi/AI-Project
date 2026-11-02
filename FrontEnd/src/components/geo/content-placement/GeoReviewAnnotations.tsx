@@ -653,10 +653,7 @@ function findQuoteOffsets(
   // 跨行：空白任意；中文之间也可能只有换行无空格 → 字符间允许 \s*
   const parts = q.split(/\s+/).filter(Boolean).map(escapeRegExp);
   if (parts.length === 0) return null;
-  const re =
-    parts.length === 1
-      ? new RegExp(parts[0])
-      : new RegExp(parts.join('\\s+'));
+  const re = parts.length === 1 ? new RegExp(parts[0]) : new RegExp(parts.join('\\s+'));
   let from = 0;
   while (from < plain.length) {
     const slice = plain.slice(from);
@@ -968,6 +965,7 @@ export function SelectableReviewBody({
   const hostWrapRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<SelectionDraft | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  const [editorError, setEditorError] = useState('');
   const [tip, setTip] = useState<{ no: number; top: number; left: number } | null>(null);
   const body = contentBody || '';
   const hasBody = body.trim().length > 0;
@@ -985,8 +983,9 @@ export function SelectableReviewBody({
 
   useEffect(() => {
     setEditorReady(false);
+    setEditorError('');
     setTip(null);
-  }, [contentKey, body]);
+  }, [contentKey]);
 
   useEffect(() => {
     const onDocDown = (e: MouseEvent) => {
@@ -1087,9 +1086,14 @@ export function SelectableReviewBody({
         ref={hostWrapRef}
         className='relative min-h-0 flex-1 overflow-auto select-text'
       >
-        {!editorReady ? (
+        {!editorReady && !editorError ? (
           <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/70 text-sm text-neutral-400'>
             加载原文…
+          </div>
+        ) : null}
+        {editorError ? (
+          <div className='absolute inset-0 z-10 flex items-center justify-center bg-white px-6 text-sm text-amber-700'>
+            原文打不开：{editorError}
           </div>
         ) : null}
         <LakexEditorHost
@@ -1097,6 +1101,7 @@ export function SelectableReviewBody({
           value={body}
           readOnly
           onReady={() => setEditorReady(true)}
+          onError={(err) => setEditorError(err.message || '加载失败')}
         />
         {enabled && onAdd && draft
           ? createPortal(
