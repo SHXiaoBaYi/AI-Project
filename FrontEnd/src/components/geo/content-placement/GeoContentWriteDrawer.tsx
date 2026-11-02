@@ -189,12 +189,13 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     mode === 'review' ||
     (active !== 'shared' && article != null && !article.editable && article.contentMode === 'custom');
   const sharedEditable = mode === 'write' && (active === 'shared' || article?.contentMode !== 'custom');
-  /** 审核划词：快照、当前稿、各平台稿里，跳过空 Lake 壳，用第一篇有文字的正文 */
-  const annotateBody = firstVisibleArticle(
-    reviewHints?.contentBody,
-    body,
-    (bundle?.articles ?? []).find((row) => articlePlain(row.contentBody))?.contentBody,
-  );
+  /** 审核划词跟当前选中的统一稿/内容平台走，不固定在第一次打开的那一篇 */
+  const annotateBody = articlePlain(body) ? body : '';
+  const annotatePlain = articlePlain(annotateBody);
+  const visibleAnnotations = liveAnnotations.filter((item) => {
+    const quote = articlePlain(item.quoteText);
+    return !!quote && !!annotatePlain && annotatePlain.includes(quote);
+  });
 
   const clearTimer = () => {
     if (timerRef.current != null) {
@@ -210,7 +211,9 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   };
 
   const applyArticle = (row: GeoContentArticle, data: GeoContentArticleBundle) => {
-    if (row.contentMode === 'custom') {
+    // 审核里：这篇平台稿自己有正文就展示这篇，不要被空的统一稿盖住
+    const showOwn = row.contentMode === 'custom' || (mode === 'review' && !!articlePlain(row.contentBody));
+    if (showOwn) {
       setContentTitle(row.contentTitle || '');
       setBody(row.contentBody || '');
       versionRef.current = row.contentVersion ?? 0;
@@ -225,11 +228,10 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     // 显式指定统一稿（撰写默认）时不自动跳转
     if (prefer === 'shared') return 'shared';
     if (prefer != null) return prefer;
-    const sharedBody = (data.shared?.contentBody || '').trim();
-    if (sharedBody) return 'shared';
-    // 审核打开且无统一稿正文：落到有正文的内容平台稿（优先独立稿）
+    if (articlePlain(data.shared?.contentBody)) return 'shared';
+    // 统一稿没有可见正文（含只剩空 Lake 壳）：落到有正文的内容平台稿（优先独立稿）
     const withBody = [...(data.articles ?? [])]
-      .filter((a) => (a.contentBody || '').trim() && a.itemId != null)
+      .filter((a) => articlePlain(a.contentBody) && a.itemId != null)
       .sort((a, b) => {
         const ac = a.contentMode === 'custom' ? 0 : 1;
         const bc = b.contentMode === 'custom' ? 0 : 1;
@@ -461,6 +463,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
       if (row) applyArticle(row, latest);
     }
     setSaveState('idle');
+    if (mode === 'review') setReviewPane('annotate');
   };
 
   const handleClose = async () => {
@@ -995,7 +998,7 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                           disabled: !versionPair,
                         },
                         {
-                          label: `划词审核${liveAnnotations.length > 0 ? ` · ${liveAnnotations.length}` : ''}`,
+                          label: `划词审核${visibleAnnotations.length > 0 ? ` · ${visibleAnnotations.length}` : ''}`,
                           value: 'annotate',
                         },
                       ]}
@@ -1052,12 +1055,18 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                   <div className='min-h-0 border-b border-neutral-100 lg:border-r lg:border-b-0'>
                     {annotateBody ? (
                       <SelectableReviewBody
-                        contentKey={`review-${reviewId}-${annotateBody.length}`}
+                        contentKey={`review-${reviewId}-${active}-${annotateBody.length}`}
                         contentBody={annotateBody}
                         enabled
-                        annotations={liveAnnotations}
+                        annotations={visibleAnnotations}
                         editableReviewId={reviewId}
-                        onAnnotationsChange={setLiveAnnotations}
+                        onAnnotationsChange={(next) => {
+                          const kept = liveAnnotations.filter((item) => {
+                            const quote = articlePlain(item.quoteText);
+                            return !(quote && annotatePlain.includes(quote));
+                          });
+                          setLiveAnnotations([...kept, ...next]);
+                        }}
                         onAdd={(d) => {
                           setAnnoDraft(d);
                           setAnnoComment('');
@@ -1069,12 +1078,12 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                   </div>
                   <aside className='flex min-h-0 flex-col overflow-auto px-3 py-2'>
                     <div className='mb-2 text-xs text-neutral-500'>
-                      批注列表{liveAnnotations.length > 0 ? `（${liveAnnotations.length}）` : ''}
+                      批注列表{visibleAnnotations.length > 0 ? `（${visibleAnnotations.length}）` : ''}
                       ；左侧 Lake 原文可划选，高亮处点数字查看
                       {!versionPair ? ' · 首次提审暂无上一轮可对照' : ''}
                     </div>
                     <ReviewAnnotationList
-                      annotations={liveAnnotations}
+                      annotations={visibleAnnotations}
                       editableReviewId={reviewId}
                       onDelete={(id) => {
                         void (async () => {
