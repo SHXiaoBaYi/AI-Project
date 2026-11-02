@@ -50,6 +50,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureRequisitionPanelColumns();
         ensureRequisitionTaskRequirementAndLog();
         ensureRequisitionMonthTaskTable();
+        ensureRequisitionMonthTaskResumeTarget();
         deactivateKpiScoreRuleMenus();
         backfillWorkAddressFromLocation();
         ensureCandidateProfileColumns();
@@ -514,8 +515,9 @@ public class HrSchemaMigrator implements ApplicationRunner {
                   requisition_id   BIGINT       NOT NULL                COMMENT '招聘需求',
                   settle_month     CHAR(7)      NOT NULL                COMMENT '核算月 YYYY-MM',
                   priority_code    VARCHAR(8)   NOT NULL                COMMENT 'P0/P1',
-                  achieve_mode     VARCHAR(32)  NOT NULL                COMMENT 'ONBOARD入职 / QUALIFIED_RESUME合格简历',
-                  target_count     INT          NOT NULL DEFAULT 1      COMMENT '入职人数或合格简历份数',
+                  achieve_mode     VARCHAR(32)  NOT NULL                COMMENT 'ONBOARD=仅入职(P0)；EITHER=入职或简历任一(P1)',
+                  target_count     INT          NOT NULL DEFAULT 1      COMMENT '入职人数门槛',
+                  resume_target    INT          NOT NULL DEFAULT 0      COMMENT '合格简历份数门槛（P1；P0为0）',
                   score            INT          NOT NULL DEFAULT 1      COMMENT '达成后得几分',
                   remark           VARCHAR(255) NULL                    COMMENT '备注',
                   create_by        VARCHAR(64)  DEFAULT ''              COMMENT '创建者',
@@ -527,6 +529,34 @@ public class HrSchemaMigrator implements ApplicationRunner {
                   UNIQUE KEY uk_hr_req_month_task (requisition_id, settle_month),
                   KEY idx_hr_req_month_task_month (settle_month)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='招聘需求按月任务要求'
+                """);
+    }
+
+    /** P1：入职门槛与合格简历门槛并存（任一达标即得分） */
+    private void ensureRequisitionMonthTaskResumeTarget() {
+        addColumnIfMissing("hr_requisition_month_task", "resume_target",
+                "ALTER TABLE hr_requisition_month_task ADD COLUMN resume_target INT NOT NULL DEFAULT 0 COMMENT '合格简历份数门槛（P1；P0为0）' AFTER target_count");
+        // 历史：若旧数据是「仅合格简历」模式，把 target_count 迁到 resume_target
+        jdbc.update("""
+                UPDATE hr_requisition_month_task
+                SET resume_target = target_count,
+                    target_count = 0,
+                    achieve_mode = 'EITHER'
+                WHERE is_active = 1
+                  AND UPPER(priority_code) = 'P1'
+                  AND UPPER(achieve_mode) = 'QUALIFIED_RESUME'
+                  AND IFNULL(resume_target, 0) = 0
+                  AND IFNULL(target_count, 0) > 0
+                """);
+        jdbc.update("""
+                UPDATE hr_requisition_month_task
+                SET achieve_mode = 'EITHER'
+                WHERE is_active = 1 AND UPPER(priority_code) = 'P1' AND UPPER(achieve_mode) <> 'EITHER'
+                """);
+        jdbc.update("""
+                UPDATE hr_requisition_month_task
+                SET achieve_mode = 'ONBOARD', resume_target = 0
+                WHERE is_active = 1 AND UPPER(priority_code) = 'P0'
                 """);
     }
 

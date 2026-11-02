@@ -1064,9 +1064,12 @@ export type HrRequisitionMonthTask = {
   jobName?: string;
   settleMonth: string;
   priorityCode: string;
-  achieveMode: string;
+  achieveMode?: string;
   achieveModeLabel?: string;
+  /** 入职人数门槛 */
   targetCount: number;
+  /** 合格简历份数门槛（P1，与入职为「或」） */
+  resumeTarget?: number;
   score: number;
   remark?: string;
   updateBy?: string;
@@ -1082,8 +1085,8 @@ export function saveHrRequisitionMonthTaskApi(data: {
   requisitionId: number;
   settleMonth: string;
   priorityCode: string;
-  achieveMode: string;
   targetCount: number;
+  resumeTarget?: number;
   score: number;
   remark?: string;
 }) {

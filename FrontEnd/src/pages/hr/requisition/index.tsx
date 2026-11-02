@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Select, Space, Tag } from 'antd';
+import { App, DatePicker, Drawer, Form, Input, InputNumber, Modal, Radio, Select, Tag } from 'antd';
 import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import TableModal from '@/components/TableModal';
@@ -219,12 +219,15 @@ const RequisitionPage = memo(function RequisitionPage() {
   const [taskForm] = Form.useForm<{
     settleMonth: dayjs.Dayjs;
     priorityCode: string;
-    achieveMode: string;
     targetCount: number;
+    resumeTarget?: number;
     score: number;
     remark?: string;
   }>();
   const taskPriority = Form.useWatch('priorityCode', taskForm);
+  const taskOnboard = Form.useWatch('targetCount', taskForm);
+  const taskResume = Form.useWatch('resumeTarget', taskForm);
+  const taskScore = Form.useWatch('score', taskForm);
   const [depts, setDepts] = useState<{ value: number; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [interviewers, setInterviewers] = useState<{ value: number; label: string }[]>([]);
@@ -256,8 +259,8 @@ const RequisitionPage = memo(function RequisitionPage() {
       taskForm.setFieldsValue({
         settleMonth: dayjs().startOf('month'),
         priorityCode: record.jobPriorityCode === 'P1' ? 'P1' : 'P0',
-        achieveMode: 'ONBOARD',
         targetCount: 1,
+        resumeTarget: record.jobPriorityCode === 'P1' ? 1 : 0,
         score: 1,
         remark: undefined,
       });
@@ -890,38 +893,64 @@ const RequisitionPage = memo(function RequisitionPage() {
           setMonthTasks([]);
         }}
         destroyOnClose
+        styles={{ body: { paddingTop: 12 } }}
       >
-        <div className='mb-4 text-xs leading-relaxed text-neutral-500'>
-          按自然月配置本岗位考核口径：P0 仅「到岗 x 人得 y 分」；P1
-          在「到岗」与「合格简历」中二选一。仅招聘管理员可改，变更写入操作日志。
-        </div>
         <Form
           form={taskForm}
           layout='vertical'
-          className='mb-4 rounded border border-neutral-200 p-3'
+          requiredMark='optional'
+          className='mb-6 !border-0 !shadow-none'
           onFinish={async (values) => {
             if (!taskReq) return;
+            const priority = values.priorityCode;
+            const month = values.settleMonth.format('YYYY-MM');
+            const onboard = Number(values.targetCount || 0);
+            const resume = priority === 'P1' ? Number(values.resumeTarget || 0) : 0;
+            if (priority === 'P0' && onboard < 1) {
+              message.warning('必须到岗请填写入职人数（至少 1）');
+              return;
+            }
+            if (priority === 'P1' && onboard < 1 && resume < 1) {
+              message.warning('灵活到岗请至少填写入职人数或合格简历份数之一');
+              return;
+            }
+            const existed = monthTasks.find((t) => t.settleMonth === month);
+            if (existed) {
+              const ok = await new Promise<boolean>((resolve) => {
+                Modal.confirm({
+                  title: `覆盖 ${month} 的任务要求？`,
+                  content: '同一岗位同一月份只能有一条配置，保存将覆盖已有设置。',
+                  okText: '覆盖保存',
+                  cancelText: '取消',
+                  onOk: () => resolve(true),
+                  onCancel: () => resolve(false),
+                });
+              });
+              if (!ok) return;
+            }
             setTaskSaving(true);
             try {
-              const priority = values.priorityCode;
-              const mode = priority === 'P0' ? 'ONBOARD' : values.achieveMode;
               await saveHrRequisitionMonthTaskApi({
                 requisitionId: taskReq.id,
-                settleMonth: values.settleMonth.format('YYYY-MM'),
+                settleMonth: month,
                 priorityCode: priority,
-                achieveMode: mode,
-                targetCount: Number(values.targetCount),
+                targetCount: onboard,
+                resumeTarget: resume,
                 score: Number(values.score),
                 remark: values.remark,
               });
-              message.success('已保存月度任务要求');
+              message.success(existed ? `已覆盖 ${month} 的任务要求` : '已保存月度任务要求');
               await reloadMonthTasks(taskReq.id);
             } finally {
               setTaskSaving(false);
             }
           }}
         >
-          <div className='grid grid-cols-2 gap-x-3'>
+          <p className='mb-4 text-xs leading-relaxed text-neutral-400'>
+            同一岗位同一月份仅一条配置；再次保存将覆盖。必须到岗按入职计分；灵活到岗为入职或合格简历「或」关系，任一达标即得分（每月只记一次）。
+          </p>
+
+          <div className='mb-1 grid grid-cols-2 gap-x-4'>
             <Form.Item
               name='settleMonth'
               label='月份'
@@ -935,50 +964,80 @@ const RequisitionPage = memo(function RequisitionPage() {
             </Form.Item>
             <Form.Item
               name='priorityCode'
-              label='当月优先级'
-              rules={[{ required: true, message: '请选择 P0/P1' }]}
+              label='到岗类型'
+              rules={[{ required: true, message: '请选择到岗类型' }]}
             >
-              <Select
+              <Radio.Group
+                optionType='button'
+                buttonStyle='solid'
+                className='flex w-full [&_.ant-radio-button-wrapper]:flex-1 [&_.ant-radio-button-wrapper]:text-center'
                 options={[
-                  { label: 'P0', value: 'P0' },
-                  { label: 'P1', value: 'P1' },
+                  { label: '必须到岗', value: 'P0' },
+                  { label: '灵活到岗', value: 'P1' },
                 ]}
-                onChange={(v) => {
-                  if (v === 'P0') taskForm.setFieldValue('achieveMode', 'ONBOARD');
+                onChange={(e) => {
+                  if (e.target.value === 'P0') {
+                    taskForm.setFieldValue('resumeTarget', 0);
+                    if (!taskForm.getFieldValue('targetCount')) {
+                      taskForm.setFieldValue('targetCount', 1);
+                    }
+                  } else if (!taskForm.getFieldValue('resumeTarget')) {
+                    taskForm.setFieldValue('resumeTarget', 1);
+                  }
                 }}
               />
             </Form.Item>
           </div>
-          <Form.Item
-            name='achieveMode'
-            label='达成方式'
-            rules={[{ required: true, message: '请选择达成方式' }]}
-            extra={taskPriority === 'P0' ? 'P0 固定为到岗' : 'P1 只能二选一'}
-          >
-            <Radio.Group disabled={taskPriority === 'P0'}>
-              <Radio value='ONBOARD'>到岗（入职）</Radio>
-              <Radio value='QUALIFIED_RESUME'>合格简历</Radio>
-            </Radio.Group>
-          </Form.Item>
-          <div className='grid grid-cols-2 gap-x-3'>
+
+          <div className='mb-4 rounded-md bg-sky-50/70 px-3 py-2.5 text-sm text-sky-900'>
+            {taskPriority === 'P1' ? (
+              <>
+                灵活到岗：完成 <span className='font-medium'>{taskOnboard ?? '—'}</span> 人入职
+                <span className='mx-1 text-sky-600'>或</span>
+                <span className='font-medium'>{taskResume ?? '—'}</span> 份合格简历
+                <span className='mx-1'>→</span>
+                <span className='font-medium'>{taskScore ?? '—'}</span> 分
+              </>
+            ) : (
+              <>
+                必须到岗：完成 <span className='font-medium'>{taskOnboard ?? '—'}</span> 人入职
+                <span className='mx-1'>→</span>
+                <span className='font-medium'>{taskScore ?? '—'}</span> 分
+              </>
+            )}
+          </div>
+
+          <div className={`mb-1 grid gap-x-4 ${taskPriority === 'P1' ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <Form.Item
               name='targetCount'
-              label='目标数量'
-              rules={[{ required: true, message: '请填写目标数量' }]}
+              label='入职人数'
+              rules={taskPriority === 'P0' ? [{ required: true, message: '请填写入职人数' }] : undefined}
             >
               <InputNumber
-                min={1}
+                min={0}
                 max={999}
                 precision={0}
                 className='w-full'
-                addonAfter={
-                  taskPriority === 'P1' && taskForm.getFieldValue('achieveMode') === 'QUALIFIED_RESUME' ? '份' : '人'
-                }
+                suffix='人'
               />
             </Form.Item>
+            {taskPriority === 'P1' ? (
+              <Form.Item
+                name='resumeTarget'
+                label='合格简历'
+              >
+                <InputNumber
+                  min={0}
+                  max={999}
+                  precision={0}
+                  className='w-full'
+                  suffix='份'
+                />
+              </Form.Item>
+            ) : null}
             <Form.Item
               name='score'
-              label='达成得分'
+              label='得分'
               rules={[{ required: true, message: '请填写得分' }]}
             >
               <InputNumber
@@ -986,10 +1045,11 @@ const RequisitionPage = memo(function RequisitionPage() {
                 max={999}
                 precision={0}
                 className='w-full'
-                addonAfter='分'
+                suffix='分'
               />
             </Form.Item>
           </div>
+
           <Form.Item
             name='remark'
             label='备注'
@@ -998,27 +1058,31 @@ const RequisitionPage = memo(function RequisitionPage() {
               rows={2}
               maxLength={255}
               showCount
+              placeholder='可选'
+              className='!resize-none'
             />
           </Form.Item>
-          <Space>
-            <PermissionButton
-              type='primary'
-              htmlType='submit'
-              perm='hr:requisition:task'
-              loading={taskSaving}
-            >
-              保存本月配置
-            </PermissionButton>
-          </Space>
+
+          <PermissionButton
+            type='primary'
+            htmlType='submit'
+            perm='hr:requisition:task'
+            loading={taskSaving}
+          >
+            保存本月配置
+          </PermissionButton>
         </Form>
+
+        <div className='mb-2 text-sm font-medium text-neutral-700'>已配置月份</div>
         <BaseProTable<HrRequisitionMonthTask>
           rowKey='id'
-          headerTitle='已配置月份'
           search={false}
           options={false}
           pagination={false}
           loading={taskLoading}
           dataSource={monthTasks}
+          cardProps={{ bodyStyle: { padding: 0 } }}
+          className='[&_.ant-pro-card]:!border-0 [&_.ant-pro-card]:shadow-none'
           columns={[
             {
               title: '操作',
@@ -1035,8 +1099,8 @@ const RequisitionPage = memo(function RequisitionPage() {
                         taskForm.setFieldsValue({
                           settleMonth: dayjs(`${row.settleMonth}-01`),
                           priorityCode: row.priorityCode,
-                          achieveMode: row.priorityCode === 'P0' ? 'ONBOARD' : row.achieveMode,
-                          targetCount: row.targetCount,
+                          targetCount: row.targetCount ?? 0,
+                          resumeTarget: row.resumeTarget ?? 0,
                           score: row.score,
                           remark: row.remark,
                         });
@@ -1060,23 +1124,20 @@ const RequisitionPage = memo(function RequisitionPage() {
             },
             { title: '月份', dataIndex: 'settleMonth', width: 100 },
             {
-              title: '优先级',
+              title: '到岗类型',
               dataIndex: 'priorityCode',
-              width: 72,
-              render: (_, r) => <Tag color={r.priorityCode === 'P0' ? 'red' : 'blue'}>{r.priorityCode}</Tag>,
-            },
-            {
-              title: '达成方式',
-              dataIndex: 'achieveModeLabel',
               width: 100,
-              render: (_, r) => r.achieveModeLabel || r.achieveMode,
+              render: (_, r) => (
+                <Tag color={r.priorityCode === 'P0' ? 'red' : 'blue'}>
+                  {r.priorityCode === 'P0' ? '必须到岗' : '灵活到岗'}
+                </Tag>
+              ),
             },
             {
-              title: '目标',
-              width: 90,
-              render: (_, r) => `${r.targetCount}${r.achieveMode === 'QUALIFIED_RESUME' ? '份' : '人'}`,
+              title: '规则',
+              ellipsis: true,
+              render: (_, r) => r.achieveModeLabel || `${r.priorityCode} → ${r.score}分`,
             },
-            { title: '得分', dataIndex: 'score', width: 72 },
             { title: '更新人', dataIndex: 'updateBy', width: 90, ellipsis: true },
             { title: '更新时间', dataIndex: 'updateTime', width: 160, ellipsis: true },
           ]}

@@ -29,22 +29,21 @@ public class HrRequisitionMonthTaskDTO {
     @Schema(description = "P0 或 P1", requiredMode = Schema.RequiredMode.REQUIRED)
     private String priorityCode;
 
-    @NotBlank
-    @Pattern(regexp = "^(?i)ONBOARD|QUALIFIED_RESUME$", message = "达成方式只能是 ONBOARD 或 QUALIFIED_RESUME")
-    @Schema(description = "ONBOARD=到岗入职；QUALIFIED_RESUME=合格简历（仅 P1 可选）",
-            requiredMode = Schema.RequiredMode.REQUIRED)
-    private String achieveMode;
-
     @NotNull
-    @Min(1)
+    @Min(0)
     @Max(999)
-    @Schema(description = "到岗人数或合格简历份数门槛", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "入职人数门槛；P0 至少 1；P1 可与合格简历门槛并存", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer targetCount;
+
+    @Min(0)
+    @Max(999)
+    @Schema(description = "合格简历份数门槛；仅 P1 使用，与入职门槛为「或」关系")
+    private Integer resumeTarget;
 
     @NotNull
     @Min(0)
     @Max(999)
-    @Schema(description = "达成后得几分", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "任一达标后得几分", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer score;
 
     @Schema(description = "备注")

@@ -16,13 +16,13 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 岗位按月任务要求：P0 仅到岗；P1 到岗或合格简历二选一。
+ * 岗位按月任务要求：P0 仅入职；P1 入职门槛与合格简历门槛为「或」——任一达标即得配置分。
  */
 @Service
 public class HrRequisitionMonthTaskService {
 
     public static final String MODE_ONBOARD = "ONBOARD";
-    public static final String MODE_RESUME = "QUALIFIED_RESUME";
+    public static final String MODE_EITHER = "EITHER";
 
     private final JdbcTemplate jdbc;
     private final HrRequisitionLogService requisitionLogService;
@@ -42,41 +42,12 @@ public class HrRequisitionMonthTaskService {
         }
         return jdbc.query("""
                 SELECT t.id, t.requisition_id, r.job_name, t.settle_month, t.priority_code, t.achieve_mode,
-                       t.target_count, t.score, t.remark, t.update_by, t.update_time
+                       t.target_count, t.resume_target, t.score, t.remark, t.update_by, t.update_time
                 FROM hr_requisition_month_task t
                 JOIN hr_requisition r ON r.id = t.requisition_id
                 WHERE t.requisition_id = ? AND t.is_active = 1
                 ORDER BY t.settle_month DESC, t.id DESC
-                """, (rs, i) -> mapRow(rs.getLong("id"), rs.getLong("requisition_id"), rs.getString("job_name"),
-                rs.getString("settle_month"), rs.getString("priority_code"), rs.getString("achieve_mode"),
-                rs.getInt("target_count"), rs.getInt("score"), rs.getString("remark"),
-                rs.getString("update_by"), rs.getTimestamp("update_time") == null ? null
-                        : rs.getTimestamp("update_time").toLocalDateTime().toString().replace('T', ' ')),
-                requisitionId);
-    }
-
-    public HrRequisitionMonthTaskVO get(Long requisitionId, String settleMonth) {
-        if (requisitionId == null || !StringUtils.hasText(settleMonth)) {
-            return null;
-        }
-        String month = settleMonth.trim();
-        return jdbc.query("""
-                SELECT t.id, t.requisition_id, r.job_name, t.settle_month, t.priority_code, t.achieve_mode,
-                       t.target_count, t.score, t.remark, t.update_by, t.update_time
-                FROM hr_requisition_month_task t
-                JOIN hr_requisition r ON r.id = t.requisition_id
-                WHERE t.requisition_id = ? AND t.settle_month = ? AND t.is_active = 1
-                LIMIT 1
-                """, rs -> {
-            if (!rs.next()) {
-                return null;
-            }
-            return mapRow(rs.getLong("id"), rs.getLong("requisition_id"), rs.getString("job_name"),
-                    rs.getString("settle_month"), rs.getString("priority_code"), rs.getString("achieve_mode"),
-                    rs.getInt("target_count"), rs.getInt("score"), rs.getString("remark"),
-                    rs.getString("update_by"), rs.getTimestamp("update_time") == null ? null
-                            : rs.getTimestamp("update_time").toLocalDateTime().toString().replace('T', ' '));
-        }, requisitionId, month);
+                """, (rs, i) -> mapRow(rs), requisitionId);
     }
 
     /** 核算月内全部岗位任务要求，key=requisitionId */
@@ -86,19 +57,12 @@ public class HrRequisitionMonthTaskService {
             return map;
         }
         jdbc.query("""
-                SELECT requisition_id, settle_month, priority_code, achieve_mode, target_count, score
+                SELECT requisition_id, settle_month, priority_code, achieve_mode, target_count, resume_target, score
                 FROM hr_requisition_month_task
                 WHERE settle_month = ? AND is_active = 1
                 """, rs -> {
             while (rs.next()) {
-                long reqId = rs.getLong("requisition_id");
-                map.put(reqId, new MonthTaskRule(
-                        reqId,
-                        rs.getString("settle_month"),
-                        rs.getString("priority_code").trim().toUpperCase(Locale.ROOT),
-                        rs.getString("achieve_mode").trim().toUpperCase(Locale.ROOT),
-                        Math.max(1, rs.getInt("target_count")),
-                        Math.max(0, rs.getInt("score"))));
+                map.put(rs.getLong("requisition_id"), readRule(rs));
             }
         }, settleMonth.trim());
         return map;
@@ -109,22 +73,11 @@ public class HrRequisitionMonthTaskService {
             return null;
         }
         return jdbc.query("""
-                SELECT requisition_id, settle_month, priority_code, achieve_mode, target_count, score
+                SELECT requisition_id, settle_month, priority_code, achieve_mode, target_count, resume_target, score
                 FROM hr_requisition_month_task
                 WHERE requisition_id = ? AND settle_month = ? AND is_active = 1
                 LIMIT 1
-                """, rs -> {
-            if (!rs.next()) {
-                return null;
-            }
-            return new MonthTaskRule(
-                    rs.getLong("requisition_id"),
-                    rs.getString("settle_month"),
-                    rs.getString("priority_code").trim().toUpperCase(Locale.ROOT),
-                    rs.getString("achieve_mode").trim().toUpperCase(Locale.ROOT),
-                    Math.max(1, rs.getInt("target_count")),
-                    Math.max(0, rs.getInt("score")));
-        }, requisitionId, settleMonth.trim());
+                """, rs -> rs.next() ? readRule(rs) : null, requisitionId, settleMonth.trim());
     }
 
     @Transactional
@@ -140,20 +93,23 @@ public class HrRequisitionMonthTaskService {
         }
         String month = dto.getSettleMonth().trim();
         String priority = dto.getPriorityCode().trim().toUpperCase(Locale.ROOT);
-        String mode = dto.getAchieveMode().trim().toUpperCase(Locale.ROOT);
+        int onboard = dto.getTargetCount() == null ? 0 : dto.getTargetCount();
+        int resume = dto.getResumeTarget() == null ? 0 : dto.getResumeTarget();
+        int score = dto.getScore() == null ? 0 : dto.getScore();
+        String mode;
         if ("P0".equals(priority)) {
             mode = MODE_ONBOARD;
+            resume = 0;
+            if (onboard < 1) {
+                throw new BusinessException("必须到岗请填写入职人数门槛（至少 1）");
+            }
         } else if ("P1".equals(priority)) {
-            if (!MODE_ONBOARD.equals(mode) && !MODE_RESUME.equals(mode)) {
-                throw new BusinessException("P1 任务要求只能选择「到岗」或「合格简历」其一");
+            mode = MODE_EITHER;
+            if (onboard < 1 && resume < 1) {
+                throw new BusinessException("灵活到岗请至少填写「入职人数」或「合格简历份数」之一");
             }
         } else {
             throw new BusinessException("优先级只能是 P0 或 P1");
-        }
-        int target = dto.getTargetCount() == null ? 1 : dto.getTargetCount();
-        int score = dto.getScore() == null ? 0 : dto.getScore();
-        if (target < 1) {
-            throw new BusinessException("目标数量至少为 1");
         }
         if (score < 0) {
             throw new BusinessException("得分不能为负");
@@ -161,35 +117,48 @@ public class HrRequisitionMonthTaskService {
 
         Map<String, Object> before = snapshot(dto.getRequisitionId(), month);
         String username = safeUser();
+        // 含软删行：唯一键 (requisition_id, settle_month) 仍占用，必须 UPDATE 恢复，不能再 INSERT
         Long existingId = jdbc.query("""
                 SELECT id FROM hr_requisition_month_task
-                WHERE requisition_id = ? AND settle_month = ? AND is_active = 1 LIMIT 1
+                WHERE requisition_id = ? AND settle_month = ?
+                ORDER BY is_active DESC, id DESC LIMIT 1
                 """, rs -> rs.next() ? rs.getLong(1) : null, dto.getRequisitionId(), month);
 
         if (existingId != null) {
             jdbc.update("""
                     UPDATE hr_requisition_month_task
-                    SET priority_code = ?, achieve_mode = ?, target_count = ?, score = ?, remark = ?,
-                        update_by = ?, update_time = NOW()
-                    WHERE id = ? AND is_active = 1
-                    """, priority, mode, target, score, blankToNull(dto.getRemark()), username, existingId);
+                    SET priority_code = ?, achieve_mode = ?, target_count = ?, resume_target = ?, score = ?,
+                        remark = ?, update_by = ?, update_time = NOW(), is_active = 1
+                    WHERE id = ?
+                    """, priority, mode, onboard, resume, score, blankToNull(dto.getRemark()), username, existingId);
         } else {
             jdbc.update("""
                     INSERT INTO hr_requisition_month_task
-                      (requisition_id, settle_month, priority_code, achieve_mode, target_count, score,
+                      (requisition_id, settle_month, priority_code, achieve_mode, target_count, resume_target, score,
                        remark, create_by, update_by, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                    """, dto.getRequisitionId(), month, priority, mode, target, score,
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    ON DUPLICATE KEY UPDATE
+                      priority_code = VALUES(priority_code),
+                      achieve_mode = VALUES(achieve_mode),
+                      target_count = VALUES(target_count),
+                      resume_target = VALUES(resume_target),
+                      score = VALUES(score),
+                      remark = VALUES(remark),
+                      update_by = VALUES(update_by),
+                      update_time = NOW(),
+                      is_active = 1
+                    """, dto.getRequisitionId(), month, priority, mode, onboard, resume, score,
                     blankToNull(dto.getRemark()), username, username);
-            existingId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+            existingId = jdbc.query("""
+                    SELECT id FROM hr_requisition_month_task
+                    WHERE requisition_id = ? AND settle_month = ? AND is_active = 1 LIMIT 1
+                    """, rs -> rs.next() ? rs.getLong(1) : null, dto.getRequisitionId(), month);
         }
 
         Map<String, Object> after = snapshot(dto.getRequisitionId(), month);
-        String summary = buildTaskSummary(before, after, month);
         requisitionLogService.write(dto.getRequisitionId(), jobName, HrRequisitionLogService.ACTION_TASK,
-                summary, before.isEmpty() ? null : before, after);
+                buildTaskSummary(before, after, month), before.isEmpty() ? null : before, after);
 
-        // 当月配置变更后同步考核槽位并尝试按新规则完成
         kpiTaskService.syncForRequisition(dto.getRequisitionId());
         kpiTaskService.reevaluateCompletion(dto.getRequisitionId());
         return existingId;
@@ -232,6 +201,61 @@ public class HrRequisitionMonthTaskService {
         kpiTaskService.syncForRequisition(requisitionId);
     }
 
+    private MonthTaskRule readRule(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String priority = rs.getString("priority_code").trim().toUpperCase(Locale.ROOT);
+        String mode = rs.getString("achieve_mode") == null ? "" : rs.getString("achieve_mode").trim().toUpperCase(Locale.ROOT);
+        int onboard = Math.max(0, rs.getInt("target_count"));
+        int resume = 0;
+        try {
+            resume = Math.max(0, rs.getInt("resume_target"));
+        } catch (Exception ignored) {
+            // 旧库无列时忽略
+        }
+        // 兼容旧 QUALIFIED_RESUME 单模式
+        if ("P1".equals(priority) && "QUALIFIED_RESUME".equals(mode) && resume <= 0 && onboard > 0) {
+            resume = onboard;
+            onboard = 0;
+            mode = MODE_EITHER;
+        }
+        if ("P0".equals(priority)) {
+            mode = MODE_ONBOARD;
+            resume = 0;
+            if (onboard < 1) {
+                onboard = 1;
+            }
+        } else {
+            mode = MODE_EITHER;
+        }
+        return new MonthTaskRule(
+                rs.getLong("requisition_id"),
+                rs.getString("settle_month"),
+                priority,
+                mode,
+                onboard,
+                resume,
+                Math.max(0, rs.getInt("score")));
+    }
+
+    private HrRequisitionMonthTaskVO mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        MonthTaskRule rule = readRule(rs);
+        HrRequisitionMonthTaskVO vo = new HrRequisitionMonthTaskVO();
+        vo.setId(rs.getLong("id"));
+        vo.setRequisitionId(rule.requisitionId());
+        vo.setJobName(rs.getString("job_name"));
+        vo.setSettleMonth(rule.settleMonth());
+        vo.setPriorityCode(rule.priorityCode());
+        vo.setAchieveMode(rule.achieveMode());
+        vo.setAchieveModeLabel(ruleLabel(rule));
+        vo.setTargetCount(rule.onboardTarget());
+        vo.setResumeTarget(rule.resumeTarget());
+        vo.setScore(rule.score());
+        vo.setRemark(rs.getString("remark"));
+        vo.setUpdateBy(rs.getString("update_by"));
+        vo.setUpdateTime(rs.getTimestamp("update_time") == null ? null
+                : rs.getTimestamp("update_time").toLocalDateTime().toString().replace('T', ' '));
+        return vo;
+    }
+
     private Map<String, Object> snapshot(Long requisitionId, String settleMonth) {
         MonthTaskRule rule = loadRule(requisitionId, settleMonth);
         if (rule == null) {
@@ -240,10 +264,10 @@ public class HrRequisitionMonthTaskService {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("settleMonth", rule.settleMonth());
         m.put("priorityCode", rule.priorityCode());
-        m.put("achieveMode", rule.achieveMode());
-        m.put("achieveModeLabel", modeLabel(rule.achieveMode()));
-        m.put("targetCount", rule.targetCount());
+        m.put("onboardTarget", rule.onboardTarget());
+        m.put("resumeTarget", rule.resumeTarget());
         m.put("score", rule.score());
+        m.put("ruleLabel", ruleLabel(rule));
         return m;
     }
 
@@ -258,34 +282,34 @@ public class HrRequisitionMonthTaskService {
         if (snap == null || snap.isEmpty()) {
             return "（无）";
         }
-        return snap.get("priorityCode") + " / " + snap.getOrDefault("achieveModeLabel", snap.get("achieveMode"))
-                + " " + snap.get("targetCount") + " → " + snap.get("score") + "分";
-    }
-
-    private static HrRequisitionMonthTaskVO mapRow(long id, long requisitionId, String jobName, String month,
-                                                   String priority, String mode, int target, int score,
-                                                   String remark, String updateBy, String updateTime) {
-        HrRequisitionMonthTaskVO vo = new HrRequisitionMonthTaskVO();
-        vo.setId(id);
-        vo.setRequisitionId(requisitionId);
-        vo.setJobName(jobName);
-        vo.setSettleMonth(month);
-        vo.setPriorityCode(priority);
-        vo.setAchieveMode(mode);
-        vo.setAchieveModeLabel(modeLabel(mode));
-        vo.setTargetCount(target);
-        vo.setScore(score);
-        vo.setRemark(remark);
-        vo.setUpdateBy(updateBy);
-        vo.setUpdateTime(updateTime);
-        return vo;
-    }
-
-    public static String modeLabel(String mode) {
-        if (MODE_RESUME.equalsIgnoreCase(mode)) {
-            return "合格简历";
+        Object label = snap.get("ruleLabel");
+        if (label != null) {
+            return String.valueOf(label);
         }
-        return "到岗";
+        return snap.get("priorityCode") + " → " + snap.get("score") + "分";
+    }
+
+    public static String ruleLabel(MonthTaskRule rule) {
+        if (rule == null) {
+            return "";
+        }
+        if ("P0".equals(rule.priorityCode())) {
+            return "必须到岗：完成 " + rule.onboardTarget() + " 个入职得 " + rule.score() + " 分";
+        }
+        StringBuilder sb = new StringBuilder("灵活到岗：");
+        boolean first = true;
+        if (rule.onboardTarget() > 0) {
+            sb.append("完成 ").append(rule.onboardTarget()).append(" 个入职");
+            first = false;
+        }
+        if (rule.resumeTarget() > 0) {
+            if (!first) {
+                sb.append(" 或 ");
+            }
+            sb.append("完成 ").append(rule.resumeTarget()).append(" 份合格简历");
+        }
+        sb.append(" 得 ").append(rule.score()).append(" 分");
+        return sb.toString();
     }
 
     private static String blankToNull(String s) {
@@ -301,14 +325,33 @@ public class HrRequisitionMonthTaskService {
         }
     }
 
+    /**
+     * @param onboardTarget 入职人数门槛；0 表示不按入职计
+     * @param resumeTarget  合格简历门槛；0 表示不按简历计
+     */
     public record MonthTaskRule(long requisitionId, String settleMonth, String priorityCode,
-                                String achieveMode, int targetCount, int score) {
-        public boolean onboardMode() {
-            return !MODE_RESUME.equalsIgnoreCase(achieveMode);
+                                String achieveMode, int onboardTarget, int resumeTarget, int score) {
+        /** 兼容旧字段名 */
+        public int targetCount() {
+            return onboardTarget;
         }
 
+        public boolean allowsOnboard() {
+            return onboardTarget > 0;
+        }
+
+        public boolean allowsResume() {
+            return resumeTarget > 0;
+        }
+
+        @Deprecated
+        public boolean onboardMode() {
+            return allowsOnboard();
+        }
+
+        @Deprecated
         public boolean resumeMode() {
-            return MODE_RESUME.equalsIgnoreCase(achieveMode);
+            return allowsResume();
         }
     }
 }

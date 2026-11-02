@@ -72,29 +72,22 @@ function doneReasonColor(reason?: string) {
   return 'default';
 }
 
-/** 例：P0 入职 0/0 · P1 入职 0/3  简历合格5份(+1.66) */
-function ownerScoreBreakdown(
-  o: {
-    p0Done?: number;
-    p0Due?: number;
-    p1Due?: number;
-    p1DoneOnboard?: number;
-    p1DoneResume?: number;
-    p1ResumePartialCount?: number;
-    p1ResumePartialScore?: number;
-  },
-  p1ResumeNeed: number,
-  weightP1: number,
-) {
-  const p0 = `P0 入职 ${o.p0Done ?? 0}/${o.p0Due ?? 0}`;
-  const p1Onboard = `P1 入职 ${o.p1DoneOnboard ?? 0}/${o.p1Due ?? 0}`;
-  const need = Math.max(1, p1ResumeNeed || 3);
-  const resumeCnt = (o.p1DoneResume ?? 0) * need + (o.p1ResumePartialCount ?? 0);
-  const resumeScore = (o.p1DoneResume ?? 0) * Number(weightP1 || 0) + (o.p1ResumePartialScore ?? 0);
-  if (resumeCnt <= 0 && resumeScore <= 0) {
-    return `${p0} · ${p1Onboard}`;
-  }
-  return `${p0} · ${p1Onboard}  简历合格${resumeCnt}份(+${fmtScore(resumeScore)})`;
+/** 例：P0 达标 1/2 · P1 到岗 0/1 · P1 简历 1/1 */
+function ownerScoreBreakdown(o: {
+  p0Done?: number;
+  p0Due?: number;
+  p1Due?: number;
+  p1Done?: number;
+  p1DoneOnboard?: number;
+  p1DoneResume?: number;
+}) {
+  const p0 = `必须到岗 ${o.p0Done ?? 0}/${o.p0Due ?? 0}`;
+  const p1 = `灵活到岗 ${o.p1Done ?? 0}/${o.p1Due ?? 0}`;
+  const detail =
+    (o.p1DoneOnboard ?? 0) > 0 || (o.p1DoneResume ?? 0) > 0
+      ? `（到岗${o.p1DoneOnboard ?? 0} · 简历${o.p1DoneResume ?? 0}）`
+      : '';
+  return `${p0} · ${p1}${detail}`;
 }
 
 const AssessmentPage = memo(function AssessmentPage() {
@@ -162,16 +155,11 @@ const AssessmentPage = memo(function AssessmentPage() {
   const baseScore = data?.baseScore ?? 30;
   const weightP0 = data?.weightP0 ?? 2;
   const weightP1 = data?.weightP1 ?? 1;
-  const p1ResumeNeed = data?.p1QualifiedResumeCount ?? 3;
   const overallMax = data?.overallScoreMax ?? (data?.ownerCount ?? data?.owners?.length ?? 0) * baseScore;
   const overallAttain = scoreAttainPct(data?.overallScore, overallMax);
   const overallP0Done = (data?.owners ?? []).reduce((n, o) => n + (o.p0Done ?? 0), 0);
   const overallP1Onboard = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneOnboard ?? 0), 0);
   const overallP1ResumeDone = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneResume ?? 0), 0);
-  const overallP1ResumePartial = (data?.owners ?? []).reduce((n, o) => n + (o.p1ResumePartialCount ?? 0), 0);
-  const overallP1ResumePartialScore = (data?.owners ?? []).reduce((n, o) => n + (o.p1ResumePartialScore ?? 0), 0);
-  const overallResumeCnt = overallP1ResumeDone * Math.max(1, p1ResumeNeed) + overallP1ResumePartial;
-  const overallResumeScore = overallP1ResumeDone * Number(weightP1) + overallP1ResumePartialScore;
 
   const taskColumns: ColumnsType<HrKpiAssessment['tasks'][number]> = [
     {
@@ -198,7 +186,9 @@ const AssessmentPage = memo(function AssessmentPage() {
       title: '优先级',
       dataIndex: 'priorityCode',
       width: 72,
-      render: (v: string) => <Tag color={v === 'P0' ? 'red' : 'blue'}>{v || '—'}</Tag>,
+      render: (v: string) => (
+        <Tag color={v === 'P0' ? 'red' : 'blue'}>{v === 'P0' ? '必须到岗' : v === 'P1' ? '灵活到岗' : v || '—'}</Tag>
+      ),
     },
     { title: 'HC', dataIndex: 'slotNo', width: 56 },
     {
@@ -243,9 +233,6 @@ const AssessmentPage = memo(function AssessmentPage() {
       render: (v: string | undefined, row) => {
         if (row.status === 'DONE' && v) {
           return <Tag color={doneReasonColor(v)}>{doneReasonLabel(v, row.priorityCode)}</Tag>;
-        }
-        if (row.status === 'OPEN' && Number(row.earnedWeight ?? 0) > 0 && row.priorityCode === 'P1') {
-          return <Tag color='purple'>合格简历进度</Tag>;
         }
         return '—';
       },
@@ -313,7 +300,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           type='secondary'
           className='!mt-2 !mb-0 text-xs leading-relaxed'
         >
-          {data?.scoreRuleHint || '按各岗位当月任务要求（P0/P1、到岗或合格简历二选一）计分；未配置岗位本月不计分。'}
+          {data?.scoreRuleHint || '每岗位每月达标只记一次配置分；未达标准不得分；超标不加分；未配置岗位本月不计分。'}
         </Typography.Paragraph>
       </Card>
 
@@ -346,8 +333,8 @@ const AssessmentPage = memo(function AssessmentPage() {
               <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
                 各人已得分之和 / 本月已配置任务应得分合计
                 <br />
-                P0 入职 {overallP0Done} · P1 入职 {overallP1Onboard}
-                {overallResumeCnt > 0 ? `  简历合格${overallResumeCnt}份(+${fmtScore(overallResumeScore)})` : ''}
+                必须到岗 {overallP0Done} · 灵活到岗-入职 {overallP1Onboard}
+                {overallP1ResumeDone > 0 ? ` · 灵活到岗-简历 ${overallP1ResumeDone}` : ''}
               </div>
             </Card>
           </Col>
@@ -381,7 +368,7 @@ const AssessmentPage = memo(function AssessmentPage() {
                   <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
                     HC {o.doneCount}/{o.dueCount} · 未完成 {o.openCount}
                     <br />
-                    {ownerScoreBreakdown(o, p1ResumeNeed, weightP1)}
+                    {ownerScoreBreakdown(o)}
                   </div>
                 </Card>
               </Col>
