@@ -104,6 +104,35 @@ function firstVisibleArticle(...parts: Array<string | undefined>) {
   return '';
 }
 
+/** Lake 标签会把一句话拆开，对原文时去掉空白再比，避免刚加上的批注被滤掉。 */
+function compactText(raw?: string) {
+  return articlePlain(raw).replace(/\s+/g, '');
+}
+
+function quoteInBody(quote: string | undefined, body?: string) {
+  const q = compactText(quote);
+  const plain = compactText(body);
+  return !!q && !!plain && plain.includes(q);
+}
+
+function tabForQuote(
+  quote: string | undefined,
+  data: GeoContentArticleBundle,
+  current: ActiveKey,
+  previous?: ActiveKey,
+): ActiveKey {
+  if (current !== 'shared') {
+    const row = data.articles.find((item) => item.itemId === current);
+    if (row && quoteInBody(quote, row.contentBody)) return current;
+  } else if (quoteInBody(quote, data.shared?.contentBody)) {
+    return 'shared';
+  }
+  const hit = data.articles.find((item) => quoteInBody(quote, item.contentBody));
+  if (hit?.itemId != null) return hit.itemId;
+  if (quoteInBody(quote, data.shared?.contentBody)) return 'shared';
+  return previous ?? current;
+}
+
 export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [editorReady, setEditorReady] = useState(false);
@@ -146,6 +175,8 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   } | null>(null);
   /** 审核进行中：可在原文上划词的批注列表 */
   const [liveAnnotations, setLiveAnnotations] = useState<GeoContentReviewAnnotation[]>([]);
+  const [annotationTab, setAnnotationTab] = useState<Record<number, ActiveKey>>({});
+  const pinnedAnnoRef = useRef<Set<number>>(new Set());
   /** 审核主区：划词 / 版本对照（任务视角内嵌，不必再点顶栏） */
   const [reviewPane, setReviewPane] = useState<ReviewPane>('annotate');
   const [versionPair, setVersionPair] = useState<{
@@ -191,11 +222,29 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
   const sharedEditable = mode === 'write' && (active === 'shared' || article?.contentMode !== 'custom');
   /** 审核划词跟当前选中的统一稿/内容平台走，不固定在第一次打开的那一篇 */
   const annotateBody = articlePlain(body) ? body : '';
-  const annotatePlain = articlePlain(annotateBody);
   const visibleAnnotations = liveAnnotations.filter((item) => {
-    const quote = articlePlain(item.quoteText);
-    return !!quote && !!annotatePlain && annotatePlain.includes(quote);
+    const tab = item.id != null ? annotationTab[item.id] : undefined;
+    if (tab != null) return tab === active;
+    return quoteInBody(item.quoteText, annotateBody);
   });
+
+  useEffect(() => {
+    if (!open || !bundle || liveAnnotations.length === 0) return;
+    setAnnotationTab((prev) => {
+      const next: Record<number, ActiveKey> = {};
+      let changed = false;
+      for (const item of liveAnnotations) {
+        if (item.id == null) continue;
+        const pinned = pinnedAnnoRef.current.has(item.id);
+        const tab =
+          pinned && prev[item.id] != null ? prev[item.id] : tabForQuote(item.quoteText, bundle, active, prev[item.id]);
+        next[item.id] = tab;
+        if (prev[item.id] !== tab) changed = true;
+      }
+      if (!changed && Object.keys(prev).length === Object.keys(next).length) return prev;
+      return next;
+    });
+  }, [open, bundle, liveAnnotations, active]);
 
   const clearTimer = () => {
     if (timerRef.current != null) {
@@ -273,6 +322,8 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
     setOpinion('');
     setReviewHints(null);
     setLiveAnnotations([]);
+    setAnnotationTab({});
+    pinnedAnnoRef.current = new Set();
     setVersionPair(null);
     setReviewPane('annotate');
     setAnnoDraft(null);
@@ -1061,11 +1112,8 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                         annotations={visibleAnnotations}
                         editableReviewId={reviewId}
                         onAnnotationsChange={(next) => {
-                          const kept = liveAnnotations.filter((item) => {
-                            const quote = articlePlain(item.quoteText);
-                            return !(quote && annotatePlain.includes(quote));
-                          });
-                          setLiveAnnotations([...kept, ...next]);
+                          const shown = new Set(visibleAnnotations.map((item) => item.id));
+                          setLiveAnnotations((prev) => [...prev.filter((item) => !shown.has(item.id)), ...next]);
                         }}
                         onAdd={(d) => {
                           setAnnoDraft(d);
@@ -1265,6 +1313,11 @@ export function GeoContentWriteDrawer({ open, placementId, mode, reviewId = null
                   startOffset: annoDraft.startOffset,
                   endOffset: annoDraft.endOffset,
                 });
+                if (created.id != null) {
+                  pinnedAnnoRef.current.add(created.id);
+                  const tab = activeRef.current;
+                  setAnnotationTab((prev) => ({ ...prev, [created.id]: tab }));
+                }
                 setLiveAnnotations((prev) => [...prev, created]);
                 setAnnoDraft(null);
                 setAnnoComment('');
