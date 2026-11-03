@@ -15,8 +15,11 @@ public final class LocalhostAccess {
     /** @deprecated 保留兼容；请用 {@link #isDataScopeOperator(String)} */
     public static final String DATA_SCOPE_OPERATOR = "bella";
 
-    /** 生产/线上可进「数据权限配置」的用户名（不看超管权限） */
-    private static final Set<String> DATA_SCOPE_OPERATORS = Set.of("bella", "wangfangyang");
+    /**
+     * 生产/线上可进「数据权限配置」的用户名（不看超管权限）。
+     * 注意：王方扬在库中有 thh/tbb/wangfangyang 三账号且钉钉绑定相同，扫码常落到 thh。
+     */
+    private static final Set<String> DATA_SCOPE_OPERATORS = Set.of("bella", "wangfangyang", "thh", "tbb");
 
     /** 电商运营暗门仍仅 bella（与数据权限名单解耦，避免误开） */
     private static final Set<String> ECOM_OPERATORS = Set.of("bella");

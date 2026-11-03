@@ -7,8 +7,8 @@ export function isLocalhostHost() {
 /** @deprecated 保留兼容；请用 DATA_SCOPE_OPERATORS */
 export const DATA_SCOPE_OPERATOR = 'bella';
 
-/** 生产/线上可进「数据权限配置」的用户名（与后端 LocalhostAccess 保持一致） */
-export const DATA_SCOPE_OPERATORS = ['bella', 'wangfangyang'] as const;
+/** 生产/线上可进「数据权限配置」的用户名（与后端 LocalhostAccess 保持一致；含王方扬 thh/tbb 别名账号） */
+export const DATA_SCOPE_OPERATORS = ['bella', 'wangfangyang', 'thh', 'tbb'] as const;
 
 /** 数据权限配置页：localhost 或名单内用户可见 */
 export function canSeeDataScopePage(username?: string | null) {
