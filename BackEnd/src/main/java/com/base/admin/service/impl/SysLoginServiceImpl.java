@@ -414,7 +414,7 @@ public class SysLoginServiceImpl implements SysLoginService {
             menus = TreeUtil.buildMenuTree(menuMapper.selectMenusByUserId(userId));
         }
 
-        boolean ecomManage = LocalhostAccess.canAccessDataScope(currentRequest(), user.getUsername());
+        boolean ecomManage = LocalhostAccess.canAccessEcom(currentRequest(), user.getUsername());
         boolean ecomAllowed = ecomManage || isEcomAclEnabled(user.getUserId());
         LoginUser loginUser = new LoginUser();
         loginUser.setUserId(user.getUserId());

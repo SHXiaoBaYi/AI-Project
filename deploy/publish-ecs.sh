@@ -132,11 +132,16 @@ echo "==> 准备前端目录"
 ssh_run "mkdir -p '$ECS_DIR/html/shxby' && rm -rf '$ECS_DIR/html/shxby/'*"
 
 echo "==> 上传前端（tar-pipe）"
+# macOS tar 支持 --disable-copyfile；Git Bash/GNU tar 不支持，按能力降级
+TAR_FLAGS=(-C "$DIST" -czf - .)
+if tar --help 2>&1 | grep -q -- '--disable-copyfile'; then
+  TAR_FLAGS=(--disable-copyfile --no-xattrs "${TAR_FLAGS[@]}")
+fi
 if [[ -n "${SSHPASS:-}" ]] && command -v sshpass >/dev/null 2>&1 && [[ -z "${ECS_IDENTITY:-}" ]]; then
-  COPYFILE_DISABLE=1 tar --disable-copyfile --no-xattrs -C "$DIST" -czf - . \
+  COPYFILE_DISABLE=1 tar "${TAR_FLAGS[@]}" \
     | sshpass -e ssh "${SSH_OPTS[@]}" "$REMOTE" "tar -C '$ECS_DIR/html/shxby' -xzf -"
 else
-  COPYFILE_DISABLE=1 tar --disable-copyfile --no-xattrs -C "$DIST" -czf - . \
+  COPYFILE_DISABLE=1 tar "${TAR_FLAGS[@]}" \
     | ssh "${SSH_OPTS[@]}" "$REMOTE" "tar -C '$ECS_DIR/html/shxby' -xzf -"
 fi
 

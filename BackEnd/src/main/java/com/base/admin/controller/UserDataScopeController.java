@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
-@Tag(name = "数据权限配置", description = "暗门页：localhost 或 bella 可访问；按模块配置可见数据切片")
+@Tag(name = "数据权限配置", description = "暗门页：localhost 或名单用户（bella/wangfangyang）可访问；按模块配置可见数据切片")
 @RestController
 @RequestMapping("/system/data-scope")
 @RequiredArgsConstructor
