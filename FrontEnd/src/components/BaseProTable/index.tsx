@@ -3,7 +3,9 @@ import { ProTable } from '@ant-design/pro-components';
 import type { ParamsType, ProColumns, ProTableProps } from '@ant-design/pro-components';
 import type { SizeType } from 'antd/es/config-provider/SizeContext';
 import { BUTTERFLY_SEARCH } from '@/constants/searchLayout';
+import { usePermission } from '@/hooks/usePermission';
 import { DATE_TIME_FORMAT, formatDateTime } from '@/utils/datetime';
+import { isActionColumnVisibleForUser } from './actionColumnVisible';
 import styles from './index.module.css';
 
 function isActionColumn<T extends Record<string, any>>(col: ProColumns<T>): boolean {
@@ -13,19 +15,25 @@ function isActionColumn<T extends Record<string, any>>(col: ProColumns<T>): bool
   return false;
 }
 
-/** 操作列统一置顶并左固定，横向滚动时始终可见 */
-function withActionColumnFirst<T extends Record<string, any>>(columns?: ProColumns<T>[]): ProColumns<T>[] | undefined {
+/** 操作列统一置顶并左固定；当前用户一个操作权限都没有时整列隐藏 */
+function withActionColumnFirst<T extends Record<string, any>>(
+  columns: ProColumns<T>[] | undefined,
+  has: (perm: string) => boolean,
+): ProColumns<T>[] | undefined {
   if (!columns?.length) return columns;
   const actions: ProColumns<T>[] = [];
   const rest: ProColumns<T>[] = [];
   for (const col of columns) {
     if (isActionColumn(col)) {
+      if (!isActionColumnVisibleForUser(col, has)) {
+        continue;
+      }
       actions.push({ ...col, fixed: 'left' });
     } else {
       rest.push(col);
     }
   }
-  if (!actions.length) return columns;
+  if (!actions.length) return rest.length ? rest : columns.filter((c) => !isActionColumn(c));
   return [...actions, ...rest];
 }
 
@@ -59,7 +67,8 @@ function withDateTimeFormat<T extends Record<string, any>>(columns?: ProColumns<
  * 扩展ProTable，添加一些公共默认属性。
  * 对于对象类型的属性（scroll、pagination、search），会与调用方传入的值进行浅合并，
  * 确保默认子属性不会因调用方传入部分属性而丢失。
- * 操作列（valueType=option / 标题「操作」）会自动移到第一列并 left 固定。
+ * 操作列（valueType=option / 标题「操作」）会自动移到第一列并 left 固定；
+ * 若当前用户对该列没有任何可见操作（ActionButtons/PermissionButton 均无权限），则整列不展示。
  */
 export default function BaseProTable<T extends Record<string, any>, U extends ParamsType = any>(
   props: ProTableProps<T, U>,
@@ -72,6 +81,7 @@ export default function BaseProTable<T extends Record<string, any>, U extends Pa
     search: callerSearch,
     ...restProps
   } = props;
+  const { has } = usePermission();
 
   const scroll = { x: 'max-content' as const, ...callerScroll };
   const pagination = (() => {
@@ -92,8 +102,8 @@ export default function BaseProTable<T extends Record<string, any>, U extends Pa
 
   const className = [styles.table, callerClassName].filter(Boolean).join(' ');
   const mergedColumns = useMemo(
-    () => withActionColumnFirst(withDateTimeFormat(columns as ProColumns<T>[] | undefined)),
-    [columns],
+    () => withActionColumnFirst(withDateTimeFormat(columns as ProColumns<T>[] | undefined), has),
+    [columns, has],
   );
 
   return (
