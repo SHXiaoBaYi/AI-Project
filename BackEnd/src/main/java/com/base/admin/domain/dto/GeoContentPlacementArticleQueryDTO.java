@@ -34,6 +34,9 @@ public class GeoContentPlacementArticleQueryDTO extends PageQuery {
     @Schema(description = "发布平台（内容发布平台）")
     private String platformName;
 
+    @Schema(description = "内容形态（图文/视频）", example = "视频")
+    private String contentForm;
+
     @Schema(description = "投放状态（投放成功/审核未通过/待投放/未投放）", example = "投放成功")
     private String publishStatus;
 

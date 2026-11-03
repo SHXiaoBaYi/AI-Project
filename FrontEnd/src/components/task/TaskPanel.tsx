@@ -175,7 +175,9 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
     !r.requireProof &&
     r.taskType !== '文章发布' &&
     r.taskType !== '文章撰写' &&
-    r.taskType !== '审核文章';
+    r.taskType !== '审核文章' &&
+    r.taskType !== '抖音视频剪辑' &&
+    r.taskType !== '抖音视频发布';
 
   const openBatchComplete = () => {
     if (!selectedRowKeys.length) {
@@ -453,7 +455,7 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       hideInForm: true,
       ellipsis: true,
       render: (_, r) => {
-        if (r.taskType === '文章发布' && r.bizId) {
+        if ((r.taskType === '文章发布' || r.taskType === '抖音视频剪辑' || r.taskType === '抖音视频发布') && r.bizId) {
           return (
             <a
               onClick={(e) => {
@@ -524,6 +526,15 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
                 onClick: () => {
                   if (record.taskType === '文章发布') {
                     navigate('/geo/content-placement-work');
+                    return;
+                  }
+                  if (record.taskType === '抖音视频剪辑' || record.taskType === '抖音视频发布') {
+                    if (!record.bizId) {
+                      message.warning('该任务未关联内容投放');
+                      return;
+                    }
+                    const from = record.taskType === '抖音视频剪辑' ? 'videoEdit' : 'videoPublish';
+                    navigate(`/geo/article?placementId=${record.bizId}&from=${from}`);
                     return;
                   }
                   if (record.taskType === '文章撰写') {

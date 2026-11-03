@@ -28,6 +28,15 @@ public interface PlacementTaskSyncService {
     /** 扫描未完成的「文章发布」任务，有发布记录的自动完成 */
     void completeArticlePublishTasks();
 
+    /**
+     * 文章列表新增/更新后：按视频稿状态自动完成「抖音视频剪辑」「抖音视频发布」。
+     * 剪辑：存在内容形态=视频且非「未投放」的明细；发布：视频稿投放成功且有投放链接。
+     */
+    void completeVideoTasks(Long placementId);
+
+    /** 扫描未完成的抖音视频任务并按文章状态自动完成 */
+    void completeVideoTasks();
+
     /** 删除投放时，同步删除该投放生成的任务 */
     void deleteTasksForPlacement(Long placementId);
 }

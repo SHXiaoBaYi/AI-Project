@@ -602,6 +602,8 @@ export interface GeoContentPlacementListItem {
   /** 在线撰写正文标题 */
   contentTitle?: string;
   remark?: string;
+  /** 是否有视频任务（抖音视频剪辑/发布） */
+  hasVideoTask?: boolean;
   createTime?: string;
 }
 
@@ -802,8 +804,11 @@ export interface GeoContentPlacementCite {
 
 export interface GeoContentPlacementDetail {
   id: number;
+  publisherUserId?: number;
   publisherName?: string;
+  ownerUserId?: number;
   ownerName?: string;
+  topicId?: number;
   topicName?: string;
   targetQuestion?: string;
   title?: string;
@@ -838,6 +843,7 @@ export interface GeoContentPlacementDTO {
   topicName?: string;
   targetQuestion: string;
   remark?: string;
+  hasVideoTask?: boolean;
 }
 
 export interface GeoContentPlacementItemDTO {

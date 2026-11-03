@@ -682,6 +682,7 @@ export function getGeoContentPlacementArticleListApi(
     publishStatus?: string;
     title?: string;
     platformName?: string;
+    contentForm?: string;
     publishTimeStart?: string;
     publishTimeEnd?: string;
     cited?: number;

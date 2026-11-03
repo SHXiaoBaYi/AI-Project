@@ -93,7 +93,7 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         if (placementId == null || !hasPublishRecord(placementId)) {
             return;
         }
-        finishOpenPublishTasks(placementId);
+        finishOpenTasks(placementId, Constants.TASK_TYPE_GEO_PUBLISH, "投放已有发布记录，系统自动完成");
     }
 
     @Override
@@ -101,13 +101,50 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
     public void completeArticlePublishTasks() {
         List<SysTask> open = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
                 .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
-                .eq(SysTask::getTaskType, "文章发布")
+                .eq(SysTask::getTaskType, Constants.TASK_TYPE_GEO_PUBLISH)
                 .in(SysTask::getStatus, List.of("未开始", "进行中"))
                 .isNotNull(SysTask::getBizId));
         for (Long placementId : open.stream().map(SysTask::getBizId).filter(Objects::nonNull).distinct().toList()) {
             if (hasPublishRecord(placementId)) {
-                finishOpenPublishTasks(placementId);
+                finishOpenTasks(placementId, Constants.TASK_TYPE_GEO_PUBLISH, "投放已有发布记录，系统自动完成");
             }
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void completeVideoTasks(Long placementId) {
+        if (placementId == null) {
+            return;
+        }
+        List<GeoContentPlacementItem> items = itemMapper.selectList(new LambdaQueryWrapper<GeoContentPlacementItem>()
+                .eq(GeoContentPlacementItem::getPlacementId, placementId)
+                .select(GeoContentPlacementItem::getId,
+                        GeoContentPlacementItem::getContentForm,
+                        GeoContentPlacementItem::getPublishStatus,
+                        GeoContentPlacementItem::getPublishUrl));
+        if (hasVideoEditDone(items)) {
+            finishOpenTasks(placementId, Constants.TASK_TYPE_GEO_VIDEO_EDIT,
+                    "文章列表已新增待投放视频稿，系统自动完成");
+        }
+        if (hasVideoPublishDone(items)) {
+            finishOpenTasks(placementId, Constants.TASK_TYPE_GEO_VIDEO_PUBLISH,
+                    "视频稿已投放成功且有投放链接，系统自动完成");
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void completeVideoTasks() {
+        List<SysTask> open = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .in(SysTask::getTaskType, List.of(
+                        Constants.TASK_TYPE_GEO_VIDEO_EDIT,
+                        Constants.TASK_TYPE_GEO_VIDEO_PUBLISH))
+                .in(SysTask::getStatus, List.of("未开始", "进行中"))
+                .isNotNull(SysTask::getBizId));
+        for (Long placementId : open.stream().map(SysTask::getBizId).filter(Objects::nonNull).distinct().toList()) {
+            completeVideoTasks(placementId);
         }
     }
 
@@ -147,18 +184,59 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         return false;
     }
 
-    private void finishOpenPublishTasks(Long placementId) {
+    /** 剪辑完成：已有内容形态=视频，且状态不是「未投放」（至少到待投放） */
+    private static boolean hasVideoEditDone(List<GeoContentPlacementItem> items) {
+        if (items == null || items.isEmpty()) {
+            return false;
+        }
+        for (GeoContentPlacementItem item : items) {
+            if (!isVideoForm(item)) {
+                continue;
+            }
+            String status = item.getPublishStatus() == null ? "" : item.getPublishStatus().trim();
+            if (!Constants.CONTENT_PUBLISH_NONE.equals(status) && StringUtils.hasText(status)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 视频发布完成：视频形态 + 投放成功 + 有投放链接 */
+    private static boolean hasVideoPublishDone(List<GeoContentPlacementItem> items) {
+        if (items == null || items.isEmpty()) {
+            return false;
+        }
+        for (GeoContentPlacementItem item : items) {
+            if (!isVideoForm(item)) {
+                continue;
+            }
+            if (!Constants.CONTENT_PUBLISH_SUCCESS.equals(item.getPublishStatus())) {
+                continue;
+            }
+            String url = item.getPublishUrl() == null ? "" : item.getPublishUrl().trim();
+            if (url.matches("(?i)https?://\\S+")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isVideoForm(GeoContentPlacementItem item) {
+        String form = item.getContentForm() == null ? "" : item.getContentForm().trim();
+        return Constants.CONTENT_FORM_VIDEO.equals(form);
+    }
+
+    private void finishOpenTasks(Long placementId, String taskType, String note) {
         List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
                 .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
                 .eq(SysTask::getBizId, placementId)
-                .eq(SysTask::getTaskType, "文章发布")
+                .eq(SysTask::getTaskType, taskType)
                 .in(SysTask::getStatus, List.of("未开始", "进行中")));
         LocalDateTime now = LocalDateTime.now();
         for (SysTask task : tasks) {
             task.setStatus("已完成");
             task.setProgress(100);
             task.setActualEndTime(now);
-            String note = "投放已有发布记录，系统自动完成";
             task.setRemark(StringUtils.hasText(task.getRemark()) ? task.getRemark().trim() + "；" + note : note);
             taskMapper.updateById(task);
             if (task.getId() != null) {
@@ -203,7 +281,7 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
             }
         } else {
             cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER);
-            if (p.getPublisherUserId() != null && ensureExecTask(p, "文章发布", p.getPublisherUserId())) {
+            if (p.getPublisherUserId() != null && ensureExecTask(p, Constants.TASK_TYPE_GEO_PUBLISH, p.getPublisherUserId())) {
                 publisherCreated++;
             }
         }
@@ -215,21 +293,50 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
             }
         } else {
             cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_WRITER);
-            if (p.getOwnerUserId() != null && ensureExecTask(p, "文章撰写", p.getOwnerUserId())) {
+            if (p.getOwnerUserId() != null && ensureExecTask(p, Constants.TASK_TYPE_GEO_WRITE, p.getOwnerUserId())) {
                 writerCreated++;
             }
+        }
+
+        // 勾选「是否有视频任务」：撰写人→抖音视频剪辑，发布人→抖音视频发布
+        if (isHasVideoTask(p)) {
+            if (p.getOwnerUserId() != null
+                    && ensureExecTask(p, Constants.TASK_TYPE_GEO_VIDEO_EDIT, p.getOwnerUserId())) {
+                writerCreated++;
+            }
+            if (p.getPublisherUserId() != null
+                    && ensureExecTask(p, Constants.TASK_TYPE_GEO_VIDEO_PUBLISH, p.getPublisherUserId())) {
+                publisherCreated++;
+            }
+            // 已具备完成条件时立即关掉（例如勾选前已有视频稿）
+            completeVideoTasks(p.getId());
+        } else {
+            cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_VIDEO_EDIT);
+            cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_VIDEO_PUBLISH);
         }
         return new int[]{publisherCreated, writerCreated};
     }
 
+    private static boolean isHasVideoTask(GeoContentPlacement p) {
+        return p.getHasVideoTask() != null && p.getHasVideoTask() == 1;
+    }
+
     private void ensureTaskTypes() {
         ensureType(Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER, 10, "投放管理：目标问题缺少发布人",
-                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_PUBLISHER, "文章发布", false);
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_PUBLISHER,
+                Constants.TASK_TYPE_GEO_PUBLISH, false);
         ensureType(Constants.TASK_TYPE_GEO_ASSIGN_WRITER, 11, "投放管理：目标问题缺少撰写人",
-                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_WRITER, "文章撰写", false);
-        ensureType("文章撰写", 12, "撰写人执行任务",
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, Constants.TASK_ASSIGN_FIELD_WRITER,
+                Constants.TASK_TYPE_GEO_WRITE, false);
+        ensureType(Constants.TASK_TYPE_GEO_WRITE, 12, "撰写人执行任务",
                 Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", true);
-        ensureType("文章发布", 13, "发布人执行任务，有发布记录后自动完成",
+        ensureType(Constants.TASK_TYPE_GEO_PUBLISH, 13, "发布人执行任务，有发布记录后自动完成",
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", false);
+        ensureType(Constants.TASK_TYPE_GEO_VIDEO_EDIT, 14,
+                "撰写人执行：在文章列表新增待投放视频稿后自动完成",
+                Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", false);
+        ensureType(Constants.TASK_TYPE_GEO_VIDEO_PUBLISH, 15,
+                "发布人执行：视频稿投放成功且有投放链接后自动完成",
                 Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT, "", "", false);
     }
 
@@ -328,12 +435,24 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         dto.setBizType(bizType);
         dto.setBizId(p.getId());
         dto.setBizTitle(abbreviate(question, 180));
-        dto.setRemark("由投放管理指定" + ("文章发布".equals(taskType) ? "发布人" : "撰写人") + "后自动生成");
+        dto.setRemark("由投放管理指定" + resolveRoleLabel(taskType) + "后自动生成");
         if (!persistTaskAsOperator(p, dto)) {
             log.warn("跳过自动生成执行任务：无可用操作人 placementId={} type={}", p.getId(), taskType);
             return false;
         }
         return true;
+    }
+
+    private static String resolveRoleLabel(String taskType) {
+        if (Constants.TASK_TYPE_GEO_PUBLISH.equals(taskType)
+                || Constants.TASK_TYPE_GEO_VIDEO_PUBLISH.equals(taskType)) {
+            return "发布人";
+        }
+        if (Constants.TASK_TYPE_GEO_WRITE.equals(taskType)
+                || Constants.TASK_TYPE_GEO_VIDEO_EDIT.equals(taskType)) {
+            return "撰写人";
+        }
+        return "执行人";
     }
 
     private void createAssignTask(GeoContentPlacement p, String taskType, String roleLabel, Long ownerUserId) {

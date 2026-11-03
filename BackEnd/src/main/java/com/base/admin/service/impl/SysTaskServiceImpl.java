@@ -100,6 +100,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         PlacementTaskSyncService sync = placementTaskSync.getIfAvailable();
         if (sync != null) {
             sync.completeArticlePublishTasks();
+            sync.completeVideoTasks();
         }
         Long mineUserId = null;
         if (Boolean.TRUE.equals(query.getMineOnly())) {
@@ -412,6 +413,12 @@ public class SysTaskServiceImpl implements SysTaskService {
         }
         if (Constants.TASK_TYPE_GEO_REVIEW.equals(task.getTaskType())) {
             throw new BusinessException("审核文章请在「我的任务」打开审核抽屉完成通过/退回");
+        }
+        if (Constants.TASK_TYPE_GEO_VIDEO_EDIT.equals(task.getTaskType())) {
+            throw new BusinessException("抖音视频剪辑请到「文章列表」新增一条待投放且内容形态为视频的文章，系统会自动完成");
+        }
+        if (Constants.TASK_TYPE_GEO_VIDEO_PUBLISH.equals(task.getTaskType())) {
+            throw new BusinessException("抖音视频发布请到「文章列表」将该视频稿填投放链接并标记投放成功，系统会自动完成");
         }
         if ("已完成".equals(task.getStatus()) || "已取消".equals(task.getStatus())) {
             throw new BusinessException("任务已结束，无法再次完成");
@@ -794,6 +801,8 @@ public class SysTaskServiceImpl implements SysTaskService {
             if (Constants.TASK_TYPE_GEO_PUBLISH.equals(task.getTaskType())
                     || Constants.TASK_TYPE_GEO_WRITE.equals(task.getTaskType())
                     || Constants.TASK_TYPE_GEO_REVIEW.equals(task.getTaskType())
+                    || Constants.TASK_TYPE_GEO_VIDEO_EDIT.equals(task.getTaskType())
+                    || Constants.TASK_TYPE_GEO_VIDEO_PUBLISH.equals(task.getTaskType())
                     || (typeCfg != null && Objects.equals(typeCfg.getRequireProof(), 1))) {
                 skip++;
                 continue;

@@ -59,6 +59,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureContentPlacementProgress(connection);
             ensureContentPlacementViewMenus(connection);
             ensureContentPlacementItemContentForm(connection);
+            ensureContentPlacementHasVideoTask(connection);
             ensureContentDraftColumns(connection);
             ensureContentArticleReview(connection);
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v22_geo_content_review.sql"));
@@ -1000,6 +1001,24 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (130, 131, 132, 117, 129);""");
         }
         log.info("已同步 GEO 菜单三分域与露出看板合并");
+    }
+
+    private void ensureContentPlacementHasVideoTask(Connection connection) throws Exception {
+        if (!tableExists(connection, "geo_content_placement")) {
+            return;
+        }
+        if (columnExists(connection, "geo_content_placement", "has_video_task")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    ALTER TABLE geo_content_placement
+                      ADD COLUMN has_video_task TINYINT NOT NULL DEFAULT 0
+                      COMMENT '是否有视频任务：1=生成抖音视频剪辑/发布'
+                      AFTER remark
+                    """);
+        }
+        log.info("已为 geo_content_placement 增加 has_video_task");
     }
 
     private void ensureContentPlacementItemContentForm(Connection connection) throws Exception {

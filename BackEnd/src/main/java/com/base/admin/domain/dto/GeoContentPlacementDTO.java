@@ -29,4 +29,7 @@ public class GeoContentPlacementDTO {
 
     @Schema(description = "备注")
     private String remark;
+
+    @Schema(description = "是否有视频任务（勾选后自动生成抖音视频剪辑/发布；撰写人→剪辑，发布人→发布）", example = "false", nullable = true)
+    private Boolean hasVideoTask;
 }

@@ -314,6 +314,19 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       formItemProps: { rules: [{ required: true, message: '请输入目标问题' }] },
     },
     {
+      title: '是否有视频任务',
+      dataIndex: 'hasVideoTask',
+      width: 120,
+      valueType: 'switch',
+      hideInSearch: true,
+      tooltip: '勾选后自动生成抖音视频剪辑（撰写人）、抖音视频发布（发布人）任务',
+      fieldProps: {
+        checkedChildren: '是',
+        unCheckedChildren: '否',
+      },
+      render: (_, r) => (r.hasVideoTask ? '是' : '否'),
+    },
+    {
       title: '正文标题',
       dataIndex: 'contentTitle',
       ellipsis: true,
@@ -612,9 +625,11 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
                 topicId: editingPlacement.topicId,
                 targetQuestion: editingPlacement.targetQuestion,
                 remark: editingPlacement.remark,
+                hasVideoTask: !!editingPlacement.hasVideoTask,
               }
             : {
                 publisherUserId: defaultPublisherUserId ?? undefined,
+                hasVideoTask: false,
               }
         }
         onFinish={async (values) => {
@@ -624,6 +639,7 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
             topicId: values.topicId,
             targetQuestion: values.targetQuestion,
             remark: values.remark,
+            hasVideoTask: !!values.hasVideoTask,
           };
           if (editingPlacement) {
             await updateGeoContentPlacementApi({ ...payload, id: editingPlacement.id });

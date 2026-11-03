@@ -429,10 +429,14 @@ public class BoardChartDrillServiceImpl implements BoardChartDrillService {
         if (cfg != null && Constants.TASK_ASSIGN_FIELD_PUBLISHER.equals(nz(cfg.getAssignField(), ""))) {
             return "publisher";
         }
-        if ("文章撰写".equals(t.getTaskType()) || Constants.TASK_TYPE_GEO_ASSIGN_WRITER.equals(t.getTaskType())) {
+        if ("文章撰写".equals(t.getTaskType())
+                || Constants.TASK_TYPE_GEO_VIDEO_EDIT.equals(t.getTaskType())
+                || Constants.TASK_TYPE_GEO_ASSIGN_WRITER.equals(t.getTaskType())) {
             return "writer";
         }
-        if ("文章发布".equals(t.getTaskType()) || Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER.equals(t.getTaskType())) {
+        if ("文章发布".equals(t.getTaskType())
+                || Constants.TASK_TYPE_GEO_VIDEO_PUBLISH.equals(t.getTaskType())
+                || Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER.equals(t.getTaskType())) {
             return "publisher";
         }
         return "flow";

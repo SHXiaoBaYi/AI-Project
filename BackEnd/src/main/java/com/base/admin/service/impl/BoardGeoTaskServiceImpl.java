@@ -52,6 +52,8 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
             Constants.TASK_TYPE_GEO_WRITE,
             Constants.TASK_TYPE_GEO_PUBLISH,
             Constants.TASK_TYPE_GEO_REVIEW,
+            Constants.TASK_TYPE_GEO_VIDEO_EDIT,
+            Constants.TASK_TYPE_GEO_VIDEO_PUBLISH,
             Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER,
             Constants.TASK_TYPE_GEO_ASSIGN_WRITER
     );
@@ -306,7 +308,9 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
      */
     private static PersonKey resolvePerson(SysTask t, GeoContentPlacement p, Long articleWriterId, String articleWriterName) {
         String type = StringUtils.hasText(t.getTaskType()) ? t.getTaskType().trim() : "";
-        if (Constants.TASK_TYPE_GEO_PUBLISH.equals(type) || Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER.equals(type)) {
+        if (Constants.TASK_TYPE_GEO_PUBLISH.equals(type)
+                || Constants.TASK_TYPE_GEO_VIDEO_PUBLISH.equals(type)
+                || Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER.equals(type)) {
             Long pubId = p != null && p.getPublisherUserId() != null ? p.getPublisherUserId() : 0L;
             if (pubId == 0L && t.getOwnerUserId() != null) {
                 pubId = t.getOwnerUserId();
@@ -322,7 +326,9 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
             }
             return new PersonKey(pubId, pubName);
         }
-        if (Constants.TASK_TYPE_GEO_WRITE.equals(type) || Constants.TASK_TYPE_GEO_ASSIGN_WRITER.equals(type)) {
+        if (Constants.TASK_TYPE_GEO_WRITE.equals(type)
+                || Constants.TASK_TYPE_GEO_VIDEO_EDIT.equals(type)
+                || Constants.TASK_TYPE_GEO_ASSIGN_WRITER.equals(type)) {
             return new PersonKey(articleWriterId, articleWriterName);
         }
         if (Constants.TASK_TYPE_GEO_REVIEW.equals(type)) {

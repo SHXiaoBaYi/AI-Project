@@ -246,10 +246,12 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 ? normalizePublishStatus(query.getPublishStatus())
                 : null;
         String platformName = StringUtils.hasText(query.getPlatformName()) ? query.getPlatformName().trim() : null;
+        String contentForm = StringUtils.hasText(query.getContentForm()) ? query.getContentForm().trim() : null;
         LambdaQueryWrapper<GeoContentPlacementItem> iw = new LambdaQueryWrapper<GeoContentPlacementItem>()
                 .in(GeoContentPlacementItem::getPlacementId, placementIds)
                 .like(StringUtils.hasText(query.getTitle()), GeoContentPlacementItem::getTitle, query.getTitle())
                 .eq(platformName != null, GeoContentPlacementItem::getPlatformName, platformName)
+                .eq(contentForm != null, GeoContentPlacementItem::getContentForm, contentForm)
                 .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter);
         var snap = dataScopeFilter.snapshot();
         // 文章列表只展示已选发布平台的明细；审核通过的空占位不再出现在这里
@@ -1554,6 +1556,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         itemMapper.insert(item);
         syncPlacementDerived(dto.getPlacementId());
         placementTaskSyncService.completeArticlePublishTasks(dto.getPlacementId());
+        placementTaskSyncService.completeVideoTasks(dto.getPlacementId());
         return item.getId();
     }
 
@@ -1602,6 +1605,10 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             syncPlacementDerived(newPlacementId);
         }
         placementTaskSyncService.completeArticlePublishTasks(newPlacementId);
+        placementTaskSyncService.completeVideoTasks(newPlacementId);
+        if (!Objects.equals(oldPlacementId, newPlacementId)) {
+            placementTaskSyncService.completeVideoTasks(oldPlacementId);
+        }
     }
 
     @Override
@@ -1944,6 +1951,11 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         applyTopic(placement, dto.getTopicId(), dto.getTopicName());
         placement.setTargetQuestion(nz(dto.getTargetQuestion()).trim());
         placement.setRemark(dto.getRemark());
+        if (dto.getHasVideoTask() != null) {
+            placement.setHasVideoTask(Boolean.TRUE.equals(dto.getHasVideoTask()) ? 1 : 0);
+        } else if (placement.getId() == null) {
+            placement.setHasVideoTask(0);
+        }
     }
 
     private void assertTopicQuestionUnique(Long topicId, String targetQuestion, Long excludeId) {
@@ -2259,6 +2271,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 ? entity.getContentStatus()
                 : Constants.CONTENT_STATUS_DRAFTING);
         vo.setContentTitle(entity.getContentTitle());
+        vo.setHasVideoTask(entity.getHasVideoTask() != null && entity.getHasVideoTask() == 1);
         String progress = StringUtils.hasText(entity.getPlacementProgress())
                 ? entity.getPlacementProgress()
                 : aggregateStatus(items.stream().map(GeoContentPlacementItem::getPublishStatus).toList());

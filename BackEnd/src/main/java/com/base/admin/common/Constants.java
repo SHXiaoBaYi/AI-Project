@@ -112,6 +112,10 @@ public class Constants {
     public static final String TASK_TYPE_GEO_REVIEW = "审核文章";
     /** 任务类型：文章发布 */
     public static final String TASK_TYPE_GEO_PUBLISH = "文章发布";
+    /** 任务类型：抖音视频剪辑（撰写人执行；文章列表新增待投放视频稿后完成） */
+    public static final String TASK_TYPE_GEO_VIDEO_EDIT = "抖音视频剪辑";
+    /** 任务类型：抖音视频发布（发布人执行；视频稿投放成功且有链接后完成） */
+    public static final String TASK_TYPE_GEO_VIDEO_PUBLISH = "抖音视频发布";
     /** 任务类型：待分配发布人 */
     public static final String TASK_TYPE_GEO_ASSIGN_PUBLISHER = "GEO文章待分配发布人";
     /** 任务类型：待分配撰写人 */

@@ -19,6 +19,7 @@ import {
   deleteGeoContentPlacementItemBatchApi,
   getGeoContentPlacementArticleListApi,
   getGeoContentPlacementCitesApi,
+  getGeoContentPlacementDetailApi,
   getGeoOwnerOptionsApi,
   getGeoPlatformOptionsApi,
   getGeoTargetQuestionsApi,
@@ -48,6 +49,7 @@ const ArticlePage = memo(function ArticlePage() {
   const currentPageKeysRef = useRef<Set<number>>(new Set());
   const [searchParams] = useSearchParams();
   const filterPlacementId = Number(searchParams.get('placementId') || '') || undefined;
+  const fromTask = searchParams.get('from') || '';
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [form] = Form.useForm();
   const formPublishStatus = Form.useWatch('publishStatus', form) as string | undefined;
@@ -89,6 +91,14 @@ const ArticlePage = memo(function ArticlePage() {
       setAiPlatforms(ai ?? []);
     });
   }, []);
+
+  /** 从抖音视频剪辑任务「去完成」进入时，直接打开新增（预填视频/待投放） */
+  useEffect(() => {
+    if (fromTask === 'videoEdit' && filterPlacementId) {
+      setEditing(null);
+      setOpen(true);
+    }
+  }, [filterPlacementId, fromTask]);
 
   useEffect(() => {
     if (!citeFormOpen) return;
@@ -135,20 +145,28 @@ const ArticlePage = memo(function ArticlePage() {
         remark: editing.remark,
       });
     } else {
+      const videoEditDefaults = fromTask === 'videoEdit';
       setFormTopicId(undefined);
       form.setFieldsValue({
         topicId: undefined,
-        placementId: undefined,
+        placementId: filterPlacementId,
         title: undefined,
         platformName: undefined,
-        contentForm: '图文',
-        publishStatus: '未投放',
+        contentForm: videoEditDefaults ? '视频' : '图文',
+        publishStatus: videoEditDefaults ? '待投放' : '未投放',
         publishUrl: undefined,
         publishTime: undefined,
         remark: undefined,
       });
+      if (filterPlacementId) {
+        void getGeoContentPlacementDetailApi(filterPlacementId).then((detail) => {
+          if (!detail?.topicId) return;
+          setFormTopicId(detail.topicId);
+          form.setFieldsValue({ topicId: detail.topicId, placementId: filterPlacementId });
+        });
+      }
     }
-  }, [editing, form, open]);
+  }, [editing, filterPlacementId, form, fromTask, open]);
 
   const userOptions = useMemo(() => owners.map((u) => ({ label: u.displayName, value: u.userId })), [owners]);
   const topicOptions = useMemo(() => topics.map((t) => ({ label: t.topicName, value: t.id })), [topics]);
@@ -291,7 +309,11 @@ const ArticlePage = memo(function ArticlePage() {
       title: '内容形态',
       dataIndex: 'contentForm',
       width: 100,
-      search: false,
+      valueType: 'select',
+      fieldProps: {
+        allowClear: true,
+        options: [...GEO_CONTENT_FORMS],
+      },
       render: (_, r) => r.contentForm || '图文',
     },
     {
@@ -364,6 +386,7 @@ const ArticlePage = memo(function ArticlePage() {
             targetQuestion: params.targetQuestion,
             title: params.title,
             platformName: params.platformName,
+            contentForm: params.contentForm,
             publishStatus: params.publishStatus,
             publishTimeStart: params.publishTimeStart,
             publishTimeEnd: params.publishTimeEnd,
