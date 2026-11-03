@@ -1,8 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { withBase } from '@/utils/basePath';
 import {
   ensureLakexAntdCss,
   LAKE_SCHEME,
+  lakexAsset,
   loadLakexAssets,
   removeLakexAntdCss,
   type LakexEditorInstance,
@@ -83,10 +83,10 @@ export const LakexEditorHost = forwardRef<LakexEditorHostHandle, Props>(function
           typography: { typography: 'classic', paragraphSpacing: 'default' },
           toc: { enable: false },
           codeblock: {
-            codemirrorURL: withBase('lakex/CodeMirror.js'),
+            codemirrorURL: lakexAsset('CodeMirror.js'),
             supportCustomStyle: true,
           },
-          math: { KaTexURL: withBase('lakex/katex.js') },
+          math: { KaTexURL: lakexAsset('katex.js') },
           // Lake 默认 capturePatterns 会抓取几乎所有外链图并重传；素材库 URL 必须用原址，否则变 data:image 并「上传失败」
           image: {
             capturePatterns: [/^data:image\//i, /^blob:/i],

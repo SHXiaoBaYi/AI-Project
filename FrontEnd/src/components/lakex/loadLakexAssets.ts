@@ -1,4 +1,8 @@
 import { withBase } from '@/utils/basePath';
+import lakexVersionRaw from '../../../public/lakex/VERSION.txt?raw';
+
+/** 与 public/lakex/VERSION.txt 同步；用于 ?v= 破浏览器长缓存 */
+export const LAKEX_ASSET_VERSION = String(lakexVersionRaw || '').trim() || '0';
 
 export type LakexDocApi = {
   createOpenEditor: (root: HTMLElement, options?: Record<string, unknown>) => LakexEditorInstance;
@@ -25,8 +29,15 @@ const loadedStyles = new Set<string>();
 const loadedScripts = new Set<string>();
 let loadPromise: Promise<LakexDocApi> | null = null;
 
+/** Lakex 静态资源 URL（带版本查询串，配合 nginx 一年缓存） */
+export function lakexAsset(path: string) {
+  const base = withBase(`lakex/${path}`);
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}v=${encodeURIComponent(LAKEX_ASSET_VERSION)}`;
+}
+
 function asset(path: string) {
-  return withBase(`lakex/${path}`);
+  return lakexAsset(path);
 }
 
 function loadStyleOnce(href: string) {
