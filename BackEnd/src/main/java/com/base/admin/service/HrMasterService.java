@@ -572,7 +572,7 @@ public class HrMasterService {
         Map<String, Object> afterSnap = requisitionLogService.loadSnapshot(id);
         String jobName = String.valueOf(afterSnap.getOrDefault("jobName", beforeSnap.getOrDefault("jobName", "")));
         requisitionLogService.write(id, jobName, HrRequisitionLogService.ACTION_STATUS,
-                "状态：" + oldStatus + " → " + status, beforeSnap, afterSnap);
+                requisitionLogService.statusChangeSummary(oldStatus, status), beforeSnap, afterSnap);
     }
 
     public void deleteRequisition(Long id) {
