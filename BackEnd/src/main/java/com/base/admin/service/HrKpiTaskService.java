@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -43,10 +44,19 @@ public class HrKpiTaskService {
         this.monthTaskService = monthTaskService;
     }
 
-    /** 需求保存/改状态/改负责人或 HC 后同步任务槽位。 */
+    /** 需求保存/改状态/改负责人或 HC 后同步任务槽位（当前自然月）。 */
     @Transactional
     public void syncForRequisition(Long requisitionId) {
-        if (requisitionId == null) {
+        syncForRequisition(requisitionId, YearMonth.now());
+    }
+
+    /**
+     * 按核算月同步单需求考核任务：以「月度任务要求」为准；到期日落该自然月末。
+     * 仅当核算月=当前月时取消无效 OPEN；历史月只补/修该月槽位，避免误伤其它月份任务。
+     */
+    @Transactional
+    public void syncForRequisition(Long requisitionId, YearMonth settleYm) {
+        if (requisitionId == null || settleYm == null) {
             return;
         }
         Map<String, Object> req = jdbc.query("""
@@ -69,23 +79,30 @@ public class HrKpiTaskService {
             return;
         }
         String status = String.valueOf(req.get("status"));
-        YearMonth currentYm = YearMonth.now();
-        String currentMonth = currentYm.toString();
-        MonthTaskRule monthRule = monthTaskService.loadRule(requisitionId, currentMonth);
-        // 优先用当月任务要求的 P0/P1；未配置则不计分、不建槽
+        String settleMonth = settleYm.toString();
+        MonthTaskRule monthRule = monthTaskService.loadRule(requisitionId, settleMonth);
         String priority = monthRule != null ? monthRule.priorityCode()
                 : (req.get("priority") == null ? "" : String.valueOf(req.get("priority")).trim().toUpperCase());
         List<Long> owners = loadOwners(requisitionId);
+        boolean currentMonth = settleYm.equals(YearMonth.now());
 
-        if (!"OPEN".equals(status) || !SCORE_PRIORITIES.contains(priority) || owners.isEmpty() || monthRule == null) {
+        if (!"OPEN".equals(status)) {
             jdbc.update("""
                     UPDATE hr_kpi_task SET status = 'CANCELLED', update_time = NOW()
                     WHERE requisition_id = ? AND status = 'OPEN' AND is_active = 1
                     """, requisitionId);
             return;
         }
+        if (owners.isEmpty() || monthRule == null || !SCORE_PRIORITIES.contains(priority)) {
+            if (currentMonth) {
+                jdbc.update("""
+                        UPDATE hr_kpi_task SET status = 'CANCELLED', update_time = NOW()
+                        WHERE requisition_id = ? AND status = 'OPEN' AND is_active = 1
+                        """, requisitionId);
+            }
+            return;
+        }
 
-        // 按月核算：每岗位每负责人当月仅 1 条任务（达标得配置分，否则 0；不按 HC 翻倍）
         LocalDate publishDay = req.get("receivedDate") instanceof LocalDate d ? d : null;
         if (publishDay == null && req.get("createTime") instanceof LocalDateTime ct) {
             publishDay = ct.toLocalDate();
@@ -94,58 +111,15 @@ public class HrKpiTaskService {
             publishDay = LocalDate.now();
         }
         LocalDateTime published = publishDay.atStartOfDay();
-        LocalDateTime monthFrom = currentYm.atDay(1).atStartOfDay();
-        LocalDateTime monthTo = currentYm.plusMonths(1).atDay(1).atStartOfDay();
+        LocalDateTime monthFrom = settleYm.atDay(1).atStartOfDay();
+        LocalDateTime monthTo = settleYm.plusMonths(1).atDay(1).atStartOfDay();
         LocalDateTime due = endOfMonth(monthFrom);
         String username = safeUser();
         for (Long ownerId : owners) {
-            boolean doneThisMonth = countDoneInDueMonth(requisitionId, ownerId, monthFrom, monthTo) > 0;
-            int needOpen = doneThisMonth ? 0 : 1;
-            List<Integer> openSlots = listSlots(requisitionId, ownerId, "OPEN");
-            int nextSlot = maxSlot(requisitionId, ownerId) + 1;
-            while (openSlots.size() < needOpen) {
-                int slot = nextSlot++;
-                jdbc.update("""
-                        INSERT INTO hr_kpi_task (requisition_id, owner_user_id, slot_no, priority_code,
-                          published_at, due_at, origin_due_at, status, score, create_by, is_active)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', 0, ?, 1)
-                        ON DUPLICATE KEY UPDATE
-                          priority_code = VALUES(priority_code),
-                          published_at = IF(hr_kpi_task.status = 'CANCELLED', VALUES(published_at), hr_kpi_task.published_at),
-                          due_at = IF(hr_kpi_task.status = 'CANCELLED', VALUES(due_at), hr_kpi_task.due_at),
-                          origin_due_at = IF(hr_kpi_task.status = 'CANCELLED', VALUES(origin_due_at), hr_kpi_task.origin_due_at),
-                          status = 'OPEN', is_active = 1,
-                          score = IF(hr_kpi_task.status = 'CANCELLED', 0, hr_kpi_task.score),
-                          done_at = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_at),
-                          done_reason = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_reason),
-                          done_application_id = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_application_id)
-                        """, requisitionId, ownerId, slot, priority, published, due, due, username);
-                openSlots.add(slot);
-            }
-            // 多余 OPEN 取消（当月已得分或重复槽）
-            openSlots.sort((a, b) -> Integer.compare(b, a));
-            while (openSlots.size() > needOpen) {
-                int slot = openSlots.remove(0);
-                jdbc.update("""
-                        UPDATE hr_kpi_task SET status = 'CANCELLED', update_time = NOW()
-                        WHERE requisition_id = ? AND owner_user_id = ? AND slot_no = ?
-                          AND status = 'OPEN' AND is_active = 1
-                        """, requisitionId, ownerId, slot);
-            }
-            jdbc.update("""
-                    UPDATE hr_kpi_task SET priority_code = ?, due_at = ?, origin_due_at = ?, update_time = NOW()
-                    WHERE requisition_id = ? AND owner_user_id = ? AND status = 'OPEN' AND is_active = 1
-                      AND (due_at = origin_due_at OR origin_due_at IS NULL)
-                    """, priority, due, due, requisitionId, ownerId);
-            jdbc.update("""
-                    UPDATE hr_kpi_task SET priority_code = ?, update_time = NOW()
-                    WHERE requisition_id = ? AND owner_user_id = ? AND status = 'OPEN' AND is_active = 1
-                    """, priority, requisitionId, ownerId);
+            syncOwnerTaskForMonth(requisitionId, ownerId, settleYm, priority, published, due, username);
         }
-        // 按岗位发布日重算本需求下未延期任务的发布/到期（生产同步后也要纠偏）
-        repairSchedulesForRequisition(requisitionId, published, due);
-        // 已不在负责人列表中的 OPEN 任务取消
-        if (!owners.isEmpty()) {
+        if (currentMonth) {
+            repairSchedulesForRequisition(requisitionId, published, due);
             StringBuilder in = new StringBuilder();
             List<Object> args = new ArrayList<>();
             args.add(requisitionId);
@@ -160,6 +134,56 @@ public class HrKpiTaskService {
                     UPDATE hr_kpi_task SET status = 'CANCELLED', update_time = NOW()
                     WHERE requisition_id = ? AND status = 'OPEN' AND is_active = 1
                       AND owner_user_id NOT IN (""" + in + ")", args.toArray());
+        }
+    }
+
+    /** 单负责人在某核算月：最多 1 条 OPEN（未达标）或已有 DONE。 */
+    private void syncOwnerTaskForMonth(Long requisitionId, Long ownerId, YearMonth settleYm, String priority,
+                                       LocalDateTime published, LocalDateTime due, String username) {
+        LocalDateTime monthFrom = settleYm.atDay(1).atStartOfDay();
+        LocalDateTime monthTo = settleYm.plusMonths(1).atDay(1).atStartOfDay();
+        if (countDoneInDueMonth(requisitionId, ownerId, monthFrom, monthTo) > 0) {
+            cancelOpenTasksInDueMonth(requisitionId, ownerId, monthFrom, monthTo);
+            return;
+        }
+        List<Long> openIdsInMonth = listOpenTaskIdsInDueMonth(requisitionId, ownerId, monthFrom, monthTo);
+        if (openIdsInMonth.isEmpty()) {
+            int slot = maxSlot(requisitionId, ownerId) + 1;
+            jdbc.update("""
+                    INSERT INTO hr_kpi_task (requisition_id, owner_user_id, slot_no, priority_code,
+                      published_at, due_at, origin_due_at, status, score, create_by, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', 0, ?, 1)
+                    ON DUPLICATE KEY UPDATE
+                      priority_code = VALUES(priority_code),
+                      published_at = IF(hr_kpi_task.status = 'CANCELLED', VALUES(published_at), hr_kpi_task.published_at),
+                      due_at = IF(hr_kpi_task.status = 'CANCELLED', VALUES(due_at), hr_kpi_task.due_at),
+                      origin_due_at = IF(hr_kpi_task.status = 'CANCELLED', VALUES(origin_due_at), hr_kpi_task.origin_due_at),
+                      status = 'OPEN', is_active = 1,
+                      score = IF(hr_kpi_task.status = 'CANCELLED', 0, hr_kpi_task.score),
+                      done_at = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_at),
+                      done_reason = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_reason),
+                      done_application_id = IF(hr_kpi_task.status = 'CANCELLED', NULL, hr_kpi_task.done_application_id)
+                    """, requisitionId, ownerId, slot, priority, published, due, due, username);
+            openIdsInMonth = listOpenTaskIdsInDueMonth(requisitionId, ownerId, monthFrom, monthTo);
+        }
+        while (openIdsInMonth.size() > 1) {
+            Long dropId = openIdsInMonth.remove(openIdsInMonth.size() - 1);
+            jdbc.update("""
+                    UPDATE hr_kpi_task SET status = 'CANCELLED', update_time = NOW()
+                    WHERE id = ? AND status = 'OPEN' AND is_active = 1
+                    """, dropId);
+        }
+        if (!openIdsInMonth.isEmpty()) {
+            Long keepId = openIdsInMonth.get(0);
+            jdbc.update("""
+                    UPDATE hr_kpi_task SET priority_code = ?, update_time = NOW()
+                    WHERE id = ? AND status = 'OPEN' AND is_active = 1
+                    """, priority, keepId);
+            jdbc.update("""
+                    UPDATE hr_kpi_task SET due_at = ?, origin_due_at = ?, update_time = NOW()
+                    WHERE id = ? AND status = 'OPEN' AND is_active = 1
+                      AND (due_at = origin_due_at OR origin_due_at IS NULL)
+                    """, due, due, keepId);
         }
     }
 
@@ -246,26 +270,59 @@ public class HrKpiTaskService {
      */
     @Transactional
     public int syncAllOpenScoreRequisitions() {
-        List<Long> ids = jdbc.query("""
-                SELECT id FROM hr_requisition
-                WHERE is_active = 1 AND status = 'OPEN'
-                  AND UPPER(IFNULL(job_priority_code, '')) IN ('P0', 'P1')
-                ORDER BY id
-                """, (rs, i) -> rs.getLong(1));
+        return syncForSettleMonth(YearMonth.now());
+    }
+
+    /**
+     * 按核算月同步所有应参与考核的在招岗位（含仅在「月度任务要求」中配置 P0/P1、需求表未填岗位优先级的岗）。
+     */
+    @Transactional
+    public int syncForSettleMonth(YearMonth settleYm) {
+        if (settleYm == null || settleYm.isAfter(YearMonth.now())) {
+            return 0;
+        }
+        List<Long> ids = listOpenRequisitionIdsForKpiSync(settleYm);
         int n = 0;
         LocalDateTime now = LocalDateTime.now();
         for (Long id : ids) {
-            syncForRequisition(id);
-            List<Long> owners = loadOwners(id);
-            for (Long ownerId : owners) {
-                tryCompleteByOnboard(id, ownerId, now, null);
-                tryCompleteByQualifiedResumes(id, ownerId);
+            syncForRequisition(id, settleYm);
+            if (settleYm.equals(YearMonth.now())) {
+                for (Long ownerId : loadOwners(id)) {
+                    tryCompleteByOnboard(id, ownerId, now, null);
+                    tryCompleteByQualifiedResumes(id, ownerId);
+                }
             }
             n++;
         }
-        // 含已关闭岗位上的历史任务：生产同步后纠正「全员同一发布/到期」
-        repairAllTaskSchedulesFromRequisitions();
+        if (settleYm.equals(YearMonth.now())) {
+            repairAllTaskSchedulesFromRequisitions();
+        }
         return n;
+    }
+
+    /**
+     * 在招且已绑定系统用户负责人，且（需求岗位优先级为 P0/P1 或 该月已配置 P0/P1 月度任务）。
+     */
+    private List<Long> listOpenRequisitionIdsForKpiSync(YearMonth settleYm) {
+        String month = settleYm.toString();
+        return jdbc.query("""
+                SELECT DISTINCT r.id
+                FROM hr_requisition r
+                WHERE r.is_active = 1 AND r.status = 'OPEN'
+                  AND EXISTS (
+                    SELECT 1 FROM hr_requisition_owner o
+                    WHERE o.requisition_id = r.id AND o.is_active = 1 AND o.user_id IS NOT NULL
+                  )
+                  AND (
+                    UPPER(IFNULL(r.job_priority_code, '')) IN ('P0', 'P1')
+                    OR EXISTS (
+                      SELECT 1 FROM hr_requisition_month_task t
+                      WHERE t.requisition_id = r.id AND t.settle_month = ? AND t.is_active = 1
+                        AND UPPER(IFNULL(t.priority_code, '')) IN ('P0', 'P1')
+                    )
+                  )
+                ORDER BY r.id
+                """, (rs, i) -> rs.getLong(1), month);
     }
 
     /**
@@ -542,91 +599,38 @@ public class HrKpiTaskService {
     public static final double ASSESS_BASE_SCORE_DEFAULT = 30.0;
 
     public HrKpiAssessmentVO assessment(HrKpiAssessmentQueryDTO query) {
-        // 增量同步在招岗位槽位；历史 DONE 由 backfillAllHistorical 生成
-        syncAllOpenScoreRequisitions();
         HrKpiAssessmentQueryDTO q = query == null ? new HrKpiAssessmentQueryDTO() : query;
         LocalDate month = q.getSettleMonth() == null ? LocalDate.now() : q.getSettleMonth();
         LocalDate monthStart = month.withDayOfMonth(1);
+        YearMonth settleYm = YearMonth.from(monthStart);
+        // 按所选核算月补全 hr_kpi_task（修复仅配月度任务、未填需求岗位优先级时不生成任务）
+        syncForSettleMonth(settleYm);
         LocalDateTime from = monthStart.atStartOfDay();
         LocalDateTime to = monthStart.plusMonths(1).atStartOfDay();
-        String settleMonthKey = YearMonth.from(monthStart).toString();
+        String settleMonthKey = settleYm.toString();
         Map<Long, MonthTaskRule> monthRules = monthTaskService.loadRulesForMonth(settleMonthKey);
+        monthRules.entrySet().removeIf(e -> {
+            if (e.getValue() == null) {
+                return true;
+            }
+            String pc = e.getValue().priorityCode();
+            return pc == null || !SCORE_PRIORITIES.contains(pc.trim().toUpperCase(Locale.ROOT));
+        });
 
-        // 当前自然月：本月到期的 DONE + 全部仍 OPEN 的在招任务（负责人不能因到期纠偏到历史月而消失）
-        // 历史月：仅按 due_at 落在该月的任务核算
         boolean settleCurrentMonth = monthStart.equals(LocalDate.now().withDayOfMonth(1));
 
-        StringBuilder sql = new StringBuilder("""
-                SELECT t.id, t.requisition_id, r.job_name, t.owner_user_id, u.nickname owner_name, t.slot_no,
-                       t.priority_code, t.published_at, t.due_at, t.origin_due_at, t.status, t.done_at,
-                       t.done_reason, t.score
-                FROM hr_kpi_task t
-                JOIN hr_requisition r ON r.id = t.requisition_id AND r.is_active = 1
-                LEFT JOIN sys_user u ON u.user_id = t.owner_user_id
-                WHERE t.is_active = 1 AND t.status IN ('OPEN','DONE')
-                  AND (
-                    (t.due_at >= ? AND t.due_at < ?)
-                """);
-        List<Object> args = new ArrayList<>();
-        args.add(from);
-        args.add(to);
-        if (settleCurrentMonth) {
-            sql.append(" OR t.status = 'OPEN' ");
-        }
-        sql.append(')');
         List<Long> ownerIds = q.getOwnerUserIds() == null ? List.of()
                 : q.getOwnerUserIds().stream().filter(Objects::nonNull).distinct().toList();
-        if (!ownerIds.isEmpty()) {
-            sql.append(" AND t.owner_user_id IN (");
-            for (int i = 0; i < ownerIds.size(); i++) {
-                if (i > 0) {
-                    sql.append(',');
-                }
-                sql.append('?');
-                args.add(ownerIds.get(i));
-            }
-            sql.append(')');
-        }
-        sql.append(" ORDER BY t.owner_user_id, t.due_at, t.id");
 
-        List<HrKpiAssessmentVO.TaskRow> allTasks = new ArrayList<>();
-        jdbc.query(sql.toString(), rs -> {
-            while (rs.next()) {
-                HrKpiAssessmentVO.TaskRow row = new HrKpiAssessmentVO.TaskRow();
-                long requisitionId = rs.getLong("requisition_id");
-                row.setId(rs.getLong("id"));
-                row.setRequisitionId(requisitionId);
-                row.setJobName(rs.getString("job_name"));
-                row.setOwnerUserId(rs.getLong("owner_user_id"));
-                row.setOwnerName(rs.getString("owner_name"));
-                row.setSlotNo(rs.getInt("slot_no"));
-                MonthTaskRule mr = monthRules.get(requisitionId);
-                String priority = mr != null ? mr.priorityCode() : rs.getString("priority_code");
-                row.setPriorityCode(priority);
-                row.setPublishedAt(rs.getTimestamp("published_at").toLocalDateTime());
-                row.setDueAt(rs.getTimestamp("due_at").toLocalDateTime());
-                row.setOriginDueAt(rs.getTimestamp("origin_due_at").toLocalDateTime());
-                String status = rs.getString("status");
-                row.setStatus(status);
-                row.setDoneAt(rs.getTimestamp("done_at") == null ? null : rs.getTimestamp("done_at").toLocalDateTime());
-                row.setDoneReason(rs.getString("done_reason"));
-                row.setScore(rs.getInt("score"));
-                double weight = mr != null ? mr.score() : 0.0;
-                row.setWeight(weight);
-                // 达标得满分，未达标 0 分（不做进度折算）
-                row.setEarnedWeight("DONE".equals(status) ? weight : 0.0);
-                allTasks.add(row);
-            }
-        }, args.toArray());
-
-        // 同一负责人×岗位×核算月若有多条历史脏数据，只保留一条计分（满分封顶）
-        dedupeTasksToOneScorePerJob(allTasks);
+        List<HrKpiAssessmentVO.TaskRow> allTasks = buildTasksFromMonthRequirements(
+                monthRules, from, to, settleCurrentMonth, ownerIds);
 
         Map<Long, HrKpiAssessmentVO.OwnerSummary> owners = new LinkedHashMap<>();
         for (HrKpiAssessmentVO.TaskRow t : allTasks) {
-            HrKpiAssessmentVO.OwnerSummary s = owners.computeIfAbsent(t.getOwnerUserId(), id -> {
+            long ownerKey = t.getOwnerUserId() == null ? 0L : t.getOwnerUserId();
+            HrKpiAssessmentVO.OwnerSummary s = owners.computeIfAbsent(ownerKey, id -> {
                 HrKpiAssessmentVO.OwnerSummary o = new HrKpiAssessmentVO.OwnerSummary();
-                o.setOwnerUserId(id);
+                o.setOwnerUserId(t.getOwnerUserId());
                 o.setOwnerName(t.getOwnerName());
                 o.setDueCount(0);
                 o.setDoneCount(0);
@@ -690,8 +694,6 @@ public class HrKpiTaskService {
 
         int ownerCount = owners.size();
         double overallEarned = round2(sumOwnerEarned);
-        // 整体满分 = 各负责人任务满分之和（与卡片分母一致；勿用全量 month_task，避免未参与考核的配置岗抬高分母）
-        double configuredMonthTotal = monthRules.values().stream().mapToInt(MonthTaskRule::score).sum();
         double overallMax = round2(sumOwnerMax);
         double overallRate = overallMax > 0 ? overallEarned / overallMax : 0.0;
 
@@ -725,12 +727,211 @@ public class HrKpiTaskService {
         vo.setOverallScoreMax(overallMax);
         int configuredJobs = monthRules.size();
         vo.setScoreRuleHint(String.format(
-                "%s 已配置 %d 个岗位月度任务（配置总分 %.0f）：必须到岗按入职达标；灵活到岗入职或合格简历任一达标；"
-                        + "每岗位每月只记一次；未达不得分；未配置岗位本月不计分。",
+                "%s 生效任务要求 %d 个岗位（配置总分 %.0f）：任务明细与计分均按当月生效的月度任务要求；"
+                        + "必须到岗按入职达标；灵活到岗入职或合格简历任一达标；每岗位每负责人一行；未达不得分。",
                 settleMonthKey, configuredJobs, overallMax));
         vo.setOwners(new ArrayList<>(owners.values()));
         vo.setTasks(tasks);
         return vo;
+    }
+
+    /**
+     * 任务明细与计分：以核算月「生效的月度任务要求」为全集，每岗位×负责人一行；再合并 hr_kpi_task 完成态。
+     */
+    private List<HrKpiAssessmentVO.TaskRow> buildTasksFromMonthRequirements(
+            Map<Long, MonthTaskRule> monthRules,
+            LocalDateTime monthFrom,
+            LocalDateTime monthTo,
+            boolean settleCurrentMonth,
+            List<Long> ownerFilter) {
+        if (monthRules == null || monthRules.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<Long> reqIds = new ArrayList<>(monthRules.keySet());
+        Map<Long, String> jobNames = loadRequisitionJobNames(reqIds);
+        Map<Long, List<OwnerRef>> ownersByReq = loadRequisitionOwnerRefs(reqIds);
+        Map<OwnerJobKey, List<HrKpiAssessmentVO.TaskRow>> kpiByKey =
+                loadKpiTaskRowsByOwnerJob(reqIds, monthFrom, monthTo, settleCurrentMonth);
+
+        LocalDateTime defaultDue = endOfMonth(monthFrom);
+        List<HrKpiAssessmentVO.TaskRow> rows = new ArrayList<>();
+        for (Long reqId : reqIds) {
+            if (!jobNames.containsKey(reqId)) {
+                continue;
+            }
+            MonthTaskRule rule = monthRules.get(reqId);
+            List<OwnerRef> owners = ownersByReq.get(reqId);
+            if (owners == null || owners.isEmpty()) {
+                owners = List.of(new OwnerRef(null, null));
+            }
+            for (OwnerRef owner : owners) {
+                Long uid = owner.userId();
+                if (uid != null && !ownerFilter.isEmpty() && !ownerFilter.contains(uid)) {
+                    continue;
+                }
+                long ownerKey = uid == null ? 0L : uid;
+                OwnerJobKey key = new OwnerJobKey(reqId, ownerKey);
+                List<HrKpiAssessmentVO.TaskRow> kpiRows = kpiByKey.get(key);
+                HrKpiAssessmentVO.TaskRow row = (kpiRows == null || kpiRows.isEmpty())
+                        ? syntheticTaskRow(reqId, jobNames.get(reqId), owner, rule, monthFrom, defaultDue)
+                        : mergeKpiTaskRow(pickBestKpiRow(kpiRows), jobNames.get(reqId), owner, rule);
+                rows.add(row);
+            }
+        }
+        dedupeTasksToOneScorePerJob(rows);
+        return rows;
+    }
+
+    private Map<Long, String> loadRequisitionJobNames(List<Long> reqIds) {
+        Map<Long, String> map = new LinkedHashMap<>();
+        if (reqIds.isEmpty()) {
+            return map;
+        }
+        String in = placeholders(reqIds.size());
+        jdbc.query("SELECT id, job_name FROM hr_requisition WHERE is_active = 1 AND id IN (" + in + ")",
+                rs -> {
+                    while (rs.next()) {
+                        map.put(rs.getLong("id"), rs.getString("job_name"));
+                    }
+                },
+                reqIds.toArray());
+        return map;
+    }
+
+    private Map<Long, List<OwnerRef>> loadRequisitionOwnerRefs(List<Long> reqIds) {
+        Map<Long, List<OwnerRef>> map = new LinkedHashMap<>();
+        if (reqIds.isEmpty()) {
+            return map;
+        }
+        String in = placeholders(reqIds.size());
+        jdbc.query("""
+                SELECT o.requisition_id, o.user_id, u.nickname
+                FROM hr_requisition_owner o
+                LEFT JOIN sys_user u ON u.user_id = o.user_id
+                WHERE o.is_active = 1 AND o.user_id IS NOT NULL AND o.requisition_id IN (""" + in + """
+                )
+                ORDER BY o.requisition_id, o.sort_no, o.id
+                """, rs -> {
+            while (rs.next()) {
+                long reqId = rs.getLong("requisition_id");
+                map.computeIfAbsent(reqId, k -> new ArrayList<>())
+                        .add(new OwnerRef(rs.getLong("user_id"), rs.getString("nickname")));
+            }
+        }, reqIds.toArray());
+        return map;
+    }
+
+    private Map<OwnerJobKey, List<HrKpiAssessmentVO.TaskRow>> loadKpiTaskRowsByOwnerJob(
+            List<Long> reqIds, LocalDateTime monthFrom, LocalDateTime monthTo, boolean settleCurrentMonth) {
+        Map<OwnerJobKey, List<HrKpiAssessmentVO.TaskRow>> map = new LinkedHashMap<>();
+        if (reqIds.isEmpty()) {
+            return map;
+        }
+        String in = placeholders(reqIds.size());
+        StringBuilder sql = new StringBuilder("""
+                SELECT t.id, t.requisition_id, t.owner_user_id, u.nickname owner_name, t.slot_no,
+                       t.priority_code, t.published_at, t.due_at, t.origin_due_at, t.status, t.done_at,
+                       t.done_reason, t.score
+                FROM hr_kpi_task t
+                LEFT JOIN sys_user u ON u.user_id = t.owner_user_id
+                WHERE t.is_active = 1 AND t.status IN ('OPEN','DONE')
+                  AND t.requisition_id IN (""" + in + """
+                )
+                  AND (
+                    (t.due_at >= ? AND t.due_at < ?)
+                """);
+        List<Object> args = new ArrayList<>(reqIds);
+        args.add(monthFrom);
+        args.add(monthTo);
+        if (settleCurrentMonth) {
+            sql.append(" OR t.status = 'OPEN' ");
+        }
+        sql.append(") ORDER BY t.requisition_id, t.owner_user_id, t.due_at, t.id");
+        jdbc.query(sql.toString(), rs -> {
+            while (rs.next()) {
+                HrKpiAssessmentVO.TaskRow row = new HrKpiAssessmentVO.TaskRow();
+                long reqId = rs.getLong("requisition_id");
+                long ownerUserId = rs.getLong("owner_user_id");
+                row.setId(rs.getLong("id"));
+                row.setRequisitionId(reqId);
+                row.setOwnerUserId(ownerUserId);
+                row.setOwnerName(rs.getString("owner_name"));
+                row.setSlotNo(rs.getInt("slot_no"));
+                row.setPriorityCode(rs.getString("priority_code"));
+                row.setPublishedAt(rs.getTimestamp("published_at").toLocalDateTime());
+                row.setDueAt(rs.getTimestamp("due_at").toLocalDateTime());
+                row.setOriginDueAt(rs.getTimestamp("origin_due_at").toLocalDateTime());
+                row.setStatus(rs.getString("status"));
+                row.setDoneAt(rs.getTimestamp("done_at") == null ? null : rs.getTimestamp("done_at").toLocalDateTime());
+                row.setDoneReason(rs.getString("done_reason"));
+                row.setScore(rs.getInt("score"));
+                map.computeIfAbsent(new OwnerJobKey(reqId, ownerUserId), k -> new ArrayList<>()).add(row);
+            }
+        }, args.toArray());
+        return map;
+    }
+
+    private HrKpiAssessmentVO.TaskRow mergeKpiTaskRow(
+            HrKpiAssessmentVO.TaskRow row, String jobName, OwnerRef owner, MonthTaskRule rule) {
+        row.setJobName(jobName);
+        if (owner.nickname() != null) {
+            row.setOwnerName(owner.nickname());
+        }
+        row.setPriorityCode(rule.priorityCode());
+        double weight = rule.score();
+        row.setWeight(weight);
+        row.setEarnedWeight("DONE".equals(row.getStatus()) ? weight : 0.0);
+        return row;
+    }
+
+    private HrKpiAssessmentVO.TaskRow syntheticTaskRow(
+            Long requisitionId, String jobName, OwnerRef owner, MonthTaskRule rule,
+            LocalDateTime monthFrom, LocalDateTime defaultDue) {
+        HrKpiAssessmentVO.TaskRow row = new HrKpiAssessmentVO.TaskRow();
+        Long uid = owner.userId();
+        row.setId(syntheticTaskId(requisitionId, uid));
+        row.setRequisitionId(requisitionId);
+        row.setJobName(jobName);
+        row.setOwnerUserId(uid);
+        row.setOwnerName(owner.nickname());
+        row.setSlotNo(1);
+        row.setPriorityCode(rule.priorityCode());
+        row.setPublishedAt(monthFrom);
+        row.setDueAt(defaultDue);
+        row.setOriginDueAt(defaultDue);
+        row.setStatus("OPEN");
+        row.setScore(0);
+        double weight = rule.score();
+        row.setWeight(weight);
+        row.setEarnedWeight(0.0);
+        return row;
+    }
+
+    private static long syntheticTaskId(long requisitionId, Long ownerUserId) {
+        long o = ownerUserId == null ? 0L : ownerUserId;
+        return -(requisitionId * 1_000_000L + o);
+    }
+
+    private HrKpiAssessmentVO.TaskRow pickBestKpiRow(List<HrKpiAssessmentVO.TaskRow> list) {
+        if (list.size() == 1) {
+            return list.get(0);
+        }
+        return list.stream()
+                .min(Comparator
+                        .comparing((HrKpiAssessmentVO.TaskRow t) -> !"DONE".equals(t.getStatus()))
+                        .thenComparing(HrKpiAssessmentVO.TaskRow::getSlotNo, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(HrKpiAssessmentVO.TaskRow::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .orElse(list.get(0));
+    }
+
+    private static String placeholders(int n) {
+        return String.join(",", java.util.Collections.nCopies(n, "?"));
+    }
+
+    private record OwnerRef(Long userId, String nickname) {
+    }
+
+    private record OwnerJobKey(long requisitionId, long ownerUserId) {
     }
 
     /**
@@ -744,10 +945,11 @@ public class HrKpiTaskService {
         }
         Map<Key, List<HrKpiAssessmentVO.TaskRow>> groups = new LinkedHashMap<>();
         for (HrKpiAssessmentVO.TaskRow t : tasks) {
-            if (t.getRequisitionId() == null || t.getOwnerUserId() == null) {
+            if (t.getRequisitionId() == null) {
                 continue;
             }
-            groups.computeIfAbsent(new Key(t.getRequisitionId(), t.getOwnerUserId()), k -> new ArrayList<>()).add(t);
+            long ownerKey = t.getOwnerUserId() == null ? 0L : t.getOwnerUserId();
+            groups.computeIfAbsent(new Key(t.getRequisitionId(), ownerKey), k -> new ArrayList<>()).add(t);
         }
         List<HrKpiAssessmentVO.TaskRow> keep = new ArrayList<>();
         for (List<HrKpiAssessmentVO.TaskRow> list : groups.values()) {
@@ -871,6 +1073,25 @@ public class HrKpiTaskService {
                   AND due_at >= ? AND due_at < ?
                 """, Integer.class, requisitionId, ownerUserId, monthFrom, monthTo);
         return n == null ? 0 : n;
+    }
+
+    private List<Long> listOpenTaskIdsInDueMonth(Long requisitionId, Long ownerUserId,
+                                                 LocalDateTime monthFrom, LocalDateTime monthTo) {
+        return jdbc.query("""
+                SELECT id FROM hr_kpi_task
+                WHERE requisition_id = ? AND owner_user_id = ? AND status = 'OPEN' AND is_active = 1
+                  AND due_at >= ? AND due_at < ?
+                ORDER BY slot_no, id
+                """, (rs, i) -> rs.getLong(1), requisitionId, ownerUserId, monthFrom, monthTo);
+    }
+
+    private void cancelOpenTasksInDueMonth(Long requisitionId, Long ownerUserId,
+                                           LocalDateTime monthFrom, LocalDateTime monthTo) {
+        jdbc.update("""
+                UPDATE hr_kpi_task SET status = 'CANCELLED', update_time = NOW()
+                WHERE requisition_id = ? AND owner_user_id = ? AND status = 'OPEN' AND is_active = 1
+                  AND due_at >= ? AND due_at < ?
+                """, requisitionId, ownerUserId, monthFrom, monthTo);
     }
 
     private int countOnboardedAppsInRange(Long requisitionId, LocalDateTime from, LocalDateTime to) {
