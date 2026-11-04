@@ -370,7 +370,7 @@ const AssessmentPage = memo(function AssessmentPage() {
           className='min-h-0 flex-1 overflow-hidden overflow-x-hidden'
         >
           <Table
-            rowKey='id'
+            rowKey={(row) => `${row.requisitionId ?? 0}-${row.ownerUserId ?? 0}`}
             size='small'
             loading={loading}
             dataSource={data?.tasks ?? []}

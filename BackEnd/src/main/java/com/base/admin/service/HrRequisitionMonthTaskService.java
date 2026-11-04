@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -50,21 +51,61 @@ public class HrRequisitionMonthTaskService {
                 """, (rs, i) -> mapRow(rs), requisitionId);
     }
 
+    /** 核算月内全部生效的 P0/P1 月度任务要求（与考核明细同源）。 */
+    public List<MonthTaskRule> loadActiveRulesForMonth(String settleMonth) {
+        return loadActiveAssessmentTasks(settleMonth).stream().map(ActiveAssessmentTask::rule).toList();
+    }
+
+    /** 核算月键统一为 YYYY-MM（兼容历史 2026-11-01 等写法）。 */
+    public static String normalizeSettleMonthKey(String input) {
+        if (!StringUtils.hasText(input)) {
+            return "";
+        }
+        String t = input.trim();
+        return t.length() >= 7 ? t.substring(0, 7) : t;
+    }
+
+    /** 考核明细同源：月度任务 + 岗位名（JOIN 一次取齐，避免二次 IN 漏岗）。 */
+    public List<ActiveAssessmentTask> loadActiveAssessmentTasks(String settleMonth) {
+        if (!StringUtils.hasText(settleMonth)) {
+            return List.of();
+        }
+        String monthKey = normalizeSettleMonthKey(settleMonth);
+        List<ActiveAssessmentTask> list = new ArrayList<>();
+        jdbc.query("""
+                SELECT t.requisition_id, t.settle_month, t.priority_code, t.achieve_mode, t.target_count,
+                       t.resume_target, t.score, r.job_name
+                FROM hr_requisition_month_task t
+                INNER JOIN hr_requisition r ON r.id = t.requisition_id
+                INNER JOIN (
+                    SELECT requisition_id, MAX(id) AS pick_id
+                    FROM hr_requisition_month_task
+                    WHERE is_active = 1
+                      AND LEFT(TRIM(settle_month), 7) = ?
+                    GROUP BY requisition_id
+                ) dedup ON dedup.pick_id = t.id
+                WHERE t.is_active = 1
+                  AND LEFT(TRIM(t.settle_month), 7) = ?
+                  AND UPPER(IFNULL(t.priority_code, '')) IN ('P0', 'P1')
+                ORDER BY t.requisition_id
+                """, rs -> {
+            while (rs.next()) {
+                MonthTaskRule rule = readRule(rs);
+                list.add(new ActiveAssessmentTask(rule, rs.getString("job_name")));
+            }
+        }, monthKey, monthKey);
+        return list;
+    }
+
+    public record ActiveAssessmentTask(MonthTaskRule rule, String jobName) {
+    }
+
     /** 核算月内全部岗位任务要求，key=requisitionId */
     public Map<Long, MonthTaskRule> loadRulesForMonth(String settleMonth) {
         Map<Long, MonthTaskRule> map = new LinkedHashMap<>();
-        if (!StringUtils.hasText(settleMonth)) {
-            return map;
+        for (MonthTaskRule rule : loadActiveRulesForMonth(settleMonth)) {
+            map.put(rule.requisitionId(), rule);
         }
-        jdbc.query("""
-                SELECT requisition_id, settle_month, priority_code, achieve_mode, target_count, resume_target, score
-                FROM hr_requisition_month_task
-                WHERE settle_month = ? AND is_active = 1
-                """, rs -> {
-            while (rs.next()) {
-                map.put(rs.getLong("requisition_id"), readRule(rs));
-            }
-        }, settleMonth.trim());
         return map;
     }
 
@@ -72,12 +113,13 @@ public class HrRequisitionMonthTaskService {
         if (requisitionId == null || !StringUtils.hasText(settleMonth)) {
             return null;
         }
+        String monthKey = normalizeSettleMonthKey(settleMonth);
         return jdbc.query("""
                 SELECT requisition_id, settle_month, priority_code, achieve_mode, target_count, resume_target, score
                 FROM hr_requisition_month_task
-                WHERE requisition_id = ? AND settle_month = ? AND is_active = 1
+                WHERE requisition_id = ? AND LEFT(TRIM(settle_month), 7) = ? AND is_active = 1
                 LIMIT 1
-                """, rs -> rs.next() ? readRule(rs) : null, requisitionId, settleMonth.trim());
+                """, rs -> rs.next() ? readRule(rs) : null, requisitionId, monthKey);
     }
 
     @Transactional
@@ -91,7 +133,10 @@ public class HrRequisitionMonthTaskService {
         if (jobName == null) {
             throw new BusinessException("招聘需求不存在");
         }
-        String month = dto.getSettleMonth().trim();
+        String month = normalizeSettleMonthKey(dto.getSettleMonth());
+        if (!StringUtils.hasText(month)) {
+            throw new BusinessException("请选择核算月");
+        }
         String priority = dto.getPriorityCode().trim().toUpperCase(Locale.ROOT);
         int onboard = dto.getTargetCount() == null ? 0 : dto.getTargetCount();
         int resume = dto.getResumeTarget() == null ? 0 : dto.getResumeTarget();
@@ -120,7 +165,7 @@ public class HrRequisitionMonthTaskService {
         // 含软删行：唯一键 (requisition_id, settle_month) 仍占用，必须 UPDATE 恢复，不能再 INSERT
         Long existingId = jdbc.query("""
                 SELECT id FROM hr_requisition_month_task
-                WHERE requisition_id = ? AND settle_month = ?
+                WHERE requisition_id = ? AND LEFT(TRIM(settle_month), 7) = ?
                 ORDER BY is_active DESC, id DESC LIMIT 1
                 """, rs -> rs.next() ? rs.getLong(1) : null, dto.getRequisitionId(), month);
 
@@ -208,7 +253,11 @@ public class HrRequisitionMonthTaskService {
     }
 
     private MonthTaskRule readRule(java.sql.ResultSet rs) throws java.sql.SQLException {
-        String priority = rs.getString("priority_code").trim().toUpperCase(Locale.ROOT);
+        String rawPriority = rs.getString("priority_code");
+        if (rawPriority == null || rawPriority.isBlank()) {
+            throw new java.sql.SQLException("priority_code missing for requisition " + rs.getLong("requisition_id"));
+        }
+        String priority = rawPriority.trim().toUpperCase(Locale.ROOT);
         String mode = rs.getString("achieve_mode") == null ? "" : rs.getString("achieve_mode").trim().toUpperCase(Locale.ROOT);
         int onboard = Math.max(0, rs.getInt("target_count"));
         int resume = 0;

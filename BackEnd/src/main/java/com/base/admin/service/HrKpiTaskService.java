@@ -317,7 +317,8 @@ public class HrKpiTaskService {
                     UPPER(IFNULL(r.job_priority_code, '')) IN ('P0', 'P1')
                     OR EXISTS (
                       SELECT 1 FROM hr_requisition_month_task t
-                      WHERE t.requisition_id = r.id AND t.settle_month = ? AND t.is_active = 1
+                      WHERE t.requisition_id = r.id AND LEFT(TRIM(t.settle_month), 7) = LEFT(TRIM(?), 7)
+                        AND t.is_active = 1
                         AND UPPER(IFNULL(t.priority_code, '')) IN ('P0', 'P1')
                     )
                   )
@@ -605,17 +606,16 @@ public class HrKpiTaskService {
         YearMonth settleYm = YearMonth.from(monthStart);
         // 按所选核算月补全 hr_kpi_task（修复仅配月度任务、未填需求岗位优先级时不生成任务）
         syncForSettleMonth(settleYm);
+        repairOpenTasksWithDoneAt();
         LocalDateTime from = monthStart.atStartOfDay();
         LocalDateTime to = monthStart.plusMonths(1).atStartOfDay();
         String settleMonthKey = settleYm.toString();
-        Map<Long, MonthTaskRule> monthRules = monthTaskService.loadRulesForMonth(settleMonthKey);
-        monthRules.entrySet().removeIf(e -> {
-            if (e.getValue() == null) {
-                return true;
-            }
-            String pc = e.getValue().priorityCode();
-            return pc == null || !SCORE_PRIORITIES.contains(pc.trim().toUpperCase(Locale.ROOT));
-        });
+        List<HrRequisitionMonthTaskService.ActiveAssessmentTask> activeTasks =
+                monthTaskService.loadActiveAssessmentTasks(settleMonthKey);
+        Map<Long, MonthTaskRule> monthRules = new LinkedHashMap<>();
+        for (HrRequisitionMonthTaskService.ActiveAssessmentTask item : activeTasks) {
+            monthRules.put(item.rule().requisitionId(), item.rule());
+        }
 
         boolean settleCurrentMonth = monthStart.equals(LocalDate.now().withDayOfMonth(1));
 
@@ -623,7 +623,7 @@ public class HrKpiTaskService {
                 : q.getOwnerUserIds().stream().filter(Objects::nonNull).distinct().toList();
 
         List<HrKpiAssessmentVO.TaskRow> allTasks = buildTasksFromMonthRequirements(
-                monthRules, from, to, settleCurrentMonth, ownerIds);
+                activeTasks, from, to, settleCurrentMonth, ownerIds);
 
         Map<Long, HrKpiAssessmentVO.OwnerSummary> owners = new LinkedHashMap<>();
         for (HrKpiAssessmentVO.TaskRow t : allTasks) {
@@ -725,45 +725,48 @@ public class HrKpiTaskService {
         vo.setOverallCompletionRate(round4(overallRate));
         vo.setOverallScore(overallEarned);
         vo.setOverallScoreMax(overallMax);
-        int configuredJobs = monthRules.size();
+        int configuredJobs = activeTasks.size();
+        double configuredTotal = round2(activeTasks.stream().mapToInt(t -> t.rule().score()).sum());
         vo.setScoreRuleHint(String.format(
                 "%s 生效任务要求 %d 个岗位（配置总分 %.0f）：任务明细与计分均按当月生效的月度任务要求；"
                         + "必须到岗按入职达标；灵活到岗入职或合格简历任一达标；每岗位每负责人一行；未达不得分。",
-                settleMonthKey, configuredJobs, overallMax));
+                settleMonthKey, configuredJobs, configuredTotal));
         vo.setOwners(new ArrayList<>(owners.values()));
         vo.setTasks(tasks);
         return vo;
     }
 
     /**
-     * 任务明细与计分：以核算月「生效的月度任务要求」为全集，每岗位×负责人一行；再合并 hr_kpi_task 完成态。
+     * 任务明细与计分：以核算月「生效的月度任务要求」为全集（SQL 驱动，避免 Map 漏岗），每岗位×负责人一行。
      */
     private List<HrKpiAssessmentVO.TaskRow> buildTasksFromMonthRequirements(
-            Map<Long, MonthTaskRule> monthRules,
+            List<HrRequisitionMonthTaskService.ActiveAssessmentTask> activeTasks,
             LocalDateTime monthFrom,
             LocalDateTime monthTo,
             boolean settleCurrentMonth,
             List<Long> ownerFilter) {
-        if (monthRules == null || monthRules.isEmpty()) {
+        if (activeTasks == null || activeTasks.isEmpty()) {
             return new ArrayList<>();
         }
-        List<Long> reqIds = new ArrayList<>(monthRules.keySet());
-        Map<Long, String> jobNames = loadRequisitionJobNames(reqIds);
+        List<Long> reqIds = activeTasks.stream().map(t -> t.rule().requisitionId()).distinct().toList();
         Map<Long, List<OwnerRef>> ownersByReq = loadRequisitionOwnerRefs(reqIds);
         Map<OwnerJobKey, List<HrKpiAssessmentVO.TaskRow>> kpiByKey =
                 loadKpiTaskRowsByOwnerJob(reqIds, monthFrom, monthTo, settleCurrentMonth);
 
         LocalDateTime defaultDue = endOfMonth(monthFrom);
         List<HrKpiAssessmentVO.TaskRow> rows = new ArrayList<>();
-        for (Long reqId : reqIds) {
-            if (!jobNames.containsKey(reqId)) {
-                continue;
+        for (HrRequisitionMonthTaskService.ActiveAssessmentTask item : activeTasks) {
+            MonthTaskRule rule = item.rule();
+            Long reqId = rule.requisitionId();
+            String jobName = item.jobName();
+            if (!StringUtils.hasText(jobName)) {
+                jobName = "岗位#" + reqId;
             }
-            MonthTaskRule rule = monthRules.get(reqId);
             List<OwnerRef> owners = ownersByReq.get(reqId);
             if (owners == null || owners.isEmpty()) {
                 owners = List.of(new OwnerRef(null, null));
             }
+            int rowsBefore = rows.size();
             for (OwnerRef owner : owners) {
                 Long uid = owner.userId();
                 if (uid != null && !ownerFilter.isEmpty() && !ownerFilter.contains(uid)) {
@@ -773,29 +776,27 @@ public class HrKpiTaskService {
                 OwnerJobKey key = new OwnerJobKey(reqId, ownerKey);
                 List<HrKpiAssessmentVO.TaskRow> kpiRows = kpiByKey.get(key);
                 HrKpiAssessmentVO.TaskRow row = (kpiRows == null || kpiRows.isEmpty())
-                        ? syntheticTaskRow(reqId, jobNames.get(reqId), owner, rule, monthFrom, defaultDue)
-                        : mergeKpiTaskRow(pickBestKpiRow(kpiRows), jobNames.get(reqId), owner, rule);
+                        ? syntheticTaskRow(reqId, jobName, owner, rule, monthFrom, defaultDue)
+                        : mergeKpiTaskRow(pickBestKpiRow(kpiRows), reqId, jobName, owner, rule);
                 rows.add(row);
+            }
+            if (rows.size() == rowsBefore && ownerFilter.isEmpty()) {
+                rows.add(syntheticTaskRow(reqId, jobName, owners.get(0), rule, monthFrom, defaultDue));
             }
         }
         dedupeTasksToOneScorePerJob(rows);
         return rows;
     }
 
-    private Map<Long, String> loadRequisitionJobNames(List<Long> reqIds) {
-        Map<Long, String> map = new LinkedHashMap<>();
-        if (reqIds.isEmpty()) {
-            return map;
-        }
-        String in = placeholders(reqIds.size());
-        jdbc.query("SELECT id, job_name FROM hr_requisition WHERE is_active = 1 AND id IN (" + in + ")",
-                rs -> {
-                    while (rs.next()) {
-                        map.put(rs.getLong("id"), rs.getString("job_name"));
-                    }
-                },
-                reqIds.toArray());
-        return map;
+    /** 历史回填偶发 OPEN 且 done_at 已写：统一为 DONE，避免明细/筛选异常。 */
+    private void repairOpenTasksWithDoneAt() {
+        jdbc.update("""
+                UPDATE hr_kpi_task
+                SET status = 'DONE', update_time = NOW()
+                WHERE is_active = 1 AND status = 'OPEN'
+                  AND done_at IS NOT NULL
+                  AND done_reason IS NOT NULL AND TRIM(done_reason) <> ''
+                """);
     }
 
     private Map<Long, List<OwnerRef>> loadRequisitionOwnerRefs(List<Long> reqIds) {
@@ -872,16 +873,28 @@ public class HrKpiTaskService {
     }
 
     private HrKpiAssessmentVO.TaskRow mergeKpiTaskRow(
-            HrKpiAssessmentVO.TaskRow row, String jobName, OwnerRef owner, MonthTaskRule rule) {
+            HrKpiAssessmentVO.TaskRow row, Long requisitionId, String jobName, OwnerRef owner, MonthTaskRule rule) {
+        row.setRequisitionId(requisitionId);
         row.setJobName(jobName);
         if (owner.nickname() != null) {
             row.setOwnerName(owner.nickname());
         }
         row.setPriorityCode(rule.priorityCode());
+        normalizeTaskCompletionStatus(row);
         double weight = rule.score();
         row.setWeight(weight);
         row.setEarnedWeight("DONE".equals(row.getStatus()) ? weight : 0.0);
         return row;
+    }
+
+    private void normalizeTaskCompletionStatus(HrKpiAssessmentVO.TaskRow row) {
+        if (row == null) {
+            return;
+        }
+        if (row.getDoneAt() != null && StringUtils.hasText(row.getDoneReason())
+                && !"CANCELLED".equalsIgnoreCase(row.getStatus())) {
+            row.setStatus("DONE");
+        }
     }
 
     private HrKpiAssessmentVO.TaskRow syntheticTaskRow(
@@ -944,14 +957,16 @@ public class HrKpiTaskService {
         record Key(long requisitionId, long ownerUserId) {
         }
         Map<Key, List<HrKpiAssessmentVO.TaskRow>> groups = new LinkedHashMap<>();
+        List<HrKpiAssessmentVO.TaskRow> keep = new ArrayList<>();
         for (HrKpiAssessmentVO.TaskRow t : tasks) {
-            if (t.getRequisitionId() == null) {
+            Long reqId = t.getRequisitionId();
+            if (reqId == null) {
+                keep.add(t);
                 continue;
             }
             long ownerKey = t.getOwnerUserId() == null ? 0L : t.getOwnerUserId();
-            groups.computeIfAbsent(new Key(t.getRequisitionId(), ownerKey), k -> new ArrayList<>()).add(t);
+            groups.computeIfAbsent(new Key(reqId, ownerKey), k -> new ArrayList<>()).add(t);
         }
-        List<HrKpiAssessmentVO.TaskRow> keep = new ArrayList<>();
         for (List<HrKpiAssessmentVO.TaskRow> list : groups.values()) {
             if (list.size() == 1) {
                 keep.add(list.get(0));
