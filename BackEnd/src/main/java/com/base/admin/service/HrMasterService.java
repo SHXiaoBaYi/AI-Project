@@ -998,6 +998,10 @@ public class HrMasterService {
             sql.append(" AND c.display_name LIKE ? ");
             args.add("%" + q.getCandidateName().trim() + "%");
         }
+        if (q.getPhone() != null && !q.getPhone().isBlank()) {
+            sql.append(" AND c.phone = ? ");
+            args.add(q.getPhone().trim());
+        }
         if (q.getJobName() != null && !q.getJobName().isBlank()) {
             sql.append(" AND r.job_name LIKE ? ");
             args.add("%" + q.getJobName().trim() + "%");

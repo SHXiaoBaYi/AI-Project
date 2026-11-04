@@ -301,6 +301,12 @@ const ApplicationPage = memo(function ApplicationPage() {
         },
       },
       {
+        title: '手机号',
+        dataIndex: 'phone',
+        hideInTable: true,
+        fieldProps: { allowClear: true, maxLength: 20 },
+      },
+      {
         title: '候选人',
         dataIndex: 'displayName',
         width: 120,
@@ -498,8 +504,10 @@ const ApplicationPage = memo(function ApplicationPage() {
           const ownerUserIds = Array.isArray(params.ownerUserIds)
             ? (params.ownerUserIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0)
             : undefined;
+          const phoneRaw = params.phone == null || params.phone === '' ? undefined : String(params.phone).trim();
           const rows = (await getHrApplicationsApi({
             candidateName: params.displayName,
+            phone: phoneRaw || undefined,
             requisitionId: Number.isFinite(requisitionId) ? requisitionId : undefined,
             channelCode: params.channelCode,
             stageCode: params.currentStage,

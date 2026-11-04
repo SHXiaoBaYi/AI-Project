@@ -622,7 +622,7 @@ public class HrInterviewRecordService {
     private void applyStage(Long applicationId, String stageCode) {
         jdbc.update("UPDATE hr_application SET current_stage = ? WHERE id = ? AND is_active = 1", stageCode, applicationId);
         LocalDateTime now = LocalDateTime.now().withNano(0);
-        // 面试结论写入时刷新 event_at：简历导入可能已有同 stage 且 event_at 是旧日期，不刷新会导致面板「区间进展」漏计
+        // 结论以本次保存时刻记到 event_at。面板「区间进展」不读这个时间，只认面试记录的面试时间。
         jdbc.update("""
                 INSERT INTO hr_stage_event (application_id, stage_code, event_at, source_sheet, create_by, is_active)
                 VALUES (?, ?, ?, 'INTERVIEW', ?, 1)

@@ -19,6 +19,8 @@ export interface HrBoardQuery {
   cycleJob?: string;
   targetText?: string;
   candidateName?: string;
+  /** 候选人手机号，全匹配 */
+  phone?: string;
   stageCode?: string;
   submitterName?: string;
   submitterUserId?: number;

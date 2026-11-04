@@ -61,6 +61,9 @@ public class HrBoardQueryDTO {
     @Schema(description = "候选人姓名，模糊匹配")
     private String candidateName;
 
+    @Schema(description = "候选人手机号，全匹配 hr_candidate.phone")
+    private String phone;
+
     @Schema(description = "阶段码")
     private String stageCode;
 
