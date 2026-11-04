@@ -645,6 +645,7 @@ export type HrKpiAssessment = {
   /** 整体已得分（各人已得分之和，整数），展示分子 */
   overallScore?: number;
   /** 整体满分=负责人数×基准分，展示分母，如 11 / 180 */
+  /** 整体满分=各负责人任务满分之和，与页面卡片分母一致 */
   overallScoreMax?: number;
   /** 参与核算的招聘负责人数 */
   ownerCount?: number;

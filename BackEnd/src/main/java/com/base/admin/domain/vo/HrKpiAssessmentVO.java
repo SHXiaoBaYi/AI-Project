@@ -50,7 +50,7 @@ public class HrKpiAssessmentVO {
     @Schema(description = "整体已得分（各负责人已得分之和，整数）", example = "11")
     private Double overallScore;
 
-    @Schema(description = "整体满分=负责人数×基准分，展示为 overallScore/overallScoreMax", example = "180")
+    @Schema(description = "整体满分=各负责人任务满分之和，展示为 overallScore/overallScoreMax", example = "12")
     private Double overallScoreMax;
 
     @Schema(description = "参与核算的招聘负责人数", example = "6")

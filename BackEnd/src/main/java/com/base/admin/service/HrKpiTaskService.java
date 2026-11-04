@@ -623,8 +623,6 @@ public class HrKpiTaskService {
         dedupeTasksToOneScorePerJob(allTasks);
 
         Map<Long, HrKpiAssessmentVO.OwnerSummary> owners = new LinkedHashMap<>();
-        double overallTotalWeight = 0.0;
-        double overallDoneWeight = 0.0;
         for (HrKpiAssessmentVO.TaskRow t : allTasks) {
             HrKpiAssessmentVO.OwnerSummary s = owners.computeIfAbsent(t.getOwnerUserId(), id -> {
                 HrKpiAssessmentVO.OwnerSummary o = new HrKpiAssessmentVO.OwnerSummary();
@@ -651,7 +649,6 @@ public class HrKpiTaskService {
             double earned = t.getEarnedWeight() == null ? 0.0 : t.getEarnedWeight();
             s.setDueCount(s.getDueCount() + 1);
             s.setTotalWeight(round2(s.getTotalWeight() + weight));
-            overallTotalWeight += weight;
             boolean p0 = "P0".equalsIgnoreCase(t.getPriorityCode());
             if (p0) {
                 s.setP0Due(s.getP0Due() + 1);
@@ -661,7 +658,6 @@ public class HrKpiTaskService {
             if ("DONE".equals(t.getStatus())) {
                 s.setDoneCount(s.getDoneCount() + 1);
                 s.setDoneWeight(round2(s.getDoneWeight() + earned));
-                overallDoneWeight += earned;
                 if (p0) {
                     s.setP0Done(s.getP0Done() + 1);
                 } else {
@@ -692,12 +688,12 @@ public class HrKpiTaskService {
             sumOwnerMax += total;
         }
 
-        double overallRate = overallTotalWeight > 0 ? overallDoneWeight / overallTotalWeight : 0.0;
         int ownerCount = owners.size();
         double overallEarned = round2(sumOwnerEarned);
-        // 整体满分 = 选中月已配置岗位任务得分之和（每岗一条，不按负责人翻倍，也不回退 30）
+        // 整体满分 = 各负责人任务满分之和（与卡片分母一致；勿用全量 month_task，避免未参与考核的配置岗抬高分母）
         double configuredMonthTotal = monthRules.values().stream().mapToInt(MonthTaskRule::score).sum();
-        double overallMax = round2(configuredMonthTotal);
+        double overallMax = round2(sumOwnerMax);
+        double overallRate = overallMax > 0 ? overallEarned / overallMax : 0.0;
 
         String statusFilter = StringUtils.hasText(q.getStatus()) ? q.getStatus().trim().toUpperCase() : "";
         List<HrKpiAssessmentVO.TaskRow> tasks = statusFilter.isEmpty() ? allTasks
@@ -722,7 +718,7 @@ public class HrKpiTaskService {
         vo.setP1QualifiedResumeCount(sampleResumeNeed);
         vo.setP1OnboardCount(sampleOnboardNeed);
         vo.setOwnerCount(ownerCount);
-        vo.setOverallTotalWeight(round2(Math.max(overallTotalWeight, sumOwnerMax)));
+        vo.setOverallTotalWeight(overallMax);
         vo.setOverallDoneWeight(overallEarned);
         vo.setOverallCompletionRate(round4(overallRate));
         vo.setOverallScore(overallEarned);

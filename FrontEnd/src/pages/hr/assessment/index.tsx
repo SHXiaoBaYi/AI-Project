@@ -144,9 +144,13 @@ const AssessmentPage = memo(function AssessmentPage() {
 
   const weightP0 = data?.weightP0 ?? 2;
   const weightP1 = data?.weightP1 ?? 1;
-  /** 整体满分 = 当月已配置岗位任务得分之和 */
-  const overallMax = data?.overallScoreMax ?? 0;
-  const overallAttain = scoreAttainPct(data?.overallScore, overallMax);
+  const ownerRows = data?.owners ?? [];
+  const sumOwnerScore = ownerRows.reduce((n, o) => n + (Number(o.score) || 0), 0);
+  const sumOwnerMaxWeight = ownerRows.reduce((n, o) => n + (Number(o.totalWeight) || 0), 0);
+  /** 整体与各人卡片同源：已得分/满分均为负责人汇总之和 */
+  const overallScore = ownerRows.length > 0 ? Math.round(sumOwnerScore * 100) / 100 : (data?.overallScore ?? 0);
+  const overallMax = ownerRows.length > 0 ? Math.round(sumOwnerMaxWeight * 100) / 100 : (data?.overallScoreMax ?? 0);
+  const overallAttain = scoreAttainPct(overallScore, overallMax);
   const overallP0Done = (data?.owners ?? []).reduce((n, o) => n + (o.p0Done ?? 0), 0);
   const overallP1Onboard = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneOnboard ?? 0), 0);
   const overallP1ResumeDone = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneResume ?? 0), 0);
@@ -292,7 +296,7 @@ const AssessmentPage = memo(function AssessmentPage() {
               <div className='mb-2 truncate font-medium text-sky-800'>整体得分</div>
               <Statistic
                 title='考核得分'
-                value={scoreOverBase(data?.overallScore, overallMax)}
+                value={scoreOverBase(overallScore, overallMax)}
               />
               <Progress
                 percent={overallAttain}
@@ -303,7 +307,7 @@ const AssessmentPage = memo(function AssessmentPage() {
               />
               <div className='text-xs text-neutral-500'>达成 {overallAttain}%</div>
               <div className='mt-2 text-xs leading-relaxed text-neutral-500'>
-                各人已得分之和 / 本月已配置岗位任务总分
+                各人已得分之和 / 各人任务满分之和（与上方卡片分母一致）
                 <br />
                 必须到岗 {overallP0Done} · 灵活到岗-入职 {overallP1Onboard}
                 {overallP1ResumeDone > 0 ? ` · 灵活到岗-简历 ${overallP1ResumeDone}` : ''}
@@ -377,7 +381,6 @@ const AssessmentPage = memo(function AssessmentPage() {
           />
         </div>
       </Card>
-
     </div>
   );
 });
