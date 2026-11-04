@@ -10,6 +10,7 @@ import com.base.admin.util.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -806,18 +807,20 @@ public class HrKpiTaskService {
         }
         String in = placeholders(reqIds.size());
         jdbc.query("""
-                SELECT o.requisition_id, o.user_id, u.nickname
+                SELECT o.requisition_id, o.user_id, COALESCE(u.nickname, o.alias) AS owner_name
                 FROM hr_requisition_owner o
                 LEFT JOIN sys_user u ON u.user_id = o.user_id
                 WHERE o.is_active = 1 AND o.user_id IS NOT NULL AND o.requisition_id IN (""" + in + """
                 )
                 ORDER BY o.requisition_id, o.sort_no, o.id
-                """, rs -> {
+                """, (ResultSetExtractor<Void>) rs -> {
+            // 必须显式 ResultSetExtractor：void lambda 会被当成 RowCallbackHandler，再 while(next) 会跳过首行
             while (rs.next()) {
                 long reqId = rs.getLong("requisition_id");
                 map.computeIfAbsent(reqId, k -> new ArrayList<>())
-                        .add(new OwnerRef(rs.getLong("user_id"), rs.getString("nickname")));
+                        .add(new OwnerRef(rs.getLong("user_id"), rs.getString("owner_name")));
             }
+            return null;
         }, reqIds.toArray());
         return map;
     }
@@ -848,11 +851,13 @@ public class HrKpiTaskService {
             sql.append(" OR t.status = 'OPEN' ");
         }
         sql.append(") ORDER BY t.requisition_id, t.owner_user_id, t.due_at, t.id");
-        jdbc.query(sql.toString(), rs -> {
+        jdbc.query(sql.toString(), (ResultSetExtractor<Void>) rs -> {
             while (rs.next()) {
                 HrKpiAssessmentVO.TaskRow row = new HrKpiAssessmentVO.TaskRow();
                 long reqId = rs.getLong("requisition_id");
-                long ownerUserId = rs.getLong("owner_user_id");
+                long ownerUserIdRaw = rs.getLong("owner_user_id");
+                Long ownerUserId = rs.wasNull() ? null : ownerUserIdRaw;
+                long ownerKey = ownerUserId == null ? 0L : ownerUserId;
                 row.setId(rs.getLong("id"));
                 row.setRequisitionId(reqId);
                 row.setOwnerUserId(ownerUserId);
@@ -866,8 +871,9 @@ public class HrKpiTaskService {
                 row.setDoneAt(rs.getTimestamp("done_at") == null ? null : rs.getTimestamp("done_at").toLocalDateTime());
                 row.setDoneReason(rs.getString("done_reason"));
                 row.setScore(rs.getInt("score"));
-                map.computeIfAbsent(new OwnerJobKey(reqId, ownerUserId), k -> new ArrayList<>()).add(row);
+                map.computeIfAbsent(new OwnerJobKey(reqId, ownerKey), k -> new ArrayList<>()).add(row);
             }
+            return null;
         }, args.toArray());
         return map;
     }
@@ -876,7 +882,10 @@ public class HrKpiTaskService {
             HrKpiAssessmentVO.TaskRow row, Long requisitionId, String jobName, OwnerRef owner, MonthTaskRule rule) {
         row.setRequisitionId(requisitionId);
         row.setJobName(jobName);
-        if (owner.nickname() != null) {
+        if (owner.userId() != null) {
+            row.setOwnerUserId(owner.userId());
+        }
+        if (StringUtils.hasText(owner.nickname())) {
             row.setOwnerName(owner.nickname());
         }
         row.setPriorityCode(rule.priorityCode());

@@ -6,6 +6,7 @@ import com.base.admin.exception.BusinessException;
 import com.base.admin.util.SecurityUtils;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -88,11 +89,13 @@ public class HrRequisitionMonthTaskService {
                   AND LEFT(TRIM(t.settle_month), 7) = ?
                   AND UPPER(IFNULL(t.priority_code, '')) IN ('P0', 'P1')
                 ORDER BY t.requisition_id
-                """, rs -> {
+                """, (ResultSetExtractor<Void>) rs -> {
+            // 必须显式 ResultSetExtractor：void lambda 会被当成 RowCallbackHandler，再 while(next) 会跳过首行
             while (rs.next()) {
                 MonthTaskRule rule = readRule(rs);
                 list.add(new ActiveAssessmentTask(rule, rs.getString("job_name")));
             }
+            return null;
         }, monthKey, monthKey);
         return list;
     }
