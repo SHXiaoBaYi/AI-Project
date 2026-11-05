@@ -13,12 +13,12 @@ public class GeoAutoPlatformOptionVO {
     @Schema(description = "平台名称", example = "豆包")
     private String platformName;
 
-    @Schema(description = "AI厂商编码（doubao/deepseek/moonshot/tongyi/zhipu）", example = "doubao")
+    @Schema(description = "采集通道编码（浏览器通道固定 BROWSER，未就绪为空）", example = "BROWSER")
     private String providerCode;
 
-    @Schema(description = "厂商是否已配置可调用", example = "true")
+    @Schema(description = "网页版采集适配器是否就绪", example = "true")
     private boolean providerReady;
 
-    @Schema(description = "未就绪提示（厂商未配置 API Key 等）")
+    @Schema(description = "未就绪提示（未配置适配器 / 未配置登录态等）")
     private String hint;
 }

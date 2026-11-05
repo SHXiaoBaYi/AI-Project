@@ -77,6 +77,12 @@ export interface GeoAutoTask {
   weekDay?: number;
   /** 1=同日有人工记录也覆盖 */
   overwriteManual?: number;
+  /** 1=开启深度思考 */
+  deepThink?: number;
+  /** DISABLED / MENTION / ALL */
+  screenshotMode?: string;
+  /** 提问位置 */
+  probeRegion?: string;
   notifyEnabled?: number;
   enabled?: number;
   lastRunId?: number;
@@ -106,6 +112,12 @@ export interface GeoAutoTaskDTO {
   runTime?: string;
   weekDay?: number;
   overwriteManual?: number;
+  /** 1=开启深度思考（记录思考过程） */
+  deepThink?: number;
+  /** DISABLED / MENTION / ALL */
+  screenshotMode?: string;
+  /** 提问位置 */
+  probeRegion?: string;
   notifyEnabled?: number;
   enabled?: number;
   remark?: string;
@@ -125,6 +137,11 @@ export interface GeoAutoRun {
   doneCount: number;
   successCount: number;
   failedCount: number;
+  /** v28 分批串行调度：每批问题数 / 总批次 / 已完成批次 / 当前批次号 */
+  batchSize?: number;
+  batchTotal?: number;
+  batchDone?: number;
+  currentBatchNo?: number;
   startTime?: string;
   endTime?: string;
   errorMsg?: string;
@@ -142,6 +159,10 @@ export interface GeoAutoResult {
   channel?: string;
   answerModel?: string;
   runDate?: string;
+  /** 1=本次开启深度思考 */
+  deepThink?: number;
+  /** 是否已有探测截图 */
+  hasScreenshot?: boolean;
   mentioned?: number;
   rankNo?: number | null;
   recommendStatus?: string;
@@ -172,6 +193,8 @@ export interface GeoAutoResultQuery extends PageQuery {
 export interface GeoAutoCitation {
   title?: string;
   site?: string;
+  /** 信源链接（http/https） */
+  url?: string;
   context?: string;
 }
 
@@ -187,6 +210,18 @@ export interface GeoAutoResultDiff {
 /** 监测结果详情（含回答原文与对比） */
 export interface GeoAutoResultDetail extends GeoAutoResult {
   answerText?: string;
+  /** 模型思考过程 */
+  reasoningText?: string;
+  /** C 端官方分享链接 */
+  probeUrl?: string;
+  /** OFFICIAL_SHARE / PAGE_URL */
+  probeUrlSource?: string;
+  /** 浏览器采集诊断 JSON 字符串 */
+  probeRequest?: string;
+  /** 整页截图地址 */
+  screenshotUrl?: string;
+  /** BROWSER_SHOT / API_SNAPSHOT / MANUAL */
+  screenshotType?: string;
   citations?: GeoAutoCitation[];
   judgeRaw?: string;
   diffs?: GeoAutoResultDiff[];
@@ -227,3 +262,71 @@ export interface GeoAutoSeedResult {
 
 /** 话题下拉（问题库/结果页筛选用，复用 geo 话题） */
 export type GeoAutoTopicOption = GeoTopic;
+
+/** 单题浏览器采集试跑入参 */
+export interface GeoAutoProbeDTO {
+  platform: string;
+  question: string;
+  deepThink?: boolean;
+  screenshot?: boolean;
+  region?: string;
+}
+
+/** 单题浏览器采集试跑结果（含取证与诊断） */
+export interface GeoBrowserProbeVO {
+  success: boolean;
+  error?: string;
+  platform: string;
+  question: string;
+  answerText?: string;
+  reasoningText?: string;
+  /** C 端官方分享链接 */
+  probeUrl?: string;
+  /** OFFICIAL_SHARE / PAGE_URL */
+  probeUrlSource?: string;
+  screenshotUrl?: string;
+  screenshotType?: string;
+  pageUrl?: string;
+  modelLabel?: string;
+  deepThinkApplied: boolean;
+  citations?: GeoAutoCitation[];
+  /** 采集诊断 JSON 字符串 */
+  diagnostic?: string;
+}
+
+/** v28 平台账号模拟登录入参 */
+export interface GeoAutoBrowserLoginDTO {
+  platform: string;
+  forceRefresh?: boolean;
+  accountId?: number;
+}
+
+/** v28 平台账号模拟登录结果 */
+export interface GeoBrowserLoginVO {
+  success: boolean;
+  error?: string;
+  platform: string;
+  accountLabel?: string;
+  /** CACHED / PASSWORD_LOGIN / STORAGE_STATE / MANUAL_UPLOAD */
+  source?: string;
+  statePath?: string;
+  screenshotUrl?: string;
+  diagnostic?: string;
+}
+
+/** v28 各平台浏览器自动监测账号就绪状态 */
+export interface GeoBrowserAccountVO {
+  platform: string;
+  accountId: number;
+  account: string;
+  hasPassword: boolean;
+  /** PASSWORD / STORAGE_STATE */
+  loginType: string;
+  /** NONE / READY / FAILED / EXPIRED */
+  loginStatus: string;
+  ready: boolean;
+  statePath?: string;
+  loginAt?: string;
+  error?: string;
+  failCount?: number;
+}

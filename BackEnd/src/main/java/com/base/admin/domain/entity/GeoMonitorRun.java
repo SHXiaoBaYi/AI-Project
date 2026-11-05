@@ -62,6 +62,19 @@ public class GeoMonitorRun extends BaseEntity {
     @Schema(description = "失败数（调用失败/判定失败）", example = "2")
     private Integer failedCount;
 
+    /** 分批串行：每批只跑 batchSize 个问题，跑完一批再起下一批，避免服务器持续满负荷 */
+    @Schema(description = "每批监测问题数", example = "3")
+    private Integer batchSize;
+
+    @Schema(description = "总批次数", example = "5")
+    private Integer batchTotal;
+
+    @Schema(description = "已完成批次数", example = "2")
+    private Integer batchDone;
+
+    @Schema(description = "当前执行批次号（从1开始）", example = "3")
+    private Integer currentBatchNo;
+
     @Schema(description = "开始时间")
     private LocalDateTime startTime;
 

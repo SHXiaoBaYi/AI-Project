@@ -45,6 +45,15 @@ public class GeoAutoTaskDTO {
     @Schema(description = "同日同题同平台有人工记录时是否覆盖 0=人工优先 1=覆盖", example = "0")
     private Integer overwriteManual;
 
+    @Schema(description = "是否开启深度思考：1=开启（记录思考过程，耗时与成本更高） 0=关闭", example = "0")
+    private Integer deepThink;
+
+    @Schema(description = "截图存证：DISABLED/MENTION=仅提及/ALL=全部", example = "MENTION")
+    private String screenshotMode;
+
+    @Schema(description = "提问位置（浏览器采集地域配置）", example = "全国随机")
+    private String probeRegion;
+
     @Schema(description = "变化提醒开关（P2 生效）", example = "1")
     private Integer notifyEnabled;
 

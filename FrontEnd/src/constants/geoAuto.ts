@@ -20,6 +20,23 @@ export const GEO_AUTO_WEEK_DAYS = [
   { label: '周日', value: 7 },
 ] as const;
 
+/** 截图存证模式（对标模力指数：禁用 / 提及截图 / 全部截图） */
+export const GEO_AUTO_SCREENSHOT_MODES = [
+  { label: '禁用截图', value: 'DISABLED' },
+  { label: '提及截图', value: 'MENTION' },
+  { label: '全部截图', value: 'ALL' },
+] as const;
+
+/** 提问位置（浏览器采集地域配置，预留给代理/地理位置） */
+export const GEO_AUTO_PROBE_REGIONS = ['全国随机', '北京', '上海', '广州', '深圳', '杭州'] as const;
+
+/** 截图类型标签 */
+export const GEO_AUTO_SCREENSHOT_TYPE_MAP: Record<string, string> = {
+  BROWSER_SHOT: '浏览器整页存证',
+  API_SNAPSHOT: 'API 回答快照',
+  MANUAL: '人工补录',
+};
+
 /** 推荐状态（与日监测口径一致） */
 export const GEO_AUTO_RECOMMEND_OPTIONS = ['未出现', '出现且推荐', '出现未推荐'].map((v) => ({
   label: v,

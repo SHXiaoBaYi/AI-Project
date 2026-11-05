@@ -55,7 +55,7 @@ public class GeoMonitorJudgeService {
                 - mention_position: 整数或null，品牌第一次出现位于回答第几段（按换行分段，从1开始）
                 - negative_content: 字符串，回答中涉及品牌的负面、错误或误导性表述原文摘录（60字内），无则空串
                 - competitors: 字符串数组，回答中出现的竞品词表中的竞品名称
-                - citations: 对象数组 [{title,site,context}]，回答中明确引用的外部信息来源（标题/站点/上下文摘录30字内），没有则空数组
+                - citations: 对象数组 [{title,site,url,context}]，回答中明确引用的外部信息来源（标题/站点/链接/上下文摘录30字内），没有则空数组；url 只填回答里真实出现的 http(s) 链接，没有则空串
                 """;
         String user = """
                 【用户问题】
@@ -125,6 +125,8 @@ public class GeoMonitorJudgeService {
                 GeoAutoResultDetailVO.Citation citation = new GeoAutoResultDetailVO.Citation();
                 citation.setTitle(truncate(c.path("title").asText(""), 200));
                 citation.setSite(truncate(c.path("site").asText(""), 200));
+                String url = c.path("url").asText("").trim();
+                citation.setUrl(url.startsWith("http") ? truncate(url, 1000) : "");
                 citation.setContext(truncate(c.path("context").asText(""), 200));
                 if (StringUtils.hasText(citation.getTitle()) || StringUtils.hasText(citation.getSite())) {
                     citations.add(citation);

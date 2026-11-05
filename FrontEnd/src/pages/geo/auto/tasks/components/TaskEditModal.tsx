@@ -10,7 +10,12 @@ import {
   updateGeoAutoTaskApi,
 } from '@/api/geoAuto';
 import type { GeoAutoPlatformOption, GeoAutoQuestionOption, GeoAutoTask, GeoAutoTaskDTO } from '@/types/geoAuto';
-import { GEO_AUTO_SCOPE_TYPES, GEO_AUTO_WEEK_DAYS } from '@/constants/geoAuto';
+import {
+  GEO_AUTO_PROBE_REGIONS,
+  GEO_AUTO_SCOPE_TYPES,
+  GEO_AUTO_SCREENSHOT_MODES,
+  GEO_AUTO_WEEK_DAYS,
+} from '@/constants/geoAuto';
 
 interface TaskEditModalProps {
   open: boolean;
@@ -62,6 +67,9 @@ export default function TaskEditModal({ open, editing, onClose, onSaved }: TaskE
         weekDay: editing.weekDay ?? 1,
         runTime: editing.runTime ? dayjs(editing.runTime, 'HH:mm:ss') : dayjs('08:30:00', 'HH:mm:ss'),
         overwriteManual: editing.overwriteManual === 1,
+        deepThink: editing.deepThink === 1,
+        screenshotMode: editing.screenshotMode || 'MENTION',
+        probeRegion: editing.probeRegion || '全国随机',
         notifyEnabled: editing.notifyEnabled !== 0,
         remark: editing.remark || '',
       });
@@ -73,6 +81,9 @@ export default function TaskEditModal({ open, editing, onClose, onSaved }: TaskE
         weekDay: 1,
         runTime: dayjs('08:30:00', 'HH:mm:ss'),
         overwriteManual: false,
+        deepThink: false,
+        screenshotMode: 'MENTION',
+        probeRegion: '全国随机',
         notifyEnabled: true,
       });
     }
@@ -110,6 +121,9 @@ export default function TaskEditModal({ open, editing, onClose, onSaved }: TaskE
       weekDay: values.freq === '每周' ? values.weekDay : undefined,
       runTime: values.runTime ? values.runTime.format('HH:mm:ss') : undefined,
       overwriteManual: values.overwriteManual ? 1 : 0,
+      deepThink: values.deepThink ? 1 : 0,
+      screenshotMode: values.screenshotMode || 'MENTION',
+      probeRegion: values.probeRegion || '全国随机',
       notifyEnabled: values.notifyEnabled ? 1 : 0,
       remark: values.remark || '',
     };
@@ -206,7 +220,7 @@ export default function TaskEditModal({ open, editing, onClose, onSaved }: TaskE
         >
           <Select
             mode='multiple'
-            placeholder='选择AI平台（未配置厂商的平台不可选）'
+            placeholder='选择网页版模型（未配置采集适配器的平台不可选）'
             options={platforms.map((p) => ({
               label: p.providerReady ? p.platformName : `${p.platformName}（${p.hint || '未就绪'}）`,
               value: p.platformName,
@@ -264,6 +278,48 @@ export default function TaskEditModal({ open, editing, onClose, onSaved }: TaskE
         >
           <Switch />
         </Form.Item>
+
+        <div className='rounded-md border border-blue-100 bg-blue-50/50 p-3'>
+          <div className='mb-2 text-xs font-medium text-blue-700'>
+            网页版采集取证（对标模力指数问答明细：深度思考 / 整页截图 / 官方分享链接）
+          </div>
+          <div className='flex gap-4'>
+            <Form.Item
+              name='deepThink'
+              label={
+                <span>
+                  深度思考{' '}
+                  <Tooltip title='开启后在 C 端页面打开「深度思考」，问答明细里会留档模型的思考过程；回答更慢，部分平台不支持'>
+                    <QuestionCircleOutlined className='text-neutral-400' />
+                  </Tooltip>
+                </span>
+              }
+              valuePropName='checked'
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item
+              name='screenshotMode'
+              label='截图存证'
+              tooltip='禁用=不截图；提及截图=仅品牌被提及时留档；全部截图=每次都留档整页截图'
+            >
+              <Select
+                style={{ width: 140 }}
+                options={[...GEO_AUTO_SCREENSHOT_MODES]}
+              />
+            </Form.Item>
+            <Form.Item
+              name='probeRegion'
+              label='提问位置'
+              tooltip='记录本次采集的目标地域；实际 IP 地域由部署环境/代理决定'
+            >
+              <Select
+                style={{ width: 130 }}
+                options={GEO_AUTO_PROBE_REGIONS.map((r) => ({ label: r, value: r }))}
+              />
+            </Form.Item>
+          </div>
+        </div>
 
         <Form.Item
           name='notifyEnabled'

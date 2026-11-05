@@ -36,6 +36,12 @@ public class GeoAutoResultVO {
     @Schema(description = "实际调用的模型名", example = "doubao-seed-2-1-lite-260915")
     private String answerModel;
 
+    @Schema(description = "本次是否开启深度思考 1=是 0=否", example = "0")
+    private Integer deepThink;
+
+    @Schema(description = "是否有探测截图", example = "true")
+    private Boolean hasScreenshot;
+
     @Schema(description = "监测归属日期", example = "2026-11-05")
     private LocalDate runDate;
 

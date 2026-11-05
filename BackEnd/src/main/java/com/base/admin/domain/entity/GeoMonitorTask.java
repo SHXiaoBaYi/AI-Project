@@ -55,6 +55,22 @@ public class GeoMonitorTask extends BaseEntity {
     @Schema(description = "同日同题同平台有人工记录时是否覆盖 0=人工优先", example = "0")
     private Integer overwriteManual;
 
+    @Schema(description = "是否开启深度思考 1=是 0=否", example = "0")
+    private Integer deepThink;
+
+    /** 截图存证：禁用 */
+    public static final String SHOT_DISABLED = "DISABLED";
+    /** 截图存证：仅品牌被提及时截图 */
+    public static final String SHOT_MENTION = "MENTION";
+    /** 截图存证：全部截图 */
+    public static final String SHOT_ALL = "ALL";
+
+    @Schema(description = "截图存证：DISABLED/MENTION=仅提及/ALL=全部", example = "MENTION")
+    private String screenshotMode;
+
+    @Schema(description = "提问位置（浏览器采集地域配置）", example = "全国随机")
+    private String probeRegion;
+
     @Schema(description = "变化提醒开关（P2 生效）", example = "1")
     private Integer notifyEnabled;
 

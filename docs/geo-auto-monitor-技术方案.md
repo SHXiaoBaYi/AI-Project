@@ -1,8 +1,57 @@
 # GEO 自动监测（问题监控）技术方案
 
-> 状态：P1 已实现（2026-11-05），后端 `mvn compile` 与前端 `vite build` 均通过
-> 对标：模力指数（molizhishu.com）「问题监控」模块
+> 状态：**v2 已实现（2026-11-05 下午）**——采集通道按业务决策全量切换为「C 端网页版浏览器采集」
+> 对标：模力指数（molizhishu.com）「问题监控 / 问答明细」模块
 > 日期：2026-11-05
+> 校验：后端 `mvn compile` 通过、前端 `vite build` 通过、v27 迁移已执行
+
+---
+
+## 0. v2 变更说明（覆盖下文 §5 / §8 / §11 的 API 通道描述）
+
+**为什么要改**：复核模力指数 V1.23 / V1.24 官方更新与后台问答明细页后确认，它的取证链路**不是 API 直连**，而是驱动各模型的**网页版 / 手机版真实 C 端界面**：
+
+| 取证项 | 模力指数的真实来源 | 我们的 v2 实现 |
+|---|---|---|
+| 回答链接 | 模型**官方分享链接**（如 `https://www.doubao.com/thread/xztqnY1pvoh…`），V1.24 新增「回答链接直达」，并注明「不保证长期有效」 | 点 C 端「分享」按钮取 `probeUrl`，拿不到则回退会话页 URL，记录 `probeUrlSource` |
+| 截图 | **整页截图存证**，任务级「禁用 / 提及截图 / 全部截图」，单独计费、保留 6 个月 | `screenshot_mode` 三态 + Playwright `fullPage` 截图落 `uploads/geo/auto-monitor/{date}/`，`screenshot_type=BROWSER_SHOT` |
+| 深度思考 / 思考过程 | 任务级按模型开关，问答明细新增「思考过程 展开」 | `deep_think` 开关 + 点深度思考按钮 + 抓页面思考面板 `reasoning_text` |
+| 引用信源 | 从 C 端回答页 DOM 解析引用来源（标题 + 链接） | 页面 `a[href]` 提取（带真实 url），LLM 裁判结果去重补充 |
+| 提问位置 | 「全国随机」地域配置、网页版/手机版独立选配 | `probe_region` 记录，实际 IP 地域由部署环境/代理决定 |
+
+**决策（已与业务确认）**：① 全量切换浏览器通道，停用 API 直连采集；② 采集器用 **Java 内置 Playwright**（单进程，无额外服务）。因此下文 §5.1 的 API 通道方案与 §8 的 `data_source='API'` 描述**不再执行**，以本节为准；LLM 裁判仍走 AI 网关（判定逻辑与采集通道解耦）。
+
+**v2 新增资产**
+- 依赖：`com.microsoft.playwright:playwright:1.64.0`（`driver-bundle` 内含 Node 驱动，约 196MB；本机 `application-local.yml` 指向系统 Chrome，生产需装 Chromium 或指定 `GEO_BROWSER_PATH`）
+- 配置：`GeoBrowserProbeProperties`（`geo.auto-monitor.browser.*`），平台适配器 URL / 输入框 / 回答 / 深度思考 / 思考过程 / 分享 / 引用信源**选择器全部可按平台覆盖**，C 端改版不用改代码
+- 服务：`GeoBrowserProbeService` 单线程串行采集，登录态用 Playwright `storageState`（`{平台名}.json`），每步耗时与选择器命中写入 `probe_request` 诊断 JSON
+- 表：`geo_monitor_task` +3 列（deep_think / screenshot_mode / probe_region）；`geo_monitor_result` +6 列（deep_think / reasoning_text / probe_url / probe_request / screenshot_url / screenshot_type）
+- 接口：`POST /geo/auto/browser/probe`（单题试跑，不落库）、`POST /geo/auto/browser/state`（上传登录态）、`POST /geo/auto/results/{id}/screenshot`（人工补录真实截图）
+- 前端：问答明细抽屉（回答链接 / 整页截图 / 思考过程 / 可点引用信源 / 采集诊断）、任务编辑（深度思考 + 截图模式 + 提问位置）、**采集诊断抽屉**（上线前核对选择器与登录态）
+- 回写：`geo_monitor_daily.data_source='浏览器'`，并顺带回写 `screenshot_url` 与 `third_party_url`（官方分享链接），日监测页可直接取证
+
+**上线前必须做**：① 各平台导出并上传登录态 storageState；② 用「采集诊断」逐平台试跑，按实际 DOM 调整 `profiles` 选择器；③ 生产机装 Chromium / 指定浏览器路径。C 端页面选择器与风控会变，这是浏览器通道的固有维护成本。
+
+### 0.1 本机联调记录（2026-11-05，豆包网页版）
+
+| 现象 | 根因 | 处理 |
+|---|---|---|
+| 首次试跑 3m45s 后 `TimeoutException`，诊断为空 | Playwright Java 的 `Playwright.create()` 会顺带执行 `cli.js install` 下载自带 Chrome for Testing，国内 CDN 卡住；外层 future 225s 超时后只中断线程，子进程仍在下载 | 指定 `executable-path` 时用 `Playwright.CreateOptions.setEnv(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)` 跳过下载；本机 Chrome 实测启动 2s。外层超时也改为返回带 `stage` 的诊断快照 |
+| 二次试跑 12s「成功」，但回答是 `To pick up a draggable item…` | 未登录的豆包落地页有推广弹窗 + `to_login_button`，提交问题被重定向到 `?from_logout=1`；DOM 兜底把无障碍拖拽提示当成回答，`PAGE_URL` 被当成回答链接 | 新增 `login-required-selectors` / `dismiss-selectors` / `answer-reject-patterns` 三组可配置信号：命中登录标志直接返回「请上传 storageState」并附登录墙截图；回答命中 UI 文案或过短一律判失败；采集失败时不再输出 `probeUrl`，避免把落地页 URL 冒充官方分享链接 |
+| 前端 `tsc -b` 报错 | 仓库既有页面（`style-pack`、`yearly-target`、`hr/*`、`train/*`）历史类型问题，与本次改动无关 | 本次新增/修改的 `geo/auto/**` 文件无报错，用 `vite build` 校验产物即可 |
+
+**结论**：采集链路（本机 Chrome → 导航 → 整页截图 → 上传目录）已跑通并落盘真实 PNG，`/api/uploads/geo/auto-monitor/{date}/*.png` 可直接访问；另用本地 mock C 端页面做了全链路自测：`answerSource=SELECTOR`、思考过程 45 字、引用信源 1 条、`probeUrlSource=OFFICIAL_SHARE`（`https://www.doubao.com/thread/...`）、整页截图 `BROWSER_SHOT`、`stage=DONE`，即「回答 / 思考 / 信源 / 官方分享链接 / 截图」五类取证均已验证。**真实平台数据必须以登录态为前提**，未登录时系统在 5 秒内明确报错并附登录墙截图，不再产出假数据。
+
+**登录态怎么来**（已提供一键脚本，不用手拼 Playwright 命令）：
+
+```bash
+# Git Bash，在项目根目录；会打开有头 Chrome，人工登录完成后回终端按回车
+export JAVA_HOME=/d/AI-XBY/.tools/jdk-21.0.13+9 && export PATH="$JAVA_HOME/bin:$PATH"
+./scripts/export-geo-storage-state.sh 豆包 https://www.doubao.com/chat/
+# 产出 BackEnd/uploads/geo/auto-monitor/state/豆包.json
+```
+
+脚本由 `scripts/GeoStorageStateExporter.java` 调 Playwright `context.storageState()` 导出 cookie + localStorage；也可在「监测任务 → 采集诊断」直接上传同名 JSON。登录态会过期，失效后重新导出即可。
 
 ---
 
@@ -100,6 +149,8 @@
 ---
 
 ## 5. 监控通道策略（核心决策点）
+
+> ⚠️ **本节为 v1 原始设计，已被 §0 的 v2 决策覆盖**：实际实现为全量 C 端网页版浏览器采集，API 直连仅用于 LLM 裁判（不用于采集）。以下保留作决策对比记录。
 
 ### 5.1 P1：API 直连通道（推荐首选）
 

@@ -8,6 +8,7 @@ import com.base.admin.domain.entity.GeoMonitorResult;
 import com.base.admin.domain.entity.GeoMonitorRun;
 import com.base.admin.domain.entity.GeoMonitorTask;
 import com.base.admin.domain.entity.GeoPlatform;
+import com.base.admin.domain.vo.GeoAutoResultDetailVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoMonitorQuestionMapper;
 import com.base.admin.mapper.GeoMonitorResultMapper;
@@ -23,29 +24,23 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
 import java.util.function.Consumer;
 
 /**
- * 自动监测执行引擎：问题×平台矩阵展开 → 平台限流调用 → LLM 裁判 → 回写日监测 → 批次收尾。
+ * 自动监测执行引擎：问题×平台矩阵展开 → C端网页版浏览器采集 → LLM 裁判 → 回写日监测 → 批次收尾。
  * 设计要点：
- * - 单项失败（调用失败/判定失败）只记 result 不阻塞批次；
- * - 平台级信号量限流（默认并发 2），重试指数退避（2s/8s）；
+ * - 采集通道为 BROWSER（对标模力指数），真实会话链接/整页截图/思考过程/引用信源全部留档；
+ * - 单项失败（采集失败/判定失败）只记 result 不阻塞批次；
+ * - 浏览器采集器内部单线程串行，采集重试指数退避（2s/8s）；
  * - 批次状态幂等收尾（仅 RUNNING → 终态一次）。
  */
 @Slf4j
 @Service
 public class GeoAutoMonitorExecutor {
-
-    /** 模拟真实用户提问的系统提示（与人工巡查口径尽量一致） */
-    private static final String QUESTION_SYSTEM_PROMPT = "你是一个真实的中文互联网用户，请直接、自然地回答用户的问题。";
 
     /** 判定失败的 result 由引擎置 JUDGE_FAILED */
     private final GeoMonitorTaskMapper taskMapper;
@@ -53,21 +48,18 @@ public class GeoAutoMonitorExecutor {
     private final GeoMonitorResultMapper resultMapper;
     private final GeoMonitorQuestionMapper questionMapper;
     private final GeoPlatformMapper platformMapper;
-    private final AiChatService aiChatService;
+    private final GeoBrowserProbeService probeService;
     private final GeoMonitorJudgeService judgeService;
     private final GeoMonitorDailySyncService dailySyncService;
     private final GeoAutoMonitorProperties properties;
     private final ObjectMapper objectMapper;
 
-    /** 批次调度线程（每个运行批次占一个编排位） */
-    private final ExecutorService runDispatcher = Executors.newFixedThreadPool(2, r -> {
+    /** 批次编排单线程：全局同一时刻只跑一个任务的一个批次，其余任务排队，避免 ECS 叠加满载 */
+    private final ExecutorService runDispatcher = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "geo-auto-monitor");
         thread.setDaemon(true);
         return thread;
     });
-
-    /** 平台名 -> 限流信号量 */
-    private final Map<String, Semaphore> platformSemaphores = new ConcurrentHashMap<>();
 
     /** 运行中的任务ID（进程内防重入） */
     private final Set<Long> runningTaskIds = ConcurrentHashMap.newKeySet();
@@ -77,7 +69,7 @@ public class GeoAutoMonitorExecutor {
                                   GeoMonitorResultMapper resultMapper,
                                   GeoMonitorQuestionMapper questionMapper,
                                   GeoPlatformMapper platformMapper,
-                                  AiChatService aiChatService,
+                                  GeoBrowserProbeService probeService,
                                   GeoMonitorJudgeService judgeService,
                                   GeoMonitorDailySyncService dailySyncService,
                                   GeoAutoMonitorProperties properties,
@@ -87,35 +79,11 @@ public class GeoAutoMonitorExecutor {
         this.resultMapper = resultMapper;
         this.questionMapper = questionMapper;
         this.platformMapper = platformMapper;
-        this.aiChatService = aiChatService;
+        this.probeService = probeService;
         this.judgeService = judgeService;
         this.dailySyncService = dailySyncService;
         this.properties = properties;
         this.objectMapper = objectMapper;
-    }
-
-    /** 平台名 -> AI厂商编码兜底推断（geo_platform.provider_code 为空时） */
-    public static String inferProvider(String platformName) {
-        if (!StringUtils.hasText(platformName)) {
-            return null;
-        }
-        String name = platformName.trim().toLowerCase(Locale.ROOT);
-        if (name.contains("豆包") || name.contains("doubao")) {
-            return "doubao";
-        }
-        if (name.equals("ds") || name.contains("deepseek")) {
-            return "deepseek";
-        }
-        if (name.contains("kimi") || name.contains("moonshot")) {
-            return "moonshot";
-        }
-        if (name.contains("通义") || name.contains("千问") || name.contains("qwen") || name.contains("tongyi")) {
-            return "tongyi";
-        }
-        if (name.contains("智谱") || name.contains("glm") || name.contains("zhipu")) {
-            return "zhipu";
-        }
-        return null;
     }
 
     public boolean isRunning(Long taskId) {
@@ -193,6 +161,12 @@ public class GeoAutoMonitorExecutor {
         run.setDoneCount(0);
         run.setSuccessCount(0);
         run.setFailedCount(0);
+        // v28 分批串行：每批只跑 batchSize 个问题，跑完一批再起下一批
+        int batchSize = Math.max(1, properties.getBatchSize());
+        run.setBatchSize(batchSize);
+        run.setBatchTotal((questions.size() + batchSize - 1) / batchSize);
+        run.setBatchDone(0);
+        run.setCurrentBatchNo(0);
         run.setStartTime(LocalDateTime.now());
         runMapper.insert(run);
 
@@ -204,32 +178,83 @@ public class GeoAutoMonitorExecutor {
         return run;
     }
 
+    /**
+     * v28 分批串行调度：把问题按 batchSize（默认 3）切批，一批跑完才起下一批，
+     * 循环直到队列耗尽；批次间与相邻监测项之间都有可配置冷却，避免 ECS 持续满负荷。
+     *
+     * <p>浏览器采集器本身是单线程串行，登录态按平台缓存，所以同批内同平台只登录一次；
+     * 这里不再开并发线程池，彻底消除多浏览器实例抢资源的问题。
+     */
     private void executeRun(GeoMonitorRun run, GeoMonitorTask task,
                             List<GeoMonitorQuestion> questions, List<GeoPlatform> platforms) {
-        int parallelism = Math.max(1, Math.min(6, platforms.size() * properties.getPerPlatformConcurrency()));
-        ExecutorService pool = Executors.newFixedThreadPool(parallelism, r -> {
-            Thread thread = new Thread(r, "geo-auto-run-" + run.getId());
-            thread.setDaemon(true);
-            return thread;
-        });
+        int batchSize = run.getBatchSize() == null || run.getBatchSize() < 1
+                ? Math.max(1, properties.getBatchSize()) : run.getBatchSize();
+        List<List<GeoMonitorQuestion>> batches = new ArrayList<>();
+        for (int i = 0; i < questions.size(); i += batchSize) {
+            batches.add(new ArrayList<>(questions.subList(i, Math.min(i + batchSize, questions.size()))));
+        }
         try {
-            List<Future<?>> futures = new ArrayList<>();
-            for (GeoMonitorQuestion question : questions) {
-                for (GeoPlatform platform : platforms) {
-                    futures.add(pool.submit(() -> executeItemSafely(run, task, question, platform)));
+            for (int b = 0; b < batches.size(); b++) {
+                if (Thread.currentThread().isInterrupted()) {
+                    log.warn("自动监测批次被中断 runId={} 已完成 {}/{}", run.getId(), b, batches.size());
+                    break;
                 }
-            }
-            for (Future<?> future : futures) {
-                future.get();
+                List<GeoMonitorQuestion> batch = batches.get(b);
+                int batchNo = b + 1;
+                long batchStart = System.currentTimeMillis();
+                markBatchStart(run.getId(), batchNo);
+                log.info("自动监测批次开始 runId={} batch={}/{} questions={} platforms={}",
+                        run.getId(), batchNo, batches.size(), batch.size(), platforms.size());
+
+                for (GeoMonitorQuestion question : batch) {
+                    for (GeoPlatform platform : platforms) {
+                        executeItemSafely(run, task, question, platform);
+                        if (properties.getBatchItemIntervalMs() > 0) {
+                            sleep(properties.getBatchItemIntervalMs());
+                        }
+                    }
+                }
+
+                long cost = System.currentTimeMillis() - batchStart;
+                markBatchDone(run.getId(), batchNo);
+                boolean slow = cost > properties.getBatchMaxDurationMs();
+                if (slow) {
+                    log.warn("自动监测批次耗时超阈值 runId={} batch={} cost={}ms threshold={}ms，追加冷却",
+                            run.getId(), batchNo, cost, properties.getBatchMaxDurationMs());
+                }
+                Integer doneNow = runMapper.selectById(run.getId()).getDoneCount();
+                log.info("自动监测批次完成 runId={} batch={}/{} cost={}ms done={}/{}",
+                        run.getId(), batchNo, batches.size(), cost, doneNow, run.getTotalCount());
+
+                if (b < batches.size() - 1) {
+                    long cooldown = Math.max(0, properties.getBatchIntervalMs()) * (slow ? 2 : 1);
+                    if (cooldown > 0) {
+                        sleep(cooldown);
+                    }
+                }
             }
             finalizeRun(run.getId(), task.getId());
         } catch (Exception e) {
             log.error("自动监测批次执行异常 runId={}", run.getId(), e);
             markRunFailed(run.getId(), truncate(e.getMessage(), 900));
         } finally {
-            pool.shutdownNow();
             runningTaskIds.remove(task.getId());
         }
+    }
+
+    /** 批次开始：更新当前批次号（前端运行记录可看到实时进度） */
+    private void markBatchStart(Long runId, int batchNo) {
+        runMapper.update(null, new LambdaUpdateWrapper<GeoMonitorRun>()
+                .eq(GeoMonitorRun::getId, runId)
+                .set(GeoMonitorRun::getCurrentBatchNo, batchNo));
+    }
+
+    /** 批次结束：原子累加已完成批次数 */
+    private void markBatchDone(Long runId, int batchNo) {
+        runMapper.update(null, new LambdaUpdateWrapper<GeoMonitorRun>()
+                .eq(GeoMonitorRun::getId, runId)
+                .setSql("batch_done = batch_done + 1")
+                .set(GeoMonitorRun::getCurrentBatchNo, batchNo));
     }
 
     private void executeItemSafely(GeoMonitorRun run, GeoMonitorTask task,
@@ -251,40 +276,66 @@ public class GeoAutoMonitorExecutor {
         result.setQuestionText(question.getQuestionText());
         result.setTopicId(question.getTopicId());
         result.setPlatform(platform.getPlatformName());
-        result.setChannel("API");
+        result.setChannel("BROWSER");
 
-        String provider = resolveProvider(platform);
-        String answer = askWithRetry(question, platform, provider);
-        if (answer == null) {
+        String shotMode = StringUtils.hasText(task.getScreenshotMode())
+                ? task.getScreenshotMode() : GeoMonitorTask.SHOT_MENTION;
+        boolean deepThink = task.getDeepThink() != null && task.getDeepThink() == 1;
+        boolean wantScreenshot = !GeoMonitorTask.SHOT_DISABLED.equals(shotMode);
+
+        GeoBrowserProbeService.ProbeOutcome outcome =
+                probeWithRetry(question, platform, deepThink, wantScreenshot, task.getProbeRegion());
+
+        // 取证信息即使采集失败也尽量留档，便于排查选择器/登录态
+        result.setDeepThink(outcome.deepThinkApplied() ? 1 : 0);
+        result.setReasoningText(truncate(outcome.reasoningText(), 60_000));
+        result.setProbeUrl(truncate(outcome.probeUrl(), 1000));
+        result.setProbeRequest(truncate(outcome.diagnostic(), 60_000));
+        result.setAnswerModel(outcome.modelLabel());
+        result.setAnswerText(outcome.answerText());
+        if (StringUtils.hasText(outcome.screenshotUrl())) {
+            result.setScreenshotUrl(outcome.screenshotUrl());
+            result.setScreenshotType(outcome.screenshotType());
+        }
+
+        if (!outcome.success()) {
             result.setStatus(GeoMonitorResult.STATUS_CALL_FAILED);
-            result.setErrorMsg("平台调用失败（已重试），详见服务日志");
+            result.setErrorMsg(truncate(outcome.error(), 450));
             result.setLatencyMs((int) (System.currentTimeMillis() - start));
             resultMapper.insert(result);
             bumpCount(run.getId(), false);
             return;
         }
-        result.setAnswerText(answer);
-        result.setAnswerModel(provider == null ? "" : provider);
 
         try {
-            GeoMonitorJudgeService.JudgeOutcome outcome = judgeService.judge(
+            GeoMonitorJudgeService.JudgeOutcome judgeOutcome = judgeService.judge(
                     question.getQuestionText(),
-                    answer,
+                    outcome.answerText(),
                     resolveWords(question.getBrandWords(), properties.getBrandWords()),
                     resolveWords(question.getCompetitorWords(), properties.getCompetitorWords()));
-            result.setMentioned(outcome.mentioned());
-            result.setRankNo(outcome.rankNo());
-            result.setRecommendStatus(outcome.recommendStatus());
-            result.setSentiment(outcome.sentiment());
-            result.setMentionPosition(outcome.mentionPosition());
-            result.setNegativeContent(outcome.negativeContent());
-            result.setCompetitors(outcome.competitors());
-            result.setCitations(objectMapper.writeValueAsString(outcome.citations()));
-            result.setJudgeRaw(outcome.judgeRaw());
+            result.setMentioned(judgeOutcome.mentioned());
+            result.setRankNo(judgeOutcome.rankNo());
+            result.setRecommendStatus(judgeOutcome.recommendStatus());
+            result.setSentiment(judgeOutcome.sentiment());
+            result.setMentionPosition(judgeOutcome.mentionPosition());
+            result.setNegativeContent(judgeOutcome.negativeContent());
+            result.setCompetitors(judgeOutcome.competitors());
+            // 页面 DOM 抓到的信源带真实链接，LLM 裁判的输出作补充
+            result.setCitations(objectMapper.writeValueAsString(
+                    mergeCitations(outcome.citations(), judgeOutcome.citations())));
+            result.setJudgeRaw(judgeOutcome.judgeRaw());
             result.setLatencyMs((int) (System.currentTimeMillis() - start));
-
             result.setStatus(GeoMonitorResult.STATUS_SUCCESS);
             resultMapper.insert(result);
+
+            // 「提及截图」模式：品牌未出现则不留证，删除已生成的整页截图
+            if (GeoMonitorTask.SHOT_MENTION.equals(shotMode)
+                    && (judgeOutcome.mentioned() == null || judgeOutcome.mentioned() == 0)
+                    && StringUtils.hasText(result.getScreenshotUrl())) {
+                probeService.discardScreenshot(result.getScreenshotUrl());
+                result.setScreenshotUrl("");
+                result.setScreenshotType("");
+            }
 
             GeoMonitorDailySyncService.SyncOutcome syncOutcome = dailySyncService.sync(run, task, question, result);
             result.setDailyId(syncOutcome.dailyId());
@@ -304,35 +355,63 @@ public class GeoAutoMonitorExecutor {
         }
     }
 
-    /** 平台调用（含重试与平台级限流）；成功返回回答原文，失败返回 null */
-    private String askWithRetry(GeoMonitorQuestion question, GeoPlatform platform, String provider) {
-        if (!StringUtils.hasText(provider) || !aiChatService.isProviderConfigured(provider)) {
-            log.warn("平台 [{}] 未配置可用AI厂商（provider_code={}），跳过调用", platform.getPlatformName(), provider);
-            return null;
-        }
+    /** 浏览器采集（含重试）；失败也返回带诊断的 outcome，由引擎记录 CALL_FAILED */
+    private GeoBrowserProbeService.ProbeOutcome probeWithRetry(GeoMonitorQuestion question,
+                                                               GeoPlatform platform,
+                                                               boolean deepThink,
+                                                               boolean screenshot,
+                                                               String region) {
         int attempts = Math.max(1, properties.getMaxRetries() + 1);
+        GeoBrowserProbeService.ProbeOutcome last = null;
         for (int i = 0; i < attempts; i++) {
             try {
-                Semaphore semaphore = platformSemaphores.computeIfAbsent(
-                        platform.getPlatformName(), k -> new Semaphore(properties.getPerPlatformConcurrency()));
-                semaphore.acquire();
-                try {
-                    return aiChatService.chat(QUESTION_SYSTEM_PROMPT, question.getQuestionText(), provider, 0.7);
-                } finally {
-                    semaphore.release();
+                GeoBrowserProbeService.ProbeOutcome outcome = probeService.probe(
+                        platform.getPlatformName(), question.getQuestionText(),
+                        deepThink, screenshot, region, null);
+                if (outcome.success()) {
+                    return outcome;
                 }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return null;
+                last = outcome;
+                log.warn("浏览器采集失败（第{}次）p={} q={}: {}",
+                        i + 1, platform.getPlatformName(), question.getId(), outcome.error());
             } catch (Exception e) {
-                log.warn("平台调用失败（第{}次）p={} q={} provider={}: {}",
-                        i + 1, platform.getPlatformName(), question.getId(), provider, e.getMessage());
-                if (i < attempts - 1) {
-                    sleep(backoffMs(i));
-                }
+                log.warn("浏览器采集异常（第{}次）p={} q={}: {}",
+                        i + 1, platform.getPlatformName(), question.getId(), e.getMessage());
+            }
+            if (i < attempts - 1) {
+                sleep(backoffMs(i));
             }
         }
-        return null;
+        return last != null ? last : probeService.failed(platform.getPlatformName(),
+                question.getQuestionText(), "浏览器采集异常（已重试），详见服务日志与后台诊断");
+    }
+
+    /** 页面信源（带链接）优先，裁判补充的信源去重后追加 */
+    private List<GeoAutoResultDetailVO.Citation> mergeCitations(
+            List<GeoBrowserProbeService.Citation> pageCitations,
+            List<GeoAutoResultDetailVO.Citation> judgeCitations) {
+        List<GeoAutoResultDetailVO.Citation> merged = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        for (GeoBrowserProbeService.Citation c : pageCitations) {
+            String key = StringUtils.hasText(c.url()) ? c.url() : c.title();
+            if (!StringUtils.hasText(key) || !seen.add(key)) {
+                continue;
+            }
+            GeoAutoResultDetailVO.Citation item = new GeoAutoResultDetailVO.Citation();
+            item.setTitle(c.title());
+            item.setSite(c.site());
+            item.setUrl(c.url());
+            item.setContext(c.context());
+            merged.add(item);
+        }
+        for (GeoAutoResultDetailVO.Citation c : judgeCitations) {
+            String key = StringUtils.hasText(c.getUrl()) ? c.getUrl() : c.getTitle();
+            if (!StringUtils.hasText(key) || !seen.add(key)) {
+                continue;
+            }
+            merged.add(c);
+        }
+        return merged.size() > 30 ? merged.subList(0, 30) : merged;
     }
 
     /** 重试退避：2s、8s（指数） */
@@ -412,13 +491,6 @@ public class GeoAutoMonitorExecutor {
         }
         LocalDateTime candidate = now.toLocalDate().atTime(runTime);
         return candidate.isAfter(now) ? candidate : candidate.plusDays(1);
-    }
-
-    private String resolveProvider(GeoPlatform platform) {
-        if (StringUtils.hasText(platform.getProviderCode())) {
-            return platform.getProviderCode().trim();
-        }
-        return inferProvider(platform.getPlatformName());
     }
 
     private String resolveWords(String questionLevel, String globalDefault) {

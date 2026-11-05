@@ -17,11 +17,26 @@ import {
 import type { GeoOwnerOption, GeoPlatform, GeoPlatformAccount } from '@/types/geo';
 import { GEO_PLATFORM_ACCOUNT_STATUS, GEO_PLATFORM_LOGIN_METHODS, GEO_PLATFORM_VERIFY_METHODS } from '@/constants/geo';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
+import { browserLoginGeoAutoApi } from '@/api/geoAuto';
+import { formatDateTime } from '@/utils/datetime';
 
 const YES_NO = [
   { label: '是', value: 1 },
   { label: '否', value: 0 },
 ];
+
+/** v28 浏览器自动监测登录方式 */
+const BROWSER_LOGIN_TYPES = [
+  { label: '账号密码模拟登录', value: 'PASSWORD' },
+  { label: '人工导出登录态（STORAGE_STATE）', value: 'STORAGE_STATE' },
+];
+
+const BROWSER_LOGIN_STATUS: Record<string, { label: string; color: string }> = {
+  READY: { label: '就绪', color: 'success' },
+  FAILED: { label: '登录失败', color: 'error' },
+  EXPIRED: { label: '已过期', color: 'warning' },
+  NONE: { label: '未登录', color: 'default' },
+};
 
 type Props = {
   /** 固定平台时隐藏平台筛选，新增默认挂到该平台 */
@@ -69,7 +84,7 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
       width: 160,
       valueType: 'select',
       hideInTable: !!fixedPlatformId,
-      hideInSearch: !!fixedPlatformId,
+      search: !fixedPlatformId,
       hideInForm: !!fixedPlatformId,
       fieldProps: {
         options: platformOptions,
@@ -220,6 +235,49 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
       },
     },
     {
+      title: '浏览器监测',
+      dataIndex: 'browserEnabled',
+      width: 110,
+      valueType: 'select',
+      fieldProps: { options: YES_NO, allowClear: false },
+      render: (_, r) =>
+        r.browserEnabled === 1 ? <Tag color='processing'>已启用</Tag> : <Tag>未启用</Tag>,
+    },
+    {
+      title: '浏览器登录方式',
+      dataIndex: 'browserLoginType',
+      width: 180,
+      valueType: 'select',
+      fieldProps: { options: BROWSER_LOGIN_TYPES, allowClear: false },
+      search: false,
+      render: (_, r) =>
+        r.browserLoginType === 'STORAGE_STATE' ? '人工登录态' : '账号密码登录',
+    },
+    {
+      title: '登录态',
+      dataIndex: 'browserLoginStatus',
+      width: 110,
+      search: false,
+      hideInForm: true,
+      render: (_, r) => {
+        const meta = BROWSER_LOGIN_STATUS[r.browserLoginStatus || 'NONE'] || BROWSER_LOGIN_STATUS.NONE;
+        return (
+          <Tag color={meta.color} title={r.browserLoginError || undefined}>
+            {meta.label}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: '浏览器登录时间',
+      dataIndex: 'browserLoginAt',
+      width: 170,
+      search: false,
+      hideInForm: true,
+      hideInTable: true,
+      render: (_, r) => (r.browserLoginAt ? formatDateTime(r.browserLoginAt) : '-'),
+    },
+    {
       title: '最近登录',
       dataIndex: 'lastLoginTime',
       width: 170,
@@ -247,7 +305,7 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
     {
       title: '操作',
       valueType: 'option',
-      width: 140,
+      width: 220,
       render: (_, record) => (
         <ActionButtons
           items={[
@@ -258,6 +316,32 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
               onClick: () => {
                 setEditing(record);
                 setOpen(true);
+              },
+            },
+            {
+              key: 'browserLogin',
+              label: '模拟登录',
+              perm: 'geo:platformAccount:edit',
+              disabled: record.browserEnabled !== 1,
+              onClick: async () => {
+                const hide = message.loading('正在用平台账号在服务器模拟登录…', 0);
+                try {
+                  const res = await browserLoginGeoAutoApi({
+                    platform: record.platformName || record.account,
+                    accountId: record.id,
+                    forceRefresh: true,
+                  });
+                  if (res.success) {
+                    message.success(`登录态已刷新（${res.source || 'READY'}）`);
+                  } else {
+                    message.warning(res.error || '模拟登录未完成，请查看诊断信息');
+                  }
+                  actionRef.current?.reload();
+                } catch {
+                  message.error('模拟登录请求失败');
+                } finally {
+                  hide();
+                }
               },
             },
             {
@@ -366,7 +450,7 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
         title={editing ? '编辑平台账号' : '新增平台账号'}
         columns={columns as any}
         open={open}
-        onOpenChange={(v) => {
+        onOpenChange={(v: boolean) => {
           setOpen(v);
           if (!v) setEditing(null);
         }}
@@ -379,6 +463,8 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
                 recharged: editing.recharged ?? 0,
                 verified: editing.verified ?? 0,
                 accountStatus: editing.accountStatus || '正常',
+                browserEnabled: editing.browserEnabled ?? 0,
+                browserLoginType: editing.browserLoginType || 'PASSWORD',
               }
             : {
                 platformId: fixedPlatformId,
@@ -387,6 +473,8 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
                 verified: 0,
                 accountStatus: '正常',
                 loginMethod: '账号密码',
+                browserEnabled: 0,
+                browserLoginType: 'PASSWORD',
               }
         }
         onFinish={async (values) => {
@@ -398,6 +486,8 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
             recharged: values.recharged === 1 || values.recharged === true ? 1 : 0,
             verified: values.verified === 1 || values.verified === true ? 1 : 0,
             accountStatus: values.accountStatus || '正常',
+            browserEnabled: values.browserEnabled === 1 || values.browserEnabled === true ? 1 : 0,
+            browserLoginType: values.browserLoginType || 'PASSWORD',
           };
           if (editing) {
             await updateGeoPlatformAccountApi({ ...payload, id: editing.id });

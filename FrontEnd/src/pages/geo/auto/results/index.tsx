@@ -242,6 +242,17 @@ const AutoResultPage = memo(function AutoResultPage() {
       render: (_, r) => r.competitors || '-',
     },
     {
+      title: '取证',
+      width: 110,
+      search: false,
+      render: (_, r) => (
+        <div className='flex gap-1'>
+          <Tag color={r.deepThink === 1 ? 'cyan' : 'default'}>{r.deepThink === 1 ? '思考' : '常规'}</Tag>
+          {r.hasScreenshot && <Tag color='blue'>截图</Tag>}
+        </div>
+      ),
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       width: 100,

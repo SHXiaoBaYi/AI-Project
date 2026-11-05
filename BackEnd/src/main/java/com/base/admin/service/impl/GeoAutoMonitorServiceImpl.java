@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.PageResult;
 import com.base.admin.config.GeoAutoMonitorProperties;
+import com.base.admin.domain.dto.GeoAutoBrowserLoginDTO;
+import com.base.admin.domain.dto.GeoAutoProbeDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionQueryDTO;
 import com.base.admin.domain.dto.GeoAutoResultQueryDTO;
@@ -26,6 +28,9 @@ import com.base.admin.domain.vo.GeoAutoResultMatrixVO;
 import com.base.admin.domain.vo.GeoAutoResultVO;
 import com.base.admin.domain.vo.GeoAutoSeedResultVO;
 import com.base.admin.domain.vo.GeoAutoTaskVO;
+import com.base.admin.domain.vo.GeoBrowserAccountVO;
+import com.base.admin.domain.vo.GeoBrowserLoginVO;
+import com.base.admin.domain.vo.GeoBrowserProbeVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoContentPlacementMapper;
 import com.base.admin.mapper.GeoMonitorDailyMapper;
@@ -35,9 +40,12 @@ import com.base.admin.mapper.GeoMonitorRunMapper;
 import com.base.admin.mapper.GeoMonitorTaskMapper;
 import com.base.admin.mapper.GeoPlatformMapper;
 import com.base.admin.mapper.GeoTopicMapper;
-import com.base.admin.service.AiChatService;
 import com.base.admin.service.GeoAutoMonitorExecutor;
 import com.base.admin.service.GeoAutoMonitorService;
+import com.base.admin.service.GeoBrowserAccountService;
+import com.base.admin.service.GeoBrowserProbeService;
+import com.base.admin.service.FileStorageService;
+import org.springframework.web.multipart.MultipartFile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,8 +86,10 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
     private final GeoContentPlacementMapper placementMapper;
     private final GeoPlatformMapper platformMapper;
     private final GeoTopicMapper topicMapper;
-    private final AiChatService aiChatService;
     private final GeoAutoMonitorExecutor executor;
+    private final GeoBrowserProbeService probeService;
+    private final GeoBrowserAccountService accountService;
+    private final FileStorageService fileStorageService;
     private final GeoAutoMonitorProperties properties;
     private final ObjectMapper objectMapper;
 
@@ -264,18 +274,20 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
         List<GeoPlatform> platforms = platformMapper.selectList(new LambdaQueryWrapper<GeoPlatform>()
                 .eq(GeoPlatform::getPlatformType, "AI平台")
                 .orderByAsc(GeoPlatform::getSortOrder));
+        Map<String, com.base.admin.config.GeoBrowserProbeProperties.PlatformProfile> profiles = probeService.profiles();
         return platforms.stream().map(p -> {
             GeoAutoPlatformOptionVO vo = new GeoAutoPlatformOptionVO();
             vo.setId(p.getId());
             vo.setPlatformName(p.getPlatformName());
-            String provider = StringUtils.hasText(p.getProviderCode())
-                    ? p.getProviderCode().trim() : GeoAutoMonitorExecutor.inferProvider(p.getPlatformName());
-            vo.setProviderCode(provider == null ? "" : provider);
-            vo.setProviderReady(provider != null && aiChatService.isProviderConfigured(provider));
-            if (provider == null) {
-                vo.setHint("未配置AI厂商编码，请到平台管理填写 provider_code");
-            } else if (!vo.isProviderReady()) {
-                vo.setHint("厂商 " + provider + " 未配置 API Key，请到系统管理 → AI模型配置");
+            com.base.admin.config.GeoBrowserProbeProperties.PlatformProfile profile = profiles.get(p.getPlatformName());
+            boolean ready = profile != null && profile.isEnabled()
+                    && StringUtils.hasText(profile.getUrl());
+            vo.setProviderCode(ready ? "BROWSER" : "");
+            vo.setProviderReady(ready);
+            if (!ready) {
+                vo.setHint("未配置网页版采集适配器，请在 geo.auto-monitor.browser.profiles 中补充");
+            } else if (!probeService.hasStorageState(p.getPlatformName())) {
+                vo.setHint("未配置登录态（未登录时可能无法提问或生成分享链接）");
             }
             return vo;
         }).toList();
@@ -384,10 +396,110 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
         GeoAutoResultDetailVO vo = new GeoAutoResultDetailVO();
         copyResultVO(vo, result, topicNames.getOrDefault(result.getTopicId(), ""), run);
         vo.setAnswerText(result.getAnswerText());
+        vo.setReasoningText(result.getReasoningText());
+        vo.setProbeUrl(result.getProbeUrl());
+        vo.setProbeUrlSource(parseDiagnosticField(result.getProbeRequest(), "probeUrlSource"));
+        vo.setProbeRequest(result.getProbeRequest());
+        vo.setScreenshotUrl(result.getScreenshotUrl());
+        vo.setScreenshotType(result.getScreenshotType());
         vo.setJudgeRaw(result.getJudgeRaw());
         vo.setCitations(parseCitations(result.getCitations()));
         vo.setDiffs(buildDiffs(result));
         return vo;
+    }
+
+    /**
+     * 单题浏览器采集试跑：不落业务库，返回回答/思考过程/分享链接/截图/诊断，
+     * 用于上线前核对各平台选择器与登录态（对标模力指数问答明细的取证内容）。
+     */
+    @Override
+    public GeoBrowserProbeVO probeOnce(GeoAutoProbeDTO dto) {
+        boolean deepThink = Boolean.TRUE.equals(dto.getDeepThink());
+        boolean screenshot = !Boolean.FALSE.equals(dto.getScreenshot());
+        GeoBrowserProbeService.ProbeOutcome outcome = probeService.probe(
+                dto.getPlatform().trim(), dto.getQuestion().trim(), deepThink, screenshot,
+                dto.getRegion(), null);
+
+        GeoBrowserProbeVO vo = new GeoBrowserProbeVO();
+        vo.setSuccess(outcome.success());
+        vo.setError(outcome.error());
+        vo.setPlatform(outcome.platform());
+        vo.setQuestion(outcome.question());
+        vo.setAnswerText(outcome.answerText());
+        vo.setReasoningText(outcome.reasoningText());
+        vo.setProbeUrl(outcome.probeUrl());
+        vo.setProbeUrlSource(outcome.probeUrlSource());
+        vo.setScreenshotUrl(outcome.screenshotUrl());
+        vo.setScreenshotType(outcome.screenshotType());
+        vo.setPageUrl(outcome.pageUrl());
+        vo.setModelLabel(outcome.modelLabel());
+        vo.setDeepThinkApplied(outcome.deepThinkApplied());
+        vo.setDiagnostic(outcome.diagnostic());
+        vo.setCitations(outcome.citations().stream().map(c -> {
+            GeoAutoResultDetailVO.Citation item = new GeoAutoResultDetailVO.Citation();
+            item.setTitle(c.title());
+            item.setSite(c.site());
+            item.setUrl(c.url());
+            item.setContext(c.context());
+            return item;
+        }).toList());
+        return vo;
+    }
+
+    @Override
+    public GeoBrowserLoginVO browserLogin(GeoAutoBrowserLoginDTO dto) {
+        GeoBrowserProbeService.LoginOutcome outcome = probeService.ensureLogin(
+                dto.getPlatform().trim(), Boolean.TRUE.equals(dto.getForceRefresh()), dto.getAccountId());
+        GeoBrowserLoginVO vo = new GeoBrowserLoginVO();
+        vo.setSuccess(outcome.success());
+        vo.setError(outcome.error());
+        vo.setPlatform(outcome.platform());
+        vo.setAccountLabel(outcome.accountLabel());
+        vo.setSource(outcome.source());
+        vo.setStatePath(outcome.statePath() == null ? "" : outcome.statePath().toString());
+        vo.setScreenshotUrl(outcome.screenshotUrl());
+        vo.setDiagnostic(outcome.diagnostic());
+        return vo;
+    }
+
+    @Override
+    public List<GeoBrowserAccountVO> browserAccountStatus() {
+        return accountService.statusList();
+    }
+
+    /** 人工补录真实 C 端截图（浏览器通道不可用或需要留档客户交付件时） */
+    @Override
+    public String saveResultScreenshot(Long id, MultipartFile file) {
+        GeoMonitorResult result = resultMapper.selectById(id);
+        if (result == null) {
+            throw new BusinessException("监测结果不存在");
+        }
+        String stored = fileStorageService.saveGeoImage(file);
+        result.setScreenshotUrl(stored);
+        result.setScreenshotType("MANUAL");
+        resultMapper.updateById(result);
+        return stored;
+    }
+
+    /** 上传平台登录态 storageState（Playwright 导出的 JSON），供后续采集复用 */
+    @Override
+    public String saveBrowserState(String platform, MultipartFile file) {
+        if (!StringUtils.hasText(platform)) {
+            throw new BusinessException("平台名不能为空");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("请选择 storageState JSON 文件");
+        }
+        try {
+            byte[] bytes = file.getBytes();
+            objectMapper.readTree(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+            probeService.saveStorageState(platform.trim(), bytes);
+            return platform.trim();
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("登录态文件保存失败：" + e.getMessage());
+        }
     }
 
     @Override
@@ -511,6 +623,12 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
             task.setWeekDay(null);
         }
         task.setOverwriteManual(dto.getOverwriteManual() != null && dto.getOverwriteManual() == 1 ? 1 : 0);
+        task.setDeepThink(dto.getDeepThink() != null && dto.getDeepThink() == 1 ? 1 : 0);
+        String shotMode = dto.getScreenshotMode();
+        task.setScreenshotMode(GeoMonitorTask.SHOT_DISABLED.equals(shotMode)
+                || GeoMonitorTask.SHOT_ALL.equals(shotMode) ? shotMode : GeoMonitorTask.SHOT_MENTION);
+        task.setProbeRegion(StringUtils.hasText(dto.getProbeRegion())
+                ? dto.getProbeRegion().trim() : "全国随机");
         task.setNotifyEnabled(dto.getNotifyEnabled() == null || dto.getNotifyEnabled() == 1 ? 1 : 0);
         task.setEnabled(dto.getEnabled() == null || dto.getEnabled() == 1 ? 1 : 0);
         task.setSortOrder(0);
@@ -574,6 +692,9 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
         vo.setRunTime(task.getRunTime());
         vo.setWeekDay(task.getWeekDay());
         vo.setOverwriteManual(task.getOverwriteManual());
+        vo.setDeepThink(task.getDeepThink());
+        vo.setScreenshotMode(task.getScreenshotMode());
+        vo.setProbeRegion(task.getProbeRegion());
         vo.setNotifyEnabled(task.getNotifyEnabled());
         vo.setEnabled(task.getEnabled());
         vo.setLastRunId(task.getLastRunId());
@@ -633,6 +754,8 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
         vo.setPlatform(result.getPlatform());
         vo.setChannel(result.getChannel());
         vo.setAnswerModel(result.getAnswerModel());
+        vo.setDeepThink(result.getDeepThink());
+        vo.setHasScreenshot(StringUtils.hasText(result.getScreenshotUrl()));
         vo.setRunDate(run != null ? run.getRunDate() : null);
         vo.setMentioned(result.getMentioned());
         vo.setRankNo(result.getRankNo());
@@ -709,6 +832,18 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
 
     private int sentimentScore(String sentiment) {
         return "正面".equals(sentiment) ? 2 : ("中性".equals(sentiment) ? 1 : 0);
+    }
+
+    /** 从采集诊断 JSON 里取单个字段（如 probeUrlSource），诊断缺失时返回空串 */
+    private String parseDiagnosticField(String diagnosticJson, String field) {
+        if (!StringUtils.hasText(diagnosticJson)) {
+            return "";
+        }
+        try {
+            return objectMapper.readTree(diagnosticJson).path(field).asText("");
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private List<GeoAutoResultDetailVO.Citation> parseCitations(String citationsJson) {

@@ -17,6 +17,8 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -86,6 +88,8 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureGeoKnowledgeMenuTree(connection);
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v26_geo_auto_monitor.sql"));
             ensureAutoMonitorColumns(connection);
+            ensureAutoMonitorEvidenceColumns(connection);
+            ensureBrowserAccountAndBatchColumns(connection);
             ensureAutoMonitorMenus(connection);
             if (cleanupEmptyDaily) {
                 cleanupEmptyUninspectedDailyBeforeToday(connection);
@@ -172,6 +176,105 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                         UPDATE geo_platform SET provider_code = 'deepseek'
                         WHERE platform_type = 'AI平台' AND TRIM(provider_code) = '' AND platform_name IN ('DS', 'DeepSeek')
                         """);
+            }
+        }
+    }
+
+    /**
+     * v27 自动监测取证字段（老库增量，可重复执行）：任务深度思考开关 + 结果的思考过程、
+     * 探测链接、请求快照、探测截图。新库由 v26 建表脚本直接建齐。
+     */
+    private void ensureAutoMonitorEvidenceColumns(Connection connection) throws Exception {
+        if (tableExists(connection, "geo_monitor_task")) {
+            Map<String, String> taskDdl = new LinkedHashMap<>();
+            taskDdl.put("deep_think", "ADD COLUMN deep_think TINYINT NOT NULL DEFAULT 0 "
+                    + "COMMENT '是否开启深度思考 1=是 0=否'");
+            taskDdl.put("screenshot_mode", "ADD COLUMN screenshot_mode VARCHAR(16) NOT NULL DEFAULT 'MENTION' "
+                    + "COMMENT '截图存证：DISABLED/MENTION=仅提及/ALL=全部'");
+            taskDdl.put("probe_region", "ADD COLUMN probe_region VARCHAR(32) NOT NULL DEFAULT '全国随机' "
+                    + "COMMENT '提问位置（浏览器采集地域配置）'");
+            for (Map.Entry<String, String> entry : taskDdl.entrySet()) {
+                if (columnExists(connection, "geo_monitor_task", entry.getKey())) {
+                    continue;
+                }
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute("ALTER TABLE geo_monitor_task " + entry.getValue());
+                }
+                log.info("已为 geo_monitor_task 增加 {} 列", entry.getKey());
+            }
+        }
+        if (!tableExists(connection, "geo_monitor_result")) {
+            return;
+        }
+        Map<String, String> ddlByColumn = new LinkedHashMap<>();
+        ddlByColumn.put("deep_think", "ADD COLUMN deep_think TINYINT NOT NULL DEFAULT 0 "
+                + "COMMENT '本次是否开启深度思考 1=是 0=否'");
+        ddlByColumn.put("reasoning_text", "ADD COLUMN reasoning_text MEDIUMTEXT NULL "
+                + "COMMENT '模型思考过程（reasoning_content，未返回则为空）'");
+        ddlByColumn.put("probe_url", "ADD COLUMN probe_url VARCHAR(1024) NOT NULL DEFAULT '' "
+                + "COMMENT '探测链接：API通道=平台复现入口 / BROWSER通道=C端真实会话页'");
+        ddlByColumn.put("probe_request", "ADD COLUMN probe_request TEXT NULL "
+                + "COMMENT '本次API请求快照JSON（endpoint/model/参数，不含密钥）'");
+        ddlByColumn.put("screenshot_url", "ADD COLUMN screenshot_url VARCHAR(512) NOT NULL DEFAULT '' "
+                + "COMMENT '探测截图地址（人工上传真实截图或回答快照）'");
+        ddlByColumn.put("screenshot_type", "ADD COLUMN screenshot_type VARCHAR(16) NOT NULL DEFAULT '' "
+                + "COMMENT 'MANUAL/API_SNAPSHOT/BROWSER_SHOT'");
+        for (Map.Entry<String, String> entry : ddlByColumn.entrySet()) {
+            if (columnExists(connection, "geo_monitor_result", entry.getKey())) {
+                continue;
+            }
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("ALTER TABLE geo_monitor_result " + entry.getValue());
+            }
+            log.info("已为 geo_monitor_result 增加 {} 列", entry.getKey());
+        }
+    }
+
+    /**
+     * v28 浏览器账号登录 + 分批串行调度（老库增量，可重复执行）。
+     * 新库由 v11 / v26 脚本直接建齐；这里只补历史库缺列。
+     */
+    private void ensureBrowserAccountAndBatchColumns(Connection connection) throws Exception {
+        if (tableExists(connection, "geo_platform_account")) {
+            Map<String, String> accountDdl = new LinkedHashMap<>();
+            accountDdl.put("browser_enabled", "ADD COLUMN browser_enabled TINYINT NOT NULL DEFAULT 0 "
+                    + "COMMENT '是否用于浏览器自动监测 1=是 0=否'");
+            accountDdl.put("browser_login_type", "ADD COLUMN browser_login_type VARCHAR(16) NOT NULL DEFAULT 'PASSWORD' "
+                    + "COMMENT 'PASSWORD=账号密码模拟登录 / STORAGE_STATE=人工导出登录态'");
+            accountDdl.put("browser_state_path", "ADD COLUMN browser_state_path VARCHAR(512) NOT NULL DEFAULT '' "
+                    + "COMMENT '自动登录导出的 storageState 文件'");
+            accountDdl.put("browser_login_status", "ADD COLUMN browser_login_status VARCHAR(16) NOT NULL DEFAULT 'NONE' "
+                    + "COMMENT 'NONE/READY/FAILED/EXPIRED'");
+            accountDdl.put("browser_login_at", "ADD COLUMN browser_login_at DATETIME NULL "
+                    + "COMMENT '浏览器最近一次登录成功时间'");
+            accountDdl.put("browser_login_error", "ADD COLUMN browser_login_error VARCHAR(1000) NOT NULL DEFAULT '' "
+                    + "COMMENT '浏览器最近一次登录失败原因（不含密码）'");
+            accountDdl.put("browser_login_fail_count", "ADD COLUMN browser_login_fail_count INT NOT NULL DEFAULT 0 "
+                    + "COMMENT '浏览器登录连续失败次数'");
+            for (Map.Entry<String, String> entry : accountDdl.entrySet()) {
+                if (columnExists(connection, "geo_platform_account", entry.getKey())) {
+                    continue;
+                }
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute("ALTER TABLE geo_platform_account " + entry.getValue());
+                }
+                log.info("已为 geo_platform_account 增加 {} 列", entry.getKey());
+            }
+        }
+        if (tableExists(connection, "geo_monitor_run")) {
+            Map<String, String> runDdl = new LinkedHashMap<>();
+            runDdl.put("batch_size", "ADD COLUMN batch_size INT NOT NULL DEFAULT 3 COMMENT '每批监测问题数'");
+            runDdl.put("batch_total", "ADD COLUMN batch_total INT NOT NULL DEFAULT 0 COMMENT '总批次数'");
+            runDdl.put("batch_done", "ADD COLUMN batch_done INT NOT NULL DEFAULT 0 COMMENT '已完成批次数'");
+            runDdl.put("current_batch_no", "ADD COLUMN current_batch_no INT NOT NULL DEFAULT 0 COMMENT '当前执行批次号'");
+            for (Map.Entry<String, String> entry : runDdl.entrySet()) {
+                if (columnExists(connection, "geo_monitor_run", entry.getKey())) {
+                    continue;
+                }
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute("ALTER TABLE geo_monitor_run " + entry.getValue());
+                }
+                log.info("已为 geo_monitor_run 增加 {} 列", entry.getKey());
             }
         }
     }

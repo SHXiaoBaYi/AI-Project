@@ -82,6 +82,28 @@ public class GeoPlatformAccountListVO {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lastLoginTime;
 
+    @Schema(description = "是否用于浏览器自动监测 1=是 0=否")
+    private Integer browserEnabled;
+
+    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE")
+    private String browserLoginType;
+
+    @Schema(description = "浏览器登录态：NONE/READY/FAILED/EXPIRED")
+    private String browserLoginStatus;
+
+    @Schema(description = "浏览器登录态文件")
+    private String browserStatePath;
+
+    @Schema(description = "浏览器最近一次登录成功时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime browserLoginAt;
+
+    @Schema(description = "浏览器最近一次登录失败原因")
+    private String browserLoginError;
+
+    @Schema(description = "浏览器登录连续失败次数")
+    private Integer browserLoginFailCount;
+
     @Schema(description = "排序")
     private Integer sortOrder;
 

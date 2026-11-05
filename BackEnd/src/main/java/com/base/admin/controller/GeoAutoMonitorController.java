@@ -4,6 +4,8 @@ import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.GeoAutoBrowserLoginDTO;
+import com.base.admin.domain.dto.GeoAutoProbeDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionEnabledDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionQueryDTO;
@@ -19,6 +21,9 @@ import com.base.admin.domain.vo.GeoAutoResultMatrixVO;
 import com.base.admin.domain.vo.GeoAutoResultVO;
 import com.base.admin.domain.vo.GeoAutoSeedResultVO;
 import com.base.admin.domain.vo.GeoAutoTaskVO;
+import com.base.admin.domain.vo.GeoBrowserAccountVO;
+import com.base.admin.domain.vo.GeoBrowserLoginVO;
+import com.base.admin.domain.vo.GeoBrowserProbeVO;
 import com.base.admin.service.GeoAutoMonitorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,8 +38,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 @Tag(name = "GEO自动监测", description = "监控问题库、监测任务与问题监控分析（结果自动回写日监测）")
 @RestController
@@ -210,5 +217,47 @@ public class GeoAutoMonitorController {
     @RequiresPermission("geo:auto:result:list")
     public Result<GeoAutoResultMatrixVO> resultMatrix(@RequestBody(required = false) GeoAutoResultQueryDTO query) {
         return Result.ok(autoMonitorService.resultMatrix(query == null ? new GeoAutoResultQueryDTO() : query));
+    }
+
+    @Operation(summary = "单题浏览器采集试跑：回答/思考过程/官方分享链接/整页截图/诊断（不落库）")
+    @PostMapping("/browser/probe")
+    @RequiresPermission("geo:auto:task:run")
+    public Result<GeoBrowserProbeVO> probeOnce(@Valid @RequestBody GeoAutoProbeDTO dto) {
+        return Result.ok(autoMonitorService.probeOnce(dto));
+    }
+
+    @Operation(summary = "用系统维护的平台账号在服务器无头浏览器模拟登录，导出并缓存登录态")
+    @PostMapping("/browser/login")
+    @RequiresPermission({"geo:auto:task:run", "geo:platformAccount:edit"})
+    @Log(title = "GEO自动监测-平台账号模拟登录", businessType = 2)
+    public Result<GeoBrowserLoginVO> browserLogin(@Valid @RequestBody GeoAutoBrowserLoginDTO dto) {
+        return Result.ok(autoMonitorService.browserLogin(dto));
+    }
+
+    @Operation(summary = "各平台浏览器自动监测账号与登录态就绪状态")
+    @GetMapping("/browser/accounts")
+    @RequiresPermission({"geo:auto:task:list", "geo:platformAccount:list"})
+    public Result<List<GeoBrowserAccountVO>> browserAccounts() {
+        return Result.ok(autoMonitorService.browserAccountStatus());
+    }
+
+    @Operation(summary = "人工补录监测结果的真实 C 端截图")
+    @PostMapping("/results/{id:\\d+}/screenshot")
+    @RequiresPermission({"geo:auto:result:list", "geo:auto:task:edit"})
+    @Log(title = "GEO自动监测-补录截图", businessType = 2)
+    public Result<Map<String, String>> uploadResultScreenshot(@PathVariable Long id,
+                                                              @RequestParam("file") MultipartFile file) {
+        String stored = autoMonitorService.saveResultScreenshot(id, file);
+        return Result.ok(Map.of("screenshotUrl", stored));
+    }
+
+    @Operation(summary = "上传平台网页版登录态（Playwright storageState JSON）")
+    @PostMapping("/browser/state")
+    @RequiresPermission("geo:auto:task:edit")
+    @Log(title = "GEO自动监测-更新平台登录态", businessType = 2)
+    public Result<Map<String, String>> uploadBrowserState(@RequestParam("platform") String platform,
+                                                          @RequestParam("file") MultipartFile file) {
+        String name = autoMonitorService.saveBrowserState(platform, file);
+        return Result.ok(Map.of("platform", name));
     }
 }

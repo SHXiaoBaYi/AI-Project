@@ -34,3 +34,10 @@ dingtalk:
   local-h5-base-url: ${DINGTALK_LOCAL_H5_BASE_URL:http://127.0.0.1:3000}
   robot:
     stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:false}
+
+# 本机浏览器采集直接用系统 Chrome，省去下载 Playwright 内置 Chromium。
+# 若本机没有 Chrome，可设 GEO_BROWSER_PATH 指向 Edge 的 msedge.exe，或留空后执行 playwright install chromium。
+geo:
+  auto-monitor:
+    browser:
+      executable-path: "${GEO_BROWSER_PATH:C:/Program Files/Google/Chrome/Application/chrome.exe}"

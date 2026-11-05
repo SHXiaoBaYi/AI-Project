@@ -18,7 +18,8 @@ import org.springframework.util.StringUtils;
  * - 回写键 = (inspect_date, platform, keyword, term_type)，term_type 由问题频率映射（每日→日巡查 / 每周→周巡查）；
  * - 同键已有人工记录且任务未开覆盖 → 跳过（人工优先），result 标记 SKIPPED_MANUAL；
  * - 已被周/月/年统计锁定（board_locked=1）→ 跳过，保护历史固化数据；
- * - data_source 标记来源（人工/API），便于看板与列表区分。
+ * - data_source 标记来源（人工/浏览器），自动结果可覆盖自动结果，人工记录默认优先；
+ * - 浏览器通道的整页截图与官方分享链接一并回写（screenshot_url / third_party_url），日监测页可直接取证。
  */
 @Slf4j
 @Service
@@ -26,7 +27,9 @@ import org.springframework.util.StringUtils;
 public class GeoMonitorDailySyncService {
 
     private static final String SOURCE_MANUAL = "人工";
-    private static final String SOURCE_API = "API";
+    private static final String SOURCE_BROWSER = "浏览器";
+    /** 自动来源（含历史 API 通道数据），同来源可覆盖，人工记录默认优先 */
+    private static final java.util.Set<String> AUTO_SOURCES = java.util.Set.of(SOURCE_BROWSER, "API");
     private static final String TERM_DAILY = "日巡查";
     private static final String TERM_WEEKLY = "周巡查";
 
@@ -52,12 +55,12 @@ public class GeoMonitorDailySyncService {
             daily.setOwnerUserId(question.getOwnerUserId() != null ? question.getOwnerUserId() : 0L);
             daily.setOwnerName(question.getOwnerName() == null ? "" : question.getOwnerName());
             applyJudgeFields(daily, result);
-            daily.setDataSource(SOURCE_API);
+            daily.setDataSource(SOURCE_BROWSER);
             dailyMapper.insert(daily);
             return new SyncOutcome(daily.getId(), false);
         }
 
-        boolean manualRecord = !SOURCE_API.equals(StringUtils.hasText(existing.getDataSource())
+        boolean manualRecord = !AUTO_SOURCES.contains(StringUtils.hasText(existing.getDataSource())
                 ? existing.getDataSource() : SOURCE_MANUAL);
         if (existing.getBoardLocked() != null && existing.getBoardLocked() == 1) {
             log.info("日监测已锁定，跳过回写：dailyId={} {} {} {}", existing.getId(),
@@ -71,7 +74,7 @@ public class GeoMonitorDailySyncService {
         GeoMonitorDaily patch = new GeoMonitorDaily();
         patch.setId(existing.getId());
         applyJudgeFields(patch, result);
-        patch.setDataSource(SOURCE_API);
+        patch.setDataSource(SOURCE_BROWSER);
         dailyMapper.updateById(patch);
         return new SyncOutcome(existing.getId(), false);
     }
@@ -82,6 +85,13 @@ public class GeoMonitorDailySyncService {
         daily.setRecommendStatus(result.getRecommendStatus());
         daily.setNegativeContent(result.getNegativeContent());
         daily.setCompetitors(result.getCompetitors());
+        // 有取证才回写，避免用空串覆盖人工已录的截图/链接
+        if (StringUtils.hasText(result.getScreenshotUrl())) {
+            daily.setScreenshotUrl(result.getScreenshotUrl());
+        }
+        if (StringUtils.hasText(result.getProbeUrl())) {
+            daily.setThirdPartyUrl(result.getProbeUrl());
+        }
     }
 
     /** 回写结果：dailyId + 是否跳过（人工优先或已锁定） */

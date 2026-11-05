@@ -127,6 +127,8 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
         row.setBindEmail(nz(dto.getBindEmail()).trim());
         row.setAccountStatus(normalizeStatus(dto.getAccountStatus()));
         row.setLastLoginTime(dto.getLastLoginTime());
+        row.setBrowserEnabled(dto.getBrowserEnabled() != null && dto.getBrowserEnabled() == 1 ? 1 : 0);
+        row.setBrowserLoginType(normalizeLoginType(dto.getBrowserLoginType()));
         row.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : 0);
         row.setRemark(dto.getRemark());
     }
@@ -192,6 +194,13 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
         vo.setBindEmail(row.getBindEmail());
         vo.setAccountStatus(row.getAccountStatus());
         vo.setLastLoginTime(row.getLastLoginTime());
+        vo.setBrowserEnabled(row.getBrowserEnabled());
+        vo.setBrowserLoginType(row.getBrowserLoginType());
+        vo.setBrowserLoginStatus(row.getBrowserLoginStatus());
+        vo.setBrowserStatePath(row.getBrowserStatePath());
+        vo.setBrowserLoginAt(row.getBrowserLoginAt());
+        vo.setBrowserLoginError(row.getBrowserLoginError());
+        vo.setBrowserLoginFailCount(row.getBrowserLoginFailCount());
         vo.setSortOrder(row.getSortOrder());
         vo.setRemark(row.getRemark());
         return vo;
@@ -202,6 +211,11 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
             return raw;
         }
         return STATUS_NORMAL;
+    }
+
+    /** 只接受两种可执行的登录方式，其余按账号密码处理 */
+    private static String normalizeLoginType(String raw) {
+        return "STORAGE_STATE".equalsIgnoreCase(nz(raw).trim()) ? "STORAGE_STATE" : "PASSWORD";
     }
 
     private static String maskPassword(String password) {

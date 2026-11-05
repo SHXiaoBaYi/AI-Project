@@ -1,7 +1,7 @@
 import { memo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Switch, Tag, Tooltip } from 'antd';
-import { HistoryOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { BugOutlined, HistoryOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import BaseProTable from '@/components/BaseProTable';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import ActionButtons from '@/components/Buttons/ActionButtons';
@@ -10,6 +10,7 @@ import type { GeoAutoTask } from '@/types/geoAuto';
 import { GEO_AUTO_RUN_STATUS_MAP, GEO_AUTO_WEEK_DAYS } from '@/constants/geoAuto';
 import TaskEditModal from './components/TaskEditModal';
 import RunsDrawer from './components/RunsDrawer';
+import BrowserProbeDrawer from './components/BrowserProbeDrawer';
 
 /** 监测任务：问题×平台 定时自动监测 */
 const AutoTaskPage = memo(function AutoTaskPage() {
@@ -18,11 +19,12 @@ const AutoTaskPage = memo(function AutoTaskPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<GeoAutoTask | null>(null);
   const [runsTask, setRunsTask] = useState<GeoAutoTask | null>(null);
+  const [probeOpen, setProbeOpen] = useState(false);
 
   const runTask = (record: GeoAutoTask) => {
     modal.confirm({
       title: '立即运行监测任务',
-      content: `将把圈选的问题发送到所选平台并自动判定，完成后自动回写日监测。`,
+      content: `将驱动所选平台的网页版逐题提问，采集回答/思考过程/官方分享链接/整页截图，判定后自动回写日监测。浏览器采集为串行执行，耗时较长。`,
       okText: '开始运行',
       cancelText: '取消',
       onOk: async () => {
@@ -86,6 +88,19 @@ const AutoTaskPage = memo(function AutoTaskPage() {
         }
         return <Tag color='green'>每日 {time}</Tag>;
       },
+    },
+    {
+      title: '取证配置',
+      width: 130,
+      search: false,
+      render: (_, r) => (
+        <div className='flex flex-col gap-1'>
+          <Tag color={r.deepThink === 1 ? 'cyan' : 'default'}>思考 {r.deepThink === 1 ? '开' : '关'}</Tag>
+          <span className='text-xs text-neutral-400'>
+            {r.screenshotMode === 'DISABLED' ? '禁用截图' : r.screenshotMode === 'ALL' ? '全部截图' : '提及截图'}
+          </span>
+        </div>
+      ),
     },
     {
       title: '问题数',
@@ -233,6 +248,14 @@ const AutoTaskPage = memo(function AutoTaskPage() {
           >
             新增任务
           </PermissionButton>,
+          <PermissionButton
+            key='probe'
+            perm='geo:auto:task:run'
+            icon={<BugOutlined />}
+            onClick={() => setProbeOpen(true)}
+          >
+            采集诊断
+          </PermissionButton>,
         ]}
       />
       <TaskEditModal
@@ -244,6 +267,10 @@ const AutoTaskPage = memo(function AutoTaskPage() {
       <RunsDrawer
         task={runsTask}
         onClose={() => setRunsTask(null)}
+      />
+      <BrowserProbeDrawer
+        open={probeOpen}
+        onClose={() => setProbeOpen(false)}
       />
     </>
   );

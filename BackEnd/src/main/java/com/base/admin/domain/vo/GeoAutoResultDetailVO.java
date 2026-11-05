@@ -14,7 +14,25 @@ public class GeoAutoResultDetailVO extends GeoAutoResultVO {
     @Schema(description = "AI回答原文（留档溯源）")
     private String answerText;
 
-    @Schema(description = "引用来源 JSON 数组：[{title,site,context}]")
+    @Schema(description = "模型思考过程（reasoning_content，模型未返回则为空）")
+    private String reasoningText;
+
+    @Schema(description = "探测链接：C端官方分享链接（点击直达原始回答页）")
+    private String probeUrl;
+
+    @Schema(description = "链接来源：OFFICIAL_SHARE=官方分享链接 / PAGE_URL=会话页面地址")
+    private String probeUrlSource;
+
+    @Schema(description = "浏览器采集诊断JSON字符串（目标URL/步骤耗时/选择器命中/UA，不含登录态）")
+    private String probeRequest;
+
+    @Schema(description = "探测截图地址")
+    private String screenshotUrl;
+
+    @Schema(description = "截图类型：MANUAL/API_SNAPSHOT/BROWSER_SHOT")
+    private String screenshotType;
+
+    @Schema(description = "引用来源 JSON 数组：[{title,site,url,context}]")
     private List<Citation> citations;
 
     @Schema(description = "裁判模型原始输出（复核用）")
@@ -32,6 +50,9 @@ public class GeoAutoResultDetailVO extends GeoAutoResultVO {
 
         @Schema(description = "来源站点")
         private String site;
+
+        @Schema(description = "信源链接（http/https）")
+        private String url;
 
         @Schema(description = "引用上下文")
         private String context;

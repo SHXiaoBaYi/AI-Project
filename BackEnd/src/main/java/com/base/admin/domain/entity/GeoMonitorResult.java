@@ -51,6 +51,24 @@ public class GeoMonitorResult extends BaseEntity {
     @Schema(description = "AI回答原文（留档溯源）")
     private String answerText;
 
+    @Schema(description = "本次是否开启深度思考 1=是 0=否", example = "0")
+    private Integer deepThink;
+
+    @Schema(description = "模型思考过程（reasoning_content，模型未返回则为空）")
+    private String reasoningText;
+
+    @Schema(description = "探测链接：C端官方分享链接（点击直达原始回答页；官方链接可能过期）")
+    private String probeUrl;
+
+    @Schema(description = "浏览器采集诊断JSON（目标URL/步骤耗时/选择器命中/UA，不含登录态）")
+    private String probeRequest;
+
+    @Schema(description = "探测截图地址（人工上传真实截图或前端生成的回答快照）")
+    private String screenshotUrl;
+
+    @Schema(description = "截图类型：MANUAL/API_SNAPSHOT/BROWSER_SHOT", example = "API_SNAPSHOT")
+    private String screenshotType;
+
     @Schema(description = "是否提及 1=是 0=否", example = "1")
     private Integer mentioned;
 

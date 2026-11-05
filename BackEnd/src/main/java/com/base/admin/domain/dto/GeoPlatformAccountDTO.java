@@ -74,6 +74,12 @@ public class GeoPlatformAccountDTO {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lastLoginTime;
 
+    @Schema(description = "是否用于浏览器自动监测 1=是 0=否", example = "0")
+    private Integer browserEnabled;
+
+    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE", example = "PASSWORD")
+    private String browserLoginType;
+
     @Schema(description = "排序", example = "0")
     private Integer sortOrder;
 

@@ -87,6 +87,31 @@ public class GeoPlatformAccount extends BaseEntity {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lastLoginTime;
 
+    /** 浏览器自动监测：是否启用该账号（一个平台可有多个，按 sort_order 取第一个可用） */
+    @Schema(description = "是否用于浏览器自动监测 1=是 0=否", example = "0")
+    private Integer browserEnabled;
+
+    /** PASSWORD=用账号密码模拟登录；STORAGE_STATE=直接使用人工导出的登录态文件 */
+    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE", example = "PASSWORD")
+    private String browserLoginType;
+
+    /** 自动登录成功后导出的 Playwright storageState 文件（相对 storage-state-dir） */
+    @Schema(description = "浏览器登录态文件")
+    private String browserStatePath;
+
+    @Schema(description = "浏览器登录态：NONE/READY/FAILED/EXPIRED", example = "NONE")
+    private String browserLoginStatus;
+
+    @Schema(description = "浏览器最近一次登录成功时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime browserLoginAt;
+
+    @Schema(description = "浏览器最近一次登录失败原因")
+    private String browserLoginError;
+
+    @Schema(description = "浏览器登录连续失败次数")
+    private Integer browserLoginFailCount;
+
     @Schema(description = "排序", example = "0")
     private Integer sortOrder;
 

@@ -142,6 +142,16 @@ export interface GeoPlatformAccount {
   bindEmail?: string;
   accountStatus?: string;
   lastLoginTime?: string;
+  /** v28 浏览器自动监测账号 */
+  browserEnabled?: number;
+  /** PASSWORD / STORAGE_STATE */
+  browserLoginType?: string;
+  /** NONE / READY / FAILED / EXPIRED */
+  browserLoginStatus?: string;
+  browserStatePath?: string;
+  browserLoginAt?: string;
+  browserLoginError?: string;
+  browserLoginFailCount?: number;
   sortOrder?: number;
   remark?: string;
 }
@@ -166,6 +176,9 @@ export interface GeoPlatformAccountDTO {
   bindEmail?: string;
   accountStatus?: string;
   lastLoginTime?: string;
+  browserEnabled?: number;
+  /** PASSWORD / STORAGE_STATE */
+  browserLoginType?: string;
   sortOrder?: number;
   remark?: string;
 }

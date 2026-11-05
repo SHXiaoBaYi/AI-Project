@@ -81,7 +81,8 @@ export default function RunsDrawer({ task, onClose }: RunsDrawerProps) {
             <span className='ml-1'>{meta.label}</span>
             {v === 'RUNNING' && (
               <span className='ml-1 text-neutral-400'>
-                （{r.doneCount}/{r.totalCount}）
+                （{r.doneCount}/{r.totalCount}
+                {r.batchTotal ? ` · 批 ${r.batchDone ?? 0}/${r.batchTotal}` : ''}）
               </span>
             )}
           </span>
@@ -98,6 +99,18 @@ export default function RunsDrawer({ task, onClose }: RunsDrawerProps) {
           <span className={r.failedCount > 0 ? 'text-red-500' : 'text-neutral-400'}>{r.failedCount}</span>
         </span>
       ),
+    },
+    {
+      title: '分批进度',
+      width: 130,
+      render: (_, r) =>
+        r.batchTotal ? (
+          <span title={`每批 ${r.batchSize ?? 3} 个问题，一批跑完再起下一批`}>
+            {r.batchSize ?? 3} 题/批 · {r.batchDone ?? 0}/{r.batchTotal}
+          </span>
+        ) : (
+          '-'
+        ),
     },
     {
       title: '开始时间',

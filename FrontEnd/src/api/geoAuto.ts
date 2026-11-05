@@ -1,8 +1,10 @@
 import request from './request';
 import type { PageQuery, PageResult } from '@/types/api';
 import type {
+  GeoAutoBrowserLoginDTO,
   GeoAutoMatrixRow,
   GeoAutoPlatformOption,
+  GeoAutoProbeDTO,
   GeoAutoQuestion,
   GeoAutoQuestionDTO,
   GeoAutoQuestionOption,
@@ -16,6 +18,9 @@ import type {
   GeoAutoTask,
   GeoAutoTaskDTO,
   GeoAutoTaskQuery,
+  GeoBrowserAccountVO,
+  GeoBrowserLoginVO,
+  GeoBrowserProbeVO,
 } from '@/types/geoAuto';
 
 // ==================== 监控问题库 ====================
@@ -104,6 +109,42 @@ export function getGeoAutoResultDetailApi(id: number) {
 
 export function getGeoAutoResultMatrixApi(data: GeoAutoResultQuery) {
   return request.post<unknown, GeoAutoResultMatrix>('/geo/auto/results/matrix', data);
+}
+
+// ==================== 浏览器通道取证 ====================
+
+/** 单题采集试跑：回答/思考过程/官方分享链接/整页截图/诊断（不落业务库） */
+export function probeGeoAutoBrowserApi(data: GeoAutoProbeDTO) {
+  return request.post<unknown, GeoBrowserProbeVO>('/geo/auto/browser/probe', data);
+}
+
+/** 人工补录真实 C 端截图 */
+export function uploadGeoAutoScreenshotApi(resultId: number, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post<unknown, { screenshotUrl: string }>(`/geo/auto/results/${resultId}/screenshot`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+}
+
+/** v28 用系统维护的平台账号在服务器无头浏览器模拟登录并刷新登录态 */
+export function browserLoginGeoAutoApi(data: GeoAutoBrowserLoginDTO) {
+  return request.post<unknown, GeoBrowserLoginVO>('/geo/auto/browser/login', data);
+}
+
+/** v28 各平台浏览器自动监测账号与登录态就绪状态 */
+export function getGeoAutoBrowserAccountsApi() {
+  return request.get<unknown, GeoBrowserAccountVO[]>('/geo/auto/browser/accounts');
+}
+
+/** 上传平台登录态 storageState JSON */
+export function uploadGeoAutoBrowserStateApi(platform: string, file: File) {
+  const formData = new FormData();
+  formData.append('platform', platform);
+  formData.append('file', file);
+  return request.post<unknown, { platform: string }>('/geo/auto/browser/state', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
 }
 
 export type { GeoAutoMatrixRow };

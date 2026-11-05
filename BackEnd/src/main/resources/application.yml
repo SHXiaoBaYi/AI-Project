@@ -110,6 +110,52 @@ geo:
     content-weekly-cron: "0 15 2 ? * MON"
     # 每月 1 日 02:25 固化内容投放月报
     content-monthly-cron: "0 25 2 1 * ?"
+  # 自动监测（问题监控）：C 端网页版浏览器采集，产出真实分享链接/整页截图/思考过程/引用信源
+  auto-monitor:
+    enabled: true
+    judge-provider: deepseek
+    # v28 分批串行：每批只跑 3 个问题，一批跑完再起下一批，循环到全部结束。
+    # 全局单编排线程 + 批次冷却，保证 ECS 不会被浏览器采集持续打满。
+    batch-size: ${GEO_MONITOR_BATCH_SIZE:3}
+    batch-interval-ms: ${GEO_MONITOR_BATCH_INTERVAL_MS:5000}
+    batch-item-interval-ms: ${GEO_MONITOR_BATCH_ITEM_INTERVAL_MS:800}
+    batch-max-duration-ms: ${GEO_MONITOR_BATCH_MAX_DURATION_MS:1800000}
+    browser:
+      enabled: true
+      # 无头模式；本地排查选择器时可设 false 观察真实页面
+      headless: ${GEO_BROWSER_HEADLESS:true}
+      # 留空用 Playwright 内置 Chromium（首次会从 cdn.playwright.dev 下载，国内常卡住）；
+      # 强烈建议显式指向本机/服务器已安装的 Chrome/Chromium，指向后采集器会自动跳过浏览器下载
+      executable-path: ${GEO_BROWSER_PATH:}
+      # 登录态目录：账号自动登录导出 account-{id}.json；手工上传为 {平台名}.json
+      # 优先级：账号缓存 → 账号密码模拟登录 → 账号绑定 STORAGE_STATE → 手工上传兜底
+      # 未就绪时采集直接返回可操作提示（含登录墙截图），不会伪造回答/分享链接
+      storage-state-dir: ${GEO_BROWSER_STATE_DIR:./uploads/geo/auto-monitor/state}
+      answer-timeout-ms: 120000
+      navigation-timeout-ms: 45000
+      # 平台账号模拟登录后导出的 storageState 有效期；过期自动重新登录（一批 3 题内只登录一次）
+      state-ttl-ms: ${GEO_BROWSER_STATE_TTL_MS:43200000}
+      login-timeout-ms: ${GEO_BROWSER_LOGIN_TIMEOUT_MS:60000}
+      login-settle-ms: 2000
+      # C 端 DOM 改版时按 name 覆盖内置适配器，未覆盖字段沿用默认值：
+      # profiles:
+      #   - name: 豆包
+      #     url: https://www.doubao.com/chat/
+      #     input-selector: "[contenteditable='true']"
+      #     answer-selector: "[data-testid='message_content']"
+      #     deep-think-selector: "text=深度思考"
+      #     share-selector: "text=分享"
+      #     login-required-selectors: ["[data-testid='to_login_button']"]
+      #     dismiss-selectors: ["button[aria-label='关闭']"]
+      #     answer-reject-patterns: ["为你推荐", "有什么我能帮你的吗"]
+      #     # 账号密码模拟登录适配器（按平台实际 DOM 覆盖；只有扫码/验证码的平台请改用 STORAGE_STATE）
+      #     login-url: https://www.doubao.com/chat/
+      #     login-entry-selector: "[data-testid='to_login_button']"
+      #     login-tab-selector: "text=密码登录"
+      #     login-account-selector: "input[placeholder*='手机']"
+      #     login-password-selector: "input[type='password']"
+      #     login-submit-selector: "text=/^登录$/"
+      #     login-success-selector: "[data-testid='user_avatar']"
 
 # 投放联动任务启动刷数：默认关闭。开启会导致用户删除的任务在重启后被重新生成。
 task:
