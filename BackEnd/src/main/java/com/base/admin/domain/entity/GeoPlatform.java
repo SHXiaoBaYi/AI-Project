@@ -24,6 +24,9 @@ public class GeoPlatform extends BaseEntity {
     @Schema(description = "平台类型（AI平台/内容发布平台）", example = "AI平台")
     private String platformType;
 
+    @Schema(description = "AI厂商编码，映射 sys_ai_provider.provider（如 doubao/deepseek），自动监测用", example = "doubao")
+    private String providerCode;
+
     @Schema(description = "平台登录地址", example = "https://www.douyin.com")
     private String loginUrl;
 

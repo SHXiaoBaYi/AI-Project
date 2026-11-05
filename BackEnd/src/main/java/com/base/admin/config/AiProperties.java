@@ -23,6 +23,7 @@ public class AiProperties {
     public static final String PROVIDER_TONGYI = "tongyi";
     public static final String PROVIDER_ZHIPU = "zhipu";
     public static final String PROVIDER_MOONSHOT = "moonshot";
+    public static final String PROVIDER_DOUBAO = "doubao";
 
     /** 是否启用外部大模型（作为默认偏好；单次请求可指定厂商） */
     private boolean enabled = false;
@@ -45,6 +46,7 @@ public class AiProperties {
     private String tongyiApiKey = "";
     private String zhipuApiKey = "";
     private String moonshotApiKey = "";
+    private String doubaoApiKey = "";
 
     /** 请求超时秒 */
     private int timeoutSeconds = 60;
@@ -58,6 +60,7 @@ public class AiProperties {
             case "qwen", "dashscope" -> PROVIDER_TONGYI;
             case "glm" -> PROVIDER_ZHIPU;
             case "kimi" -> PROVIDER_MOONSHOT;
+            case "ark", "volcengine", "火山方舟" -> PROVIDER_DOUBAO;
             case "heuristic", "template" -> PROVIDER_LOCAL;
             default -> p;
         };
@@ -81,6 +84,7 @@ public class AiProperties {
             case PROVIDER_TONGYI -> tongyiApiKey;
             case PROVIDER_ZHIPU -> zhipuApiKey;
             case PROVIDER_MOONSHOT -> moonshotApiKey;
+            case PROVIDER_DOUBAO -> doubaoApiKey;
             default -> "";
         };
         if (StringUtils.hasText(specific)) {
@@ -106,6 +110,7 @@ public class AiProperties {
             case PROVIDER_ZHIPU -> "https://open.bigmodel.cn/api/paas/v4";
             case PROVIDER_MOONSHOT -> "https://api.moonshot.cn/v1";
             case PROVIDER_DEEPSEEK -> "https://api.deepseek.com/v1";
+            case PROVIDER_DOUBAO -> "https://ark.cn-beijing.volces.com/api/v3";
             default -> "https://api.deepseek.com/v1";
         };
     }
@@ -120,6 +125,7 @@ public class AiProperties {
             case PROVIDER_ZHIPU -> "glm-4-flash";
             case PROVIDER_MOONSHOT -> "moonshot-v1-8k";
             case PROVIDER_DEEPSEEK -> "deepseek-chat";
+            case PROVIDER_DOUBAO -> "doubao-seed-1-6-250615";
             case PROVIDER_LOCAL -> "local-template";
             default -> "deepseek-chat";
         };
@@ -131,6 +137,7 @@ public class AiProperties {
             case PROVIDER_ZHIPU -> "智谱GLM";
             case PROVIDER_MOONSHOT -> "月之暗面";
             case PROVIDER_DEEPSEEK -> "DeepSeek";
+            case PROVIDER_DOUBAO -> "豆包";
             case PROVIDER_LOCAL -> "本地模板";
             default -> normalizeProvider(provider);
         };
@@ -144,6 +151,7 @@ public class AiProperties {
         list.add(option(PROVIDER_DEEPSEEK));
         list.add(option(PROVIDER_ZHIPU));
         list.add(option(PROVIDER_MOONSHOT));
+        list.add(option(PROVIDER_DOUBAO));
         return list;
     }
 

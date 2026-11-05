@@ -75,6 +75,7 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
         GeoPlatform platform = new GeoPlatform();
         platform.setPlatformName(name);
         platform.setPlatformType(type);
+        platform.setProviderCode(nz(dto.getProviderCode()).trim());
         platform.setLoginUrl(dto.getLoginUrl() == null ? "" : dto.getLoginUrl().trim());
         platform.setContentAuditUrls(nz(dto.getContentAuditUrls()));
         platform.setContentAuditNotes(nz(dto.getContentAuditNotes()));
@@ -92,6 +93,7 @@ public class GeoPlatformServiceImpl implements GeoPlatformService {
         String oldName = platform.getPlatformName();
         platform.setPlatformName(name);
         platform.setPlatformType(type);
+        platform.setProviderCode(nz(dto.getProviderCode()).trim());
         platform.setLoginUrl(dto.getLoginUrl() == null ? "" : dto.getLoginUrl().trim());
         platform.setContentAuditUrls(nz(dto.getContentAuditUrls()));
         platform.setContentAuditNotes(nz(dto.getContentAuditNotes()));

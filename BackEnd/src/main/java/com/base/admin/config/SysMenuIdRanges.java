@@ -33,7 +33,8 @@ public final class SysMenuIdRanges {
             case GEO -> (menuId >= 100 && menuId <= 139)
                     || (menuId >= 150 && menuId <= 159)
                     || (menuId >= 170 && menuId <= 199)
-                    || (menuId >= 310 && menuId <= 319);
+                    || (menuId >= 310 && menuId <= 319)
+                    || (menuId >= 355 && menuId <= 369);
             case BOARD -> menuId >= 160 && menuId <= 169;
             case HR -> (menuId >= 200 && menuId <= 249) || (menuId >= 261 && menuId <= 279);
             case ROBOT -> menuId >= 250 && menuId <= 260;

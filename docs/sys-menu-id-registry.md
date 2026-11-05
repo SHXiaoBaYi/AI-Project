@@ -11,13 +11,31 @@
 |------|------|----------|
 | 1–99 | 系统核心（用户/角色/菜单等） | 初始化 SQL / 系统管理 |
 | 100–139、150–159、170–199、310–319 | GEO | `GeoSchemaMigrator` |
+| **355–369** | **GEO 自动监测**（GEO 子段） | `GeoSchemaMigrator` |
 | 140–149 | 系统扩展（AI / 钉钉 / 日程规则） | `AiSchemaMigrator` / `DingTalkSchemaMigrator` |
 | 160–169 | 数据看板 | `db/v13_board_menu.sql` 等 |
 | **200–249、261–279** | **招聘 HR** | `HrSchemaMigrator` |
 | **250–260** | **机器人** | `RobotSchemaMigrator` |
 | 280–299 | **预留（未分配）** | 新大模块优先用此段 |
 | 300–309、320–349 | 收银培训 | `TrainSchemaMigrator` |
-| 350+ | 预留 | 新模块 |
+| 350–354、370+ | 预留 | 新模块 |
+
+## GEO 自动监测（355–369）
+
+| ID | 名称 | 备注 |
+|----|------|------|
+| 355 | 自动监测 | 目录，父=100，path=`geo/auto` |
+| 356 | 监控问题库 | `geo/auto/questions`，`geo:auto:question:list` |
+| 357 | 问题新增 | 按钮 `geo:auto:question:add` |
+| 358 | 问题编辑 | 按钮 `geo:auto:question:edit` |
+| 359 | 问题删除 | 按钮 `geo:auto:question:delete` |
+| 360 | 监测任务 | `geo/auto/tasks`，`geo:auto:task:list` |
+| 361 | 任务新增 | 按钮 `geo:auto:task:add` |
+| 362 | 任务编辑 | 按钮 `geo:auto:task:edit` |
+| 363 | 任务删除 | 按钮 `geo:auto:task:delete` |
+| 364 | 任务运行 | 按钮 `geo:auto:task:run` |
+| 365 | 问题监控 | `geo/auto/results`，`geo:auto:result:list` |
+| 366–369 | 空闲（GEO 自动监测下一菜单从 366 起） | P2 预留：结果导出等 |
 
 ## 招聘 HR（200–249、261–279）
 

@@ -8,6 +8,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.stereotype.Component;
 
@@ -83,6 +84,9 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureSellPointLibrary(connection);
             ensureArticleAiPipeline(connection);
             ensureGeoKnowledgeMenuTree(connection);
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v26_geo_auto_monitor.sql"));
+            ensureAutoMonitorColumns(connection);
+            ensureAutoMonitorMenus(connection);
             if (cleanupEmptyDaily) {
                 cleanupEmptyUninspectedDailyBeforeToday(connection);
             }
@@ -129,6 +133,97 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                 log.info("今日之前未巡查空壳日监测无需清洗");
             }
         }
+    }
+
+    /**
+     * 自动监测（问题监控）既有表增量：geo_monitor_daily.data_source、geo_platform.provider_code。
+     * 新表由 db/v26_geo_auto_monitor.sql 建；此处只做老库兼容 ALTER 与种子回填，可重复执行。
+     */
+    private void ensureAutoMonitorColumns(Connection connection) throws Exception {
+        if (tableExists(connection, "geo_monitor_daily")
+                && !columnExists(connection, "geo_monitor_daily", "data_source")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        ALTER TABLE geo_monitor_daily
+                          ADD COLUMN data_source VARCHAR(16) NOT NULL DEFAULT '人工'
+                          COMMENT '数据来源：人工/API/浏览器' AFTER competitors
+                        """);
+            }
+            log.info("已为 geo_monitor_daily 增加 data_source 列（存量默认人工）");
+        }
+        if (tableExists(connection, "geo_platform")) {
+            if (!columnExists(connection, "geo_platform", "provider_code")) {
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute("""
+                            ALTER TABLE geo_platform
+                              ADD COLUMN provider_code VARCHAR(32) NOT NULL DEFAULT ''
+                              COMMENT 'AI厂商编码，映射 sys_ai_provider.provider，如 doubao/deepseek' AFTER platform_type
+                            """);
+                }
+                log.info("已为 geo_platform 增加 provider_code 列");
+            }
+            // 种子回填：仅补空值，不覆盖手工配置（豆包=火山方Ark、DS=DeepSeek官方）
+            try (Statement statement = connection.createStatement()) {
+                statement.executeUpdate("""
+                        UPDATE geo_platform SET provider_code = 'doubao'
+                        WHERE platform_type = 'AI平台' AND TRIM(provider_code) = '' AND platform_name = '豆包'
+                        """);
+                statement.executeUpdate("""
+                        UPDATE geo_platform SET provider_code = 'deepseek'
+                        WHERE platform_type = 'AI平台' AND TRIM(provider_code) = '' AND platform_name IN ('DS', 'DeepSeek')
+                        """);
+            }
+        }
+    }
+
+    /**
+     * 自动监测菜单（GEO 子号段 355–369，见 docs/sys-menu-id-registry.md）。
+     * 走 SysMenuSeedSupport.upsert 做号段校验；授权随「日监测数据(102)」角色继承 + admin。
+     */
+    private void ensureAutoMonitorMenus(Connection connection) {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        SysMenuIdRanges.Owner owner = SysMenuIdRanges.Owner.GEO;
+        SysMenuSeedSupport.upsert(jdbc, owner, 355, "自动监测", 100, 4, "geo/auto", "", "M",
+                "", "RobotOutlined", "问题自动提问监测，结果回写日监测");
+        SysMenuSeedSupport.upsert(jdbc, owner, 356, "监控问题库", 355, 1, "geo/auto/questions", "", "C",
+                "geo:auto:question:list", "QuestionCircleOutlined", "目标问题结构化管理");
+        SysMenuSeedSupport.upsert(jdbc, owner, 357, "问题新增", 356, 1, "", "", "F",
+                "geo:auto:question:add", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, owner, 358, "问题编辑", 356, 2, "", "", "F",
+                "geo:auto:question:edit", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, owner, 359, "问题删除", 356, 3, "", "", "F",
+                "geo:auto:question:delete", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, owner, 360, "监测任务", 355, 2, "geo/auto/tasks", "", "C",
+                "geo:auto:task:list", "ControlOutlined", "问题×平台定时自动监测");
+        SysMenuSeedSupport.upsert(jdbc, owner, 361, "任务新增", 360, 1, "", "", "F",
+                "geo:auto:task:add", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, owner, 362, "任务编辑", 360, 2, "", "", "F",
+                "geo:auto:task:edit", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, owner, 363, "任务删除", 360, 3, "", "", "F",
+                "geo:auto:task:delete", "#", "");
+        SysMenuSeedSupport.upsert(jdbc, owner, 364, "任务运行", 360, 4, "", "", "F",
+                "geo:auto:task:run", "#", "手动立即运行");
+        SysMenuSeedSupport.upsert(jdbc, owner, 365, "问题监控", 355, 3, "geo/auto/results", "", "C",
+                "geo:auto:result:list", "FundProjectionScreenOutlined", "问题×平台监测结果与分析");
+        // 授权：admin + 持有「日监测数据」菜单的角色随动
+        Integer[] menuIds = {355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365};
+        try {
+            try (Statement statement = connection.createStatement()) {
+                String csv = String.join(",", java.util.Arrays.stream(menuIds).map(String::valueOf).toList());
+                statement.execute("""
+                        INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                        SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (%s)""".formatted(csv));
+                statement.execute("""
+                        INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                        SELECT rm.role_id, m.menu_id, 1
+                        FROM sys_role_menu rm
+                        JOIN sys_menu m ON m.menu_id IN (%s)
+                        WHERE rm.menu_id = 102 AND rm.is_active = 1""".formatted(csv));
+            }
+        } catch (Exception e) {
+            log.warn("自动监测菜单授权同步失败（不影响启动）：{}", e.getMessage());
+        }
+        log.info("已同步自动监测菜单 355-365");
     }
 
     /** GEO 选人角色：运营录入 / 管理复盘（不存在则创建） */

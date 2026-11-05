@@ -62,6 +62,9 @@ public class GeoMonitorDaily extends BaseEntity {
     @Schema(description = "出现的竞品")
     private String competitors;
 
+    @Schema(description = "数据来源（人工/API/浏览器）", example = "人工")
+    private String dataSource;
+
     @Schema(description = "是否已被周/月/年统计（1=已统计不可改 0=未统计可编辑）", example = "0")
     private Integer boardLocked;
 

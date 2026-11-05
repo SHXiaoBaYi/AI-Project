@@ -70,6 +70,7 @@ public class AiSchemaMigrator implements ApplicationRunner {
                       UNION ALL SELECT 'deepseek', 'DeepSeek', 'deepseek-chat', 2, 'DeepSeek OpenAI 兼容'
                       UNION ALL SELECT 'zhipu', '智谱GLM', 'glm-4-flash', 3, '智谱开放平台'
                       UNION ALL SELECT 'moonshot', '月之暗面', 'moonshot-v1-8k', 4, 'Moonshot / Kimi'
+                      UNION ALL SELECT 'doubao', '豆包', 'doubao-seed-1-6-250615', 5, '火山方舟 Ark OpenAI 兼容'
                     ) v
                     WHERE NOT EXISTS (SELECT 1 FROM sys_ai_provider p WHERE p.provider = v.provider)
                     """);

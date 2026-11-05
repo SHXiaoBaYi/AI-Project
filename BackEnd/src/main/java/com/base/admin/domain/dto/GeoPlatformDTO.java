@@ -19,6 +19,9 @@ public class GeoPlatformDTO {
     @Schema(description = "平台类型（AI平台/内容发布平台）", requiredMode = Schema.RequiredMode.REQUIRED, example = "AI平台")
     private String platformType;
 
+    @Schema(description = "AI厂商编码（doubao/deepseek/moonshot/tongyi/zhipu），AI平台可填", example = "doubao")
+    private String providerCode;
+
     @Schema(description = "平台登录地址", example = "https://www.douyin.com")
     private String loginUrl;
 
