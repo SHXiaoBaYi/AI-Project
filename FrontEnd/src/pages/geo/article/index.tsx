@@ -17,6 +17,7 @@ import {
   deleteGeoContentPlacementCiteApi,
   deleteGeoContentPlacementItemApi,
   deleteGeoContentPlacementItemBatchApi,
+  exportGeoContentPlacementArticlesApi,
   getGeoContentPlacementArticleListApi,
   getGeoContentPlacementCitesApi,
   getGeoContentPlacementDetailApi,
@@ -47,6 +48,8 @@ const ArticlePage = memo(function ArticlePage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
   const currentPageKeysRef = useRef<Set<number>>(new Set());
+  const lastListQueryRef = useRef<Parameters<typeof exportGeoContentPlacementArticlesApi>[0]>({});
+  const [exporting, setExporting] = useState(false);
   const [searchParams] = useSearchParams();
   const filterPlacementId = Number(searchParams.get('placementId') || '') || undefined;
   const fromTask = searchParams.get('from') || '';
@@ -376,7 +379,7 @@ const ArticlePage = memo(function ArticlePage() {
           const citedRaw = params.cited;
           const cited = citedRaw === 1 || citedRaw === '1' ? 1 : citedRaw === 0 || citedRaw === '0' ? 0 : undefined;
           const order = sort?.cited;
-          const res = await getGeoContentPlacementArticleListApi({
+          const listQuery = {
             pageNum: params.current,
             pageSize: params.pageSize,
             publisherUserId: params.publisherUserId,
@@ -393,8 +396,11 @@ const ArticlePage = memo(function ArticlePage() {
             createTimeStart: params.createTimeStart,
             createTimeEnd: params.createTimeEnd,
             cited,
-            citeSort: order === 'ascend' ? 'asc' : order === 'descend' ? 'desc' : undefined,
-          });
+            citeSort: order === 'ascend' ? ('asc' as const) : order === 'descend' ? ('desc' as const) : undefined,
+          };
+          const { pageNum: _pn, pageSize: _ps, ...exportQuery } = listQuery;
+          lastListQueryRef.current = exportQuery;
+          const res = await getGeoContentPlacementArticleListApi(listQuery);
           currentPageKeysRef.current = new Set(res.rows.map((r) => r.id));
           return { data: res.rows, success: true, total: res.total };
         }}
@@ -413,6 +419,20 @@ const ArticlePage = memo(function ArticlePage() {
           },
         }}
         toolBarRender={() => [
+          <PermissionButton
+            key='export'
+            perm='geo:article:list'
+            loading={exporting}
+            onClick={() => {
+              setExporting(true);
+              void exportGeoContentPlacementArticlesApi(lastListQueryRef.current)
+                .then(() => message.success('导出成功'))
+                .catch(() => message.error('导出失败'))
+                .finally(() => setExporting(false));
+            }}
+          >
+            导出 Excel
+          </PermissionButton>,
           <PermissionButton
             key='del'
             color='danger'

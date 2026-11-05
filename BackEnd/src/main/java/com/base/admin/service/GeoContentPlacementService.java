@@ -30,6 +30,7 @@ import com.base.admin.domain.vo.GeoTargetQuestionOptionVO;
 import com.base.admin.domain.vo.SysTaskFileVO;
 
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.List;
 
 public interface GeoContentPlacementService {
@@ -38,6 +39,9 @@ public interface GeoContentPlacementService {
 
     /** 已发布文章：投放明细联查主表 */
     PageResult<GeoContentPlacementArticleListVO> listArticles(GeoContentPlacementArticleQueryDTO query);
+
+    /** 按与列表相同的筛选条件导出全部文章明细（Excel） */
+    void exportArticles(GeoContentPlacementArticleQueryDTO query, OutputStream out);
 
     /** 按话题加载目标问题（新建文章级联） */
     List<GeoTargetQuestionOptionVO> listTargetQuestions(Long topicId);

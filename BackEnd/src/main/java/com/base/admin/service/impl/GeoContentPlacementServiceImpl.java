@@ -1,5 +1,6 @@
 package com.base.admin.service.impl;
 
+import com.alibaba.excel.EasyExcel;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -99,6 +100,8 @@ import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.time.format.DateTimeFormatter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.math.BigDecimal;
@@ -225,8 +228,82 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         return new PageResult<>(page.getTotal(), rows);
     }
 
+    private static final int ARTICLE_EXPORT_MAX = 50_000;
+    private static final DateTimeFormatter ARTICLE_EXPORT_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
     @Override
     public PageResult<GeoContentPlacementArticleListVO> listArticles(GeoContentPlacementArticleQueryDTO query) {
+        LambdaQueryWrapper<GeoContentPlacementItem> iw = buildArticleItemFilters(query);
+        if (iw == null) {
+            return new PageResult<>(0, List.of());
+        }
+        applyArticleItemOrder(iw, query);
+
+        int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
+        int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 10 : query.getPageSize();
+        Page<GeoContentPlacementItem> page = itemMapper.selectPage(new Page<>(pageNum, pageSize), iw);
+        List<GeoContentPlacementItem> items = page.getRecords();
+        if (items.isEmpty()) {
+            return new PageResult<>(page.getTotal(), List.of());
+        }
+        List<GeoContentPlacementArticleListVO> rows = mapArticleListRows(items);
+        return new PageResult<>(page.getTotal(), rows);
+    }
+
+    @Override
+    public void exportArticles(GeoContentPlacementArticleQueryDTO query, OutputStream out) {
+        List<List<String>> head = List.of(
+                List.of("文章ID"),
+                List.of("投放ID"),
+                List.of("发布人"),
+                List.of("撰写人"),
+                List.of("话题"),
+                List.of("目标问题"),
+                List.of("标题"),
+                List.of("发布平台"),
+                List.of("内容形态"),
+                List.of("投放状态"),
+                List.of("投放链接"),
+                List.of("发布时间"),
+                List.of("引用条数"),
+                List.of("备注"),
+                List.of("创建时间"));
+        LambdaQueryWrapper<GeoContentPlacementItem> iw = buildArticleItemFilters(query);
+        if (iw == null) {
+            EasyExcel.write(out).head(head).sheet("文章明细").doWrite(List.of());
+            return;
+        }
+        long total = itemMapper.selectCount(iw);
+        if (total > ARTICLE_EXPORT_MAX) {
+            throw new BusinessException(
+                    "符合条件的数据共 " + total + " 条，超过单次导出上限 " + ARTICLE_EXPORT_MAX + " 条，请缩小筛选范围");
+        }
+        applyArticleItemOrder(iw, query);
+        List<GeoContentPlacementArticleListVO> rows = mapArticleListRows(itemMapper.selectList(iw));
+        List<List<Object>> data = new ArrayList<>(rows.size());
+        for (GeoContentPlacementArticleListVO row : rows) {
+            data.add(List.of(
+                    row.getId(),
+                    row.getPlacementId(),
+                    nz(row.getPublisherName()),
+                    nz(row.getOwnerName()),
+                    nz(row.getTopicName()),
+                    nz(row.getTargetQuestion()),
+                    nz(row.getTitle()),
+                    nz(row.getPlatformName()),
+                    nz(row.getContentForm()),
+                    nz(row.getPublishStatus()),
+                    nz(row.getPublishUrl()),
+                    row.getPublishTime() == null ? "" : row.getPublishTime().format(ARTICLE_EXPORT_TIME_FMT),
+                    row.getCiteCount() == null ? 0 : row.getCiteCount(),
+                    nz(row.getRemark()),
+                    row.getCreateTime() == null ? "" : row.getCreateTime().format(ARTICLE_EXPORT_TIME_FMT)));
+        }
+        EasyExcel.write(out).head(head).sheet("文章明细").doWrite(data);
+    }
+
+    /** @return null when no placement matches filters */
+    private LambdaQueryWrapper<GeoContentPlacementItem> buildArticleItemFilters(GeoContentPlacementArticleQueryDTO query) {
         LambdaQueryWrapper<GeoContentPlacement> pw = new LambdaQueryWrapper<GeoContentPlacement>()
                 .eq(query.getPlacementId() != null, GeoContentPlacement::getId, query.getPlacementId())
                 .eq(query.getPublisherUserId() != null, GeoContentPlacement::getPublisherUserId, query.getPublisherUserId())
@@ -237,10 +314,9 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         dataScopeFilter.applyGeoPlacement(pw);
         List<GeoContentPlacement> placements = placementMapper.selectList(pw);
         if (placements.isEmpty()) {
-            return new PageResult<>(0, List.of());
+            return null;
         }
         List<Long> placementIds = placements.stream().map(GeoContentPlacement::getId).toList();
-        Map<Long, GeoContentPlacement> placementMap = Map.of();
 
         String statusFilter = StringUtils.hasText(query.getPublishStatus())
                 ? normalizePublishStatus(query.getPublishStatus())
@@ -254,7 +330,6 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
                 .eq(contentForm != null, GeoContentPlacementItem::getContentForm, contentForm)
                 .eq(StringUtils.hasText(statusFilter), GeoContentPlacementItem::getPublishStatus, statusFilter);
         var snap = dataScopeFilter.snapshot();
-        // 文章列表只展示已选发布平台的明细；审核通过的空占位不再出现在这里
         iw.and(w -> w.isNotNull(GeoContentPlacementItem::getPlatformName)
                 .ne(GeoContentPlacementItem::getPlatformName, ""));
         if (!snap.globalAll() && snap.geoEnabled() && !snap.geoPlatformNames().isEmpty()) {
@@ -272,6 +347,11 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             iw.apply("NOT " + citeExistsSql());
         }
         com.base.admin.util.QueryWrappers.applyCreateTimeRange(iw, query, GeoContentPlacementItem::getCreateTime);
+        return iw;
+    }
+
+    private static void applyArticleItemOrder(
+            LambdaQueryWrapper<GeoContentPlacementItem> iw, GeoContentPlacementArticleQueryDTO query) {
         String citeSort = query.getCiteSort() == null ? "" : query.getCiteSort().trim().toLowerCase();
         if ("asc".equals(citeSort) || "desc".equals(citeSort)) {
             iw.last("ORDER BY (SELECT COUNT(1) FROM geo_content_placement_cite c WHERE c.item_id = geo_content_placement_item.id AND c.is_active = 1) "
@@ -279,15 +359,13 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         } else {
             iw.orderByDesc(GeoContentPlacementItem::getId);
         }
+    }
 
-        int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
-        int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 10 : query.getPageSize();
-        Page<GeoContentPlacementItem> page = itemMapper.selectPage(new Page<>(pageNum, pageSize), iw);
-        List<GeoContentPlacementItem> items = page.getRecords();
+    private List<GeoContentPlacementArticleListVO> mapArticleListRows(List<GeoContentPlacementItem> items) {
         if (items.isEmpty()) {
-            return new PageResult<>(page.getTotal(), List.of());
+            return List.of();
         }
-
+        Map<Long, GeoContentPlacement> placementMap = Map.of();
         Set<Long> loadPlacementIds = items.stream()
                 .map(GeoContentPlacementItem::getPlacementId)
                 .filter(Objects::nonNull)
@@ -315,7 +393,7 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
             GeoContentPlacement placement = placementMap.get(item.getPlacementId());
             rows.add(toArticleListVo(item, placement, citeCountByItem.getOrDefault(item.getId(), 0)));
         }
-        return new PageResult<>(page.getTotal(), rows);
+        return rows;
     }
 
     private static String citeExistsSql() {

@@ -91,6 +91,17 @@ public class GeoContentPlacementController {
         return Result.ok(contentPlacementService.listArticles(query));
     }
 
+    @Operation(summary = "按筛选条件导出文章明细 Excel")
+    @PostMapping("/articles/export")
+    @RequiresPermission("geo:article:list")
+    public void exportArticles(@RequestBody(required = false) GeoContentPlacementArticleQueryDTO query, HttpServletResponse response)
+            throws IOException {
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        String filename = URLEncoder.encode("GEO文章明细.xlsx", StandardCharsets.UTF_8);
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + filename);
+        contentPlacementService.exportArticles(query == null ? new GeoContentPlacementArticleQueryDTO() : query, response.getOutputStream());
+    }
+
     @Operation(summary = "按话题加载目标问题（新建文章级联）")
     @GetMapping("/target-questions")
     @RequiresPermission({"geo:article:list", "geo:article:add", "geo:content:list", "geo:content:work"})

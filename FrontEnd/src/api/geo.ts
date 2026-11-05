@@ -692,6 +692,38 @@ export function getGeoContentPlacementArticleListApi(
   return request.post<unknown, PageResult<GeoContentPlacementArticle>>('/geo/content-placement/articles/list', data);
 }
 
+export type GeoContentPlacementArticleExportQuery = Omit<
+  Parameters<typeof getGeoContentPlacementArticleListApi>[0],
+  'pageNum' | 'pageSize'
+>;
+
+export async function exportGeoContentPlacementArticlesApi(
+  data: GeoContentPlacementArticleExportQuery = {},
+  filename = 'GEO文章明细.xlsx',
+) {
+  const token = getToken();
+  const res = await fetch(withBase('/api/geo/content-placement/articles/export'), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    throw new Error('导出失败');
+  }
+  const blob = await res.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = objectUrl;
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const matched = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(disposition);
+  a.download = matched ? decodeURIComponent(matched[1]) : filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(objectUrl);
+}
+
 export function getGeoTargetQuestionsApi(topicId: number) {
   return request.get<unknown, GeoTargetQuestionOption[]>('/geo/content-placement/target-questions', {
     params: { topicId },
