@@ -433,6 +433,7 @@ public class HrPanelService {
                 JOIN hr_application a ON a.id = e.application_id AND a.is_active = 1
                 LEFT JOIN hr_stage_def s ON s.stage_code = e.stage_code AND s.is_active = 1
                 WHERE e.is_active = 1 AND a.requisition_id IN (%s)
+                  AND e.stage_code <> 'ONBOARDED'
                   AND e.event_at >= ? AND e.event_at < ?
                 GROUP BY a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code), COALESCE(s.sort_no, 999)
                 ORDER BY a.requisition_id, COALESCE(s.sort_no, 999)
@@ -444,6 +445,24 @@ public class HrPanelService {
                 byReq.computeIfAbsent(reqId, k -> new LinkedHashMap<>()).merge(name, cnt, Integer::sum);
             }
         }, eventArgs.toArray());
+        List<Object> onboardArgs = new ArrayList<>(ids);
+        onboardArgs.add(window.start());
+        onboardArgs.add(window.end().plusDays(1));
+        jdbc.query("""
+                SELECT a.requisition_id, COUNT(DISTINCT a.id) cnt
+                FROM hr_onboard ob
+                JOIN hr_application a ON a.id = ob.application_id AND a.is_active = 1
+                WHERE ob.is_active = 1 AND ob.onboard_date IS NOT NULL
+                  AND a.requisition_id IN (%s)
+                  AND ob.onboard_date >= ? AND ob.onboard_date < ?
+                GROUP BY a.requisition_id
+                """.formatted(placeholders), rs -> {
+            long reqId = rs.getLong("requisition_id");
+            int cnt = rs.getInt("cnt");
+            if (cnt > 0) {
+                byReq.computeIfAbsent(reqId, k -> new LinkedHashMap<>()).merge("已入职", cnt, Integer::sum);
+            }
+        }, onboardArgs.toArray());
         List<Object> inviteArgs = new ArrayList<>(ids);
         inviteArgs.add(window.from());
         inviteArgs.add(window.toExclusive());

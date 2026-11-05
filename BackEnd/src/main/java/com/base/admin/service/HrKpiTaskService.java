@@ -563,14 +563,12 @@ public class HrKpiTaskService {
     private List<OnboardHit> listOnboards(Long requisitionId) {
         return jdbc.query("""
                 SELECT a.id AS application_id,
-                       COALESCE(
-                         (SELECT MIN(e.event_at) FROM hr_stage_event e
-                           WHERE e.application_id = a.id AND e.stage_code = 'ONBOARDED' AND e.is_active = 1),
-                         a.update_time, a.create_time
-                       ) AS onboard_at
+                       TIMESTAMP(ob.onboard_date) AS onboard_at
                 FROM hr_application a
-                WHERE a.requisition_id = ? AND a.is_active = 1 AND a.current_stage = 'ONBOARDED'
-                ORDER BY onboard_at ASC, a.id ASC
+                JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
+                WHERE a.requisition_id = ? AND a.is_active = 1
+                  AND ob.onboard_date IS NOT NULL
+                ORDER BY ob.onboard_date ASC, a.id ASC
                 """, (rs, i) -> new OnboardHit(
                 rs.getLong("application_id"),
                 rs.getTimestamp("onboard_at").toLocalDateTime()), requisitionId);
@@ -584,6 +582,10 @@ public class HrKpiTaskService {
                 JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
                 WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
                   AND a.current_stage <> 'ONBOARDED'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM hr_onboard ob
+                    WHERE ob.application_id = a.id AND ob.is_active = 1 AND ob.onboard_date IS NOT NULL
+                  )
                 GROUP BY rec.application_id
                 ORDER BY hit_at ASC
                 """, (rs, i) -> rs.getTimestamp("hit_at").toLocalDateTime(), requisitionId);
@@ -1221,17 +1223,11 @@ public class HrKpiTaskService {
     private int countOnboardedAppsInRange(Long requisitionId, LocalDateTime from, LocalDateTime to) {
         Integer n = jdbc.queryForObject("""
                 SELECT COUNT(1) FROM hr_application a
-                WHERE a.requisition_id = ? AND a.is_active = 1 AND a.current_stage = 'ONBOARDED'
-                  AND COALESCE(
-                        (SELECT MIN(e.event_at) FROM hr_stage_event e
-                          WHERE e.application_id = a.id AND e.stage_code = 'ONBOARDED' AND e.is_active = 1),
-                        a.update_time, a.create_time
-                      ) >= ?
-                  AND COALESCE(
-                        (SELECT MIN(e.event_at) FROM hr_stage_event e
-                          WHERE e.application_id = a.id AND e.stage_code = 'ONBOARDED' AND e.is_active = 1),
-                        a.update_time, a.create_time
-                      ) < ?
+                JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
+                WHERE a.requisition_id = ? AND a.is_active = 1
+                  AND ob.onboard_date IS NOT NULL
+                  AND ob.onboard_date >= DATE(?)
+                  AND ob.onboard_date < DATE(?)
                 """, Integer.class, requisitionId, from, to);
         return n == null ? 0 : n;
     }
@@ -1254,6 +1250,10 @@ public class HrKpiTaskService {
                 JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
                 WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
                   AND a.current_stage <> 'ONBOARDED'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM hr_onboard ob
+                    WHERE ob.application_id = a.id AND ob.is_active = 1 AND ob.onboard_date IS NOT NULL
+                  )
                   AND COALESCE(rec.interviewed_at, rec.update_time, rec.create_time) >= ?
                   AND COALESCE(rec.interviewed_at, rec.update_time, rec.create_time) < ?
                 """, Integer.class, requisitionId, from, to);
@@ -1262,11 +1262,11 @@ public class HrKpiTaskService {
 
     private LocalDateTime onboardEventAt(Long applicationId) {
         return jdbc.query("""
-                SELECT event_at FROM hr_stage_event
-                WHERE application_id = ? AND stage_code = 'ONBOARDED' AND is_active = 1
-                ORDER BY event_at ASC LIMIT 1
-                """, rs -> rs.next() && rs.getTimestamp(1) != null
-                ? rs.getTimestamp(1).toLocalDateTime() : null, applicationId);
+                SELECT onboard_date FROM hr_onboard
+                WHERE application_id = ? AND is_active = 1 AND onboard_date IS NOT NULL
+                ORDER BY onboard_date ASC LIMIT 1
+                """, rs -> rs.next() && rs.getDate(1) != null
+                ? rs.getDate(1).toLocalDate().atStartOfDay() : null, applicationId);
     }
 
     private Map<String, Object> loadTask(Long id) {
