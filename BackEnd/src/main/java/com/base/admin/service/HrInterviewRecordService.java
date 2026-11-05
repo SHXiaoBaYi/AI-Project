@@ -471,7 +471,7 @@ public class HrInterviewRecordService {
         }
         Long requisitionId = requisitionIdOf(applicationId);
         if (conclusions.size() > 1) {
-            applyStage(applicationId, "R" + roundNo + "_DISPUTE");
+            applyStage(applicationId, "R" + roundNo + "_DISPUTE", resolveInterviewEventAt(applicationId, roundNo));
             return "DISPUTE";
         }
         return applyConsensus(applicationId, requisitionId, roundNo, conclusions.iterator().next(), "");
@@ -490,7 +490,7 @@ public class HrInterviewRecordService {
     private String applyConsensus(Long applicationId, Long requisitionId, Integer roundNo, String conclusion, String prefix) {
         boolean finalRound = requisitionId != null && hirePipeline.isFinalRound(requisitionId, roundNo);
         String stage = stageCode(roundNo, conclusion, finalRound);
-        applyStage(applicationId, stage);
+        applyStage(applicationId, stage, resolveInterviewEventAt(applicationId, roundNo));
         if (!"PASS".equals(conclusion)) {
             return prefix + ("FAIL".equals(conclusion) ? "FAIL" : "PENDING");
         }
@@ -568,7 +568,7 @@ public class HrInterviewRecordService {
             unique.add(conclusion.trim().toUpperCase());
         }
         if (unique.size() > 1) {
-            applyStage(applicationId, "R" + roundNo + "_DISPUTE");
+            applyStage(applicationId, "R" + roundNo + "_DISPUTE", resolveInterviewEventAt(applicationId, roundNo));
             return;
         }
         applyConsensus(applicationId, resolvedRequisition, roundNo, unique.iterator().next(), "");
@@ -620,19 +620,55 @@ public class HrInterviewRecordService {
     }
 
     private void applyStage(Long applicationId, String stageCode) {
+        applyStage(applicationId, stageCode, LocalDateTime.now().withNano(0));
+    }
+
+    /**
+     * 结论阶段第一次写入的发生时间：表单面试时间，否则邀约时间，都没有才用当前时间。
+     * 已有事件不改 event_at。
+     */
+    private LocalDateTime resolveInterviewEventAt(Long applicationId, Integer roundNo) {
+        if (applicationId == null || roundNo == null) {
+            return LocalDateTime.now().withNano(0);
+        }
+        LocalDateTime recorded = jdbc.query("""
+                SELECT interviewed_at FROM hr_interview_record
+                WHERE application_id = ? AND round_no = ? AND is_active = 1
+                  AND interviewed_at IS NOT NULL
+                ORDER BY interviewed_at ASC, id ASC
+                LIMIT 1
+                """, rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null,
+                applicationId, roundNo);
+        if (recorded != null) {
+            return recorded.withNano(0);
+        }
+        LocalDateTime invited = jdbc.query("""
+                SELECT interview_at FROM hr_interview_invite
+                WHERE application_id = ? AND round_no = ? AND is_active = 1
+                  AND status <> 'CANCELLED' AND interview_at IS NOT NULL
+                ORDER BY interview_at ASC, id ASC
+                LIMIT 1
+                """, rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null,
+                applicationId, roundNo);
+        if (invited != null) {
+            return invited.withNano(0);
+        }
+        return LocalDateTime.now().withNano(0);
+    }
+
+    private void applyStage(Long applicationId, String stageCode, LocalDateTime eventAt) {
         jdbc.update("UPDATE hr_application SET current_stage = ? WHERE id = ? AND is_active = 1", stageCode, applicationId);
-        LocalDateTime now = LocalDateTime.now().withNano(0);
-        // 结论以本次保存时刻记到 event_at。面板「区间进展」不读这个时间，只认面试记录的面试时间。
+        LocalDateTime at = eventAt == null ? LocalDateTime.now().withNano(0) : eventAt.withNano(0);
+        // event_at 只在第一次产生该阶段时写入。重复保存不改发生时间，否则区间进展会把旧结论算到今天。
         jdbc.update("""
                 INSERT INTO hr_stage_event (application_id, stage_code, event_at, source_sheet, create_by, is_active)
                 VALUES (?, ?, ?, 'INTERVIEW', ?, 1)
                 ON DUPLICATE KEY UPDATE
                   is_active = 1,
-                  event_at = VALUES(event_at),
                   source_sheet = VALUES(source_sheet),
                   update_by = VALUES(create_by),
                   update_time = NOW()
-                """, applicationId, stageCode, now, SecurityUtils.getCurrentUsername());
+                """, applicationId, stageCode, at, SecurityUtils.getCurrentUsername());
     }
 
     private String stageCode(Integer roundNo, String conclusion, boolean finalRound) {

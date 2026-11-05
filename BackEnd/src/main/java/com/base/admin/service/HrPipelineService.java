@@ -380,7 +380,7 @@ public class HrPipelineService {
         jdbc.update("""
                 INSERT INTO hr_stage_event (application_id, stage_code, event_at, source_sheet, create_by, is_active)
                 VALUES (?, ?, NOW(), ?, ?, 1)
-                ON DUPLICATE KEY UPDATE event_at = NOW(), source_sheet = VALUES(source_sheet), is_active = 1, update_by = VALUES(create_by)
+                ON DUPLICATE KEY UPDATE source_sheet = VALUES(source_sheet), is_active = 1, update_by = VALUES(create_by)
                 """, applicationId, stage, source, user);
         // optional remark table not available; summary encoded in source for detail query via stage name
     }

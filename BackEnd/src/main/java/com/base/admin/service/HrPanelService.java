@@ -32,19 +32,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class HrPanelService {
 
-    /**
-     * 这些阶段改按面试记录上的面试时间统计。
-     * 阶段事件的 create_time 只是第一次写入库的时间，补历史阶段时会落在今天，不能当成当天有面试。
-     */
-    private static final String INTERVIEW_RESULT_STAGES = """
-            'FIRST_PENDING','FIRST_ROUND','FIRST_FAIL','R1_DISPUTE',
-            'R2_PENDING','SECOND_ROUND','R2_FAIL','R2_DISPUTE',
-            'R3_PASS','R3_PENDING','R3_DISPUTE','R3_FAIL',
-            'R4_PASS','R4_PENDING','R4_DISPUTE','R4_FAIL',
-            'R5_PASS','R5_PENDING','R5_DISPUTE','R5_FAIL',
-            'FINAL'
-            """;
-
     /** 区间进展展示顺序：到面与结论拆开，避免把「已到面」误看成已出面试结果 */
     private static final List<String> PROGRESS_ORDER = List.of(
             "筛选简历", "电话沟通", "约面", "已到面",
@@ -439,18 +426,17 @@ public class HrPanelService {
         List<Object> eventArgs = new ArrayList<>(ids);
         eventArgs.add(window.from());
         eventArgs.add(window.toExclusive());
-        // 面试结论不走这里：阶段事件的 create_time 会在改档案时被写成今天
+        // 只认阶段事件的发生时间 event_at。create_time / update_time 是入库和后来改行的时间。
         jdbc.query("""
                 SELECT a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code) stage_name, COUNT(DISTINCT a.id) cnt
                 FROM hr_stage_event e
                 JOIN hr_application a ON a.id = e.application_id AND a.is_active = 1
                 LEFT JOIN hr_stage_def s ON s.stage_code = e.stage_code AND s.is_active = 1
                 WHERE e.is_active = 1 AND a.requisition_id IN (%s)
-                  AND e.stage_code NOT IN (%s)
-                  AND COALESCE(e.create_time, e.event_at) >= ? AND COALESCE(e.create_time, e.event_at) < ?
+                  AND e.event_at >= ? AND e.event_at < ?
                 GROUP BY a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code), COALESCE(s.sort_no, 999)
                 ORDER BY a.requisition_id, COALESCE(s.sort_no, 999)
-                """.formatted(placeholders, INTERVIEW_RESULT_STAGES), rs -> {
+                """.formatted(placeholders), rs -> {
             long reqId = rs.getLong("requisition_id");
             String name = displayStage(rs.getString("stage_code"), rs.getString("stage_name"));
             int cnt = rs.getInt("cnt");
@@ -458,7 +444,6 @@ public class HrPanelService {
                 byReq.computeIfAbsent(reqId, k -> new LinkedHashMap<>()).merge(name, cnt, Integer::sum);
             }
         }, eventArgs.toArray());
-        fillInterviewProgress(byReq, placeholders, ids, window);
         List<Object> inviteArgs = new ArrayList<>(ids);
         inviteArgs.add(window.from());
         inviteArgs.add(window.toExclusive());
@@ -480,76 +465,6 @@ public class HrPanelService {
         for (HrPanelJobVO row : rows) {
             row.setProgressSummary(formatProgress(byReq.get(row.getId())));
         }
-    }
-
-    /**
-     * 一面未通过 / 一面通过等只认区间内的面试记录（interviewed_at，没有则用记录创建时间）。
-     * 不读阶段事件的 create_time：改候选人、补历史阶段都会把事件写成今天，当天却没有面试。
-     */
-    private void fillInterviewProgress(Map<Long, LinkedHashMap<String, Integer>> byReq, String placeholders,
-                                       List<Object> ids, DateWindow window) {
-        List<Object> args = new ArrayList<>(ids);
-        args.add(window.from());
-        args.add(window.toExclusive());
-        jdbc.query("""
-                SELECT a.requisition_id,
-                       rec.round_no,
-                       CASE WHEN COUNT(DISTINCT UPPER(TRIM(rec.conclusion))) > 1 THEN 'DISPUTE'
-                            ELSE MAX(UPPER(TRIM(rec.conclusion))) END AS conclusion,
-                       CASE WHEN mr.max_round IS NOT NULL AND rec.round_no >= mr.max_round THEN 1 ELSE 0 END AS final_round
-                FROM hr_interview_record rec
-                JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
-                LEFT JOIN (
-                    SELECT requisition_id, MAX(round_no) max_round
-                    FROM hr_requisition_round
-                    WHERE is_active = 1
-                    GROUP BY requisition_id
-                ) mr ON mr.requisition_id = a.requisition_id
-                WHERE rec.is_active = 1
-                  AND UPPER(TRIM(IFNULL(rec.conclusion, ''))) IN ('PASS', 'FAIL', 'PENDING')
-                  AND a.requisition_id IN (%s)
-                  AND COALESCE(rec.interviewed_at, rec.create_time) >= ?
-                  AND COALESCE(rec.interviewed_at, rec.create_time) < ?
-                GROUP BY a.requisition_id, a.id, rec.round_no, mr.max_round
-                """.formatted(placeholders), rs -> {
-            long reqId = rs.getLong("requisition_id");
-            String name = interviewProgressLabel(rs.getInt("round_no"), rs.getString("conclusion"),
-                    rs.getInt("final_round") == 1);
-            if (StringUtils.hasText(name)) {
-                byReq.computeIfAbsent(reqId, k -> new LinkedHashMap<>()).merge(name, 1, Integer::sum);
-            }
-        }, args.toArray());
-    }
-
-    /** 与阶段目录展示名一致：一面未通过、二面通过、终面通过。 */
-    private static String interviewProgressLabel(int roundNo, String conclusion, boolean finalRound) {
-        if (!StringUtils.hasText(conclusion)) {
-            return null;
-        }
-        if ("DISPUTE".equals(conclusion)) {
-            return roundTitle(roundNo) + "待商榷";
-        }
-        if ("PASS".equals(conclusion) && finalRound) {
-            return "终面通过";
-        }
-        String title = roundTitle(roundNo);
-        return switch (conclusion) {
-            case "PASS" -> title + "通过";
-            case "FAIL" -> title + "未通过";
-            case "PENDING" -> title + "待定";
-            default -> null;
-        };
-    }
-
-    private static String roundTitle(int roundNo) {
-        return switch (roundNo) {
-            case 1 -> "一面";
-            case 2 -> "二面";
-            case 3 -> "三面";
-            case 4 -> "四面";
-            case 5 -> "五面";
-            default -> roundNo + "面";
-        };
     }
 
     private static String formatProgress(LinkedHashMap<String, Integer> stages) {
