@@ -45,7 +45,7 @@ public class GeoMonitorResult extends BaseEntity {
     @Schema(description = "通道：API/BROWSER", example = "API")
     private String channel;
 
-    @Schema(description = "实际调用的模型名", example = "doubao-seed-1-6-250615")
+    @Schema(description = "实际调用的模型名", example = "doubao-seed-2-1-lite-260915")
     private String answerModel;
 
     @Schema(description = "AI回答原文（留档溯源）")

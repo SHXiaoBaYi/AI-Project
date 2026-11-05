@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Badge, Drawer, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getGeoAutoRunListApi } from '@/api/geoAuto';
+import { formatDateTime } from '@/utils/datetime';
 import type { GeoAutoRun, GeoAutoTask } from '@/types/geoAuto';
 import { GEO_AUTO_RUN_STATUS_MAP } from '@/constants/geoAuto';
 
@@ -98,8 +99,18 @@ export default function RunsDrawer({ task, onClose }: RunsDrawerProps) {
         </span>
       ),
     },
-    { title: '开始时间', dataIndex: 'startTime', width: 150 },
-    { title: '结束时间', dataIndex: 'endTime', width: 150, render: (v: string) => v || '-' },
+    {
+      title: '开始时间',
+      dataIndex: 'startTime',
+      width: 170,
+      render: (v: string) => formatDateTime(v),
+    },
+    {
+      title: '结束时间',
+      dataIndex: 'endTime',
+      width: 170,
+      render: (v: string) => formatDateTime(v),
+    },
     { title: '错误', dataIndex: 'errorMsg', ellipsis: true, render: (v: string) => v || '-' },
   ];
 

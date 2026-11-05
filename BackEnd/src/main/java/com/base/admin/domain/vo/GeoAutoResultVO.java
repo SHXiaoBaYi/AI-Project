@@ -33,7 +33,7 @@ public class GeoAutoResultVO {
     @Schema(description = "通道：API/BROWSER", example = "API")
     private String channel;
 
-    @Schema(description = "实际调用的模型名", example = "doubao-seed-1-6-250615")
+    @Schema(description = "实际调用的模型名", example = "doubao-seed-2-1-lite-260915")
     private String answerModel;
 
     @Schema(description = "监测归属日期", example = "2026-11-05")

@@ -30,7 +30,7 @@ const AiProviderPage = memo(function AiProviderPage() {
           width: 560,
           content: (
             <div className='space-y-2 text-sm'>
-              <div>{res.message}</div>
+              <div className='leading-relaxed break-words'>{res.message}</div>
               {(res.attempts ?? []).length > 0 ? (
                 <pre className='max-h-48 overflow-auto rounded bg-neutral-50 p-2 text-xs whitespace-pre-wrap'>
                   {(res.attempts ?? []).join('\n')}
@@ -212,10 +212,12 @@ const AiProviderPage = memo(function AiProviderPage() {
             extra={
               editing?.provider === 'tongyi'
                 ? '通义建议用 qwen-plus 或 qwen-flash；qwen-turbo 在部分账号会异常 429，换 Key 通常无效'
-                : undefined
+                : editing?.provider === 'doubao'
+                  ? '火山方舟需在控制台「开通管理」开通模型后才能调用（仅申请 API Key 不够）。模型名填 Model ID（如 doubao-seed-2-1-lite-260915）或 ep- 开头的推理接入点 ID；doubao-seed-1-6-* 已下线'
+                  : undefined
             }
           >
-            <Input placeholder='如 qwen-plus / deepseek-chat / glm-4-flash' />
+            <Input placeholder='如 qwen-plus / deepseek-chat / doubao-seed-2-1-lite-260915 / ep-...' />
           </Form.Item>
           <Form.Item
             name='baseUrl'

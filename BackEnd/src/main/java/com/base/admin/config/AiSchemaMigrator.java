@@ -70,7 +70,7 @@ public class AiSchemaMigrator implements ApplicationRunner {
                       UNION ALL SELECT 'deepseek', 'DeepSeek', 'deepseek-chat', 2, 'DeepSeek OpenAI 兼容'
                       UNION ALL SELECT 'zhipu', '智谱GLM', 'glm-4-flash', 3, '智谱开放平台'
                       UNION ALL SELECT 'moonshot', '月之暗面', 'moonshot-v1-8k', 4, 'Moonshot / Kimi'
-                      UNION ALL SELECT 'doubao', '豆包', 'doubao-seed-1-6-250615', 5, '火山方舟 Ark OpenAI 兼容'
+                      UNION ALL SELECT 'doubao', '豆包', 'doubao-seed-2-1-lite-260915', 5, '火山方舟 Ark OpenAI 兼容（需在控制台开通模型或填 ep- 接入点）'
                     ) v
                     WHERE NOT EXISTS (SELECT 1 FROM sys_ai_provider p WHERE p.provider = v.provider)
                     """);
@@ -88,6 +88,22 @@ public class AiSchemaMigrator implements ApplicationRunner {
                     """);
             if (migrated > 0) {
                 log.info("已将通义默认模型从 qwen-turbo 迁移为 qwen-plus，影响 {} 行", migrated);
+            }
+            // 豆包 1.6 系列带日期模型 ID 已于 2026-09 在火山方舟中国区下线，继续调用必然 404。
+            // 只迁移这些已知失效值，绝不覆盖用户自定义的模型名或 ep- 接入点 ID。
+            int doubaoMigrated = statement.executeUpdate("""
+                    UPDATE sys_ai_provider
+                    SET model = 'doubao-seed-2-1-lite-260915'
+                    WHERE provider = 'doubao'
+                      AND is_active = 1
+                      AND model IN (
+                        'doubao-seed-1-6-250615', 'doubao-seed-1-6-flash-250715',
+                        'doubao-seed-1-6-thinking-250715', 'doubao-seed-1-6-lite-250715',
+                        'doubao-1-5-pro-32k-250115', 'doubao-1-5-lite-32k-250115', ''
+                      )
+                    """);
+            if (doubaoMigrated > 0) {
+                log.info("已将豆包已下线模型迁移为 doubao-seed-2-1-lite-260915，影响 {} 行", doubaoMigrated);
             }
         }
     }

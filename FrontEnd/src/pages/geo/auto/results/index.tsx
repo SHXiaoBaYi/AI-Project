@@ -182,18 +182,16 @@ const AutoResultPage = memo(function AutoResultPage() {
       fieldProps: { showSearch: true, options: topics.map((t) => ({ label: t.topicName, value: t.id })) },
     },
     {
-      title: '日期起',
-      dataIndex: 'dateStart',
+      title: '监测日期',
+      dataIndex: 'runDateRange',
       hideInTable: true,
-      valueType: 'date',
-      fieldProps: { placeholder: '监测日期起' },
-    },
-    {
-      title: '日期止',
-      dataIndex: 'dateEnd',
-      hideInTable: true,
-      valueType: 'date',
-      fieldProps: { placeholder: '监测日期止' },
+      valueType: 'dateRange',
+      search: {
+        transform: (v) => ({
+          dateStart: v?.[0] ? dayjs(v[0]).format('YYYY-MM-DD') : undefined,
+          dateEnd: v?.[1] ? dayjs(v[1]).format('YYYY-MM-DD') : undefined,
+        }),
+      },
     },
     {
       title: '提及',

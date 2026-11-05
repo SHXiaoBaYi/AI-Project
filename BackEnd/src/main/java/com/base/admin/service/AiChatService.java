@@ -53,6 +53,17 @@ public class AiChatService {
             "qwen-turbo-latest"
     );
 
+    /**
+     * 火山方舟：模型按账号逐个开通、且带日期的 ID 会下线，404 时依次试当前在售模型。
+     * doubao-seed-1-6-* 已于 2026-09 停止服务；用户也可在配置里填 ep- 开头的推理接入点 ID。
+     */
+    private static final List<String> DOUBAO_MODEL_FALLBACKS = List.of(
+            "doubao-seed-2-1-lite-260915",
+            "doubao-seed-2-1-turbo-260628",
+            "doubao-seed-2-1-pro-260915",
+            "doubao-seed-2-0-lite-260428"
+    );
+
     private final AiProperties aiProperties;
     private final SysAiProviderService aiProviderService;
     private final ObjectMapper objectMapper;
@@ -219,32 +230,41 @@ public class AiChatService {
         ResolvedEndpoint ep = resolveEndpoint(p);
         List<String> models = modelCandidates(p, ep.model());
         List<String> attempts = new ArrayList<>();
+        CallFailedException lastModelError = null;
         clearRateLimit(p);
         for (String model : models) {
             try {
                 String raw = invokeChatCompletions(ep, model, "你是连通性探测。", "只回复：ok", 0.1, false, null);
                 attempts.add(model + " => OK");
                 clearRateLimit(p);
+                String hint = model.equals(ep.model())
+                        ? "" : "（这不是当前配置的模型，建议到「AI模型配置」把模型名改成 " + model + "，避免每次多一次失败请求）";
                 return SysAiProviderTestVO.builder()
                         .success(true)
                         .provider(p)
                         .model(model)
                         .httpStatus(200)
-                        .message("连通成功，可用模型：" + model)
+                        .message("连通成功，可用模型：" + model + hint)
                         .attempts(attempts)
                         .build();
             } catch (CallFailedException e) {
                 attempts.add(model + " => HTTP " + e.httpStatus() + " " + truncate(e.body(), 120));
-                if (!e.rateLimited()) {
-                    return SysAiProviderTestVO.builder()
-                            .success(false)
-                            .provider(p)
-                            .model(model)
-                            .httpStatus(e.httpStatus())
-                            .message(friendlyProbeError(ep.displayName(), e))
-                            .attempts(attempts)
-                            .build();
+                if (e.rateLimited()) {
+                    continue;
                 }
+                // 模型未开通 / ID 已下线：换下一个在售模型再试，别把英文 404 JSON 直接甩给用户
+                if (models.size() > 1 && isModelUnavailable(e)) {
+                    lastModelError = e;
+                    continue;
+                }
+                return SysAiProviderTestVO.builder()
+                        .success(false)
+                        .provider(p)
+                        .model(model)
+                        .httpStatus(e.httpStatus())
+                        .message(friendlyProbeError(ep.displayName(), e))
+                        .attempts(attempts)
+                        .build();
             } catch (Exception e) {
                 attempts.add(model + " => EX " + truncate(e.getMessage(), 120));
                 return SysAiProviderTestVO.builder()
@@ -256,13 +276,23 @@ public class AiChatService {
                         .build();
             }
         }
+        if (lastModelError != null) {
+            return SysAiProviderTestVO.builder()
+                    .success(false)
+                    .provider(p)
+                    .model(models.isEmpty() ? ep.model() : models.getLast())
+                    .httpStatus(404)
+                    .message(modelUnavailableMessage(ep.displayName(), lastModelError, models))
+                    .attempts(attempts)
+                    .build();
+        }
         markRateLimited(p);
         return SysAiProviderTestVO.builder()
                 .success(false)
                 .provider(p)
                 .model(models.isEmpty() ? ep.model() : models.getLast())
                 .httpStatus(429)
-                .message("通义所有候选模型均返回 429。这是阿里云按「主账号 + 模型」限流："
+                .message("所有候选模型均返回 429 限流。通义是阿里云按「主账号 + 模型」限流："
                         + "换同账号新 Key 通常无效；请到百炼控制台看 qwen-plus / qwen-flash 是否可调，"
                         + "或把模型改成控制台里可用的名称，或先用智谱/DeepSeek。")
                 .attempts(attempts)
@@ -304,6 +334,7 @@ public class AiChatService {
         ResolvedEndpoint ep = resolveEndpoint(p);
         List<String> models = modelCandidates(p, ep.model());
         CallFailedException lastRate = null;
+        CallFailedException lastModelError = null;
         for (String model : models) {
             try {
                 log.info("调用 AI [{}] model={} deepThink={} topP={} baseUrl={}",
@@ -332,6 +363,12 @@ public class AiChatService {
                     log.warn("AI 限流 [{}] model={} HTTP {} body={}",
                             ep.displayName(), model, e.httpStatus(), truncate(e.body(), 240));
                     lastRate = e;
+                    continue;
+                }
+                if (models.size() > 1 && isModelUnavailable(e)) {
+                    log.warn("AI 模型不可用 [{}] model={} HTTP {}，尝试下一个候选模型",
+                            ep.displayName(), model, e.httpStatus());
+                    lastModelError = e;
                     continue;
                 }
                 // 深度思考参数不被旧模型接受时，自动降级再试一次
@@ -365,9 +402,12 @@ public class AiChatService {
                 throw new BusinessException(friendlyAiError(ep.displayName(), e));
             }
         }
-        markRateLimited(p);
         if (lastRate != null) {
+            markRateLimited(p);
             throw new BusinessException(friendlyRateLimit(ep.displayName(), lastRate.body(), models));
+        }
+        if (lastModelError != null) {
+            throw new BusinessException(modelUnavailableMessage(ep.displayName(), lastModelError, models));
         }
         throw new BusinessException("调用 AI 失败（" + ep.displayName() + "）");
     }
@@ -378,6 +418,7 @@ public class AiChatService {
         ResolvedEndpoint ep = resolveEndpoint(p);
         List<String> models = modelCandidates(p, ep.model());
         CallFailedException lastRate = null;
+        CallFailedException lastModelError = null;
         for (String model : models) {
             try {
                 log.info("流式调用 AI [{}] model={} deepThink={} topP={}", ep.displayName(), model, deepThink, topP);
@@ -386,6 +427,10 @@ public class AiChatService {
             } catch (CallFailedException e) {
                 if (e.rateLimited()) {
                     lastRate = e;
+                    continue;
+                }
+                if (models.size() > 1 && isModelUnavailable(e)) {
+                    lastModelError = e;
                     continue;
                 }
                 // 通义深度思考流式不稳定时降级非思考流式
@@ -408,9 +453,12 @@ public class AiChatService {
                 throw new BusinessException("流式调用失败（" + ep.displayName() + "）：" + truncate(e.getMessage(), 200));
             }
         }
-        markRateLimited(p);
         if (lastRate != null) {
+            markRateLimited(p);
             throw new BusinessException(friendlyRateLimit(ep.displayName(), lastRate.body(), models));
+        }
+        if (lastModelError != null) {
+            throw new BusinessException(modelUnavailableMessage(ep.displayName(), lastModelError, models));
         }
         throw new BusinessException("流式调用 AI 失败（" + ep.displayName() + "）");
     }
@@ -586,6 +634,9 @@ public class AiChatService {
         if (AiProperties.PROVIDER_TONGYI.equals(provider)) {
             set.addAll(TONGYI_MODEL_FALLBACKS);
         }
+        if (AiProperties.PROVIDER_DOUBAO.equals(provider)) {
+            set.addAll(DOUBAO_MODEL_FALLBACKS);
+        }
         return new ArrayList<>(set);
     }
 
@@ -653,7 +704,45 @@ public class AiChatService {
         if (e.rateLimited()) {
             return friendlyRateLimit(displayName, e.body(), List.of());
         }
+        if (isModelUnavailable(e)) {
+            return modelUnavailableMessage(displayName, e, List.of());
+        }
         return "探测失败（" + displayName + "）HTTP " + e.httpStatus() + ": " + truncate(e.body(), 280);
+    }
+
+    /**
+     * 模型不可用（可切换候选）判定：火山方舟用 404 + ModelNotOpen 表示「账号未开通模型」，
+     * 用 404 + InvalidEndpointOrModel.NotFound 表示「模型 ID 不存在或已下线」。
+     * 401/403 属于 Key/权限问题，必须原样报错，不能盲目换模型。
+     */
+    private static boolean isModelUnavailable(CallFailedException e) {
+        if (e.httpStatus() != 404) {
+            return false;
+        }
+        String body = nz(e.body());
+        return body.contains("ModelNotOpen")
+                || body.contains("InvalidEndpointOrModel.NotFound")
+                || body.contains("ModelNotFound");
+    }
+
+    /** 把厂商的英文 404 翻译成可执行的中文操作指引 */
+    private static String modelUnavailableMessage(String displayName, CallFailedException e, List<String> models) {
+        String body = nz(e.body());
+        String prefix = "探测/调用失败（" + displayName + "）HTTP 404：";
+        String reason;
+        if (body.contains("ModelNotOpen")) {
+            reason = "账号未开通该模型。火山方舟需要在控制台「方舟 → 开通管理」逐个开通模型后才能调用，仅申请 API Key 不够；"
+                    + "已尝试的候选模型均返回 ModelNotOpen。";
+        } else if (body.contains("InvalidEndpointOrModel.NotFound")) {
+            reason = "模型 ID 不存在或已下线（doubao-seed-1-6-* 系列已于 2026-09 停止服务）。";
+        } else {
+            return prefix + "模型名不存在或未开通，请核对厂商控制台里的 Model ID。" + truncate(body, 200);
+        }
+        return prefix + reason
+                + " 处理：①在火山方舟控制台开通 doubao-seed-2-1-lite-260915（或其它在售模型）；"
+                + "②或创建「推理接入点」，把 ep- 开头的接入点 ID 填入「系统管理 → AI模型配置 → 模型名」；"
+                + "③确认 API Key 与模型属于同一个项目空间。"
+                + (models.isEmpty() ? "" : " 已尝试：" + String.join(" / ", models) + "。");
     }
 
     private static String extractRequestId(String body) {
@@ -676,6 +765,9 @@ public class AiChatService {
     private static String friendlyAiError(String displayName, Exception e) {
         String detail = e == null ? "" : e.getMessage();
         if (e instanceof CallFailedException cfe) {
+            if (isModelUnavailable(cfe)) {
+                return modelUnavailableMessage(displayName, cfe, List.of());
+            }
             detail = cfe.httpStatus() + ": " + truncate(cfe.body(), 280);
         } else if (e instanceof RestClientResponseException re) {
             detail = re.getStatusCode().value() + " " + re.getStatusText()

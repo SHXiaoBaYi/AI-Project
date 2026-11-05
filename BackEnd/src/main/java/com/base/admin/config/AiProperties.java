@@ -125,7 +125,10 @@ public class AiProperties {
             case PROVIDER_ZHIPU -> "glm-4-flash";
             case PROVIDER_MOONSHOT -> "moonshot-v1-8k";
             case PROVIDER_DEEPSEEK -> "deepseek-chat";
-            case PROVIDER_DOUBAO -> "doubao-seed-1-6-250615";
+            // 火山方舟模型 ID 带日期且会下线：doubao-seed-1-6-* 已于 2026-09 停止服务。
+            // 账号还需在方舟控制台「开通管理」逐个开通模型；未开通会返回 404 ModelNotOpen。
+            // 若使用推理接入点，请在 AI 模型配置里把模型名改成 ep- 开头的接入点 ID。
+            case PROVIDER_DOUBAO -> "doubao-seed-2-1-lite-260915";
             case PROVIDER_LOCAL -> "local-template";
             default -> "deepseek-chat";
         };
