@@ -45,7 +45,11 @@ import com.base.admin.domain.vo.HrJobCommStatsVO;
 import com.base.admin.domain.vo.HrStageCatalogVO;
 import com.base.admin.service.HrInterviewRecordService;
 import com.base.admin.service.HrInviteService;
+import com.base.admin.domain.dto.HrStageAdjustDTO;
+import com.base.admin.domain.dto.HrStageAdjustLogQueryDTO;
+import com.base.admin.domain.vo.HrStageAdjustLogVO;
 import com.base.admin.service.HrMasterService;
+import com.base.admin.service.HrStageAdjustService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -92,6 +96,7 @@ public class HrMasterController {
     private final com.base.admin.service.HrResumeParseService resumeParseService;
     private final HrRequisitionLogService requisitionLogService;
     private final HrRequisitionMonthTaskService requisitionMonthTaskService;
+    private final HrStageAdjustService stageAdjustService;
 
     @Operation(summary = "需求列表")
     @PostMapping("/requisition/list")
@@ -258,6 +263,23 @@ public class HrMasterController {
     @Log(title = "候选人", businessType = 2)
     public Result<Long> updateApplication(@Valid @RequestBody HrApplicationDTO dto) {
         return Result.ok(masterService.saveApplication(dto));
+    }
+
+    @Operation(summary = "调整候选人阶段")
+    @PostMapping("/application/stage/adjust")
+    @RequiresPermission("hr:application:stage")
+    @Log(title = "调整候选人阶段", businessType = 2)
+    public Result<Void> adjustApplicationStage(@Valid @RequestBody HrStageAdjustDTO dto) {
+        stageAdjustService.adjust(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "阶段调整记录")
+    @PostMapping("/application/stage/log/list")
+    @RequiresPermission("hr:application:stage-log")
+    public Result<PageResult<HrStageAdjustLogVO>> applicationStageLogs(
+            @RequestBody(required = false) HrStageAdjustLogQueryDTO query) {
+        return Result.ok(stageAdjustService.logs(query == null ? new HrStageAdjustLogQueryDTO() : query));
     }
 
     @Operation(summary = "解析简历（AI 优先识别姓名/性别/年龄/学历/职位/公司/电话/邮箱/渠道，供新增预填）")

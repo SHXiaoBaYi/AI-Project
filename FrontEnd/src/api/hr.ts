@@ -797,6 +797,40 @@ export function saveHrApplicationApi(data: Record<string, unknown>) {
     : request.post<unknown, number>('/hr/application', data);
 }
 
+export function adjustHrApplicationStageApi(data: {
+  applicationId: number;
+  stageCode: string;
+  businessAt: string;
+  reason: string;
+}) {
+  return request.post<unknown, void>('/hr/application/stage/adjust', data);
+}
+
+export type HrStageAdjustLog = {
+  id: number;
+  applicationId?: number;
+  candidateName?: string;
+  jobName?: string;
+  fromStage?: string;
+  fromStageName?: string;
+  toStage?: string;
+  toStageName?: string;
+  businessAt?: string;
+  reason?: string;
+  operatorNickname?: string;
+  operatorUsername?: string;
+  operatedAt?: string;
+};
+
+export function listHrStageAdjustLogsApi(data: {
+  pageNum?: number;
+  pageSize?: number;
+  applicationId?: number;
+  keyword?: string;
+}) {
+  return request.post<unknown, { total: number; rows: HrStageAdjustLog[] }>('/hr/application/stage/log/list', data);
+}
+
 export function uploadHrResumeApi(applicationId: number, file: File) {
   const formData = new FormData();
   formData.append('file', file);

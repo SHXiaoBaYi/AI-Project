@@ -426,7 +426,8 @@ public class HrPanelService {
         List<Object> eventArgs = new ArrayList<>(ids);
         eventArgs.add(window.from());
         eventArgs.add(window.toExclusive());
-        // 只认阶段事件的发生时间 event_at。create_time / update_time 是入库和后来改行的时间。
+        // 有「调整阶段」用业务时间；否则用阶段事件 event_at，不用入库或改行时间。
+        String stageAt = "COALESCE(" + HrStageAdjustClock.latestBusinessAt("e.application_id", "e.stage_code") + ", e.event_at)";
         jdbc.query("""
                 SELECT a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code) stage_name, COUNT(DISTINCT a.id) cnt
                 FROM hr_stage_event e
@@ -434,10 +435,10 @@ public class HrPanelService {
                 LEFT JOIN hr_stage_def s ON s.stage_code = e.stage_code AND s.is_active = 1
                 WHERE e.is_active = 1 AND a.requisition_id IN (%s)
                   AND e.stage_code <> 'ONBOARDED'
-                  AND e.event_at >= ? AND e.event_at < ?
+                  AND %s >= ? AND %s < ?
                 GROUP BY a.requisition_id, e.stage_code, COALESCE(s.stage_name, e.stage_code), COALESCE(s.sort_no, 999)
                 ORDER BY a.requisition_id, COALESCE(s.sort_no, 999)
-                """.formatted(placeholders), rs -> {
+                """.formatted(placeholders, stageAt, stageAt), rs -> {
             long reqId = rs.getLong("requisition_id");
             String name = displayStage(rs.getString("stage_code"), rs.getString("stage_name"));
             int cnt = rs.getInt("cnt");
@@ -448,15 +449,17 @@ public class HrPanelService {
         List<Object> onboardArgs = new ArrayList<>(ids);
         onboardArgs.add(window.start());
         onboardArgs.add(window.end().plusDays(1));
+        String onboardDay = "COALESCE(DATE(" + HrStageAdjustClock.latestBusinessAt("a.id", "'ONBOARDED'") + "), ob.onboard_date)";
         jdbc.query("""
                 SELECT a.requisition_id, COUNT(DISTINCT a.id) cnt
                 FROM hr_onboard ob
                 JOIN hr_application a ON a.id = ob.application_id AND a.is_active = 1
                 WHERE ob.is_active = 1 AND ob.onboard_date IS NOT NULL
+                  AND a.current_stage = 'ONBOARDED'
                   AND a.requisition_id IN (%s)
-                  AND ob.onboard_date >= ? AND ob.onboard_date < ?
+                  AND %s >= ? AND %s < ?
                 GROUP BY a.requisition_id
-                """.formatted(placeholders), rs -> {
+                """.formatted(placeholders, onboardDay, onboardDay), rs -> {
             long reqId = rs.getLong("requisition_id");
             int cnt = rs.getInt("cnt");
             if (cnt > 0) {
@@ -466,15 +469,16 @@ public class HrPanelService {
         List<Object> inviteArgs = new ArrayList<>(ids);
         inviteArgs.add(window.from());
         inviteArgs.add(window.toExclusive());
+        String inviteAt = "COALESCE(" + HrStageAdjustClock.latestBusinessAt("a.id", "'INVITED'")
+                + ", COALESCE(i.create_time, i.interview_at))";
         jdbc.query("""
                 SELECT a.requisition_id, COUNT(DISTINCT a.id) cnt
                 FROM hr_interview_invite i
                 JOIN hr_application a ON a.id = i.application_id AND a.is_active = 1
                 WHERE i.is_active = 1 AND i.status <> 'CANCELLED' AND a.requisition_id IN (%s)
-                  AND COALESCE(i.create_time, i.interview_at) >= ?
-                  AND COALESCE(i.create_time, i.interview_at) < ?
+                  AND %s >= ? AND %s < ?
                 GROUP BY a.requisition_id
-                """.formatted(placeholders), rs -> {
+                """.formatted(placeholders, inviteAt, inviteAt), rs -> {
             long reqId = rs.getLong("requisition_id");
             int cnt = rs.getInt("cnt");
             if (cnt > 0) {

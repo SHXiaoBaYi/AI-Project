@@ -30,6 +30,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -1204,21 +1205,21 @@ public class HrMasterService {
 
     @Transactional
     public Long saveApplication(HrApplicationDTO dto) {
-        String stage = dto.getCurrentStage().trim();
-        Integer stageOk = jdbc.queryForObject(
-                "SELECT COUNT(1) FROM hr_stage_def WHERE stage_code = ? AND is_active = 1", Integer.class, stage);
-        if (stageOk == null || stageOk == 0) {
-            throw new BusinessException("阶段不存在");
-        }
         Integer requisitionOk = jdbc.queryForObject(
                 "SELECT COUNT(1) FROM hr_requisition WHERE id = ? AND is_active = 1", Integer.class, dto.getRequisitionId());
         if (requisitionOk == null || requisitionOk == 0) {
             throw new BusinessException("招聘需求不存在");
         }
         String user = SecurityUtils.getCurrentUsername();
-        String resumeStatus = "ENTERED".equals(stage) ? "DRAFT" : "PASS";
         Submitter submitter = resolveSubmitter(dto.getSubmitterUserId(), dto.getSubmitterName());
         if (dto.getId() == null) {
+            String stage = dto.getCurrentStage() == null ? "" : dto.getCurrentStage().trim();
+            Integer stageOk = jdbc.queryForObject(
+                    "SELECT COUNT(1) FROM hr_stage_def WHERE stage_code = ? AND is_active = 1", Integer.class, stage);
+            if (stageOk == null || stageOk == 0) {
+                throw new BusinessException("阶段不存在");
+            }
+            String resumeStatus = "ENTERED".equals(stage) ? "DRAFT" : "PASS";
             jdbc.update("""
                     INSERT INTO hr_candidate (display_name, phone, email, gender, age, education, candidate_no,
                                               current_title, current_company, create_by, is_active)
@@ -1257,19 +1258,23 @@ public class HrMasterService {
                 emptyToNull(dto.getCandidateNo()), emptyToNull(dto.getCurrentTitle()),
                 emptyToNull(dto.getCurrentCompany()), candidateId);
         ensureCandidateNo(candidateId, dto.getCandidateNo());
+        String keptStage = jdbc.query("""
+                SELECT current_stage FROM hr_application WHERE id = ? AND is_active = 1
+                """, rs -> rs.next() ? rs.getString(1) : null, dto.getId());
+        if (!StringUtils.hasText(keptStage)) {
+            throw new BusinessException("候选人不存在");
+        }
+        String keptResume = "ENTERED".equals(keptStage) ? "DRAFT" : "PASS";
         int updated = jdbc.update("""
                 UPDATE hr_application
-                SET requisition_id = ?, channel_code = ?, resume_status = ?, submitter_user_id = ?, submitter_name = ?, submitted_at = ?, current_stage = ?
+                SET requisition_id = ?, channel_code = ?, resume_status = ?, submitter_user_id = ?, submitter_name = ?, submitted_at = ?
                 WHERE id = ? AND is_active = 1
-                """, dto.getRequisitionId(), emptyToNull(dto.getChannelCode()), resumeStatus, submitter.userId(), submitter.name(),
-                dto.getSubmittedAt(), stage, dto.getId());
+                """, dto.getRequisitionId(), emptyToNull(dto.getChannelCode()), keptResume, submitter.userId(), submitter.name(),
+                dto.getSubmittedAt(), dto.getId());
         if (updated == 0) {
             throw new BusinessException("候选人不存在");
         }
         touchStage(dto.getId(), "ENTERED", dto.getSubmittedAt(), user);
-        if (!"ENTERED".equals(stage)) {
-            touchStage(dto.getId(), stage, dto.getSubmittedAt(), user);
-        }
         return dto.getId();
     }
 

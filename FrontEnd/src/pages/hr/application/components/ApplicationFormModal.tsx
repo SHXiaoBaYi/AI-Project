@@ -435,14 +435,17 @@ export default function ApplicationFormModal({
         <Form.Item
           name='currentStage'
           label='阶段'
+          extra={
+            editing
+              ? '阶段不能在这里改，请用列表里的「调整阶段」。'
+              : '新建候选人从待初筛开始，后续阶段由业务动作推进。'
+          }
           rules={[{ required: true, message: '请选择阶段' }]}
         >
           <Select
             options={stages}
-            allowClear
-            showSearch
-            optionFilterProp='label'
-            placeholder='请选择阶段'
+            disabled
+            placeholder='待初筛'
           />
         </Form.Item>
         <Form.Item

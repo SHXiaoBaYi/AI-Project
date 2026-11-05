@@ -561,15 +561,16 @@ public class HrKpiTaskService {
     }
 
     private List<OnboardHit> listOnboards(Long requisitionId) {
+        String at = onboardAtExpr();
         return jdbc.query("""
-                SELECT a.id AS application_id,
-                       TIMESTAMP(ob.onboard_date) AS onboard_at
+                SELECT a.id AS application_id, %s AS onboard_at
                 FROM hr_application a
                 JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
                 WHERE a.requisition_id = ? AND a.is_active = 1
+                  AND a.current_stage = 'ONBOARDED'
                   AND ob.onboard_date IS NOT NULL
-                ORDER BY ob.onboard_date ASC, a.id ASC
-                """, (rs, i) -> new OnboardHit(
+                ORDER BY onboard_at ASC, a.id ASC
+                """.formatted(at), (rs, i) -> new OnboardHit(
                 rs.getLong("application_id"),
                 rs.getTimestamp("onboard_at").toLocalDateTime()), requisitionId);
     }
@@ -577,7 +578,7 @@ public class HrKpiTaskService {
     private List<LocalDateTime> listQualifiedAts(Long requisitionId) {
         // 已入职人选走入职记分，其合格简历不再计入简历达标，避免重复
         return jdbc.query("""
-                SELECT MIN(COALESCE(rec.interviewed_at, rec.update_time, rec.create_time)) AS hit_at
+                SELECT MIN(%s) AS hit_at
                 FROM hr_interview_record rec
                 JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
                 WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
@@ -588,7 +589,7 @@ public class HrKpiTaskService {
                   )
                 GROUP BY rec.application_id
                 ORDER BY hit_at ASC
-                """, (rs, i) -> rs.getTimestamp("hit_at").toLocalDateTime(), requisitionId);
+                """.formatted(resumeHitAt()), (rs, i) -> rs.getTimestamp("hit_at").toLocalDateTime(), requisitionId);
     }
 
     private static LocalDateTime endOfMonth(LocalDateTime at) {
@@ -1221,14 +1222,16 @@ public class HrKpiTaskService {
     }
 
     private int countOnboardedAppsInRange(Long requisitionId, LocalDateTime from, LocalDateTime to) {
+        String day = "COALESCE(DATE(" + HrStageAdjustClock.latestBusinessAt("a.id", "'ONBOARDED'") + "), ob.onboard_date)";
         Integer n = jdbc.queryForObject("""
                 SELECT COUNT(1) FROM hr_application a
                 JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
                 WHERE a.requisition_id = ? AND a.is_active = 1
+                  AND a.current_stage = 'ONBOARDED'
                   AND ob.onboard_date IS NOT NULL
-                  AND ob.onboard_date >= DATE(?)
-                  AND ob.onboard_date < DATE(?)
-                """, Integer.class, requisitionId, from, to);
+                  AND %s >= DATE(?)
+                  AND %s < DATE(?)
+                """.formatted(day, day), Integer.class, requisitionId, from, to);
         return n == null ? 0 : n;
     }
 
@@ -1254,19 +1257,53 @@ public class HrKpiTaskService {
                     SELECT 1 FROM hr_onboard ob
                     WHERE ob.application_id = a.id AND ob.is_active = 1 AND ob.onboard_date IS NOT NULL
                   )
-                  AND COALESCE(rec.interviewed_at, rec.update_time, rec.create_time) >= ?
-                  AND COALESCE(rec.interviewed_at, rec.update_time, rec.create_time) < ?
-                """, Integer.class, requisitionId, from, to);
+                  AND %s >= ?
+                  AND %s < ?
+                """.formatted(resumeHitAt(), resumeHitAt()), Integer.class, requisitionId, from, to);
         return n == null ? 0 : n;
     }
 
     private LocalDateTime onboardEventAt(Long applicationId) {
         return jdbc.query("""
-                SELECT onboard_date FROM hr_onboard
-                WHERE application_id = ? AND is_active = 1 AND onboard_date IS NOT NULL
-                ORDER BY onboard_date ASC LIMIT 1
-                """, rs -> rs.next() && rs.getDate(1) != null
-                ? rs.getDate(1).toLocalDate().atStartOfDay() : null, applicationId);
+                SELECT COALESCE(
+                    %s,
+                    (SELECT TIMESTAMP(onboard_date) FROM hr_onboard
+                     WHERE application_id = ? AND is_active = 1 AND onboard_date IS NOT NULL
+                     ORDER BY onboard_date ASC LIMIT 1)
+                )
+                """.formatted(HrStageAdjustClock.latestBusinessAt("?", "'ONBOARDED'")),
+                rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null,
+                applicationId, applicationId);
+    }
+
+    /** 已入职时间：调整阶段的业务时间优先，否则用入职日。 */
+    private static String onboardAtExpr() {
+        return "COALESCE(" + HrStageAdjustClock.latestBusinessAt("a.id", "'ONBOARDED'") + ", TIMESTAMP(ob.onboard_date))";
+    }
+
+    /**
+     * 合格简历命中时间：同一轮结论若做过调整阶段，用那次业务时间；否则用面试记录时间。
+     */
+    private static String resumeHitAt() {
+        String adjust = """
+                (SELECT l.business_at
+                 FROM hr_stage_adjust_log l
+                 WHERE l.application_id = rec.application_id AND l.is_active = 1
+                   AND (
+                     (rec.round_no = 1 AND l.to_stage IN ('FIRST_ROUND','FIRST_FAIL','FIRST_PENDING','R1_DISPUTE'))
+                     OR (rec.round_no = 2 AND l.to_stage IN ('SECOND_ROUND','R2_FAIL','R2_PENDING','R2_DISPUTE'))
+                     OR (rec.round_no >= 3 AND l.to_stage IN (
+                          CONCAT('R', rec.round_no, '_PASS'),
+                          CONCAT('R', rec.round_no, '_FAIL'),
+                          CONCAT('R', rec.round_no, '_PENDING'),
+                          CONCAT('R', rec.round_no, '_DISPUTE')))
+                     OR (l.to_stage = 'FINAL' AND rec.round_no = (
+                          SELECT MAX(rr.round_no) FROM hr_requisition_round rr
+                          WHERE rr.requisition_id = a.requisition_id AND rr.is_active = 1))
+                   )
+                 ORDER BY CASE WHEN l.to_stage = 'FINAL' THEN 1 ELSE 0 END, l.operated_at DESC, l.id DESC
+                 LIMIT 1)""";
+        return "COALESCE(" + adjust + ", COALESCE(rec.interviewed_at, rec.update_time, rec.create_time))";
     }
 
     private Map<String, Object> loadTask(Long id) {

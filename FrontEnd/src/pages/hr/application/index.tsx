@@ -11,6 +11,8 @@ import { AiAnalysisDrawer } from '@/components/hr/AiAnalysisDrawer';
 import InterviewReviewDrawer from '@/components/hr/InterviewReviewDrawer';
 import InviteFormModal, { type InviteFormPreset } from '@/components/hr/InviteFormModal';
 import { canCreateInvite, maxRoundOf, nextInviteRound } from '@/components/hr/inviteRound';
+import StageAdjustLogDrawer from '@/components/hr/StageAdjustLogDrawer';
+import StageAdjustModal from '@/components/hr/StageAdjustModal';
 import ApplicationFormModal from './components/ApplicationFormModal';
 import ImportApplicationModal from './components/ImportApplicationModal';
 import {
@@ -139,6 +141,8 @@ const ApplicationPage = memo(function ApplicationPage() {
   const [aiTarget, setAiTarget] = useState<AppRow | null>(null);
   const [reviewTarget, setReviewTarget] = useState<AppRow | null>(null);
   const [invitePreset, setInvitePreset] = useState<InviteFormPreset | null>(null);
+  const [stageTarget, setStageTarget] = useState<AppRow | null>(null);
+  const [stageLogOpen, setStageLogOpen] = useState(false);
   const [roundPlans, setRoundPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
   const [ccRoundPlans, setCcRoundPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
 
@@ -235,14 +239,14 @@ const ApplicationPage = memo(function ApplicationPage() {
       {
         title: '操作',
         valueType: 'option',
-        width: 320,
+        width: 400,
         render: (_, record) => {
           const roundNo = nextInviteRound(record.currentStage);
           const maxRound = maxRoundOf(roundPlans, record.requisitionId);
           const inviteable = canCreateInvite(record.currentStage, maxRound) && record.requisitionId != null;
           return (
             <ActionButtons
-              maxVisible={4}
+              maxVisible={5}
               items={[
                 ...(inviteable && roundNo != null
                   ? [
@@ -274,6 +278,12 @@ const ApplicationPage = memo(function ApplicationPage() {
                   key: 'ai',
                   label: 'AI分析',
                   onClick: () => setAiTarget(record),
+                },
+                {
+                  key: 'stage',
+                  label: '调整阶段',
+                  perm: 'hr:application:stage',
+                  onClick: () => setStageTarget(record),
                 },
                 {
                   key: 'edit',
@@ -572,6 +582,13 @@ const ApplicationPage = memo(function ApplicationPage() {
             导入
           </PermissionButton>,
           <PermissionButton
+            key='stage-log'
+            perm='hr:application:stage-log'
+            onClick={() => setStageLogOpen(true)}
+          >
+            阶段调整记录
+          </PermissionButton>,
+          <PermissionButton
             key='add'
             type='primary'
             perm='hr:application:add'
@@ -614,6 +631,20 @@ const ApplicationPage = memo(function ApplicationPage() {
         candidateName={reviewTarget?.displayName}
         open={reviewTarget != null}
         onClose={() => setReviewTarget(null)}
+      />
+      <StageAdjustModal
+        open={stageTarget != null}
+        target={stageTarget}
+        stages={stages}
+        onClose={() => setStageTarget(null)}
+        onSuccess={() => {
+          message.success('阶段已调整');
+          actionRef.current?.reload();
+        }}
+      />
+      <StageAdjustLogDrawer
+        open={stageLogOpen}
+        onClose={() => setStageLogOpen(false)}
       />
       <InviteFormModal
         open={invitePreset != null}

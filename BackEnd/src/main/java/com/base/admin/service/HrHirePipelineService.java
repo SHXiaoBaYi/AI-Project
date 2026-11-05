@@ -83,6 +83,14 @@ public class HrHirePipelineService {
             }
             touch(applicationId, "ONBOARDED");
             jdbc.update("UPDATE hr_application SET current_stage = 'ONBOARDED' WHERE id = ? AND is_active = 1", applicationId);
+            String user = SecurityUtils.getCurrentUsername();
+            jdbc.update("""
+                    INSERT INTO hr_onboard (application_id, onboard_date, source, create_by, update_by, is_active)
+                    VALUES (?, CURDATE(), 'TASK', ?, ?, 1)
+                    ON DUPLICATE KEY UPDATE is_active = 1,
+                        onboard_date = IFNULL(onboard_date, CURDATE()),
+                        update_by = VALUES(update_by)
+                    """, applicationId, user, user);
             kpiTaskService.onApplicationOnboarded(applicationId);
         }
     }

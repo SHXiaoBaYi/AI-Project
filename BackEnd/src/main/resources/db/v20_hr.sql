@@ -688,3 +688,24 @@ INSERT INTO hr_base_dict (dict_type, code, name, sort_no, create_by, is_active) 
 ('JOB_PRIORITY', 'P0', '本月必须到岗', 1, 'hr-seed', 1),
 ('JOB_PRIORITY', 'P1', 'x份合格简历/到岗', 2, 'hr-seed', 1)
 ON DUPLICATE KEY UPDATE code = VALUES(code), sort_no = VALUES(sort_no);
+
+CREATE TABLE IF NOT EXISTS hr_stage_adjust_log (
+  id                  BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+  application_id      BIGINT       NOT NULL                COMMENT '投递',
+  candidate_name      VARCHAR(64)  NULL                    COMMENT '候选人',
+  job_name            VARCHAR(128) NULL                    COMMENT '岗位',
+  from_stage          VARCHAR(32)  NULL                    COMMENT '调整前阶段',
+  to_stage            VARCHAR(32)  NOT NULL                COMMENT '调整后阶段',
+  business_at         DATETIME     NOT NULL                COMMENT '业务时间：入职日或面试时间',
+  reason              VARCHAR(500) NOT NULL                COMMENT '调整原因',
+  operator_user_id    BIGINT       NULL                    COMMENT '操作人用户ID',
+  operator_username   VARCHAR(64)  NULL                    COMMENT '操作人账号',
+  operator_nickname   VARCHAR(64)  NULL                    COMMENT '操作人',
+  operated_at         DATETIME     NOT NULL                COMMENT '操作时间',
+  create_by           VARCHAR(50)  DEFAULT ''              COMMENT '创建者',
+  create_time         DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  is_active           TINYINT      NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+  PRIMARY KEY (id),
+  KEY idx_hr_stage_adjust_app (application_id, operated_at),
+  KEY idx_hr_stage_adjust_time (operated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='候选人阶段调整记录';
