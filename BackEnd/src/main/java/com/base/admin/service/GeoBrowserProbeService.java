@@ -337,16 +337,8 @@ public class GeoBrowserProbeService {
                     .setTimeout(properties.getNavigationTimeoutMs()));
             page.waitForTimeout(1_500);
 
-            // 1) 打开登录框
-            boolean entryClicked = false;
-            if (StringUtils.hasText(profile.getLoginEntrySelector())) {
-                Locator entry = page.locator(profile.getLoginEntrySelector()).first();
-                if (entry.count() > 0 && entry.isVisible()) {
-                    entry.click(new Locator.ClickOptions().setTimeout(5_000));
-                    entryClicked = true;
-                    page.waitForTimeout(1_000);
-                }
-            }
+            // 1) 打开登录框：候选入口逐个尝试，命中最先可见的那个（不同引擎分开，避免逗号混排被当纯 CSS）
+            boolean entryClicked = clickFirstVisible(page, profile.getLoginEntrySelectors(), diag, "loginEntry");
             diag.put("loginEntryClicked", entryClicked);
 
             // 2) 切到「账号密码登录」tab（部分平台默认是扫码）
@@ -366,7 +358,7 @@ public class GeoBrowserProbeService {
             }
             diag.put("loginInputsReady", inputsReady);
             if (!inputsReady) {
-                boolean captcha = isAnyVisible(page, profile.getLoginCaptchaSelector());
+                boolean captcha = isAnyVisible(page, profile.getLoginCaptchaSelectors());
                 diag.put("captchaDetected", captcha);
                 String hint = captcha
                         ? "该平台当前只提供扫码/短信验证码登录，无头浏览器无法自动完成：请把该账号的浏览器登录方式改为 STORAGE_STATE，"
@@ -382,14 +374,7 @@ public class GeoBrowserProbeService {
             accountInput.fill(account.getAccount());
             passwordInput.fill(account.getPassword());
             diag.put("stage", "LOGIN_SUBMIT");
-            boolean submitted = false;
-            if (StringUtils.hasText(profile.getLoginSubmitSelector())) {
-                Locator button = page.locator(profile.getLoginSubmitSelector()).first();
-                if (button.count() > 0 && button.isVisible()) {
-                    button.click(new Locator.ClickOptions().setTimeout(5_000));
-                    submitted = true;
-                }
-            }
+            boolean submitted = clickFirstVisible(page, profile.getLoginSubmitSelectors(), diag, "loginSubmit");
             if (!submitted) {
                 passwordInput.press("Enter");
             }
@@ -410,8 +395,7 @@ public class GeoBrowserProbeService {
                     success = true;
                     break;
                 }
-                if (entryClicked && StringUtils.hasText(profile.getLoginEntrySelector())
-                        && !isAnyVisible(page, profile.getLoginEntrySelector())) {
+                if (entryClicked && !isAnyVisible(page, profile.getLoginEntrySelectors())) {
                     success = true;
                     break;
                 }
@@ -463,6 +447,51 @@ public class GeoBrowserProbeService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** 候选选择器列表：任一可见即认为命中（与 loginRequiredSelectors 同一套容错思路） */
+    private boolean isAnyVisible(Page page, List<String> selectors) {
+        if (selectors == null || selectors.isEmpty()) {
+            return false;
+        }
+        for (String selector : selectors) {
+            if (isAnyVisible(page, selector)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 候选选择器列表：逐个尝试，点击最先可见的那个；单条语法/匹配失败不影响后续候选。
+     * 修复：原来把 "[data-testid='to_login_button'], text=/^登录$/" 当成一个字符串交给 Playwright，
+     * 会被当成纯 CSS 解析而抛 "Unexpected token ="；拆成多引擎列表后各自独立即可正常匹配。
+     */
+    private boolean clickFirstVisible(Page page, List<String> selectors, Map<String, Object> diag, String key) {
+        if (selectors == null || selectors.isEmpty()) {
+            diag.put(key, "未配置");
+            return false;
+        }
+        List<String> notFound = new ArrayList<>();
+        for (String selector : selectors) {
+            if (!StringUtils.hasText(selector)) {
+                continue;
+            }
+            try {
+                Locator locator = page.locator(selector).first();
+                if (locator.count() > 0 && locator.isVisible()) {
+                    locator.click(new Locator.ClickOptions().setTimeout(5_000));
+                    diag.put(key, "已点击：" + selector);
+                    return true;
+                }
+                notFound.add(selector);
+            } catch (Exception e) {
+                diag.put(key + "Error", rootMessage(e));
+                // 单条选择器语法/匹配失败，尝试下一条候选
+            }
+        }
+        diag.put(key, "未找到/不可见：" + String.join(" | ", notFound));
+        return false;
     }
 
     private String screenshotOnFailure(Page page, GeoBrowserProbeProperties.PlatformProfile profile,

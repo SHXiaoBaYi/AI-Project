@@ -150,11 +150,11 @@ geo:
       #     answer-reject-patterns: ["为你推荐", "有什么我能帮你的吗"]
       #     # 账号密码模拟登录适配器（按平台实际 DOM 覆盖；只有扫码/验证码的平台请改用 STORAGE_STATE）
       #     login-url: https://www.doubao.com/chat/
-      #     login-entry-selector: "[data-testid='to_login_button']"
+      #     login-entry-selectors: ["[data-testid='to_login_button']", "text=/^登录$/"]
       #     login-tab-selector: "text=密码登录"
       #     login-account-selector: "input[placeholder*='手机']"
       #     login-password-selector: "input[type='password']"
-      #     login-submit-selector: "text=/^登录$/"
+      #     login-submit-selectors: ["button[type='submit']", "text=/^登录$/"]
       #     login-success-selector: "[data-testid='user_avatar']"
 
 # 投放联动任务启动刷数：默认关闭。开启会导致用户删除的任务在重启后被重新生成。

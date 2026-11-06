@@ -128,8 +128,8 @@ public class GeoBrowserProbeProperties {
         /** 登录页地址；留空则用提问页 url 并点击登录入口 */
         private String loginUrl = "";
 
-        /** 登录入口按钮（未登录页上的「登录」），点击后弹出登录框 */
-        private String loginEntrySelector = "";
+        /** 登录入口按钮（未登录页上的「登录」）；命中任一候选即点击（不同引擎分开写，避免逗号混排被当纯 CSS 解析） */
+        private List<String> loginEntrySelectors = new ArrayList<>();
 
         /** 可选：切到「账号密码登录」的 tab / 单选 */
         private String loginTabSelector = "";
@@ -140,8 +140,8 @@ public class GeoBrowserProbeProperties {
         /** 密码输入框 */
         private String loginPasswordSelector = "";
 
-        /** 登录提交按钮 */
-        private String loginSubmitSelector = "";
+        /** 登录提交按钮；命中任一候选即点击（不同引擎分开写） */
+        private List<String> loginSubmitSelectors = new ArrayList<>();
 
         /** 登录成功标志元素（出现即认为登录成功，如头像/新建对话按钮） */
         private String loginSuccessSelector = "";
@@ -149,8 +149,8 @@ public class GeoBrowserProbeProperties {
         /** 登录成功标志 URL 片段（可选，命中即成功） */
         private String loginSuccessUrlPattern = "";
 
-        /** 出现该元素说明需要人工验证码/扫码，直接返回可执行提示，不做无谓等待 */
-        private String loginCaptchaSelector = "";
+        /** 出现任一候选即说明需要人工验证码/扫码，直接返回可执行提示（不同引擎分开写，避免逗号混排） */
+        private List<String> loginCaptchaSelectors = new ArrayList<>();
 
         /** 该平台是否支持深度思考 */
         private boolean deepThinkSupported = true;
@@ -205,13 +205,23 @@ public class GeoBrowserProbeProperties {
         // 通用账号密码登录适配器：多数平台是「登录入口 → 账号/密码 → 提交」。
         // 只有扫码/短信验证码的平台（如豆包）会命中 loginCaptchaSelector 并给出可执行提示，
         // 也可在 yml 里按 name 覆盖为真实选择器，或把账号登录方式设为 STORAGE_STATE。
-        p.setLoginEntrySelector("[data-testid='to_login_button'], text=/^登录$/");
+        p.setLoginEntrySelectors(new ArrayList<>(List.of(
+                "[data-testid='to_login_button']",
+                "text=/^登录$/"
+        )));
         p.setLoginTabSelector("text=/密码登录|账号登录/");
         p.setLoginAccountSelector("input[type='text'], input[name='username'], input[placeholder*='账号'], input[placeholder*='手机']");
         p.setLoginPasswordSelector("input[type='password']");
-        p.setLoginSubmitSelector("button[type='submit'], text=/^登录$/");
+        p.setLoginSubmitSelectors(new ArrayList<>(List.of(
+                "button[type='submit']",
+                "text=/^登录$/"
+        )));
         // 默认靠「登录入口消失」判定成功；平台若有明确头像/用户名元素可显式配置 loginSuccessSelector
-        p.setLoginCaptchaSelector("[class*='qrcode'], [class*='captcha'], text=/扫码登录|短信验证码|获取验证码/");
+        p.setLoginCaptchaSelectors(new ArrayList<>(List.of(
+                "[class*='qrcode']",
+                "[class*='captcha']",
+                "text=/扫码登录|短信验证码|获取验证码/"
+        )));
         return p;
     }
 
