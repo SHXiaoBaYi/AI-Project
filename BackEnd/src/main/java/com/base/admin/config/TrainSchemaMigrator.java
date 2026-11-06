@@ -228,14 +228,11 @@ public class TrainSchemaMigrator implements ApplicationRunner {
         menu(308, "重新识别", 306, 2, "", "", "F", "train:qa:recognize", "#", "");
         menu(309, "未命中提问", 300, 4, "train/miss", "train/miss/index", "C", "train:qa:list", "QuestionCircleOutlined", "没有找到答案的用户提问");
 
-        Long admin = roleId("admin");
-        if (admin != null) {
-            grant(admin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 320, 321);
-        }
-        Long hrAdmin = roleId("hr_admin");
-        if (hrAdmin != null) {
-            grant(hrAdmin, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 320, 321);
-        }
+        int[] trainMenus = {300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 320, 321};
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "admin", trainMenus);
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_admin", trainMenus);
+        SysRbacSeedSupport.linkRoleMenusIfAbsentByKey(jdbc, "admin", 320, 321);
+        SysRbacSeedSupport.linkRoleMenusIfAbsentByKey(jdbc, "hr_admin", 320, 321);
     }
 
     /** 上一版卫士过严，把手册正文误标为代码：中文操作说明恢复为「准」。 */
@@ -313,12 +310,5 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                       String perms, String icon, String remark) {
         SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.TRAIN, id, name, parent, sort, path, component, type,
                 perms, icon, remark);
-    }
-
-    private void grant(long roleId, int... menuIds) {
-        for (int menuId : menuIds) {
-            jdbc.update("""
-                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active) VALUES (?, ?, 1);""", roleId, menuId);
-        }
     }
 }

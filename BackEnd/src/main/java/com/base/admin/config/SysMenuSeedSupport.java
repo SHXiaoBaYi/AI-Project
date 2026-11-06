@@ -12,6 +12,7 @@ import java.util.Map;
  * 已有菜单的名称、上级、排序不回写。测试和生产上手动改过的这三项，发版后必须保留。
  * 新菜单仍用 INSERT 写入初始名称、层级和排序。路径、权限、图标继续随发版更新。
  * SchemaMigrator 新增/更新菜单应走本类，勿直接裸写 sys_menu。
+ * 角色与用户授权见 {@link SysRbacSeedSupport}。
  */
 public final class SysMenuSeedSupport {
 

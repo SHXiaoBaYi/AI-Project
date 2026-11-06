@@ -207,24 +207,13 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private void seedRoles() {
-        // 数据同步可能清空 sys_role；本地/测试缺超管时补回，避免菜单授权与登录账号断掉
-        insertRole("超级管理员", "admin", 1, "超级管理员拥有所有权限");
-        insertRole("招聘管理员", "hr_admin", 10, "全部招聘数据、导出、邀约、主数据");
-        insertRole("招聘负责人", "hr_owner", 11, "只看自己负责的需求");
-        insertRole("高管", "hr_exec", 12, "全公司看板可下钻，不可改主数据");
-        insertRole("普通账号", "hr_user", 13, "看板只读");
-        insertRole("面试官", "hr_interviewer", 14, "只看自己参与的面试");
-    }
-
-    private void insertRole(String name, String key, int sort, String remark) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(1) FROM sys_role WHERE role_key = ?", Integer.class, key);
-        if (count != null && count > 0) {
-            return;
-        }
-        jdbc.update("""
-                INSERT INTO sys_role (role_name, role_key, sort_order, status, remark, is_active)
-                VALUES (?, ?, ?, 0, ?, 1)
-                """, name, key, sort, remark);
+        // 数据同步可能清空 sys_role；本地/测试缺角色时补回，不覆盖已有 role_name/sort/remark
+        SysRbacSeedSupport.ensureRoleIfAbsent(jdbc, "admin", "超级管理员", 1, "超级管理员拥有所有权限");
+        SysRbacSeedSupport.ensureRoleIfAbsent(jdbc, "hr_admin", "招聘管理员", 10, "全部招聘数据、导出、邀约、主数据");
+        SysRbacSeedSupport.ensureRoleIfAbsent(jdbc, "hr_owner", "招聘负责人", 11, "只看自己负责的需求");
+        SysRbacSeedSupport.ensureRoleIfAbsent(jdbc, "hr_exec", "高管", 12, "全公司看板可下钻，不可改主数据");
+        SysRbacSeedSupport.ensureRoleIfAbsent(jdbc, "hr_user", "普通账号", 13, "看板只读");
+        SysRbacSeedSupport.ensureRoleIfAbsent(jdbc, "hr_interviewer", "面试官", 14, "只看自己参与的面试");
     }
 
     private void seedUsers() {
@@ -259,15 +248,11 @@ public class HrSchemaMigrator implements ApplicationRunner {
                     """, username, hash, nickname, remark);
             userId = jdbc.queryForObject("SELECT user_id FROM sys_user WHERE username = ?", Long.class, username);
             log.info("已创建招聘用户 {} / {}", username, nickname);
-        }
-        for (long roleId : roleIds) {
-            Integer linked = jdbc.queryForObject(
-                    "SELECT COUNT(1) FROM sys_user_role WHERE user_id = ? AND role_id = ?",
-                    Integer.class, userId, roleId);
-            if (linked == null || linked == 0) {
-                jdbc.update("INSERT IGNORE INTO sys_user_role (user_id, role_id, is_active) VALUES (?, ?, 1)", userId, roleId);
+            for (long roleId : roleIds) {
+                SysRbacSeedSupport.linkUserRoleIfAbsent(jdbc, userId, roleId);
             }
         }
+        // 已有用户：不在发版时改角色绑定，避免覆盖「用户管理」里保存的配置
     }
 
     private long roleId(String key) {
@@ -352,20 +337,37 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(226, "面试记录修改", 221, 2, "", "", "F", "hr:record:edit", "#", "");
         menu(227, "面试记录删除", 221, 3, "", "", "F", "hr:record:delete", "#", "");
 
+        seedHrRoleMenusOnce();
+        linkHrNewMenuBindings();
+    }
+
+    /** 空库首次：各招聘角色默认菜单矩阵；运营改过后不再整表重写。 */
+    private void seedHrRoleMenusOnce() {
         Long admin = roleIdOrNull("admin");
-        long hrAdmin = roleId("hr_admin");
-        long owner = roleId("hr_owner");
-        long exec = roleId("hr_exec");
-        long plain = roleId("hr_user");
-        long interviewer = roleId("hr_interviewer");
         if (admin != null) {
-            grant(admin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 265, 266, 267, 268);
+            SysRbacSeedSupport.bootstrapRoleMenusIfNeverBound(jdbc, admin, 200, 201, 202, 203, 204, 205, 206, 207,
+                    208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225,
+                    226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246,
+                    247, 248, 249, 261, 262, 265, 266, 267, 268);
         }
-        grant(hrAdmin, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261, 262, 265, 266, 267, 268);
-        grant(owner, 200, 201, 202, 203, 210, 218, 219, 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262);
-        grant(exec, 200, 201, 203, 207, 209, 218, 219, 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261, 262);
-        grant(plain, 200, 201, 209, 234, 235, 237, 249);
-        grant(interviewer, 200, 201, 203, 211, 220, 221, 222, 225, 232, 234, 235, 249, 261);
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_admin", 200, 201, 202, 203, 204, 205, 206,
+                207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230,
+                231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261,
+                262, 265, 266, 267, 268);
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_owner", 200, 201, 202, 203, 210, 218, 219,
+                220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262);
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_exec", 200, 201, 203, 207, 209, 218, 219,
+                220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261, 262);
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_user", 200, 201, 209, 234, 235, 237, 249);
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_interviewer", 200, 201, 203, 211, 220, 221,
+                222, 225, 232, 234, 235, 249, 261);
+    }
+
+    /** 新发版 HR 菜单：只补缺绑定，不恢复运营已取消的权限。 */
+    private void linkHrNewMenuBindings() {
+        int[] adminAndHrAdmin = {265, 266, 267, 268};
+        SysRbacSeedSupport.linkRoleMenusIfAbsentByKey(jdbc, "admin", adminAndHrAdmin);
+        SysRbacSeedSupport.linkRoleMenusIfAbsentByKey(jdbc, "hr_admin", adminAndHrAdmin);
     }
 
     private int menuId(String name, String type) {
@@ -413,13 +415,6 @@ public class HrSchemaMigrator implements ApplicationRunner {
                       String perms, String icon, String remark) {
         SysMenuSeedSupport.upsert(jdbc, SysMenuIdRanges.Owner.HR, id, name, parent, sort, path, component, type,
                 perms, icon, remark);
-    }
-
-    private void grant(long roleId, int... menuIds) {
-        for (int menuId : menuIds) {
-            jdbc.update("""
-                    INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active) VALUES (?, ?, 1);""", roleId, menuId);
-        }
     }
 
     private void seedTaskType() {

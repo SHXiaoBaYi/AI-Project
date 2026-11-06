@@ -1816,12 +1816,6 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                   AND rm.menu_id IN (1, 100, 101, 113, 130, 178, 182, 187, 192, 196, 310, 311)
                   AND m.menu_id IN (%s)
                 """.formatted(menuIdCsv));
-        statement.execute("""
-                UPDATE sys_role_menu rm
-                INNER JOIN sys_role r ON r.role_id = rm.role_id
-                SET rm.is_active = 1
-                WHERE rm.menu_id IN (%s) AND r.role_key = 'admin'
-                """.formatted(menuIdCsv));
     }
 
     /** 默认发布人规则：未指定发布人时自动套用（种子：小穆） */
