@@ -1,0 +1,8 @@
+# 复制为同目录下的 .ecs-test.local（已 gitignore，勿提交仓库）
+# 发测试时 publish-ecs.sh 会自动 source 本文件
+#
+# 方式一：密码（需本机已安装 sshpass）
+# export SSHPASS='测试 ECS root 密码'
+#
+# 方式二：私钥
+# export ECS_IDENTITY="$HOME/.ssh/你的测试机.pem"

@@ -39,6 +39,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -157,7 +158,47 @@ public class HrMasterService {
         }
         dataScope.apply(sql, args, "r", null);
         sql.append(" ORDER BY r.received_date DESC, r.id DESC");
-        return jdbc.queryForList(sql.toString(), args.toArray());
+        List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), args.toArray());
+        attachP1MonthTaskLabels(rows);
+        return rows;
+    }
+
+    /** 与招聘面板一致：P1 且本月已配置任务要求时，带出「P1 x份合格简历」。 */
+    private void attachP1MonthTaskLabels(List<Map<String, Object>> rows) {
+        List<Long> ids = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Object code = row.get("job_priority_code");
+            if (code != null && "P1".equalsIgnoreCase(String.valueOf(code).trim()) && row.get("id") instanceof Number id) {
+                ids.add(id.longValue());
+            }
+        }
+        if (ids.isEmpty()) {
+            return;
+        }
+        String month = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
+        String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
+        List<Object> queryArgs = new ArrayList<>(ids);
+        queryArgs.add(month);
+        Map<Long, String> labels = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT requisition_id, target_count, resume_target
+                FROM hr_requisition_month_task
+                WHERE is_active = 1 AND requisition_id IN (%s) AND settle_month = ?
+                """.formatted(placeholders), rs -> {
+            String label = HrPanelService.p1TaskLabel(rs.getInt("resume_target"), rs.getInt("target_count"));
+            if (label != null) {
+                labels.put(rs.getLong("requisition_id"), label);
+            }
+        }, queryArgs.toArray());
+        for (Map<String, Object> row : rows) {
+            if (!(row.get("id") instanceof Number id)) {
+                continue;
+            }
+            String label = labels.get(id.longValue());
+            if (label != null) {
+                row.put("month_task_label", label);
+            }
+        }
     }
 
     /**

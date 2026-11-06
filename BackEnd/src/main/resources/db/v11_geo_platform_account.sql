@@ -55,11 +55,7 @@ VALUES
 (134, '平台账号新增', 133, 1, '', '', 'F', 'geo:platformAccount:add', '#', 0, 0, '', 1),
 (135, '平台账号修改', 133, 2, '', '', 'F', 'geo:platformAccount:edit', '#', 0, 0, '', 1),
 (136, '平台账号删除', 133, 3, '', '', 'F', 'geo:platformAccount:delete', '#', 0, 0, '', 1)
-ON DUPLICATE KEY UPDATE
-  menu_name = VALUES(menu_name),
-  parent_id = VALUES(parent_id),
-  sort_order = VALUES(sort_order),
-  path = VALUES(path),
+ON DUPLICATE KEY UPDATE  path = VALUES(path),
   component = VALUES(component),
   perms = VALUES(perms),
   icon = VALUES(icon),

@@ -79,6 +79,7 @@ interface Req {
   targetText?: string;
   priority?: number;
   jobPriorityCode?: string;
+  monthTaskLabel?: string;
   workAddressId?: number;
   importanceLevel?: number;
   difficultyLevel?: number;
@@ -161,6 +162,7 @@ function mapRow(raw: Record<string, unknown>): Req {
     targetText: textOf(raw.target_text)?.trim(),
     priority: raw.priority == null || raw.priority === '' ? undefined : Number(raw.priority),
     jobPriorityCode: textOf(raw.job_priority_code),
+    monthTaskLabel: textOf(raw.month_task_label),
     workAddressId: raw.work_address_id == null || raw.work_address_id === '' ? undefined : Number(raw.work_address_id),
     importanceLevel:
       raw.importance_level == null || raw.importance_level === '' ? undefined : Number(raw.importance_level),
@@ -307,10 +309,14 @@ const RequisitionPage = memo(function RequisitionPage() {
         title: '岗位优先级',
         dataIndex: 'jobPriorityCode',
         valueType: 'select',
-        width: 180,
+        width: 220,
+        ellipsis: true,
         search: false,
         fieldProps: { options: jobPriorities, allowClear: true, showSearch: true, optionFilterProp: 'label' },
-        render: (_, record) => jobPriorities.find((item) => item.value === record.jobPriorityCode)?.label || '—',
+        render: (_, record) => {
+          if (record.jobPriorityCode === 'P1' && record.monthTaskLabel) return record.monthTaskLabel;
+          return jobPriorities.find((item) => item.value === record.jobPriorityCode)?.label || '—';
+        },
       },
       {
         title: '重要性',
@@ -703,6 +709,7 @@ const RequisitionPage = memo(function RequisitionPage() {
         onClose={() => {
           setTaskOpen(false);
           setTaskTarget(null);
+          actionRef.current?.reload();
         }}
         target={taskTarget}
         entrySource='REQUISITION'

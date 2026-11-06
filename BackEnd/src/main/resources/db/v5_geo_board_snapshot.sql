@@ -37,15 +37,7 @@ VALUES
 (119, '周报落库', 103, 1, '', '', 'F', 'geo:weekly:persist', '#', 0, 0, '', 1),
 (120, '月报落库', 118, 1, '', '', 'F', 'geo:monthly:persist', '#', 0, 0, '', 1),
 (121, '年报落库', 104, 2, '', '', 'F', 'geo:yearly:persist', '#', 0, 0, '', 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), path = VALUES(path), perms = VALUES(perms), icon = VALUES(icon);
-
-UPDATE sys_menu SET sort_order = 1 WHERE menu_id = 101;
-UPDATE sys_menu SET sort_order = 2 WHERE menu_id = 113;
-UPDATE sys_menu SET sort_order = 3 WHERE menu_id = 102;
-UPDATE sys_menu SET sort_order = 4 WHERE menu_id = 117;
-UPDATE sys_menu SET sort_order = 5 WHERE menu_id = 103;
-UPDATE sys_menu SET sort_order = 6 WHERE menu_id = 118;
-UPDATE sys_menu SET sort_order = 7 WHERE menu_id = 104;
+ON DUPLICATE KEY UPDATE path = VALUES(path), perms = VALUES(perms), icon = VALUES(icon);
 
 INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
 SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 118 AND 121;

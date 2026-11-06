@@ -4,11 +4,7 @@ INSERT IGNORE INTO sys_menu (menu_id, menu_name, parent_id, sort_order, path, co
 VALUES
 (160, '数据看板', 0, 2, 'board', 'board/index', 'C', 'board:view', 'FundOutlined', 0, 0,
  '露出/投放/任务统一看板', 1)
-ON DUPLICATE KEY UPDATE
-  menu_name = VALUES(menu_name),
-  parent_id = VALUES(parent_id),
-  sort_order = VALUES(sort_order),
-  path = VALUES(path),
+ON DUPLICATE KEY UPDATE  path = VALUES(path),
   component = VALUES(component),
   perms = VALUES(perms),
   icon = VALUES(icon),
@@ -24,6 +20,5 @@ SELECT DISTINCT role_id, 160, 1 FROM sys_role_menu
 WHERE menu_id IN (117, 129) AND IFNULL(is_active, 1) = 1;
 
 -- 下线旧看板菜单（保留记录，侧栏不可见）
-UPDATE sys_menu SET is_active = 0, visible = 1
-WHERE menu_id IN (117, 129, 103, 118)
+UPDATE sys_menu SET is_active = 0, visible = 1 WHERE menu_id IN (117, 129, 103, 118)
    OR path IN ('geo/expose-board', 'geo/article-board', 'geo/weekly', 'geo/monthly', 'geo/yearly', 'geo/day');

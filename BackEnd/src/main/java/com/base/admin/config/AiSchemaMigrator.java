@@ -116,16 +116,11 @@ public class AiSchemaMigrator implements ApplicationRunner {
                     (140, 'AI模型配置', 1, 4, 'ai-provider', 'system/ai-provider/index', 'C', 'system:ai:list', 'KeyOutlined', 0, 0,
                      '配置通义/DeepSeek/智谱/月之暗面 API Key', 1),
                     (141, 'AI模型编辑', 140, 1, '', '', 'F', 'system:ai:edit', '#', 0, 0, '', 1)
-                    ON DUPLICATE KEY UPDATE
-                      menu_name = VALUES(menu_name),
-                      parent_id = VALUES(parent_id),
-                      sort_order = VALUES(sort_order),
-                      path = VALUES(path),
+                    ON DUPLICATE KEY UPDATE                      path = VALUES(path),
                       component = VALUES(component),
                       perms = VALUES(perms),
                       icon = VALUES(icon),
-                      remark = VALUES(remark)
-                    """);
+                      remark = VALUES(remark)""");
             statement.execute("""
                     INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                     SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (140, 141);""");

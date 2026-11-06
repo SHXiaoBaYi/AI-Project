@@ -165,18 +165,6 @@ function JobRowCard({
             >
               {tone.label}
             </Tag>
-            {tags.length === 0 ? (
-              <span className='text-xs text-neutral-400'>未标注优先级</span>
-            ) : (
-              tags.map((tag) => (
-                <Tag
-                  key={tag}
-                  className='m-0 rounded-full border-neutral-200 bg-white text-neutral-600'
-                >
-                  {tag}
-                </Tag>
-              ))
-            )}
             <Button
               type='link'
               size='small'
