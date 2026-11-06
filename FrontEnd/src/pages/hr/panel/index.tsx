@@ -8,9 +8,16 @@ import dayjs from 'dayjs';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import PermissionButton from '@/components/Buttons/PermissionButton';
+import { AiAnalysisDrawer } from '@/components/hr/AiAnalysisDrawer';
 import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
 import HrRequisitionLogDrawer from '@/components/hr/HrRequisitionLogDrawer';
 import HrRequisitionMonthTaskDrawer, { type HrMonthTaskTarget } from '@/components/hr/HrRequisitionMonthTaskDrawer';
+import { ResumeDrawer } from '@/components/hr/ResumeDrawer';
+import {
+  buildCandidateListColumns,
+  CANDIDATE_LIST_DRAWER_WIDTH,
+  type HrCandidateListRow,
+} from '@/components/hr/candidateListColumns';
 import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
 import { downloadElementImage } from '@/utils/downloadElementImage';
 import {
@@ -49,6 +56,13 @@ function numId(value: unknown): number | undefined {
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
 }
+
+function renderJobPriority(record: HrPanelJobRow) {
+  if (record.jobPriorityCode === 'P1' && record.monthTaskLabel) return record.monthTaskLabel;
+  return record.jobPriorityLabel || '—';
+}
+
+type PanelCandidateRow = HrPanelPersonRow & HrCandidateListRow;
 
 function normalizeRange(grain: DemoBoardGrain, start: Dayjs, end: Dayjs): [Dayjs, Dayjs] {
   if (grain === 'week') return [start.startOf('week'), end.endOf('week')];
@@ -90,6 +104,9 @@ const HrPanelPage = memo(function HrPanelPage() {
   const [jobRows, setJobRows] = useState<HrPanelJobRow[]>([]);
   const [peopleRows, setPeopleRows] = useState<HrPanelPersonRow[]>([]);
   const [jobDetail, setJobDetail] = useState<HrPanelJobRow | null>(null);
+  const [resumePerson, setResumePerson] = useState<PanelCandidateRow | null>(null);
+  const [aiPerson, setAiPerson] = useState<PanelCandidateRow | null>(null);
+  const candidateColumns = useMemo(() => buildCandidateListColumns<PanelCandidateRow>(setAiPerson), []);
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskTarget, setTaskTarget] = useState<HrMonthTaskTarget | null>(null);
   const [logOpen, setLogOpen] = useState(false);
@@ -243,10 +260,10 @@ const HrPanelPage = memo(function HrPanelPage() {
         title: '岗位优先级',
         dataIndex: 'jobPriorityCode',
         valueType: 'select',
-        width: 160,
+        width: 220,
         ellipsis: true,
         fieldProps: { options: priorities, allowClear: true, showSearch: true, optionFilterProp: 'label' },
-        render: (_, record) => record.jobPriorityLabel || '—',
+        render: (_, record) => renderJobPriority(record),
       },
       {
         title: '工作地址',
@@ -324,7 +341,13 @@ const HrPanelPage = memo(function HrPanelPage() {
       },
       { title: 'HC', dataIndex: 'headcount', width: 70, render: (v) => (v == null ? '—' : v) },
       { title: '负责人', dataIndex: 'ownerName', ellipsis: true, width: 120, render: (v) => v || '—' },
-      { title: '岗位优先级', dataIndex: 'jobPriorityLabel', width: 160, render: (v) => v || '—' },
+      {
+        title: '岗位优先级',
+        dataIndex: 'jobPriorityLabel',
+        ellipsis: true,
+        width: 220,
+        render: (_, record) => renderJobPriority(record),
+      },
       { title: '工作地点', dataIndex: 'workLocation', width: 120, render: (v) => v || '—' },
       { title: '接收日', dataIndex: 'receivedDate', width: 120, render: (v) => v || '—' },
       { title: '任务截止日期', dataIndex: 'deadlineDate', width: 130, render: (v) => v || '—' },
@@ -334,9 +357,9 @@ const HrPanelPage = memo(function HrPanelPage() {
     [],
   );
 
-  const peopleColumns: ColumnsType<HrPanelPersonRow> = useMemo(
+  const peopleColumns: ColumnsType<PanelCandidateRow> = useMemo(
     () => [
-      { title: '候选人', dataIndex: 'candidateName', width: 120, render: (v) => v || '—' },
+      ...candidateColumns,
       { title: '岗位名称', dataIndex: 'jobName', ellipsis: true, width: 160, render: (v) => v || '—' },
       { title: '需求部门', dataIndex: 'deptName', ellipsis: true, width: 140, render: (v) => v || '—' },
       { title: '负责人', dataIndex: 'ownerName', width: 120, ellipsis: true, render: (v) => v || '—' },
@@ -344,7 +367,7 @@ const HrPanelPage = memo(function HrPanelPage() {
       { title: '发生时间', dataIndex: 'occurredAt', width: 150, render: (v) => v || '—' },
       { title: '结果', dataIndex: 'resultLabel', width: 100, render: (v) => v || '—' },
     ],
-    [],
+    [candidateColumns],
   );
 
   const loadDetail = async (metric: HrPanelMetric, page = 1) => {
@@ -444,11 +467,11 @@ const HrPanelPage = memo(function HrPanelPage() {
       <BaseProTable<HrPanelJobRow>
         rowKey='id'
         actionRef={actionRef}
-        headerTitle='招聘面板'
+        headerTitle='岗位列表'
         columns={columns}
         params={dateQuery}
         pagination={{ defaultPageSize: 10 }}
-        scroll={{ x: 1480 }}
+        scroll={{ x: 1560 }}
         toolBarRender={() => [
           <PermissionButton
             key='log'
@@ -507,9 +530,13 @@ const HrPanelPage = memo(function HrPanelPage() {
       <Drawer
         title={drawerTitle || '指标明细'}
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        width={960}
+        width={CANDIDATE_LIST_DRAWER_WIDTH}
         destroyOnHidden
+        onClose={() => {
+          setDrawerOpen(false);
+          setResumePerson(null);
+          setAiPerson(null);
+        }}
       >
         {drawerKind === 'JOB' ? (
           <Table<HrPanelJobRow>
@@ -528,13 +555,17 @@ const HrPanelPage = memo(function HrPanelPage() {
             }}
           />
         ) : (
-          <Table<HrPanelPersonRow>
+          <Table<PanelCandidateRow>
             rowKey='applicationId'
             size='small'
             loading={drawerLoading}
-            dataSource={peopleRows}
+            dataSource={peopleRows.map((row) => ({ ...row, displayName: row.displayName || row.candidateName }))}
             columns={peopleColumns}
-            scroll={{ x: 1000 }}
+            scroll={{ x: 1680 }}
+            onRow={(record) => ({
+              className: 'cursor-pointer',
+              onClick: () => setResumePerson(record),
+            })}
             pagination={{
               current: drawerPage,
               pageSize: 10,
@@ -545,6 +576,23 @@ const HrPanelPage = memo(function HrPanelPage() {
           />
         )}
       </Drawer>
+      {resumePerson ? (
+        <ResumeDrawer
+          applicationId={resumePerson.applicationId}
+          fileName={resumePerson.resumeName}
+          open
+          onClose={() => setResumePerson(null)}
+          showCommRecords
+        />
+      ) : null}
+      {aiPerson ? (
+        <AiAnalysisDrawer
+          applicationId={aiPerson.applicationId}
+          name={aiPerson.displayName || aiPerson.candidateName || '候选人'}
+          open
+          onClose={() => setAiPerson(null)}
+        />
+      ) : null}
       <HrJobDetailDrawer
         open={jobDetail != null}
         requisitionId={jobDetail?.id}

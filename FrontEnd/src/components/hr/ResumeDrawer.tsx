@@ -18,6 +18,7 @@ import { HistoryOutlined, PhoneOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { renderAsync } from 'docx-preview';
 import PermissionButton from '@/components/Buttons/PermissionButton';
+import { AiAnalysisDrawer } from '@/components/hr/AiAnalysisDrawer';
 import InviteFormModal, { type InviteFormPreset } from '@/components/hr/InviteFormModal';
 import { nextInviteRound } from '@/components/hr/inviteRound';
 import {
@@ -114,6 +115,7 @@ export function ResumeDrawer({
   const docxRef = useRef<HTMLDivElement>(null);
   const { message } = App.useApp();
   const [invitePreset, setInvitePreset] = useState<InviteFormPreset | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
   const [unsuitableOpen, setUnsuitableOpen] = useState(false);
   const [unsuitableSaving, setUnsuitableSaving] = useState(false);
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -195,6 +197,10 @@ export function ResumeDrawer({
       if (objectUrl) window.URL.revokeObjectURL(objectUrl);
     };
   }, [applicationId, fileName, open]);
+
+  useEffect(() => {
+    if (!open) setAiOpen(false);
+  }, [applicationId, open]);
 
   useEffect(() => {
     if (!open || mode !== 'docx' || !docxBlob || !docxRef.current) return;
@@ -367,6 +373,7 @@ export function ResumeDrawer({
                 发起面试邀约
               </PermissionButton>
             ) : null}
+            <Button onClick={() => setAiOpen(true)}>AI分析</Button>
             {canAct ? (
               <PermissionButton
                 perm='hr:pipeline:edit'
@@ -423,6 +430,12 @@ export function ResumeDrawer({
           </div>
         ) : null}
       </Drawer>
+      <AiAnalysisDrawer
+        applicationId={applicationId}
+        name={String(detail?.display_name || '候选人')}
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+      />
       <InviteFormModal
         open={invitePreset != null}
         preset={invitePreset}

@@ -16,6 +16,7 @@ import org.springframework.util.StringUtils;
 
 import java.sql.Date;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -250,6 +251,7 @@ public class HrPanelService {
             row.setResultLabel(rs.getString("result_label"));
             return row;
         }, listArgs.toArray());
+        enrichPeople(people);
         HrPanelDetailVO vo = new HrPanelDetailVO();
         vo.setMetric(metric);
         vo.setTitle(title);
@@ -327,7 +329,56 @@ public class HrPanelService {
         if (withProgress) {
             fillProgress(rows, window);
         }
+        fillMonthTasks(rows, today);
         return rows;
+    }
+
+    /** 岗位优先级为 P1，且本月已配置任务要求时，带出「P1 x份合格简历」。 */
+    private void fillMonthTasks(List<HrPanelJobVO> rows, LocalDate asOf) {
+        if (rows.isEmpty() || asOf == null) {
+            return;
+        }
+        List<HrPanelJobVO> targets = rows.stream()
+                .filter(row -> row.getId() != null && "P1".equalsIgnoreCase(row.getJobPriorityCode()))
+                .toList();
+        if (targets.isEmpty()) {
+            return;
+        }
+        String month = asOf.format(DateTimeFormatter.ofPattern("yyyy-MM"));
+        String placeholders = targets.stream().map(row -> "?").collect(Collectors.joining(","));
+        List<Object> args = new ArrayList<>();
+        targets.forEach(row -> args.add(row.getId()));
+        args.add(month);
+        Map<Long, String> labels = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT requisition_id, target_count, resume_target
+                FROM hr_requisition_month_task
+                WHERE is_active = 1 AND requisition_id IN (%s) AND settle_month = ?
+                """.formatted(placeholders), rs -> {
+            String label = p1TaskLabel(rs.getInt("resume_target"), rs.getInt("target_count"));
+            if (label != null) {
+                labels.put(rs.getLong("requisition_id"), label);
+            }
+        }, args.toArray());
+        for (HrPanelJobVO row : rows) {
+            String label = labels.get(row.getId());
+            if (label != null) {
+                row.setMonthTaskLabel(label);
+            }
+        }
+    }
+
+    private static String p1TaskLabel(int resume, int onboard) {
+        if (resume > 0 && onboard > 0) {
+            return "P1 " + resume + "份合格简历或" + onboard + "人入职";
+        }
+        if (resume > 0) {
+            return "P1 " + resume + "份合格简历";
+        }
+        if (onboard > 0) {
+            return "P1 " + onboard + "人入职";
+        }
+        return null;
     }
 
     private HrPanelStatsVO loadStats(FilterSql baseFilter, DateWindow window) {
@@ -720,6 +771,102 @@ public class HrPanelService {
     private long countLong(String sql, List<Object> args) {
         Long n = jdbc.queryForObject(sql, Long.class, args.toArray());
         return n == null ? 0L : n;
+    }
+
+    /** 补齐与岗位看板候选人列表相同的展示字段，保证两个抽屉列一致。 */
+    private void enrichPeople(List<HrPanelPersonVO> people) {
+        if (people.isEmpty()) {
+            return;
+        }
+        Map<Long, HrPanelPersonVO> byId = new LinkedHashMap<>();
+        for (HrPanelPersonVO person : people) {
+            if (person.getApplicationId() != null) {
+                byId.put(person.getApplicationId(), person);
+            }
+        }
+        if (byId.isEmpty()) {
+            return;
+        }
+        String placeholders = byId.keySet().stream().map(id -> "?").collect(Collectors.joining(","));
+        jdbc.query("""
+                SELECT a.id application_id,
+                       c.gender, c.age, c.education, c.candidate_no, c.current_title, c.current_company,
+                       a.submitted_at, a.create_time, a.submitter_name,
+                       (SELECT f.file_name FROM hr_resume_file f
+                         WHERE f.application_id = a.id AND f.is_active = 1
+                         ORDER BY f.id DESC LIMIT 1) file_name,
+                       (SELECT ai.score FROM hr_application_ai ai
+                         WHERE ai.application_id = a.id AND ai.is_active = 1
+                         ORDER BY ai.id DESC LIMIT 1) ai_score,
+                       (SELECT COUNT(1) FROM hr_application_ai ai
+                         WHERE ai.application_id = a.id AND ai.is_active = 1) ai_count,
+                       (CASE
+                          WHEN IFNULL(NULLIF(TRIM(a.current_stage), ''), 'ENTERED') <> 'ENTERED' THEN 1
+                          WHEN a.screen_result IS NOT NULL AND TRIM(a.screen_result) <> '' THEN 1
+                          WHEN EXISTS (
+                              SELECT 1 FROM hr_phone_screen p
+                              WHERE p.application_id = a.id AND p.is_active = 1) THEN 1
+                          WHEN EXISTS (
+                              SELECT 1 FROM hr_interview_record rec
+                              WHERE rec.application_id = a.id AND rec.is_active = 1) THEN 1
+                          WHEN EXISTS (
+                              SELECT 1 FROM hr_stage_event e
+                              WHERE e.application_id = a.id AND e.is_active = 1
+                                AND UPPER(TRIM(IFNULL(e.stage_code, ''))) <> 'ENTERED') THEN 1
+                          ELSE 0
+                        END) handled
+                FROM hr_application a
+                JOIN hr_candidate c ON c.id = a.candidate_id
+                WHERE a.id IN (%s)
+                """.formatted(placeholders), rs -> {
+            HrPanelPersonVO row = byId.get(rs.getLong("application_id"));
+            if (row == null) {
+                return;
+            }
+            int age = rs.getInt("age");
+            Integer ageVal = rs.wasNull() ? null : age;
+            row.setBasicInfo(joinBasic(rs.getString("gender"), ageVal, rs.getString("education")));
+            row.setCandidateNo(blankToNull(rs.getString("candidate_no")));
+            row.setCurrentTitle(blankToNull(rs.getString("current_title")));
+            row.setCurrentCompany(blankToNull(rs.getString("current_company")));
+            Date submitted = rs.getDate("submitted_at");
+            row.setRecommendedAt(submitted == null ? null : submitted.toLocalDate().toString());
+            row.setReferrerName(blankToNull(rs.getString("submitter_name")));
+            row.setResumeName(blankToNull(rs.getString("file_name")));
+            int score = rs.getInt("ai_score");
+            row.setAiScore(rs.wasNull() ? null : score);
+            int count = rs.getInt("ai_count");
+            row.setAiCount(rs.wasNull() ? null : count);
+            boolean pending = rs.getInt("handled") == 0;
+            row.setPending(pending);
+            row.setRemainingHours(pending ? remainingHours(rs.getTimestamp("create_time"), submitted) : null);
+        }, byId.keySet().toArray());
+    }
+
+    private static String joinBasic(String gender, Integer age, String education) {
+        List<String> parts = new ArrayList<>();
+        if (StringUtils.hasText(gender)) {
+            parts.add(gender.trim());
+        }
+        if (age != null) {
+            parts.add(String.valueOf(age));
+        }
+        if (StringUtils.hasText(education)) {
+            parts.add(education.trim());
+        }
+        return parts.isEmpty() ? null : String.join(" | ", parts);
+    }
+
+    private static Double remainingHours(Timestamp createTime, Date submittedAt) {
+        LocalDateTime start = createTime == null ? null : createTime.toLocalDateTime();
+        if (start == null && submittedAt != null) {
+            start = submittedAt.toLocalDate().atStartOfDay();
+        }
+        if (start == null) {
+            return null;
+        }
+        Duration left = Duration.between(LocalDateTime.now(), start.plusHours(48));
+        return Math.round((left.toMillis() / 3600000.0) * 100.0) / 100.0;
     }
 
     private static LocalDate dateOf(Date date) {

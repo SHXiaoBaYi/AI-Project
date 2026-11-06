@@ -1,10 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { App, Button, Card, Drawer, Empty, Input, Pagination, Select, Space, Spin, Table, Tabs, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ClockCircleOutlined, EyeOutlined, PlusOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
+import { EyeOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import PermissionButton from '@/components/Buttons/PermissionButton';
+import { AiAnalysisDrawer } from '@/components/hr/AiAnalysisDrawer';
 import { ResumeDrawer } from '@/components/hr/ResumeDrawer';
 import { HrJobDetailDrawer } from '@/components/hr/HrJobDetailDrawer';
+import { buildCandidateListColumns, CANDIDATE_LIST_DRAWER_WIDTH } from '@/components/hr/candidateListColumns';
 import ApplicationFormModal from '@/pages/hr/application/components/ApplicationFormModal';
 import ImportApplicationModal from '@/pages/hr/application/components/ImportApplicationModal';
 import {
@@ -72,17 +74,6 @@ function fmtDate(value?: string) {
   return String(value).slice(0, 10).replaceAll('-', '/');
 }
 
-function remainingLabel(hours?: number | null) {
-  if (hours == null || Number.isNaN(hours)) return '—';
-  if (hours < 0) return <span className='text-red-500'>已超时</span>;
-  return (
-    <span className='inline-flex items-center gap-1 text-orange-500'>
-      <ClockCircleOutlined />
-      剩余{hours.toFixed(2)}小时
-    </span>
-  );
-}
-
 function Metric({ value, label, onClick }: { value?: number; label: string; onClick: () => void }) {
   return (
     <button
@@ -99,6 +90,52 @@ function Metric({ value, label, onClick }: { value?: number; label: string; onCl
   );
 }
 
+const JOB_STATUS_TONE: Record<string, { label: string; bar: string; header: string; border: string; tag: string }> = {
+  OPEN: {
+    label: '招聘中',
+    bar: 'bg-blue-500',
+    header: 'bg-blue-50',
+    border: 'border-blue-200 hover:border-blue-400',
+    tag: 'processing',
+  },
+  PAUSED: {
+    label: '暂缓',
+    bar: 'bg-amber-500',
+    header: 'bg-amber-50',
+    border: 'border-amber-200 hover:border-amber-400',
+    tag: 'warning',
+  },
+  STOPPED: {
+    label: '停止招聘',
+    bar: 'bg-rose-500',
+    header: 'bg-rose-50',
+    border: 'border-rose-200 hover:border-rose-400',
+    tag: 'error',
+  },
+  ARCHIVED: {
+    label: '已归档',
+    bar: 'bg-slate-400',
+    header: 'bg-slate-100',
+    border: 'border-slate-300 hover:border-slate-400',
+    tag: 'default',
+  },
+  DONE: {
+    label: '已完成',
+    bar: 'bg-emerald-500',
+    header: 'bg-emerald-50',
+    border: 'border-emerald-200 hover:border-emerald-400',
+    tag: 'success',
+  },
+};
+
+const JOB_STATUS_FALLBACK = {
+  label: '未标注状态',
+  bar: 'bg-neutral-300',
+  header: 'bg-neutral-100',
+  border: 'border-neutral-200 hover:border-neutral-400',
+  tag: 'default',
+};
+
 function JobRowCard({
   job,
   onOpen,
@@ -108,193 +145,136 @@ function JobRowCard({
   onOpen: (job: HrJobCard, funnel?: HrJobFunnelStatus) => void;
   onViewDetail: (job: HrJobCard) => void;
 }) {
+  const tone = JOB_STATUS_TONE[job.status || ''] || JOB_STATUS_FALLBACK;
   const tags: string[] = [];
   if (job.jobPriorityLabel) tags.push(job.jobPriorityLabel);
   if (job.priorityLabel) tags.push(`【${job.priorityLabel}】`);
-  if (job.cardStatusLabel) tags.push(job.cardStatusLabel);
 
   return (
     <div
-      className='cursor-pointer overflow-hidden rounded border border-neutral-200 bg-white hover:border-blue-300'
+      className={`cursor-pointer overflow-hidden rounded border bg-white ${tone.border}`}
       onClick={() => onOpen(job)}
     >
-      <div className='flex flex-wrap items-center gap-2 bg-neutral-100 px-4 py-2'>
-        {tags.length === 0 ? (
-          <span className='text-xs text-neutral-400'>未标注优先级</span>
-        ) : (
-          tags.map((tag) => (
+      <div className='flex'>
+        <div className={`w-1.5 shrink-0 ${tone.bar}`} />
+        <div className='min-w-0 flex-1'>
+          <div className={`flex flex-wrap items-center gap-2 px-4 py-2 ${tone.header}`}>
             <Tag
-              key={tag}
-              className='m-0 rounded-full border-neutral-200 bg-white text-neutral-600'
+              color={tone.tag}
+              className='m-0'
             >
-              {tag}
+              {tone.label}
             </Tag>
-          ))
-        )}
-        <Button
-          type='link'
-          size='small'
-          className='h-auto px-1'
-          icon={<EyeOutlined />}
-          onClick={(e) => {
-            e.stopPropagation();
-            onViewDetail(job);
-          }}
-        >
-          查看岗位详情
-        </Button>
-      </div>
-      <div className='flex flex-col xl:flex-row xl:items-stretch'>
-        <div className='min-w-0 flex-1 px-4 py-3'>
-          <div className='flex flex-wrap items-baseline gap-x-4 gap-y-1'>
-            <span
-              className='max-w-full truncate text-base font-medium text-blue-600'
-              title={job.jobName}
+            {tags.length === 0 ? (
+              <span className='text-xs text-neutral-400'>未标注优先级</span>
+            ) : (
+              tags.map((tag) => (
+                <Tag
+                  key={tag}
+                  className='m-0 rounded-full border-neutral-200 bg-white text-neutral-600'
+                >
+                  {tag}
+                </Tag>
+              ))
+            )}
+            <Button
+              type='link'
+              size='small'
+              className='h-auto px-1'
+              icon={<EyeOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewDetail(job);
+              }}
             >
-              {job.jobName}
-            </span>
-            <span
-              className='truncate text-sm text-orange-500'
-              title={job.ownerNames || '未指定负责人'}
-            >
-              负责人：{job.ownerNames?.trim() || '未指定'}
-            </span>
+              查看岗位详情
+            </Button>
           </div>
-          <div
-            className='mt-2 truncate text-sm text-neutral-500'
-            title={[job.workLocation, job.salaryRange, job.receivedDate].filter(Boolean).join(' | ')}
-          >
-            <span>{job.workLocation || job.deptName || '—'}</span>
-            <span className='mx-2 text-neutral-300'>|</span>
-            <span>年薪：{job.salaryRange?.trim() || '—'}</span>
-            <span className='mx-2 text-neutral-300'>|</span>
-            <span>招聘起始：{fmtDate(job.receivedDate)}</span>
+          <div className='flex flex-col xl:flex-row xl:items-stretch'>
+            <div className='min-w-0 flex-1 px-4 py-3'>
+              <div className='flex flex-wrap items-baseline gap-x-4 gap-y-1'>
+                <span
+                  className='max-w-full truncate text-base font-medium text-blue-600'
+                  title={job.jobName}
+                >
+                  {job.jobName}
+                </span>
+                <span
+                  className='truncate text-sm text-orange-500'
+                  title={job.ownerNames || '未指定负责人'}
+                >
+                  负责人：{job.ownerNames?.trim() || '未指定'}
+                </span>
+              </div>
+              <div
+                className='mt-2 truncate text-sm text-neutral-500'
+                title={[job.workLocation, job.salaryRange, job.receivedDate].filter(Boolean).join(' | ')}
+              >
+                <span>{job.workLocation || job.deptName || '—'}</span>
+                <span className='mx-2 text-neutral-300'>|</span>
+                <span>年薪：{job.salaryRange?.trim() || '—'}</span>
+                <span className='mx-2 text-neutral-300'>|</span>
+                <span>招聘起始：{fmtDate(job.receivedDate)}</span>
+              </div>
+            </div>
+            <div className='flex shrink-0 divide-x divide-neutral-200 overflow-x-auto border-t border-neutral-100 xl:border-t-0 xl:border-l'>
+              <Metric
+                value={job.todayScreenCount}
+                label='今日筛选简历'
+                onClick={() => onOpen(job, 'TODAY_SCREEN')}
+              />
+              <Metric
+                value={job.pendingCount}
+                label='未处理'
+                onClick={() => onOpen(job, 'PENDING')}
+              />
+              <Metric
+                value={job.todayPhoneCount}
+                label='今日电话沟通'
+                onClick={() => onOpen(job, 'TODAY_PHONE')}
+              />
+              <Metric
+                value={job.interviewingCount}
+                label='约面中'
+                onClick={() => onOpen(job, 'INTERVIEWING')}
+              />
+              <Metric
+                value={job.todayInviteCount}
+                label='今日约面'
+                onClick={() => onOpen(job, 'TODAY_INVITE')}
+              />
+              <Metric
+                value={job.todayInterviewCount}
+                label='今日实际面试'
+                onClick={() => onOpen(job, 'TODAY_INTERVIEW')}
+              />
+              <Metric
+                value={job.todayInterviewPassCount}
+                label='今日通过面试'
+                onClick={() => onOpen(job, 'TODAY_INTERVIEW_PASS')}
+              />
+              <Metric
+                value={job.bgCheckCount}
+                label='背调中'
+                onClick={() => onOpen(job, 'BG_CHECK')}
+              />
+              <Metric
+                value={job.pendingOnboardCount}
+                label='待入职'
+                onClick={() => onOpen(job, 'PENDING_ONBOARD')}
+              />
+              <Metric
+                value={job.onboardedCount}
+                label='已入职'
+                onClick={() => onOpen(job, 'ONBOARDED')}
+              />
+            </div>
           </div>
-        </div>
-        <div className='flex shrink-0 divide-x divide-neutral-200 overflow-x-auto border-t border-neutral-100 xl:border-t-0 xl:border-l'>
-          <Metric
-            value={job.todayScreenCount}
-            label='今日筛选简历'
-            onClick={() => onOpen(job, 'TODAY_SCREEN')}
-          />
-          <Metric
-            value={job.pendingCount}
-            label='未处理'
-            onClick={() => onOpen(job, 'PENDING')}
-          />
-          <Metric
-            value={job.todayPhoneCount}
-            label='今日电话沟通'
-            onClick={() => onOpen(job, 'TODAY_PHONE')}
-          />
-          <Metric
-            value={job.interviewingCount}
-            label='约面中'
-            onClick={() => onOpen(job, 'INTERVIEWING')}
-          />
-          <Metric
-            value={job.todayInviteCount}
-            label='今日约面'
-            onClick={() => onOpen(job, 'TODAY_INVITE')}
-          />
-          <Metric
-            value={job.todayInterviewCount}
-            label='今日实际面试'
-            onClick={() => onOpen(job, 'TODAY_INTERVIEW')}
-          />
-          <Metric
-            value={job.todayInterviewPassCount}
-            label='今日通过面试'
-            onClick={() => onOpen(job, 'TODAY_INTERVIEW_PASS')}
-          />
-          <Metric
-            value={job.bgCheckCount}
-            label='背调中'
-            onClick={() => onOpen(job, 'BG_CHECK')}
-          />
-          <Metric
-            value={job.pendingOnboardCount}
-            label='待入职'
-            onClick={() => onOpen(job, 'PENDING_ONBOARD')}
-          />
-          <Metric
-            value={job.onboardedCount}
-            label='已入职'
-            onClick={() => onOpen(job, 'ONBOARDED')}
-          />
         </div>
       </div>
     </div>
   );
 }
-
-const candidateColumns: ColumnsType<HrJobCandidate> = [
-  {
-    title: '候选人',
-    dataIndex: 'displayName',
-    width: 120,
-    render: (_, record) => (
-      <span className='inline-flex items-center gap-1.5'>
-        <span className={`inline-block h-1.5 w-1.5 rounded-full ${record.pending ? 'bg-red-500' : 'bg-blue-500'}`} />
-        <span className='text-blue-600'>{record.displayName || '—'}</span>
-      </span>
-    ),
-  },
-  {
-    title: '基本信息',
-    dataIndex: 'basicInfo',
-    width: 160,
-    ellipsis: true,
-    render: (v) => v || '—',
-  },
-  {
-    title: '人选编号',
-    dataIndex: 'candidateNo',
-    width: 110,
-    render: (v) => v || '—',
-  },
-  {
-    title: '目前职位',
-    dataIndex: 'currentTitle',
-    width: 160,
-    ellipsis: true,
-    render: (v) => v || '—',
-  },
-  {
-    title: '目前公司',
-    dataIndex: 'currentCompany',
-    width: 200,
-    ellipsis: true,
-    render: (v) => v || '—',
-  },
-  {
-    title: '提交时间',
-    dataIndex: 'recommendedAt',
-    width: 120,
-    render: (v) => (v ? String(v).slice(0, 10) : '—'),
-  },
-  {
-    title: '剩余处理时间',
-    dataIndex: 'remainingHours',
-    width: 150,
-    render: (v) => remainingLabel(typeof v === 'number' ? v : null),
-  },
-  {
-    title: '提交人',
-    dataIndex: 'referrerName',
-    width: 120,
-    ellipsis: true,
-    render: (v) =>
-      v ? (
-        <span className='inline-flex items-center gap-1'>
-          <UserOutlined />
-          {v}
-        </span>
-      ) : (
-        '—'
-      ),
-  },
-];
 
 const COMM_DETAIL_COLUMNS: ColumnsType<HrJobCommDetail> = [
   {
@@ -419,6 +399,8 @@ export default function HrJobBoardPage() {
   const [drawerTotal, setDrawerTotal] = useState(0);
   const [candidates, setCandidates] = useState<HrJobCandidate[]>([]);
   const [resumeRow, setResumeRow] = useState<HrJobCandidate | null>(null);
+  const [aiRow, setAiRow] = useState<HrJobCandidate | null>(null);
+  const candidateColumns = useMemo(() => buildCandidateListColumns<HrJobCandidate>(setAiRow), []);
   const [manualOpen, setManualOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [channels, setChannels] = useState<{ value: string; label: string }[]>([]);
@@ -728,11 +710,12 @@ export default function HrJobBoardPage() {
           setDrawerFunnel(undefined);
           setCandidates([]);
           setResumeRow(null);
+          setAiRow(null);
           setCommStats(null);
           setCommFilter({});
           setDrawerTab('candidates');
         }}
-        width={1100}
+        width={CANDIDATE_LIST_DRAWER_WIDTH}
         destroyOnHidden
         extra={
           drawerJob ? (
@@ -770,7 +753,7 @@ export default function HrJobBoardPage() {
                   loading={drawerLoading}
                   dataSource={candidates}
                   columns={candidateColumns}
-                  scroll={{ x: 1100 }}
+                  scroll={{ x: 1240 }}
                   onRow={(record) => ({
                     className: 'cursor-pointer',
                     onClick: () => setResumeRow(record),
@@ -860,6 +843,14 @@ export default function HrJobBoardPage() {
           onClose={() => setResumeRow(null)}
           onActionSuccess={refreshDrawer}
           showCommRecords
+        />
+      ) : null}
+      {aiRow ? (
+        <AiAnalysisDrawer
+          applicationId={aiRow.applicationId}
+          name={aiRow.displayName || '候选人'}
+          open
+          onClose={() => setAiRow(null)}
         />
       ) : null}
       <ApplicationFormModal

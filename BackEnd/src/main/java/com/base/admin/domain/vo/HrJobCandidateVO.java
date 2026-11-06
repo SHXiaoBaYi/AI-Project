@@ -57,4 +57,10 @@ public class HrJobCandidateVO {
 
     @Schema(description = "简历文件名")
     private String resumeName;
+
+    @Schema(description = "最近一次 AI 分析分数", example = "86", nullable = true)
+    private Integer aiScore;
+
+    @Schema(description = "有效 AI 分析份数", example = "2")
+    private Integer aiCount;
 }

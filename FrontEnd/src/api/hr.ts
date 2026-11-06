@@ -231,6 +231,8 @@ export interface HrPanelJobRow {
   ownerName?: string;
   jobPriorityCode?: string;
   jobPriorityLabel?: string;
+  /** 岗位为 P1 且本月已配置任务要求时的展示，如「P1 3份合格简历」 */
+  monthTaskLabel?: string;
   workLocation?: string;
   receivedDate?: string;
   deadlineDate?: string;
@@ -257,6 +259,18 @@ export type HrPanelMetric =
 export interface HrPanelPersonRow {
   applicationId: number;
   candidateName?: string;
+  displayName?: string;
+  pending?: boolean;
+  basicInfo?: string;
+  candidateNo?: string;
+  currentTitle?: string;
+  currentCompany?: string;
+  recommendedAt?: string;
+  remainingHours?: number | null;
+  referrerName?: string;
+  resumeName?: string;
+  aiScore?: number | null;
+  aiCount?: number | null;
   jobName?: string;
   deptName?: string;
   ownerName?: string;
@@ -397,6 +411,8 @@ export type HrJobCandidate = {
   currentStage?: string;
   stageName?: string;
   resumeName?: string;
+  aiScore?: number | null;
+  aiCount?: number | null;
 };
 
 export type HrJobFunnelStatus =

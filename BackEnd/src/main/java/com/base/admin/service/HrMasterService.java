@@ -162,6 +162,7 @@ public class HrMasterService {
 
     /**
      * 岗位看板第一屏：筛选 + 分页卡片。
+     * 排序：招聘中、暂缓、停止招聘、已归档、已完成，同状态内 P0 在 P1 前。
      * 卡片状态：OPEN 且无候选人→待招；OPEN 且有候选人→进行中；其余→已关闭。
      */
     public HrJobCardVO jobCards(HrJobCardQueryDTO query) {
@@ -265,7 +266,20 @@ public class HrMasterService {
                         WHERE a.requisition_id = r.id AND a.is_active = 1
                           AND a.current_stage = 'PENDING_ONBOARD') pending_onboard_count
                 """ + filter + """
-                 ORDER BY FIELD(r.priority,1,2,3), r.received_date DESC, r.id DESC
+                 ORDER BY CASE r.status
+                            WHEN 'OPEN' THEN 1
+                            WHEN 'PAUSED' THEN 2
+                            WHEN 'STOPPED' THEN 3
+                            WHEN 'ARCHIVED' THEN 4
+                            WHEN 'DONE' THEN 5
+                            ELSE 9
+                          END,
+                          CASE UPPER(IFNULL(r.job_priority_code, ''))
+                            WHEN 'P0' THEN 1
+                            WHEN 'P1' THEN 2
+                            ELSE 9
+                          END,
+                          r.received_date DESC, r.id DESC
                  LIMIT ? OFFSET ?
                 """;
         List<Object> listArgs = new ArrayList<>(args);
@@ -910,6 +924,10 @@ public class HrMasterService {
         vo.setCurrentStage(stringOf(row.get("current_stage")));
         vo.setStageName(stringOf(row.get("stage_name")));
         vo.setResumeName(stringOf(row.get("file_name")));
+        Object score = row.get("ai_score");
+        vo.setAiScore(score instanceof Number n ? n.intValue() : null);
+        Object count = row.get("ai_count");
+        vo.setAiCount(count instanceof Number n ? n.intValue() : null);
         return vo;
     }
 

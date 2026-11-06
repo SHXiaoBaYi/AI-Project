@@ -34,6 +34,9 @@ public class HrPanelJobVO {
     @Schema(description = "岗位优先级展示", example = "P0 本月必须到岗")
     private String jobPriorityLabel;
 
+    @Schema(description = "P1 且本月已配置任务要求时的展示", example = "P1 3份合格简历")
+    private String monthTaskLabel;
+
     @Schema(description = "工作地点", example = "上海")
     private String workLocation;
 
