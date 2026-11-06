@@ -368,7 +368,7 @@ public class HrPanelService {
         }
     }
 
-    private static String p1TaskLabel(int resume, int onboard) {
+    static String p1TaskLabel(int resume, int onboard) {
         if (resume > 0 && onboard > 0) {
             return "P1 " + resume + "份合格简历或" + onboard + "人入职";
         }
