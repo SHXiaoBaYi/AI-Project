@@ -131,6 +131,10 @@ public class HrInterviewRecordService {
             for (Long inviteId : inviteIds) {
                 outcome = stronger(outcome, syncStage(applicationId, roundNo, inviteId));
             }
+            // 邀约对不上面试官时，不能把刚保存的评价丢掉，仍按本次结论推进阶段
+            if ("NONE".equals(outcome)) {
+                outcome = applyConsensus(applicationId, requisitionId, roundNo, dto.getConclusion().trim().toUpperCase(), "");
+            }
         }
         return outcomeMessage(prefix, outcome, roundNo);
     }
@@ -252,6 +256,7 @@ public class HrInterviewRecordService {
             Long owner = jdbc.query("""
                     SELECT interviewer_user_id FROM hr_interview_invite
                     WHERE id = ? AND application_id = ? AND round_no = ? AND is_active = 1
+                      AND status IN ('SUCCESS', 'NO_CALENDAR', 'FAILED')
                     """, rs -> rs.next() ? (rs.getObject(1) == null ? null : rs.getLong(1)) : null,
                     preferredInviteId, applicationId, roundNo);
             if (interviewerUserId.equals(owner)) {
@@ -261,7 +266,8 @@ public class HrInterviewRecordService {
         return jdbc.query("""
                 SELECT id FROM hr_interview_invite
                 WHERE application_id = ? AND round_no = ? AND interviewer_user_id = ? AND is_active = 1
-                ORDER BY id DESC LIMIT 1
+                  AND status IN ('SUCCESS', 'NO_CALENDAR', 'FAILED')
+                ORDER BY interview_at DESC, id DESC LIMIT 1
                 """, rs -> rs.next() ? rs.getLong(1) : null, applicationId, roundNo, interviewerUserId);
     }
 
@@ -428,36 +434,29 @@ public class HrInterviewRecordService {
         if (applicationId == null || roundNo == null || inviteId == null) {
             return "NONE";
         }
-        LocalDateTime interviewAt = jdbc.query("""
-                SELECT interview_at FROM hr_interview_invite WHERE id = ? AND is_active = 1
-                """, rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toLocalDateTime() : null, inviteId);
-        List<Long> peerInviteIds = new ArrayList<>();
         java.util.LinkedHashSet<Long> expectedSet = new java.util.LinkedHashSet<>();
         jdbc.query("""
-                SELECT id, interviewer_user_id FROM hr_interview_invite
+                SELECT interviewer_user_id FROM hr_interview_invite
                 WHERE application_id = ? AND round_no = ? AND is_active = 1
                   AND status IN ('SUCCESS', 'NO_CALENDAR', 'FAILED')
-                  AND interview_at <=> ?
-                """, rs -> {
-            peerInviteIds.add(rs.getLong("id"));
-            if (rs.getObject("interviewer_user_id") != null) {
-                expectedSet.add(rs.getLong("interviewer_user_id"));
-            }
-        }, applicationId, roundNo, interviewAt);
+                  AND interviewer_user_id IS NOT NULL
+                  AND interview_at <=> (SELECT interview_at FROM hr_interview_invite WHERE id = ?)
+                """, rs -> expectedSet.add(rs.getLong("interviewer_user_id")), applicationId, roundNo, inviteId);
         List<Long> expected = new ArrayList<>(expectedSet);
         if (expected.isEmpty()) {
             return "NONE";
         }
         Map<Long, String> submitted = new java.util.HashMap<>();
-        String placeholders = String.join(",", java.util.Collections.nCopies(peerInviteIds.size(), "?"));
+        String placeholders = String.join(",", java.util.Collections.nCopies(expected.size(), "?"));
         List<Object> args = new ArrayList<>();
         args.add(applicationId);
         args.add(roundNo);
-        args.addAll(peerInviteIds);
+        args.addAll(expected);
         jdbc.query("""
                 SELECT interviewer_user_id, conclusion FROM hr_interview_record
                 WHERE application_id = ? AND round_no = ? AND is_active = 1
-                  AND conclusion IS NOT NULL AND invite_id IN (%s)
+                  AND conclusion IS NOT NULL AND TRIM(conclusion) <> ''
+                  AND interviewer_user_id IN (%s)
                 """.formatted(placeholders), rs -> {
             submitted.put(rs.getLong(1), rs.getString(2));
         }, args.toArray());
