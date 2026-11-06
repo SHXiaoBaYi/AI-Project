@@ -81,10 +81,7 @@ VALUES
 (126, '内容投放修改', 122, 4, '', '', 'F', 'geo:content:edit', '#', 0, 0, '', 1),
 (127, '生成相似问题', 122, 5, '', '', 'F', 'geo:content:generate', '#', 0, 0, '', 1),
 (128, '投放执行', 100, 9, 'geo/content-placement-work', '', 'C', 'geo:content:work', 'FormOutlined', 0, 0, '一线视角：维护本人话题/目标问题的平台投放与引用详情', 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name), path = VALUES(path), perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark);
-
-UPDATE sys_menu SET sort_order = 8 WHERE menu_id = 122;
-UPDATE sys_menu SET sort_order = 9 WHERE menu_id = 128;
+ON DUPLICATE KEY UPDATE path = VALUES(path), perms = VALUES(perms), icon = VALUES(icon), remark = VALUES(remark);
 
 INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
 SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id BETWEEN 122 AND 128;

@@ -44,11 +44,7 @@ VALUES
 (157, '任务类型新增', 156, 1, '', '', 'F', 'task:type:add', '#', 0, 0, '', 1),
 (158, '任务类型修改', 156, 2, '', '', 'F', 'task:type:edit', '#', 0, 0, '', 1),
 (159, '任务类型删除', 156, 3, '', '', 'F', 'task:type:delete', '#', 0, 0, '', 1)
-ON DUPLICATE KEY UPDATE
-  menu_name = VALUES(menu_name),
-  parent_id = VALUES(parent_id),
-  sort_order = VALUES(sort_order),
-  path = VALUES(path),
+ON DUPLICATE KEY UPDATE  path = VALUES(path),
   component = VALUES(component),
   perms = VALUES(perms),
   icon = VALUES(icon),

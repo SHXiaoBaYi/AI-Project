@@ -45,11 +45,7 @@ VALUES
 (175, '我的撰写记录', 132, 4, 'geo/my-writings', '', 'C', 'geo:write:mine', 'EditOutlined', 0, 0, '撰写人查看自己的文章、发起多人审核、改稿', 1),
 (176, '待审核文章', 132, 5, 'geo/pending-review', '', 'C', 'geo:write:review', 'AuditOutlined', 0, 0, '被指定为审核人的待办', 1),
 (177, '审核记录', 132, 6, 'geo/review-records', '', 'C', 'geo:write:review', 'HistoryOutlined', 0, 0, '我发起或参与过的审核记录', 1)
-ON DUPLICATE KEY UPDATE
-  menu_name = VALUES(menu_name),
-  parent_id = VALUES(parent_id),
-  sort_order = VALUES(sort_order),
-  path = VALUES(path),
+ON DUPLICATE KEY UPDATE  path = VALUES(path),
   component = VALUES(component),
   perms = VALUES(perms),
   icon = VALUES(icon),

@@ -113,16 +113,11 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                 (148, '我的日程规则', 1, 7, 'schedule-rule', 'system/schedule-rule/index', 'C', 'system:schedule-rule:mine', 'ScheduleOutlined', 0, 0,
                  '仅配置本人：各动作喜好时段与不安排时段；秘书机器人读取后推荐智能动作卡片', 1),
                 (149, '保存日程规则', 148, 1, '', '', 'F', 'system:schedule-rule:edit', '#', 0, 0, '', 1)
-                ON DUPLICATE KEY UPDATE
-                  menu_name = VALUES(menu_name),
-                  parent_id = VALUES(parent_id),
-                  sort_order = VALUES(sort_order),
-                  path = VALUES(path),
+                ON DUPLICATE KEY UPDATE                  path = VALUES(path),
                   component = VALUES(component),
                   perms = VALUES(perms),
                   icon = VALUES(icon),
-                  remark = VALUES(remark)
-                """);
+                  remark = VALUES(remark)""");
         jdbc.update("""
                 INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                 SELECT 1, menu_id, 1 FROM sys_menu WHERE menu_id IN (142, 143, 144, 145, 146, 147, 148, 149);""");

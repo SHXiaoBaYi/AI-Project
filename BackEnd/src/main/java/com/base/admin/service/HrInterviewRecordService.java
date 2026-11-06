@@ -441,7 +441,9 @@ public class HrInterviewRecordService {
                   AND status IN ('SUCCESS', 'NO_CALENDAR', 'FAILED')
                   AND interviewer_user_id IS NOT NULL
                   AND interview_at <=> (SELECT interview_at FROM hr_interview_invite WHERE id = ?)
-                """, rs -> expectedSet.add(rs.getLong("interviewer_user_id")), applicationId, roundNo, inviteId);
+                """, rs -> {
+            expectedSet.add(rs.getLong("interviewer_user_id"));
+        }, applicationId, roundNo, inviteId);
         List<Long> expected = new ArrayList<>(expectedSet);
         if (expected.isEmpty()) {
             return "NONE";
