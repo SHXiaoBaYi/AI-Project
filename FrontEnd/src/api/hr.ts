@@ -716,6 +716,35 @@ export function getHrKpiAssessmentApi(data: HrKpiAssessmentQuery = {}) {
   return request.post<unknown, HrKpiAssessment>('/hr/kpi/assessment', data);
 }
 
+export type HrKpiAssessmentCandidates = {
+  requisitionId: number;
+  jobName?: string;
+  settleMonth?: string;
+  doneReason?: string;
+  /** 达标门槛（入职人数或合格简历份数） */
+  target?: number;
+  hitCount?: number;
+  items: {
+    applicationId: number;
+    candidateId?: number;
+    candidateName?: string;
+    phone?: string;
+    currentStage?: string;
+    submitterName?: string;
+    hitAt?: string;
+    /** 凑够门槛、计入达标的那几位 */
+    counted?: boolean;
+  }[];
+};
+
+export function getHrKpiAssessmentCandidatesApi(data: {
+  requisitionId: number;
+  settleMonth?: string;
+  doneReason?: string;
+}) {
+  return request.post<unknown, HrKpiAssessmentCandidates>('/hr/kpi/assessment/candidates', data);
+}
+
 export function updateHrKpiTaskDueApi(id: number, dueAt: string) {
   return request.put(`/hr/kpi/task/${id}/due`, { dueAt });
 }

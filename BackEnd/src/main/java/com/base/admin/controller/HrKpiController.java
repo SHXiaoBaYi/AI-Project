@@ -2,9 +2,11 @@ package com.base.admin.controller;
 
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.HrKpiAssessmentCandidateQueryDTO;
 import com.base.admin.domain.dto.HrKpiAssessmentQueryDTO;
 import com.base.admin.domain.dto.HrKpiQueryDTO;
 import com.base.admin.domain.dto.HrKpiTaskDueUpdateDTO;
+import com.base.admin.domain.vo.HrKpiAssessmentCandidateVO;
 import com.base.admin.domain.vo.HrKpiAssessmentVO;
 import com.base.admin.domain.vo.HrKpiBoardVO;
 import com.base.admin.service.HrKpiService;
@@ -49,6 +51,14 @@ public class HrKpiController {
     @RequiresPermission("hr:kpi:view")
     public Result<HrKpiAssessmentVO> assessment(@RequestBody(required = false) HrKpiAssessmentQueryDTO query) {
         return Result.ok(kpiTaskService.assessment(query));
+    }
+
+    @Operation(summary = "考核任务达标候选人明细（按完成方式下钻）")
+    @PostMapping("/assessment/candidates")
+    @RequiresPermission("hr:kpi:view")
+    public Result<HrKpiAssessmentCandidateVO> assessmentCandidates(
+            @Valid @RequestBody HrKpiAssessmentCandidateQueryDTO query) {
+        return Result.ok(kpiTaskService.assessmentCandidates(query));
     }
 
     @Operation(summary = "考核任务延期")

@@ -1,7 +1,9 @@
 package com.base.admin.service;
 
+import com.base.admin.domain.dto.HrKpiAssessmentCandidateQueryDTO;
 import com.base.admin.domain.dto.HrKpiAssessmentQueryDTO;
 import com.base.admin.domain.dto.HrKpiScoreRuleDTO;
+import com.base.admin.domain.vo.HrKpiAssessmentCandidateVO;
 import com.base.admin.domain.vo.HrKpiAssessmentVO;
 import com.base.admin.domain.vo.HrKpiScoreRuleVO;
 import com.base.admin.exception.BusinessException;
@@ -888,6 +890,107 @@ public class HrKpiTaskService {
             }
         }
         return MonthAttainment.notDone();
+    }
+
+    /** 任务明细「完成方式」下钻：与 evaluateMonthAttainment 同口径列出核算月内命中的候选人。 */
+    public HrKpiAssessmentCandidateVO assessmentCandidates(HrKpiAssessmentCandidateQueryDTO query) {
+        if (query == null || query.getRequisitionId() == null) {
+            throw new BusinessException("岗位不能为空");
+        }
+        Long reqId = query.getRequisitionId();
+        LocalDate month = query.getSettleMonth() == null ? LocalDate.now() : query.getSettleMonth();
+        LocalDate monthStart = month.withDayOfMonth(1);
+        String settleMonthKey = YearMonth.from(monthStart).toString();
+        LocalDateTime from = monthStart.atStartOfDay();
+        LocalDateTime to = monthStart.plusMonths(1).atStartOfDay();
+        MonthTaskRule rule = monthTaskService.loadRule(reqId, settleMonthKey);
+
+        String reason = StringUtils.hasText(query.getDoneReason())
+                ? query.getDoneReason().trim().toUpperCase(Locale.ROOT) : null;
+        if (reason == null) {
+            MonthAttainment att = evaluateMonthAttainment(rule, reqId, from, to);
+            if (att.done()) {
+                reason = att.reason();
+            } else {
+                reason = rule != null && !rule.allowsOnboard() && rule.allowsResume() ? "QUALIFIED_RESUME" : "ONBOARD";
+            }
+        }
+        boolean resumeMode = "QUALIFIED_RESUME".equals(reason);
+        int target = rule == null ? 0 : (resumeMode ? rule.resumeTarget() : rule.onboardTarget());
+
+        List<HrKpiAssessmentCandidateVO.Item> items = resumeMode
+                ? listQualifiedCandidates(reqId, from, to)
+                : listOnboardCandidates(reqId, from, to);
+        for (int i = 0; i < items.size(); i++) {
+            items.get(i).setCounted(target > 0 && i < target);
+        }
+
+        HrKpiAssessmentCandidateVO vo = new HrKpiAssessmentCandidateVO();
+        vo.setRequisitionId(reqId);
+        vo.setJobName(jdbc.query("SELECT job_name FROM hr_requisition WHERE id = ?",
+                rs -> rs.next() ? rs.getString(1) : null, reqId));
+        vo.setSettleMonth(settleMonthKey);
+        vo.setDoneReason(reason);
+        vo.setTarget(target);
+        vo.setHitCount(items.size());
+        vo.setItems(items);
+        return vo;
+    }
+
+    private List<HrKpiAssessmentCandidateVO.Item> listOnboardCandidates(
+            Long requisitionId, LocalDateTime from, LocalDateTime to) {
+        return jdbc.query("""
+                SELECT x.* FROM (
+                  SELECT a.id AS application_id, a.candidate_id, c.display_name, c.phone,
+                         a.current_stage, a.submitter_name, %s AS hit_at
+                  FROM hr_application a
+                  JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
+                  LEFT JOIN hr_candidate c ON c.id = a.candidate_id
+                  WHERE a.requisition_id = ? AND a.is_active = 1
+                    AND a.current_stage = 'ONBOARDED'
+                    AND ob.onboard_date IS NOT NULL
+                ) x
+                WHERE x.hit_at >= ? AND x.hit_at < ?
+                ORDER BY x.hit_at ASC, x.application_id ASC
+                """.formatted(onboardAtExpr()), (rs, i) -> readCandidateItem(rs), requisitionId, from, to);
+    }
+
+    private List<HrKpiAssessmentCandidateVO.Item> listQualifiedCandidates(
+            Long requisitionId, LocalDateTime from, LocalDateTime to) {
+        return jdbc.query("""
+                SELECT x.application_id, a.candidate_id, c.display_name, c.phone,
+                       a.current_stage, a.submitter_name, x.hit_at
+                FROM (
+                  SELECT rec.application_id, MIN(%s) AS hit_at
+                  FROM hr_interview_record rec
+                  JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
+                  WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
+                    AND a.current_stage <> 'ONBOARDED'
+                    AND NOT EXISTS (
+                      SELECT 1 FROM hr_onboard ob
+                      WHERE ob.application_id = a.id AND ob.is_active = 1 AND ob.onboard_date IS NOT NULL
+                    )
+                  GROUP BY rec.application_id
+                ) x
+                JOIN hr_application a ON a.id = x.application_id
+                LEFT JOIN hr_candidate c ON c.id = a.candidate_id
+                WHERE x.hit_at >= ? AND x.hit_at < ?
+                ORDER BY x.hit_at ASC, x.application_id ASC
+                """.formatted(resumeHitAt()), (rs, i) -> readCandidateItem(rs), requisitionId, from, to);
+    }
+
+    private static HrKpiAssessmentCandidateVO.Item readCandidateItem(java.sql.ResultSet rs) throws java.sql.SQLException {
+        HrKpiAssessmentCandidateVO.Item item = new HrKpiAssessmentCandidateVO.Item();
+        item.setApplicationId(rs.getLong("application_id"));
+        long candidateId = rs.getLong("candidate_id");
+        item.setCandidateId(rs.wasNull() ? null : candidateId);
+        item.setCandidateName(rs.getString("display_name"));
+        item.setPhone(rs.getString("phone"));
+        item.setCurrentStage(rs.getString("current_stage"));
+        item.setSubmitterName(rs.getString("submitter_name"));
+        java.sql.Timestamp at = rs.getTimestamp("hit_at");
+        item.setHitAt(at == null ? null : at.toLocalDateTime());
+        return item;
     }
 
     private void applyMonthAttainment(

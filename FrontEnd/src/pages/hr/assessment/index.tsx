@@ -5,6 +5,8 @@ import {
   Card,
   Col,
   DatePicker,
+  Descriptions,
+  Drawer,
   Progress,
   Row,
   Select,
@@ -17,7 +19,17 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import PermissionButton from '@/components/Buttons/PermissionButton';
-import { backfillHrKpiAssessmentApi, getHrKpiAssessmentApi, getHrUsersApi, type HrKpiAssessment } from '@/api/hr';
+import {
+  backfillHrKpiAssessmentApi,
+  getHrKpiAssessmentApi,
+  getHrKpiAssessmentCandidatesApi,
+  getHrUsersApi,
+  type HrKpiAssessment,
+  type HrKpiAssessmentCandidates,
+} from '@/api/hr';
+import { hrStageDisplayName } from '@/constants/hrStages';
+
+type TaskRow = HrKpiAssessment['tasks'][number];
 
 const STATUS_OPTIONS = [
   { label: '全部', value: '' },
@@ -94,6 +106,28 @@ const AssessmentPage = memo(function AssessmentPage() {
   const [backfilling, setBackfilling] = useState(false);
   const tableHostRef = useRef<HTMLDivElement>(null);
   const [tableBodyY, setTableBodyY] = useState(320);
+  const [detailTask, setDetailTask] = useState<TaskRow | null>(null);
+  const [detail, setDetail] = useState<HrKpiAssessmentCandidates | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const openCandidates = useCallback(
+    async (row: TaskRow) => {
+      setDetailTask(row);
+      setDetail(null);
+      setDetailLoading(true);
+      try {
+        const res = await getHrKpiAssessmentCandidatesApi({
+          requisitionId: row.requisitionId,
+          settleMonth: month.format('YYYY-MM-01'),
+          doneReason: row.doneReason,
+        });
+        setDetail(res);
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [month],
+  );
 
   useEffect(() => {
     getHrUsersApi('owner').then((list) =>
@@ -155,7 +189,27 @@ const AssessmentPage = memo(function AssessmentPage() {
   const overallP1Onboard = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneOnboard ?? 0), 0);
   const overallP1ResumeDone = (data?.owners ?? []).reduce((n, o) => n + (o.p1DoneResume ?? 0), 0);
 
-  const taskColumns: ColumnsType<HrKpiAssessment['tasks'][number]> = [
+  const candidateColumns: ColumnsType<HrKpiAssessmentCandidates['items'][number]> = [
+    { title: '#', key: 'idx', width: 48, render: (_v, _r, i) => i + 1 },
+    { title: '候选人', dataIndex: 'candidateName', width: 100, ellipsis: true, render: (v) => v || '—' },
+    { title: '电话', dataIndex: 'phone', width: 120, render: (v) => v || '—' },
+    {
+      title: detail?.doneReason === 'QUALIFIED_RESUME' ? '合格时间' : '入职时间',
+      dataIndex: 'hitAt',
+      width: 110,
+      render: fmtDate,
+    },
+    { title: '当前阶段', dataIndex: 'currentStage', width: 110, render: (v) => hrStageDisplayName(v) },
+    { title: '提交人', dataIndex: 'submitterName', width: 88, ellipsis: true, render: (v) => v || '—' },
+    {
+      title: '计入达标',
+      dataIndex: 'counted',
+      width: 80,
+      render: (v: boolean) => (v ? <Tag color='success'>计入</Tag> : <Tag>超出</Tag>),
+    },
+  ];
+
+  const taskColumns: ColumnsType<TaskRow> = [
     { title: '负责人', dataIndex: 'ownerName', width: 88, ellipsis: true },
     { title: '岗位', dataIndex: 'jobName', ellipsis: true },
     {
@@ -208,7 +262,15 @@ const AssessmentPage = memo(function AssessmentPage() {
       width: 120,
       render: (v: string | undefined, row) => {
         if (row.status === 'DONE' && v) {
-          return <Tag color={doneReasonColor(v)}>{doneReasonLabel(v, row.priorityCode)}</Tag>;
+          return (
+            <Tag
+              color={doneReasonColor(v)}
+              className='cursor-pointer'
+              onClick={() => openCandidates(row)}
+            >
+              {doneReasonLabel(v, row.priorityCode)} ›
+            </Tag>
+          );
         }
         return '—';
       },
@@ -381,6 +443,51 @@ const AssessmentPage = memo(function AssessmentPage() {
           />
         </div>
       </Card>
+
+      <Drawer
+        title='达标候选人'
+        width={760}
+        open={!!detailTask}
+        onClose={() => setDetailTask(null)}
+        destroyOnHidden
+      >
+        <Descriptions
+          size='small'
+          column={2}
+          className='mb-3'
+          items={[
+            { key: 'job', label: '岗位', children: detail?.jobName || detailTask?.jobName || '—' },
+            { key: 'owner', label: '负责人', children: detailTask?.ownerName || '—' },
+            { key: 'month', label: '核算月', children: detail?.settleMonth || month.format('YYYY-MM') },
+            {
+              key: 'reason',
+              label: '完成方式',
+              children: (
+                <Tag color={doneReasonColor(detail?.doneReason ?? detailTask?.doneReason)}>
+                  {doneReasonLabel(detail?.doneReason ?? detailTask?.doneReason, detailTask?.priorityCode)}
+                </Tag>
+              ),
+            },
+            {
+              key: 'progress',
+              label: '命中 / 门槛',
+              children: detail
+                ? `${detail.hitCount ?? 0} / ${detail.target ?? 0}${detail.doneReason === 'QUALIFIED_RESUME' ? ' 份' : ' 人'}`
+                : '—',
+            },
+          ]}
+        />
+        <Table
+          rowKey='applicationId'
+          size='small'
+          loading={detailLoading}
+          dataSource={detail?.items ?? []}
+          columns={candidateColumns}
+          pagination={false}
+          scroll={{ x: 'max-content' }}
+          locale={{ emptyText: '核算月内暂无命中候选人' }}
+        />
+      </Drawer>
     </div>
   );
 });
