@@ -1,0 +1,9 @@
+[Unit]
+Description=One-shot sync of old production database and uploads
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/xby-admin/sync-old-prod-once.sh
+TimeoutStartSec=2h

@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync old production data once at 2026-11-10 23:59:59 Asia/Shanghai
+
+[Timer]
+OnCalendar=2026-11-10 23:59:59
+AccuracySec=1s
+Persistent=true
+Unit=xby-prod-final-sync.service
+
+[Install]
+WantedBy=timers.target
