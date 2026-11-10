@@ -19,6 +19,7 @@ import {
   type HrCandidateListRow,
 } from '@/components/hr/candidateListColumns';
 import { demoRangeByGrain, type DemoBoardGrain } from '@/constants/demoData';
+import { useResizableColumns } from '@/hooks/useResizableColumns';
 import { downloadElementImage } from '@/utils/downloadElementImage';
 import {
   getHrDepartmentsApi,
@@ -312,6 +313,7 @@ const HrPanelPage = memo(function HrPanelPage() {
     ],
     [addresses, depts, owners, priorities],
   );
+  const resizable = useResizableColumns('hr-panel-job-list-widths', columns);
 
   const jobColumns: ColumnsType<HrPanelJobRow> = useMemo(
     () => [
@@ -468,10 +470,11 @@ const HrPanelPage = memo(function HrPanelPage() {
         rowKey='id'
         actionRef={actionRef}
         headerTitle='岗位列表'
-        columns={columns}
+        columns={resizable.columns}
+        components={resizable.components}
         params={dateQuery}
         pagination={{ defaultPageSize: 10 }}
-        scroll={{ x: 1560 }}
+        scroll={{ x: resizable.totalWidth }}
         toolBarRender={() => [
           <PermissionButton
             key='log'
