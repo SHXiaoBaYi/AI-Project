@@ -1,5 +1,5 @@
-# 测试 ECS（121.40.170.82）：测试 RDS 内网
-# RDS 主机沿用 application.yml 默认（rm-bp15f2a3k5b93293k）
+# 测试 ECS（47.117.132.161）：测试 RDS 内网
+# RDS 主机沿用 application.yml 默认（rm-uf64y725h1ufca0jk）
 spring:
   datasource:
     url: jdbc:mysql://${xby.rds.internal-host}:${xby.rds.port}/${xby.rds.database}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
@@ -8,7 +8,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
 
 xby:
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.170.82/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.117.132.161/shxby/api}
   # 测试 ECS 允许账号密码登录（生产仍仅钉钉）
   auth:
     password-login-enabled: true
@@ -16,15 +16,15 @@ xby:
   env-sync:
     enabled: true
     prod:
-      host: rm-bp18jx12jxs1884h9so.mysql.rds.aliyuncs.com
+      host: rm-uf6l17zg54sh9378vso.mysql.rds.aliyuncs.com
       port: 3306
       database: base_admin
       username: ${RDS_USERNAME:xiaobayi0099}
       password: ${RDS_PASSWORD:Xby@123456}
 
-# 与生产共用同一机器人凭证时，测试默认不占 Stream，避免「线上邀约」卡片落到 170.82
+# 与生产共用同一机器人凭证时，测试默认不占 Stream，避免「线上邀约」卡片落到 47.117.132.161
 dingtalk:
-  h5-base-url: ${DINGTALK_H5_BASE_URL:http://121.40.170.82/shxby}
+  h5-base-url: ${DINGTALK_H5_BASE_URL:http://47.117.132.161/shxby}
   robot:
     stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:false}
 

@@ -24,7 +24,7 @@ public class FileStorageService {
 
     /**
      * 对外访问根（含 /api）。禁止在代码里写死 ECS IP。
-     * 由 yml 按环境注入：local/test → 170.82，prod → 119.134（见 application-*.yml）。
+     * 由 yml 按环境注入：local/test → 47.117.132.161，prod → 47.117.113.28（见 application-*.yml）。
      * 落库仍用相对路径 /uploads/...；返回给前端时拼成公网地址。
      */
     @Value("${xby.upload-public-base:}")

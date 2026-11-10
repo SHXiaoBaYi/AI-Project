@@ -5,9 +5,9 @@
 #   rds:
 #     username: your_test_user
 #     password: your_test_password
-#   upload-public-base: http://121.40.170.82/shxby/api
+#   upload-public-base: http://47.117.132.161/shxby/api
 # dingtalk:
-#   h5-base-url: http://121.40.170.82/shxby
+#   h5-base-url: http://47.117.132.161/shxby
 #   # 调试机器人时再开；默认 false，避免抢走生产 Stream
 #   robot:
 #     stream-enabled: false
@@ -17,8 +17,8 @@
 #   rds:
 #     username: your_prod_user
 #     password: your_prod_password
-#   upload-public-base: http://121.40.119.134/shxby/api
+#   upload-public-base: http://47.117.113.28/shxby/api
 # dingtalk:
-#   h5-base-url: http://121.40.119.134/shxby
+#   h5-base-url: http://47.117.113.28/shxby
 #   robot:
 #     stream-enabled: true

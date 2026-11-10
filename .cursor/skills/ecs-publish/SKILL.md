@@ -3,7 +3,7 @@ name: ecs-publish
 description: >-
   编译 Spring Boot + React 并发布到测试或生产 ECS。必须先确认环境，禁止默认打生产。
   Use when the user asks to 重新编译并发布到ECS / 发布到ECS / 发布测试 / 发布生产,
-  or mentions 测试环境 ECS 121.40.170.82 / 生产环境 ECS 121.40.119.134,
+  or mentions 测试环境 ECS 47.117.132.161 / 生产环境 ECS 47.117.113.28,
   or 生产表结构/初始化数据/默认值回填是否随发版执行.
 ---
 
@@ -15,8 +15,8 @@ description: >-
 
 | 环境 | 公网 | Profile | systemd 源 | 入口 |
 |------|------|---------|------------|------|
-| 测试 | `121.40.170.82` | `test` | `deploy/xby-admin-test.service` | http://121.40.170.82/shxby/ |
-| 生产 | `121.40.119.134` | `prod` | `deploy/xby-admin.service` | http://121.40.119.134/shxby/ |
+| 测试 | `47.117.132.161` | `test` | `deploy/xby-admin-test.service` | http://47.117.132.161/shxby/ |
+| 生产 | `47.117.113.28` | `prod` | `deploy/xby-admin.service` | http://47.117.113.28/shxby/ |
 
 两边布局相同：jar `/opt/xby-admin/base-admin-1.0.0.jar`，前端 `/opt/xby-admin/html/shxby/`，nginx `/etc/nginx/conf.d/xby-admin.conf`，服务名 `xby-admin`。`VITE_BASE=/shxby/`。不要自创发布路径。
 

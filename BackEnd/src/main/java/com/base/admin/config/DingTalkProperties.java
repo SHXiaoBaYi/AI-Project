@@ -30,7 +30,7 @@ public class DingTalkProperties {
 
     /**
      * 机器人 ActionCard 打开的 H5 根地址（含部署前缀，无尾斜杠）。
-     * 例：http://121.40.119.134/shxby 。留空则尝试从 xby.upload-public-base 去掉 /api 推导。
+     * 例：http://47.117.113.28/shxby 。留空则尝试从 xby.upload-public-base 去掉 /api 推导。
      */
     private String h5BaseUrl = "";
 

@@ -13,9 +13,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd());
   const base = env.VITE_BASE || '/';
   // 本地默认把 /api 代理到「测试」ECS；要测本机后端时设 VITE_API_PROXY_TARGET=http://127.0.0.1:8080
-  // 临时连生产：VITE_API_PROXY_TARGET=http://121.40.119.134/shxby
+  // 临时连生产：VITE_API_PROXY_TARGET=http://47.117.113.28/shxby
   const apiProxyTarget =
-    env.VITE_API_PROXY_TARGET || (mode === 'development' ? 'http://121.40.170.82/shxby' : 'http://127.0.0.1:8080');
+    env.VITE_API_PROXY_TARGET || (mode === 'development' ? 'http://47.117.132.161/shxby' : 'http://127.0.0.1:8080');
 
   return {
     base,

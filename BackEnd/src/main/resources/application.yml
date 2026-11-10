@@ -19,23 +19,23 @@ spring:
       max-file-size: 10MB
       max-request-size: 10MB
 
-# 本文件默认 = 本地/测试（profile local|dev|test）。
-# 生产 ECS 必须 SPRING_PROFILES_ACTIVE=prod，由 application-prod.yml 覆盖为 119.134。
-# 测试 RDS：rm-bp15f2a3k5b93293k ；测试 ECS：121.40.170.82
-# 生产 RDS：rm-bp18jx12jxs1884h9 ；生产 ECS：121.40.119.134
+# 本文件默认 = 本地/测试（profile local|dev|test），账号 shxby。生产 profile 覆盖为 xiaobayi0099。
+# 生产 ECS 必须 SPRING_PROFILES_ACTIVE=prod，由 application-prod.yml 覆盖为 47.117.113.28。
+# 测试 RDS：rm-uf64y725h1ufca0jk ；测试 ECS：47.117.132.161
+# 生产 RDS：rm-uf6l17zg54sh9378v ；生产 ECS：47.117.113.28
 # 注意：测试库外网域名需在阿里云「申请外网地址」后才有 *so* DNS；未申请时本机请代理测试 ECS，ECS 用 internal-host。
 xby:
   rds:
-    external-host: rm-bp15f2a3k5b93293kso.mysql.rds.aliyuncs.com
-    internal-host: rm-bp15f2a3k5b93293k.mysql.rds.aliyuncs.com
+    external-host: rm-uf64y725h1ufca0jkso.mysql.rds.aliyuncs.com
+    internal-host: rm-uf64y725h1ufca0jk.mysql.rds.aliyuncs.com
     port: 3306
     database: base_admin
-    username: ${RDS_USERNAME:xiaobayi0099}
+    username: ${RDS_USERNAME:shxby}
     password: ${RDS_PASSWORD:Xby@123456}
   upload-dir: ${UPLOAD_DIR:./uploads}
-  # 仅 local/test 默认测试机；生产见 application-prod.yml → http://121.40.119.134/shxby/api
+  # 仅 local/test 默认测试机；生产见 application-prod.yml → http://47.117.113.28/shxby/api
   # Java 代码不得再写死 IP 作 @Value 默认值
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.170.82/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.117.132.161/shxby/api}
   # 账号密码登录：默认仅 localhost；测试环境在 application-test.yml 打开
   auth:
     password-login-enabled: ${XBY_PASSWORD_LOGIN_ENABLED:false}

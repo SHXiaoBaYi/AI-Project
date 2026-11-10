@@ -2,8 +2,8 @@
 # 生产库 → 测试库 全量同步（结构+数据）
 #
 # 用法（在能同时访问生产外网与测试外网的机器上执行，需已安装 mysql / mysqldump）：
-#   export PROD_RDS_HOST=rm-bp18jx12jxs1884h9so.mysql.rds.aliyuncs.com
-#   export TEST_RDS_HOST=rm-bp15f2a3k5b93293kso.mysql.rds.aliyuncs.com
+#   export PROD_RDS_HOST=rm-uf6l17zg54sh9378vso.mysql.rds.aliyuncs.com
+#   export TEST_RDS_HOST=rm-uf64y725h1ufca0jkso.mysql.rds.aliyuncs.com
 #   export RDS_USER=xiaobayi0099
 #   export RDS_PASS='***'
 #   ./deploy/sync-prod-db-to-test.sh
@@ -14,8 +14,8 @@
 # 让 SchemaMigrator 把「测试已开发、生产尚未发」的结构补回。
 set -euo pipefail
 
-PROD_RDS_HOST="${PROD_RDS_HOST:-rm-bp18jx12jxs1884h9so.mysql.rds.aliyuncs.com}"
-TEST_RDS_HOST="${TEST_RDS_HOST:-rm-bp15f2a3k5b93293kso.mysql.rds.aliyuncs.com}"
+PROD_RDS_HOST="${PROD_RDS_HOST:-rm-uf6l17zg54sh9378vso.mysql.rds.aliyuncs.com}"
+TEST_RDS_HOST="${TEST_RDS_HOST:-rm-uf64y725h1ufca0jkso.mysql.rds.aliyuncs.com}"
 DB_NAME="${DB_NAME:-base_admin}"
 RDS_USER="${RDS_USER:?请设置 RDS_USER}"
 RDS_PASS="${RDS_PASS:?请设置 RDS_PASS}"
@@ -36,5 +36,5 @@ mysql \
   --default-character-set=utf8mb4 \
   "$DB_NAME" < "$DUMP_FILE"
 
-echo "==> 完成。请重启测试 ECS：ssh root@121.40.170.82 'systemctl restart xby-admin'"
+echo "==> 完成。请重启测试 ECS：ssh root@47.117.132.161 'systemctl restart xby-admin'"
 echo "    dump 文件保留：${DUMP_FILE}"

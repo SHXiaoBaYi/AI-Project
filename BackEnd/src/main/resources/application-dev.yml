@@ -9,8 +9,8 @@ spring:
 
 xby:
   rds:
-    external-host: rm-bp15f2a3k5b93293kso.mysql.rds.aliyuncs.com
-    internal-host: rm-bp15f2a3k5b93293k.mysql.rds.aliyuncs.com
+    external-host: rm-uf64y725h1ufca0jkso.mysql.rds.aliyuncs.com
+    internal-host: rm-uf64y725h1ufca0jk.mysql.rds.aliyuncs.com
   auth:
     password-login-enabled: true
   env-sync:

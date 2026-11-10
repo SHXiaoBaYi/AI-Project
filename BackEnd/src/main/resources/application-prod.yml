@@ -1,22 +1,22 @@
-# 生产 ECS（121.40.119.134）：生产 RDS 内网
+# 生产 ECS（47.117.113.28）：生产 RDS 内网
 # 覆盖 application.yml 中的测试库默认值
 xby:
   rds:
-    external-host: rm-bp18jx12jxs1884h9so.mysql.rds.aliyuncs.com
-    internal-host: rm-bp18jx12jxs1884h9.mysql.rds.aliyuncs.com
+    external-host: rm-uf6l17zg54sh9378vso.mysql.rds.aliyuncs.com
+    internal-host: rm-uf6l17zg54sh9378v.mysql.rds.aliyuncs.com
     port: 3306
     database: base_admin
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://121.40.119.134/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.117.113.28/shxby/api}
   auth:
     password-login-enabled: false
   env-sync:
     enabled: false
 
-# ActionCard / bridge 必须指向生产公网，避免落到测试机 170.82
+# ActionCard / bridge 必须指向生产公网，避免落到测试机 47.117.132.161
 dingtalk:
-  h5-base-url: ${DINGTALK_H5_BASE_URL:http://121.40.119.134/shxby}
+  h5-base-url: ${DINGTALK_H5_BASE_URL:http://47.117.113.28/shxby}
   robot:
     stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:true}
 

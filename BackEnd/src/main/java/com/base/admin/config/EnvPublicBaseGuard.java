@@ -10,15 +10,16 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 /**
- * 防止生产误用测试 ECS 公网地址（历史写死 170.82 导致答疑配图等全挂）。
- * 对照：测试 121.40.170.82 / 生产 121.40.119.134。
+ * 防止生产误用测试 ECS 公网地址（曾写死旧测试机 121.40.170.82，答疑配图等全挂）。
+ * 对照：测试 47.117.132.161 / 生产 47.117.113.28。旧测试机同样禁止。
  */
 @Component
 public class EnvPublicBaseGuard implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(EnvPublicBaseGuard.class);
-    private static final String TEST_HOST = "121.40.170.82";
-    private static final String PROD_HOST = "121.40.119.134";
+    private static final String TEST_HOST = "47.117.132.161";
+    private static final String TEST_HOST_LEGACY = "121.40.170.82";
+    private static final String PROD_HOST = "47.117.113.28";
 
     private final Environment environment;
 
@@ -58,9 +59,10 @@ public class EnvPublicBaseGuard implements ApplicationRunner {
     }
 
     private static void assertNotTestHost(String name, String value) {
-        if (StringUtils.hasText(value) && value.contains(TEST_HOST)) {
+        if (StringUtils.hasText(value) && (value.contains(TEST_HOST) || value.contains(TEST_HOST_LEGACY))) {
             throw new IllegalStateException(
-                    "生产环境禁止使用测试 ECS 地址 " + TEST_HOST + "（配置项 " + name + "=" + value
+                    "生产环境禁止使用测试 ECS 地址 " + TEST_HOST + " 或旧测试机 " + TEST_HOST_LEGACY
+                            + "（配置项 " + name + "=" + value
                             + "）。请使用 application-prod.yml 中的 http://" + PROD_HOST + "/shxby");
         }
     }

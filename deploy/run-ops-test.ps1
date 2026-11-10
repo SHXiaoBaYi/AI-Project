@@ -6,7 +6,7 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$Identity,
-  [string]$EcsHost = '121.40.170.82',
+  [string]$EcsHost = '47.117.132.161',
   [string]$EcsUser = 'root',
   [string]$RdsUser = 'xiaobayi0099',
   [string]$RdsPass = '',

@@ -2,8 +2,8 @@ import { withBase } from '@/utils/basePath';
 
 /**
  * 附件根解析规则（禁止在前端源码写死生产/测试 ECS IP）：
- * 1) VITE_UPLOAD_PUBLIC_BASE（仅本地 .env：测 170.82 / 慎用生产 119.134）
- * 2) 浏览器同源：当前页 origin + /shxby/api（生产打开就是 119.134，测试打开就是 170.82）
+ * 1) VITE_UPLOAD_PUBLIC_BASE（仅本地 .env：测 47.117.132.161 / 慎用生产 47.117.113.28）
+ * 2) 浏览器同源：当前页 origin + /shxby/api（生产打开就是 47.117.113.28，测试打开就是 47.117.132.161）
  * 3) 无浏览器上下文：相对路径 withBase('/api/uploads/...')
  */
 function uploadPublicBase(): string {

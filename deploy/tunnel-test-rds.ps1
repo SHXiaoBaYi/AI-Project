@@ -3,10 +3,10 @@
 #   .\deploy\tunnel-test-rds.ps1
 param(
   [string]$Identity = (Join-Path $env:USERPROFILE '.ssh\xby-test-ecs'),
-  [string]$EcsHost = '121.40.170.82',
+  [string]$EcsHost = '47.117.132.161',
   [string]$EcsUser = 'root',
   [int]$LocalPort = 13306,
-  [string]$RdsInternalHost = 'rm-bp15f2a3k5b93293k.mysql.rds.aliyuncs.com',
+  [string]$RdsInternalHost = 'rm-uf64y725h1ufca0jk.mysql.rds.aliyuncs.com',
   [int]$RdsPort = 3306
 )
 

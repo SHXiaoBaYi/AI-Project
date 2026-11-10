@@ -9,9 +9,13 @@ public class Constants {
     /** 测试环境「同步生产数据 / 同步表结构」仅此账号可见可调 */
     public static final String ENV_SYNC_USERNAME = "wangfangyang";
     /** JDBC URL / host 中出现即视为生产 RDS，本地/测试严禁直连 */
-    public static final String RDS_PROD_INSTANCE_MARKER = "rm-bp18jx12jxs1884h9";
+    public static final String RDS_PROD_INSTANCE_MARKER = "rm-uf6l17zg54sh9378v";
     /** JDBC URL / host 中出现即视为测试 RDS */
-    public static final String RDS_TEST_INSTANCE_MARKER = "rm-bp15f2a3k5b93293k";
+    public static final String RDS_TEST_INSTANCE_MARKER = "rm-uf64y725h1ufca0jk";
+    /** 切换前的生产库，正式数据仍在；local/test 同样禁止直连 */
+    public static final String RDS_PROD_INSTANCE_MARKER_LEGACY = "rm-bp18jx12jxs1884h9";
+    /** 切换前的测试库 */
+    public static final String RDS_TEST_INSTANCE_MARKER_LEGACY = "rm-bp15f2a3k5b93293k";
 
     public static final String MENU_TYPE_DIR = "M";
     public static final String MENU_TYPE_MENU = "C";

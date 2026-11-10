@@ -5,5 +5,5 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export ECS_ENV=test
-export ECS_HOST="${ECS_HOST:-121.40.170.82}"
+export ECS_HOST="${ECS_HOST:-47.117.132.161}"
 exec "$ROOT/deploy/publish-ecs.sh" test

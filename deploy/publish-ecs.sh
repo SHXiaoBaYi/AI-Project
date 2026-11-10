@@ -30,10 +30,10 @@ if [[ "$ENV_NAME" == "test" && -f "$ROOT/deploy/.ecs-test.local" ]]; then
 fi
 
 if [[ "$ENV_NAME" == "test" ]]; then
-  ECS_HOST="${ECS_HOST:-121.40.170.82}"
+  ECS_HOST="${ECS_HOST:-47.117.132.161}"
   UNIT_SRC="$ROOT/deploy/xby-admin-test.service"
 else
-  ECS_HOST="${ECS_HOST:-121.40.119.134}"
+  ECS_HOST="${ECS_HOST:-47.117.113.28}"
   UNIT_SRC="$ROOT/deploy/xby-admin.service"
 fi
 

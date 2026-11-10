@@ -42,8 +42,10 @@ public class RdsEnvironmentGuard implements ApplicationRunner {
         String url = jdbcUrl == null ? "" : jdbcUrl.toLowerCase(Locale.ROOT);
         boolean prodProfile = Arrays.stream(environment.getActiveProfiles())
                 .anyMatch(p -> "prod".equalsIgnoreCase(p));
-        boolean hitsProd = url.contains(Constants.RDS_PROD_INSTANCE_MARKER.toLowerCase(Locale.ROOT));
+        boolean hitsProd = url.contains(Constants.RDS_PROD_INSTANCE_MARKER.toLowerCase(Locale.ROOT))
+                || url.contains(Constants.RDS_PROD_INSTANCE_MARKER_LEGACY.toLowerCase(Locale.ROOT));
         boolean hitsTest = url.contains(Constants.RDS_TEST_INSTANCE_MARKER.toLowerCase(Locale.ROOT))
+                || url.contains(Constants.RDS_TEST_INSTANCE_MARKER_LEGACY.toLowerCase(Locale.ROOT))
                 || url.contains("127.0.0.1") || url.contains("localhost");
 
         if (!prodProfile && hitsProd) {

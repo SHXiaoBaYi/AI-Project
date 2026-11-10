@@ -4,7 +4,7 @@ import java.util.*;
 /** One-shot: wipe GEO topic master + all topic-linked business data. */
 public class CleanTopicData {
     public static void main(String[] args) throws Exception {
-        String url = "jdbc:mysql://rm-bp18jx12jxs1884h9so.mysql.rds.aliyuncs.com:3306/base_admin"
+        String url = "jdbc:mysql://rm-uf6l17zg54sh9378vso.mysql.rds.aliyuncs.com:3306/base_admin"
                 + "?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=true&allowPublicKeyRetrieval=true";
         String user = System.getenv().getOrDefault("RDS_USERNAME", "xiaobayi0099");
         String pass = System.getenv().getOrDefault("RDS_PASSWORD", "Xby@123456");

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import paramiko
 
-HOST = os.environ.get("ECS_HOST", "121.40.170.82")
+HOST = os.environ.get("ECS_HOST", "47.117.132.161")
 USER = os.environ.get("ECS_USER", "root")
 PASSWORD = os.environ["ECS_PASS"]
 RDS_USER = os.environ.get("RDS_USER", "xiaobayi0099")
