@@ -2053,7 +2053,10 @@ public class GeoContentPlacementServiceImpl implements GeoContentPlacementServic
         }
         LambdaQueryWrapper<GeoContentPlacement> wrapper = new LambdaQueryWrapper<GeoContentPlacement>()
                 .eq(GeoContentPlacement::getTopicId, topicId)
-                .apply("TRIM(target_question) = {0}", question);
+                .apply("TRIM(target_question) = {0}", question)
+                // 投放完成不再占用唯一性，同一话题下可以再次新增相同目标问题
+                .notIn(GeoContentPlacement::getPlacementProgress,
+                        Constants.CONTENT_AGG_DONE, "全部投放成功");
         if (excludeId != null) {
             wrapper.ne(GeoContentPlacement::getId, excludeId);
         }
