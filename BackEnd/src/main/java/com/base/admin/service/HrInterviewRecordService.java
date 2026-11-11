@@ -413,23 +413,6 @@ public class HrInterviewRecordService {
         }
     }
 
-    public static boolean roundConcluded(String currentStage, int roundNo) {
-        if (currentStage == null || roundNo <= 0) {
-            return false;
-        }
-        int concluded = switch (currentStage) {
-            case "FIRST_PENDING", "FIRST_ROUND", "FIRST_FAIL", "R1_DISPUTE" -> 1;
-            case "R2_PENDING", "SECOND_ROUND", "R2_FAIL", "R2_DISPUTE" -> 2;
-            case "R3_PASS", "R3_PENDING", "R3_DISPUTE", "R3_FAIL" -> 3;
-            case "R4_PASS", "R4_PENDING", "R4_DISPUTE", "R4_FAIL" -> 4;
-            case "R5_PASS", "R5_PENDING", "R5_DISPUTE", "R5_FAIL" -> 5;
-            case "FINAL", "SALARY", "BG_COLLECT", "BG_CHECK", "MEDICAL", "OFFER_PENDING", "PENDING_ONBOARD",
-                 "OFFER_SENT", "OFFER_ACCEPTED", "CANDIDATE_REJECT", "ONBOARDED" -> 99;
-            default -> 0;
-        };
-        return concluded >= roundNo;
-    }
-
     private String syncStage(Long applicationId, Integer roundNo, Long inviteId) {
         if (applicationId == null || roundNo == null || inviteId == null) {
             return "NONE";

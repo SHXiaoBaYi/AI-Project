@@ -234,14 +234,25 @@ public class HrInviteService {
                 """);
         List<Object> args = new ArrayList<>();
         if (Boolean.TRUE.equals(q.getMine())) {
+            // 自己面过的都留下，候选人进入下一轮也显示；写过评价的无论邀约状态都显示。
             sql.append("""
-                     AND i.interviewer_user_id = ? AND i.status IN ('SUCCESS', 'NO_CALENDAR')
+                     AND i.interviewer_user_id = ?
+                     AND (i.status IN ('SUCCESS', 'NO_CALENDAR') OR mine_rec.id IS NOT NULL)
                     """);
             args.add(SecurityUtils.getCurrentUserId());
         }
         if (q.getCandidateName() != null && !q.getCandidateName().isBlank()) {
             sql.append(" AND c.display_name LIKE ? ");
             args.add("%" + q.getCandidateName().trim() + "%");
+        }
+        if (q.getJobName() != null && !q.getJobName().isBlank()) {
+            sql.append(" AND r.job_name LIKE ? ");
+            args.add("%" + q.getJobName().trim() + "%");
+        }
+        if (q.getReviewed() != null) {
+            sql.append(Boolean.TRUE.equals(q.getReviewed())
+                    ? " AND mine_rec.id IS NOT NULL "
+                    : " AND mine_rec.id IS NULL ");
         }
         if (q.getRequisitionId() != null) {
             sql.append(" AND a.requisition_id = ? ");
@@ -269,13 +280,7 @@ public class HrInviteService {
         }
         HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         sql.append(" ORDER BY i.interview_at DESC, i.id DESC");
-        List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), args.toArray());
-        if (Boolean.TRUE.equals(q.getMine())) {
-            rows.removeIf(row -> HrInterviewRecordService.roundConcluded(
-                    row.get("current_stage") == null ? null : String.valueOf(row.get("current_stage")),
-                    row.get("round_no") == null ? 0 : ((Number) row.get("round_no")).intValue()));
-        }
-        return rows;
+        return jdbc.queryForList(sql.toString(), args.toArray());
     }
 
     @Transactional

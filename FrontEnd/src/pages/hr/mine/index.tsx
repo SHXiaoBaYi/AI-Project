@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react';
-import { App, Form, Input, Modal, Select, Table } from 'antd';
-import dayjs from 'dayjs';
+import { App, Button, DatePicker, Form, Input, Modal, Select, Table } from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import { useSearchParams } from 'react-router-dom';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { ResumeViewButton } from '@/components/hr/ResumeDrawer';
@@ -52,6 +52,32 @@ function openReviewForm(
   setReviewing(row);
 }
 
+type MineFilter = {
+  candidateName?: string;
+  jobName?: string;
+  reviewed?: boolean;
+  interviewRange?: [Dayjs, Dayjs];
+};
+
+function toMineQuery(values: MineFilter) {
+  const range = values.interviewRange;
+  const query: {
+    candidateName?: string;
+    jobName?: string;
+    reviewed?: boolean;
+    startDate?: string;
+    endDate?: string;
+  } = {};
+  const candidateName = values.candidateName?.trim();
+  const jobName = values.jobName?.trim();
+  if (candidateName) query.candidateName = candidateName;
+  if (jobName) query.jobName = jobName;
+  if (values.reviewed != null) query.reviewed = values.reviewed;
+  if (range?.[0]) query.startDate = range[0].format('YYYY-MM-DD');
+  if (range?.[1]) query.endDate = range[1].format('YYYY-MM-DD');
+  return query;
+}
+
 const MinePage = memo(function MinePage() {
   const { message } = App.useApp();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -63,8 +89,10 @@ const MinePage = memo(function MinePage() {
   const [target, setTarget] = useState<number>();
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
+  const [filterForm] = Form.useForm<MineFilter>();
 
-  const load = () => listMyHrInvitesApi().then(setRows);
+  const load = (override?: MineFilter) =>
+    listMyHrInvitesApi(toMineQuery(override ?? filterForm.getFieldsValue())).then(setRows);
 
   useEffect(() => {
     load();
@@ -101,8 +129,77 @@ const MinePage = memo(function MinePage() {
       <div className='rounded bg-white p-4'>
         <h2 className='mb-1 text-base font-medium'>我的面试</h2>
         <p className='mb-3 text-sm text-neutral-500'>
-          这里是分配给你、候选人还没进入下一阶段的面试。面试时间到了之后可以填写评价；进入下一阶段之前，可以编辑或删除自己的评价。已填写评价的不能再转发或添加面试官。
+          这里是分配给你的面试。只要你面试过，或者已经给过评价，都会留在这里，候选人进入下一轮之后也继续显示。面试时间到了可以去评价；评过的可以查看、修改或删除。已填写评价的不能再转发或添加面试官。
         </p>
+        <Form
+          form={filterForm}
+          layout='inline'
+          className='mb-3 flex flex-wrap items-end gap-y-2'
+          onFinish={() => load()}
+        >
+          <Form.Item
+            name='candidateName'
+            label='候选人'
+            className='mb-0'
+          >
+            <Input
+              allowClear
+              placeholder='候选人姓名'
+              className='w-40'
+            />
+          </Form.Item>
+          <Form.Item
+            name='jobName'
+            label='岗位'
+            className='mb-0'
+          >
+            <Input
+              allowClear
+              placeholder='岗位名称'
+              className='w-40'
+            />
+          </Form.Item>
+          <Form.Item
+            name='reviewed'
+            label='是否评价'
+            className='mb-0'
+          >
+            <Select
+              allowClear
+              placeholder='全部'
+              className='w-28'
+              options={[
+                { value: true, label: '已评价' },
+                { value: false, label: '未评价' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name='interviewRange'
+            label='面试日期'
+            className='mb-0'
+          >
+            <DatePicker.RangePicker />
+          </Form.Item>
+          <Form.Item className='mb-0'>
+            <Button
+              type='primary'
+              htmlType='submit'
+            >
+              查询
+            </Button>
+          </Form.Item>
+          <Form.Item className='mb-0'>
+            <Button
+              onClick={() => {
+                filterForm.resetFields();
+                load({});
+              }}
+            >
+              重置
+            </Button>
+          </Form.Item>
+        </Form>
         <Table
           rowKey='id'
           dataSource={rows}
@@ -122,14 +219,14 @@ const MinePage = memo(function MinePage() {
                     items={[
                       reviewed
                         ? {
-                            key: 'edit-review',
-                            label: '编辑评价',
+                            key: 'view-review',
+                            label: '查看评价',
                             perm: 'hr:interview:mine',
                             onClick: () => openReviewForm(form, row, setReviewing),
                           }
                         : {
                             key: 'review',
-                            label: '评价',
+                            label: '去评价',
                             perm: 'hr:interview:mine',
                             disabled: !ended,
                             onClick: () => {
@@ -214,7 +311,7 @@ const MinePage = memo(function MinePage() {
       </div>
       <Modal
         title={
-          reviewing ? `${Number(reviewing.reviewed) > 0 ? '编辑评价' : '评价'}：${reviewing.display_name}` : '评价'
+          reviewing ? `${Number(reviewing.reviewed) > 0 ? '查看评价' : '去评价'}：${reviewing.display_name}` : '去评价'
         }
         open={!!reviewing}
         confirmLoading={saving}

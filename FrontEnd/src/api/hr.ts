@@ -1356,8 +1356,14 @@ export function deleteHrInterviewRecordBatchApi(ids: number[]) {
   return request.delete('/hr/interview-record/batch', { data: ids });
 }
 
-export function listMyHrInvitesApi() {
-  return request.post<unknown, Record<string, unknown>[]>('/hr/invite/mine', {});
+export function listMyHrInvitesApi(query?: {
+  candidateName?: string;
+  jobName?: string;
+  reviewed?: boolean;
+  startDate?: string;
+  endDate?: string;
+}) {
+  return request.post<unknown, Record<string, unknown>[]>('/hr/invite/mine', query ?? {});
 }
 
 export function previewHrDingTalkApi(userId: number) {

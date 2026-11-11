@@ -99,4 +99,7 @@ public class HrBoardQueryDTO {
 
     @Schema(description = "true 只看当前用户尚未填写结论的成功邀约")
     private Boolean mine;
+
+    @Schema(description = "是否已评价（true=已评价 false=未评价，空=全部）")
+    private Boolean reviewed;
 }
