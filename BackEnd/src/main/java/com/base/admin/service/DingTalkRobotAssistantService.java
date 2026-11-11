@@ -40,6 +40,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -847,7 +848,7 @@ public class DingTalkRobotAssistantService {
             }
         }
         if (!fromTokens.isEmpty()) {
-            return ResolveResult.ok(fromTokens);
+            return ResolveResult.ok(collapseSamePhone(fromTokens));
         }
 
         List<DingTalkBusyUserOptionVO> candidates = new ArrayList<>();
@@ -863,14 +864,15 @@ public class DingTalkRobotAssistantService {
                 }
             }
         }
-        if (candidates.size() == 1) {
-            return ResolveResult.ok(candidates);
+        List<DingTalkBusyUserOptionVO> people = collapseSamePhone(candidates);
+        if (people.size() == 1) {
+            return ResolveResult.ok(people);
         }
-        if (candidates.size() > 1) {
+        if (people.size() > 1) {
             if (looksLikeMultiPersonAsk(text)) {
-                return ResolveResult.ok(candidates);
+                return ResolveResult.ok(people);
             }
-            String names = candidates.stream().limit(5).map(DingTalkRobotAssistantService::displayName)
+            String names = people.stream().limit(5).map(DingTalkRobotAssistantService::displayName)
                     .reduce((a, b) -> a + "、" + b).orElse("");
             return ResolveResult.error("匹配到多位同事（" + names + "），若要查共同空闲请写清，例如：查一下庞焯文和 Bella 两个人最近都有空的 40 分钟");
         }
@@ -922,27 +924,78 @@ public class DingTalkRobotAssistantService {
         if (!StringUtils.hasText(t)) {
             return null;
         }
+        List<DingTalkBusyUserOptionVO> exact = new ArrayList<>();
         for (DingTalkBusyUserOptionVO u : users) {
             if (t.equals(u.getNickname()) || t.equals(u.getUsername())) {
-                return u;
+                exact.add(u);
             }
+        }
+        DingTalkBusyUserOptionVO exactHit = onlyPerson(exact);
+        if (exactHit != null || !exact.isEmpty()) {
+            return exactHit;
         }
         List<DingTalkBusyUserOptionVO> starts = users.stream().filter(u ->
                 (StringUtils.hasText(u.getNickname())
                         && (u.getNickname().startsWith(t) || t.startsWith(u.getNickname())))
                         || (StringUtils.hasText(u.getUsername()) && u.getUsername().startsWith(t))
         ).toList();
-        if (starts.size() == 1) {
-            return starts.getFirst();
+        DingTalkBusyUserOptionVO startsHit = onlyPerson(starts);
+        if (startsHit != null) {
+            return startsHit;
         }
         List<DingTalkBusyUserOptionVO> includes = users.stream().filter(u ->
                 (StringUtils.hasText(u.getNickname()) && u.getNickname().contains(t))
                         || (StringUtils.hasText(u.getUsername()) && u.getUsername().contains(t))
         ).toList();
-        if (includes.size() == 1) {
-            return includes.getFirst();
+        return onlyPerson(includes);
+    }
+
+    /** 同一手机号的多个启用账号是同一个人；同名但号码不同仍是不同的人。没填手机号的账号各自保留。 */
+    static List<DingTalkBusyUserOptionVO> collapseSamePhone(List<DingTalkBusyUserOptionVO> users) {
+        if (users == null || users.size() <= 1) {
+            return users == null ? List.of() : users;
         }
-        return null;
+        Map<String, DingTalkBusyUserOptionVO> grouped = new LinkedHashMap<>();
+        for (DingTalkBusyUserOptionVO user : users) {
+            if (user == null || user.getUserId() == null) {
+                continue;
+            }
+            String phone = normalizePhone(user.getPhone());
+            String key = StringUtils.hasText(phone) ? "p:" + phone : "u:" + user.getUserId();
+            grouped.merge(key, user, DingTalkRobotAssistantService::preferAccount);
+        }
+        return new ArrayList<>(grouped.values());
+    }
+
+    /** 合并后只剩一个人时返回该账号；仍是多个人则返回 null，交给上层报歧义。 */
+    private static DingTalkBusyUserOptionVO onlyPerson(List<DingTalkBusyUserOptionVO> matches) {
+        List<DingTalkBusyUserOptionVO> people = collapseSamePhone(matches);
+        return people.size() == 1 ? people.getFirst() : null;
+    }
+
+    private static DingTalkBusyUserOptionVO preferAccount(DingTalkBusyUserOptionVO current, DingTalkBusyUserOptionVO candidate) {
+        int bound = Integer.compare(boundScore(candidate), boundScore(current));
+        if (bound != 0) {
+            return bound > 0 ? candidate : current;
+        }
+        long currentId = current.getUserId() == null ? 0L : current.getUserId();
+        long candidateId = candidate.getUserId() == null ? 0L : candidate.getUserId();
+        return candidateId >= currentId ? candidate : current;
+    }
+
+    private static int boundScore(DingTalkBusyUserOptionVO user) {
+        return user.getDingtalkBound() != null && user.getDingtalkBound() == 1 ? 1 : 0;
+    }
+
+    static String normalizePhone(String phone) {
+        if (!StringUtils.hasText(phone)) {
+            return "";
+        }
+        String digits = phone.replaceAll("\\D", "");
+        if (digits.startsWith("86") && digits.length() == 13) {
+            digits = digits.substring(2);
+        }
+        return digits;
     }
 
     private static boolean nameAppearsInText(String text, String name) {

@@ -34,7 +34,7 @@ public class DingTalkBusyService {
 
     public List<DingTalkBusyUserOptionVO> listBoundUsers() {
         return jdbc.query("""
-                SELECT u.user_id, u.username, u.nickname,
+                SELECT u.user_id, u.username, u.nickname, u.phone,
                        CASE WHEN d.user_id IS NULL OR d.dingtalk_union_id IS NULL OR d.dingtalk_union_id = '' THEN 0 ELSE 1 END dingtalk_bound
                 FROM sys_user u
                 LEFT JOIN hr_user_dingtalk d ON d.user_id = u.user_id AND d.is_active = 1
@@ -45,6 +45,7 @@ public class DingTalkBusyService {
             vo.setUserId(rs.getLong("user_id"));
             vo.setUsername(rs.getString("username"));
             vo.setNickname(rs.getString("nickname"));
+            vo.setPhone(rs.getString("phone"));
             vo.setDingtalkBound(rs.getInt("dingtalk_bound"));
             return vo;
         });
