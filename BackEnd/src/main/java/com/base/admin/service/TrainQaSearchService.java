@@ -21,8 +21,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * 收银答疑检索（精确率优先）：
  * <ol>
  *   <li>AI 抽取用户意图（在问什么操作）</li>
- *   <li>AI 在题录中点选「同一操作」的题目（输出 item_id；没有则 0）</li>
- *   <li>仅当 confidence≥阈值且硬闸门通过 → HIT，答案只读题库原文</li>
+ *   <li>AI 做单向 NLI：题干意思包含用户意图才算蕴含（输出 item_id；否则 0）</li>
+ *   <li>仅当 label=entailment 且 confidence≥阈值且硬闸门通过 → HIT，答案只读题库原文</li>
  *   <li>否则 NOT_FOUND / NEED_OLD，绝不拿沾边题凑答案</li>
  * </ol>
  * 题量不大时全量题录点选；过大时先向量粗召回再点选。
@@ -88,7 +88,7 @@ public class TrainQaSearchService {
 
         String intent = extractIntent(question);
         PickResult pick = pickCatalogItem(question, intent, poolEntries);
-        if (pick == null || pick.itemId <= 0 || pick.score < HIT) {
+        if (pick == null || pick.itemId <= 0 || !pick.entails() || pick.score < HIT) {
             log.info("答疑未命中 question={} intent={} pick={}", question, intent, pick);
             return java.util.Optional.of(miss(cat, oldVersions));
         }
@@ -107,8 +107,8 @@ public class TrainQaSearchService {
             return java.util.Optional.of(miss(cat, oldVersions));
         }
 
-        log.info("答疑HIT question={} intent={} itemId={} score={} reason={} title={}",
-                question, intent, hitEntry.id, pick.score, pick.reason, hitEntry.question);
+        log.info("答疑HIT question={} intent={} itemId={} label={} score={} reason={} title={}",
+                question, intent, hitEntry.id, pick.label, pick.score, pick.reason, hitEntry.question);
         return java.util.Optional.of(hit(hitEntry, MSG_HIT));
     }
 
@@ -217,7 +217,8 @@ public class TrainQaSearchService {
     }
 
     /**
-     * 在候选题录中点选同一操作题目。返回 item_id=0 表示题录无对应知识。
+     * 单向 NLI：前提是题干（含别名），假设是用户意图。
+     * 只有「题目的意思包含用户意图」才返回该题；否则 item_id=0。
      */
     private PickResult pickCatalogItem(String question, String intent, List<TrainQaVectorIndex.Entry> pool) {
         Map<Long, TrainQaVectorIndex.Entry> byId = new HashMap<>();
@@ -232,23 +233,29 @@ public class TrainQaSearchService {
         }
         String intentLine = StringUtils.hasText(intent) ? intent : question;
         String system = """
-                你是收银操作培训答疑的题录点选助手。
-                任务：根据用户意图，从题录中选出「同一操作」的那一道题的 ID；没有则必须选 0。
-                硬性规则：
-                1. 只有操作目标一致才可选（允许口语、同义、倒装、别名）
-                2. 仅主题沾边、场景相关、同属收银但操作不同 → item_id 必须为 0
-                3. 题录没有该操作 → item_id 必须为 0（宁可未命中，禁止答非所问）
-                4. 易混对照（禁止互配）：
-                   - 退款/退货/退单 ≠ 寄存/暂存
-                   - 会员登记/开卡/录入手机号/能否复制粘贴 ≠ 积分兑换/取消兑换
-                   - 肉票卡/储值卡结算/出票 ≠ 长短款/收银差/对账
-                   - 查流水/查销售 ≠ 寄存
-                   - 一般退单/退货步骤 ≠ 「退单找不到/超期无法退」异常说明（用户未提找不到/超期时不要选）
-                5. confidence：同一操作 ≥0.9；不确定则 item_id=0 且 confidence 低于 0.75
+                你是收银操作培训答疑的题录判定助手。做单向自然语言推理（NLI），不是相似度排序，也不要在沾边题里挑最像的。
+                前提（premise）= 题干及其别名
+                假设（hypothesis）= 用户意图
+                只判断一个方向：前提是否蕴含假设，即「题目的意思是否包含用户意图」。
+                不要反过来要求用户意图覆盖题目的全部说法。
+                entailment（才可选该题）：
+                - 用户想完成的操作，落在这道题所讲操作之内（可以是整道题，也可以是题目涵盖的一部分）
+                - 口语、同义、倒装、别名算同一件事（打折 ⊂ 折扣改价；厂子订货 ⊂ 找厂家要货）
+                neutral 或 contradiction（item_id 必须为 0）：
+                - 仅用词相近、主题沾边、场景相关、同属收银但操作不同
+                - 用户意图比题目更具体，题目没有讲到意图里的那个点（题目盖不住意图）
+                - 题录没有能盖住该意图的题（宁可未命中，禁止答非所问）
+                - 易混对照（一律 contradiction）：
+                  - 退款/退货/退单 ≠ 寄存/暂存
+                  - 会员登记/开卡/录入手机号/能否复制粘贴 ≠ 积分兑换/取消兑换
+                  - 肉票卡/储值卡结算/出票 ≠ 长短款/收银差/对账
+                  - 查流水/查销售 ≠ 寄存
+                  - 一般退单/退货步骤 ≠ 「退单找不到/超期无法退」异常说明（用户未提找不到/超期时不要选）
+                confidence：蕴含 ≥0.9；不确定则 item_id=0、label=neutral、confidence 低于 0.75。
                 只输出 JSON：
-                {"item_id":280,"confidence":0.95,"reason":"同一操作：退货退款"}
-                或 {"item_id":0,"confidence":0,"reason":"题录无会员登记"}
-                item_id 必须是题录中的 ID 或 0。
+                {"item_id":280,"label":"entailment","confidence":0.95,"reason":"题目「如何折扣改价」包含意图「怎么打折」"}
+                或 {"item_id":0,"label":"neutral","confidence":0,"reason":"没有任何题目包含该意图"}
+                item_id 必须是题录中的 ID 或 0。label 只能是 entailment、neutral、contradiction。
                 """;
         String user = "用户原话：\n" + question
                 + "\n\n用户意图：\n" + intentLine
@@ -263,7 +270,7 @@ public class TrainQaSearchService {
         } catch (Exception e) {
             log.warn("答疑题录点选失败: {}", e.getMessage());
         }
-        return new PickResult(0, 0f, "parse_failed");
+        return new PickResult(0, 0f, "", "parse_failed");
     }
 
     private PickResult parsePick(String raw, Map<Long, TrainQaVectorIndex.Entry> byId) {
@@ -282,7 +289,7 @@ public class TrainQaSearchService {
                     itemId = 0;
                 } else {
                     log.info("答疑点选返回旧 index 格式，忽略以免错配 index={}", idx);
-                    return new PickResult(0, 0f, "legacy_index_ignored");
+                    return new PickResult(0, 0f, "", "legacy_index_ignored");
                 }
             } else {
                 return null;
@@ -293,13 +300,21 @@ public class TrainQaSearchService {
             } else if (root.has("score")) {
                 confidence = (float) root.get("score").asDouble(0);
             }
+            String label = "";
+            if (root.has("label") && root.get("label").isTextual()) {
+                label = root.get("label").asText("").trim().toLowerCase(Locale.ROOT);
+            }
             String reason = root.has("reason") && root.get("reason").isTextual()
                     ? root.get("reason").asText() : "";
             if (itemId != 0 && !byId.containsKey(itemId)) {
                 log.warn("答疑点选 item_id 非法 id={}", itemId);
-                return new PickResult(0, 0f, "invalid_item_id");
+                return new PickResult(0, 0f, label, "invalid_item_id");
             }
-            return new PickResult(itemId, clamp01(confidence), reason);
+            if (itemId != 0 && !"entailment".equals(label) && !"蕴含".equals(label)) {
+                log.info("答疑点选非蕴含，视为未命中 id={} label={}", itemId, label);
+                return new PickResult(0, clamp01(confidence), label, reason);
+            }
+            return new PickResult(itemId, clamp01(confidence), label, reason);
         } catch (Exception e) {
             return null;
         }
@@ -451,10 +466,14 @@ public class TrainQaSearchService {
         float rank;
     }
 
-    private record PickResult(long itemId, float score, String reason) {
+    private record PickResult(long itemId, float score, String label, String reason) {
+        boolean entails() {
+            return "entailment".equals(label) || "蕴含".equals(label);
+        }
+
         @Override
         public String toString() {
-            return "itemId=" + itemId + ",score=" + score + ",reason=" + reason;
+            return "itemId=" + itemId + ",score=" + score + ",label=" + label + ",reason=" + reason;
         }
     }
 }
