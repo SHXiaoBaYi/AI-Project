@@ -50,10 +50,12 @@ public class TrainAssistantController {
     @Operation(summary = "提问答疑")
     @PostMapping("/ask")
     public Result<TrainAssistantAskVO> ask(@Valid @RequestBody TrainAssistantAskDTO dto) {
-        return Result.ok(trainDocService.ask(dto));
+        TrainAssistantAskVO vo = trainDocService.ask(dto);
+        trainQaCalibrateService.recordAsked(dto.getQuestion(), dto.getCategory(), vo);
+        return Result.ok(vo);
     }
 
-    @Operation(summary = "标记本次答案准/不准（准则入库优先命中）")
+    @Operation(summary = "标记本次答案准/不准（已有记录时只改状态）")
     @PostMapping("/feedback")
     public Result<Long> feedback(@Valid @RequestBody TrainQaFeedbackDTO dto) {
         return Result.ok(trainQaCalibrateService.feedback(dto));
