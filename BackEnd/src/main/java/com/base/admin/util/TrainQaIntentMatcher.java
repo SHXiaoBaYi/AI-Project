@@ -117,6 +117,262 @@ public final class TrainQaIntentMatcher {
         return !hasExclusiveTopic(canon);
     }
 
+    /** 锚点分达到此值，才允许在不靠模型时直接命中。 */
+    public static final int SPECIFIC_HIT = 160;
+
+    /**
+     * 题干（或别名）是否盖住用户这句的具体操作。
+     * 0 表示不能当确定命中：无效提问、手册里没有的点、只沾一个词的近题，都是 0。
+     */
+    public static int specificScore(String userQuestion, String title, Iterable<String> aliases) {
+        if (!StringUtils.hasText(userQuestion) || !StringUtils.hasText(title)) {
+            return 0;
+        }
+        int best = scoreSpecific(userQuestion, title);
+        if (aliases != null) {
+            for (String alias : aliases) {
+                if (StringUtils.hasText(alias)) {
+                    best = Math.max(best, scoreSpecific(userQuestion, alias));
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * 候选里有唯一操作被锚点盖住时，返回该题干；并列的同一题（多份文档各有一份）取较短的一条。
+     * 没有明确赢家时返回 null，交给未命中，不用近题凑。
+     */
+    public static String selectSpecificQuestion(String userQuestion, List<String> titles, List<? extends Iterable<String>> aliases) {
+        if (!StringUtils.hasText(userQuestion) || titles == null || titles.isEmpty()) {
+            return null;
+        }
+        int best = 0;
+        List<Integer> idx = new ArrayList<>();
+        for (int i = 0; i < titles.size(); i++) {
+            Iterable<String> alias = aliases != null && i < aliases.size() ? aliases.get(i) : null;
+            int score = specificScore(userQuestion, titles.get(i), alias);
+            if (score > best) {
+                best = score;
+                idx.clear();
+                idx.add(i);
+            } else if (score == best && score > 0) {
+                idx.add(i);
+            }
+        }
+        if (best < SPECIFIC_HIT || idx.isEmpty()) {
+            return null;
+        }
+        String chosen = titles.get(idx.get(0));
+        for (int i : idx) {
+            if (compact(titles.get(i)).length() < compact(chosen).length()) {
+                chosen = titles.get(i);
+            }
+        }
+        return chosen;
+    }
+
+    /**
+     * 用户点名了某个操作时，题干必须带上对应的字，否则是近题。
+     */
+    private static int scoreSpecific(String userQuestion, String title) {
+        if (conflicts(userQuestion, title)) {
+            return 0;
+        }
+        String user = compact(userQuestion);
+        String t = compact(title);
+        if (user.isEmpty() || t.isEmpty()) {
+            return 0;
+        }
+        int groups = 0;
+        if (user.contains("传称")) {
+            if (!t.contains("传称")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("入库")) {
+            if (!t.contains("入库")) {
+                return 0;
+            }
+            if (!user.contains("退货") && !user.contains("错误") && (t.contains("退货") || t.contains("错误"))) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("取消") && (user.contains("积分") || user.contains("兑换"))) {
+            if (!t.contains("取消") || (!t.contains("积分") && !t.contains("兑换"))) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("云闪付") || user.contains("闪付")) {
+            if (!t.contains("云闪付") && !t.contains("闪付")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("粘贴") || user.contains("复制")) {
+            if (!t.contains("粘贴") && !t.contains("复制")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("寄存") || user.contains("寄存货品")) {
+            if (!t.contains("寄存")) {
+                return 0;
+            }
+            if (!user.contains("查询") && !user.contains("提货") && (t.contains("查询") || t.contains("提货"))) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("退票") && !user.contains("退款") && !user.contains("退货") && !user.contains("退单")) {
+            if (!t.contains("退票")) {
+                return 0;
+            }
+            groups++;
+        } else if (user.contains("退款") || user.contains("退货") || user.contains("退单")) {
+            if (!t.contains("退款") && !t.contains("退货") && !t.contains("退单")) {
+                return 0;
+            }
+            if (!user.contains("理赔") && t.contains("理赔")) {
+                return 0;
+            }
+            if (!user.contains("挂账") && t.contains("挂账")) {
+                return 0;
+            }
+            if (!user.contains("找不到") && !user.contains("无法")
+                    && (t.contains("找不到") || t.contains("无法"))) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("多张") && user.contains("肉票")) {
+            if (!t.contains("多张") || !t.contains("肉票")) {
+                return 0;
+            }
+            groups++;
+        } else if (user.contains("肉票") && containsPay(user) && !user.contains("出票")) {
+            if (!t.contains("肉票") || !containsPay(t) || t.contains("查询") || t.contains("余额") || t.contains("过期")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("储值卡") && containsPay(user) && !user.contains("出票")) {
+            if (!t.contains("储值卡") || !containsPay(t) || t.contains("查询") || t.contains("核对")
+                    || t.contains("预收") || t.contains("过期") || t.contains("余额")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("出票") && !user.contains("退")) {
+            if (!t.contains("出票") || (!user.contains("挂账") && t.contains("挂账"))) {
+                return 0;
+            }
+            groups++;
+        }
+        boolean factory = user.contains("厂子") || user.contains("厂家") || user.contains("厂商") || user.contains("供应商");
+        boolean order = user.contains("要货") || user.contains("订货");
+        if (factory && order && !user.contains("入库")) {
+            if (!t.contains("要货") && !t.contains("厂子") && !t.contains("厂家") && !t.contains("厂商")) {
+                return 0;
+            }
+            groups++;
+        } else if (order && !factory && !user.contains("入库") && !user.contains("采购")) {
+            if (!t.contains("要货") && !t.contains("订货")) {
+                return 0;
+            }
+            groups++;
+        }
+        if ((user.contains("充值")) && (user.contains("查") || user.contains("查询"))) {
+            if (!t.contains("充值") || (!t.contains("查") && !t.contains("查询"))) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("差额") || user.contains("误差") || user.contains("几分")) {
+            if (!t.contains("差额") && !t.contains("误差") && !t.contains("几分")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("回款") || user.contains("销帐") || user.contains("销账") || user.contains("收账")) {
+            if (!t.contains("回款") && !t.contains("销帐") && !t.contains("销账") && !t.contains("收账")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("快递")) {
+            if (!t.contains("快递")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("累计") || (user.contains("扫码") && user.contains("不能"))) {
+            if (!t.contains("累计") && !t.contains("扫码")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (user.contains("只能") || user.contains("麻烦")) {
+            if (!t.contains("只能") && !t.contains("麻烦")) {
+                return 0;
+            }
+            groups++;
+        }
+        if (groups == 0) {
+            return 0;
+        }
+        int bonus = 0;
+        if (user.length() >= 4 && t.contains(user)) {
+            bonus += 80;
+        }
+        if (user.contains("退款") && t.contains("退款")) {
+            bonus += 50;
+        }
+        if (user.contains("肉票") && t.contains("肉票")) {
+            bonus += 20;
+        }
+        if (user.contains("储值卡") && t.contains("储值卡")) {
+            bonus += 20;
+        }
+        return 140 + groups * 40 + bonus;
+    }
+
+    /** 用户原话点名了某种操作。题录盖不住时不能再拿近题充数。 */
+    public static boolean hasSpecificConstraint(String userQuestion) {
+        String user = compact(userQuestion);
+        if (user.isEmpty()) {
+            return false;
+        }
+        boolean factory = user.contains("厂子") || user.contains("厂家") || user.contains("厂商") || user.contains("供应商");
+        boolean order = user.contains("要货") || user.contains("订货");
+        return user.contains("传称")
+                || user.contains("入库")
+                || (user.contains("取消") && (user.contains("积分") || user.contains("兑换")))
+                || user.contains("云闪付") || user.contains("闪付")
+                || user.contains("粘贴") || user.contains("复制")
+                || user.contains("寄存") || user.contains("寄存货品")
+                || user.contains("退票") || user.contains("退款") || user.contains("退货") || user.contains("退单")
+                || (user.contains("多张") && user.contains("肉票"))
+                || (user.contains("肉票") && containsPay(user) && !user.contains("出票"))
+                || (user.contains("储值卡") && containsPay(user) && !user.contains("出票"))
+                || (user.contains("出票") && !user.contains("退"))
+                || (factory && order && !user.contains("入库"))
+                || (order && !factory && !user.contains("入库") && !user.contains("采购"))
+                || (user.contains("充值") && (user.contains("查") || user.contains("查询")))
+                || user.contains("差额") || user.contains("误差") || user.contains("几分")
+                || user.contains("回款") || user.contains("销帐") || user.contains("销账") || user.contains("收账")
+                || user.contains("快递")
+                || user.contains("累计") || (user.contains("扫码") && user.contains("不能"))
+                || user.contains("只能") || user.contains("麻烦");
+    }
+
+    private static boolean containsPay(String text) {
+        return text.contains("支付") || text.contains("结账") || text.contains("结算") || text.contains("收款");
+    }
+
     /** 关键词重合度 0~1，供向量召回融合加分。 */
     public static float keywordOverlap(String userQuestion, String title) {
         Set<String> tokens = contentTokens(userQuestion);

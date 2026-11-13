@@ -80,6 +80,13 @@ public class TrainQaSearchService {
             return java.util.Optional.of(miss(cat, oldVersions));
         }
 
+        TrainQaVectorIndex.Entry specific = pickSpecific(question, poolEntries);
+        if (specific != null) {
+            log.info("答疑按题干锚点命中 question={} itemId={} title={}",
+                    question, specific.id, specific.question);
+            return java.util.Optional.of(hit(specific, MSG_HIT));
+        }
+
         if (!aiChatService.isEnabled()) {
             // 无 AI 时不做「猜题」直出，避免词面误命中
             log.warn("答疑AI未启用，结构化题录仅记未命中 question={}", question);
@@ -103,6 +110,13 @@ public class TrainQaSearchService {
         }
         if (!TrainQaIntentMatcher.passesHardGate(question, hitEntry.question, hitEntry.aliases)) {
             log.info("答疑HIT被硬闸门拦截 question={} itemId={} title={}",
+                    question, hitEntry.id, hitEntry.question);
+            return java.util.Optional.of(miss(cat, oldVersions));
+        }
+        if (TrainQaIntentMatcher.hasSpecificConstraint(question)
+                && TrainQaIntentMatcher.specificScore(question, hitEntry.question, hitEntry.aliases)
+                < TrainQaIntentMatcher.SPECIFIC_HIT) {
+            log.info("答疑点选没盖住具体操作，改为未命中 question={} itemId={} title={}",
                     question, hitEntry.id, hitEntry.question);
             return java.util.Optional.of(miss(cat, oldVersions));
         }
@@ -134,6 +148,33 @@ public class TrainQaSearchService {
                   )
                 """, Integer.class, cat);
         return n != null && n > 0;
+    }
+
+    /**
+     * 题干锚点能唯一对上时直接用该题。同一题挂在多份文档上算同一条，取较短题干。
+     */
+    private TrainQaVectorIndex.Entry pickSpecific(String question, List<TrainQaVectorIndex.Entry> pool) {
+        List<String> titles = new ArrayList<>();
+        List<List<String>> aliases = new ArrayList<>();
+        for (TrainQaVectorIndex.Entry e : pool) {
+            titles.add(e.question);
+            aliases.add(e.aliases == null ? List.of() : e.aliases);
+        }
+        String chosen = TrainQaIntentMatcher.selectSpecificQuestion(question, titles, aliases);
+        if (!StringUtils.hasText(chosen)) {
+            return null;
+        }
+        String chosenKey = TrainQaIntentMatcher.compact(chosen);
+        TrainQaVectorIndex.Entry hit = null;
+        for (TrainQaVectorIndex.Entry e : pool) {
+            if (!chosenKey.equals(TrainQaIntentMatcher.compact(e.question))) {
+                continue;
+            }
+            if (hit == null || TrainQaIntentMatcher.compact(e.question).length() < TrainQaIntentMatcher.compact(hit.question).length()) {
+                hit = e;
+            }
+        }
+        return hit;
     }
 
     private List<TrainQaVectorIndex.Entry> buildPickPool(String question, List<TrainQaVectorIndex.Entry> entries) {
