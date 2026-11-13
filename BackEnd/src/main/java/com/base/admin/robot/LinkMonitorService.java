@@ -30,7 +30,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,31 +45,16 @@ public class LinkMonitorService {
                     + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     private static final String DEFAULT_COOKIE_HOSTS = "xiaohongshu.com,xhslink.com";
     private static final ObjectMapper JSON = new ObjectMapper();
-    /** Cookie 健康检查结果缓存（避免批量探测时对站点连打）。 */
-    private static final long COOKIE_HEALTH_CACHE_MS = 10 * 60 * 1000L;
+    /** 自行跟随的跳转上限。JDK 在跨主机 302 时会丢掉 Cookie，短链会因此被误判成登录失效。 */
+    private static final int MAX_PROBE_REDIRECTS = 6;
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalkCalendarClient;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
-    private final AtomicReference<CookieHealthCache> cookieHealthCache = new AtomicReference<>();
 
-    private record CookieHealthCache(String cookieFp, boolean alive, String reason, long checkedAtMs) {
-    }
-
-    private record CookiePrecheck(boolean needCookie, boolean alive, String reason) {
-        static CookiePrecheck notNeeded() {
-            return new CookiePrecheck(false, true, "");
-        }
-
-        static CookiePrecheck dead(String reason) {
-            return new CookiePrecheck(true, false, reason);
-        }
-
-        static CookiePrecheck ok() {
-            return new CookiePrecheck(true, true, "");
-        }
+    private record FetchedPage(int status, URI uri, byte[] body, String contentType, boolean cookieOnFinal) {
     }
 
     public record ProbeCookieConfig(boolean configured, boolean enabled, String cookieHeader,
@@ -141,15 +125,10 @@ public class LinkMonitorService {
                     VALUES (1, ?, ?, ?, ?, ?, NOW())
                     """, cookie, hosts, en, rem, operator == null ? "" : operator);
         }
-        invalidateProbeCookieHealthCache();
     }
 
     public void clearProbeCookie(String operator) {
         saveProbeCookie("", DEFAULT_COOKIE_HOSTS, true, "", operator);
-    }
-
-    public void invalidateProbeCookieHealthCache() {
-        cookieHealthCache.set(null);
     }
 
     /**
@@ -169,8 +148,18 @@ public class LinkMonitorService {
         if (!StringUtils.hasText(host)) {
             return "";
         }
+        if (!hostMatchesCookieSuffix(host, c.hostSuffixes())) {
+            return "";
+        }
+        return c.cookieHeader().trim();
+    }
+
+    static boolean hostMatchesCookieSuffix(String host, String hostSuffixes) {
+        if (!StringUtils.hasText(host) || !StringUtils.hasText(hostSuffixes)) {
+            return false;
+        }
         String hostLower = host.toLowerCase(Locale.ROOT);
-        for (String rawSuffix : c.hostSuffixes().split("[,;\\s]+")) {
+        for (String rawSuffix : hostSuffixes.split("[,;\\s]+")) {
             if (!StringUtils.hasText(rawSuffix)) {
                 continue;
             }
@@ -182,10 +171,155 @@ public class LinkMonitorService {
                 continue;
             }
             if (hostLower.equals(suffix) || hostLower.endsWith("." + suffix)) {
-                return c.cookieHeader().trim();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 把浏览器 Cookie 头拆成有序名值，供跳转链路上按主机重放。 */
+    static Map<String, String> parseCookiePairs(String cookieHeader) {
+        Map<String, String> jar = new LinkedHashMap<>();
+        if (!StringUtils.hasText(cookieHeader)) {
+            return jar;
+        }
+        for (String part : cookieHeader.split(";")) {
+            String item = part.trim();
+            if (!StringUtils.hasText(item)) {
+                continue;
+            }
+            int eq = item.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String name = item.substring(0, eq).trim();
+            String value = item.substring(eq + 1).trim();
+            if (StringUtils.hasText(name) && isSafeCookieToken(name) && isSafeCookieToken(value)) {
+                jar.put(name, value);
+            }
+        }
+        return jar;
+    }
+
+    static String formatCookiePairs(Map<String, String> jar) {
+        if (jar == null || jar.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> e : jar.entrySet()) {
+            if (!isSafeCookieToken(e.getKey()) || !isSafeCookieToken(e.getValue())) {
+                continue;
+            }
+            if (!sb.isEmpty()) {
+                sb.append("; ");
+            }
+            sb.append(e.getKey()).append('=').append(e.getValue());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 跳转响应里的 Set-Cookie 写回本次探测的临时 jar。
+     * Domain 对不上当前主机的不收，避免把第三方域的 cookie 带到笔记站。
+     */
+    static void absorbSetCookies(Map<String, String> jar, String requestHost, List<String> setCookies) {
+        if (jar == null || setCookies == null) {
+            return;
+        }
+        for (String raw : setCookies) {
+            if (!StringUtils.hasText(raw)) {
+                continue;
+            }
+            String first = raw.split(";", 2)[0].trim();
+            int eq = first.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String name = first.substring(0, eq).trim();
+            String value = first.substring(eq + 1).trim();
+            if (!isSafeCookieToken(name) || name.startsWith("$")) {
+                continue;
+            }
+            String domain = cookieAttribute(raw, "domain");
+            if (StringUtils.hasText(domain) && !hostMatchesCookieDomain(requestHost, domain)) {
+                continue;
+            }
+            if (!StringUtils.hasText(value) || "deleted".equalsIgnoreCase(value)) {
+                jar.remove(name);
+            } else if (isSafeCookieToken(value)) {
+                jar.put(name, value);
+            }
+        }
+    }
+
+    static boolean hostMatchesCookieDomain(String host, String domainAttr) {
+        if (!StringUtils.hasText(host) || !StringUtils.hasText(domainAttr)) {
+            return false;
+        }
+        String domain = domainAttr.trim().toLowerCase(Locale.ROOT);
+        while (domain.startsWith(".")) {
+            domain = domain.substring(1);
+        }
+        if (!StringUtils.hasText(domain)) {
+            return false;
+        }
+        String hostLower = host.toLowerCase(Locale.ROOT);
+        return hostLower.equals(domain) || hostLower.endsWith("." + domain);
+    }
+
+    private static String cookieAttribute(String setCookie, String attr) {
+        String[] parts = setCookie.split(";");
+        for (int i = 1; i < parts.length; i++) {
+            String p = parts[i].trim();
+            int eq = p.indexOf('=');
+            String key = (eq < 0 ? p : p.substring(0, eq)).trim();
+            if (attr.equalsIgnoreCase(key)) {
+                return eq < 0 ? "" : p.substring(eq + 1).trim();
             }
         }
         return "";
+    }
+
+    /** 只拒绝会拆坏 Cookie 头或被 HttpClient 拒掉的字符；空值允许（{@code name=}）。 */
+    private static boolean isSafeCookieToken(String s) {
+        if (s == null) {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c <= 31 || c == 127 || c == ';') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean isBlockedProbeHost(String host) {
+        if (!StringUtils.hasText(host)) {
+            return true;
+        }
+        String h = host.toLowerCase(Locale.ROOT);
+        if (h.equals("localhost") || h.equals("0.0.0.0") || h.endsWith(".localhost")
+                || h.equals("metadata.google.internal") || h.endsWith(".internal")) {
+            return true;
+        }
+        if (h.startsWith("127.") || h.startsWith("10.") || h.startsWith("192.168.") || h.startsWith("169.254.")) {
+            return true;
+        }
+        if (h.startsWith("172.")) {
+            String[] seg = h.split("\\.");
+            if (seg.length >= 2) {
+                try {
+                    int second = Integer.parseInt(seg[1]);
+                    if (second >= 16 && second <= 31) {
+                        return true;
+                    }
+                } catch (NumberFormatException ignored) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     static String normalizeCookiePaste(String raw) {
@@ -349,14 +483,6 @@ public class LinkMonitorService {
      */
     public ProbeBatchSummary probeAllActiveNow(boolean forceAlert) {
         List<Map<String, Object>> active = listActive(200);
-        // 批量前先做一次 Cookie 预检，后续 probeOne 复用缓存
-        for (Map<String, Object> row : active) {
-            String url = row.get("url") == null ? "" : String.valueOf(row.get("url"));
-            if (StringUtils.hasText(resolveProbeCookieForUrl(url))) {
-                precheckProbeCookieForUrl(url);
-                break;
-            }
-        }
         int okCount = 0;
         List<ProbeFailItem> failures = new ArrayList<>();
         for (Map<String, Object> row : active) {
@@ -447,45 +573,20 @@ public class LinkMonitorService {
         String url = String.valueOf(row.get("url"));
         int timeout = row.get("timeout_ms") == null ? 15000 : ((Number) row.get("timeout_ms")).intValue();
         long start = System.currentTimeMillis();
-
-        // 需要带 Cookie 的域名：先预检会话；失效则跳过本条探测，只告警更新 Cookie
-        CookiePrecheck pre = precheckProbeCookieForUrl(url);
-        if (pre.needCookie() && !pre.alive()) {
-            String skipErr = StringUtils.hasText(pre.reason())
-                    ? pre.reason()
-                    : "探测 Cookie 已失效，已跳过探测";
-            int latency = (int) (System.currentTimeMillis() - start);
-            jdbc.update("""
-                    INSERT INTO ops_link_monitor_check_log (monitor_id, checked_at, ok, http_status, latency_ms, error_msg)
-                    VALUES (?, NOW(), 0, NULL, ?, ?)
-                    """, monitorId, latency, skipErr);
-            // 不改 last_ok，避免把「Cookie 挂了」记成「笔记挂了」
-            jdbc.update("""
-                    UPDATE ops_link_monitor SET last_check_at = NOW(), last_error = ?, update_time = NOW()
-                    WHERE id = ?
-                    """, skipErr, monitorId);
-            boolean alerted = maybeAlertProbeCookieExpired(monitorId, url, skipErr);
-            return new ProbeResult(false, skipErr, alerted);
-        }
+        String probeCookie = resolveProbeCookieForUrl(url);
+        boolean withAuthCookie = StringUtils.hasText(probeCookie);
+        String hostSuffixes = withAuthCookie ? getProbeCookieConfig().hostSuffixes() : "";
 
         boolean ok = false;
         Integer status = null;
         String err = "";
-        boolean withAuthCookie = pre.needCookie();
+        // 只有最终一跳确实带上了 Cookie 才把登录墙当成会话问题；跨站丢 Cookie 不再误判。
+        boolean cookieOnFinal = false;
         try {
-            String probeCookie = withAuthCookie ? resolveProbeCookieForUrl(url) : "";
-            HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMillis(Math.max(3000, timeout)))
-                    .GET()
-                    .header("User-Agent", BROWSER_UA)
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-            if (withAuthCookie && StringUtils.hasText(probeCookie)) {
-                reqBuilder.header("Cookie", probeCookie);
-            }
-            HttpResponse<byte[]> resp = http.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofByteArray());
-            status = resp.statusCode();
+            FetchedPage page = fetchDocument(url, probeCookie, hostSuffixes, timeout);
+            status = page.status();
+            cookieOnFinal = page.cookieOnFinal();
+            boolean judgeWithCookie = withAuthCookie && cookieOnFinal;
             if (status == 404 || status == 403 || status == 410 || status == 451 || status >= 500) {
                 err = "HTTP " + status;
             } else if (status < 200 || status >= 400) {
@@ -494,14 +595,14 @@ public class LinkMonitorService {
                 // 失效笔记常见：302→首页/404/其它内容，落地仍 HTTP 200，不能只看状态码。
                 // 无 Cookie：跳登录页 ≠ 失效；有 Cookie：登录墙可视为会话失效或内容不可见。
                 boolean contentDeep = isContentDeepLink(url);
-                String soft = detectSoftRedirect(url, resp.uri(), withAuthCookie);
+                String soft = detectSoftRedirect(url, page.uri(), judgeWithCookie);
                 if (StringUtils.hasText(soft)) {
                     err = soft;
                 } else {
-                    String body = decodeBody(resp.body(), resp.headers().firstValue("Content-Type").orElse(""));
-                    String unavailable = detectUnavailableHint(body, contentDeep, withAuthCookie);
+                    String body = decodeBody(page.body(), page.contentType());
+                    String unavailable = detectUnavailableHint(body, contentDeep, judgeWithCookie);
                     // 仅登录态探测才校验 SSR 笔记载荷：无 Cookie 时登录空壳与失效空壳难区分，避免误杀
-                    if (!StringUtils.hasText(unavailable) && contentDeep && withAuthCookie) {
+                    if (!StringUtils.hasText(unavailable) && contentDeep && judgeWithCookie) {
                         // 同 id 落地仍可能是空壳：失效笔记常不跳转、也无「已删除」明文
                         String contentId = extractContentId(normalizePath(URI.create(url.trim()).getPath()));
                         unavailable = detectMissingNotePayload(body, contentId);
@@ -522,115 +623,75 @@ public class LinkMonitorService {
             }
         }
         int latency = (int) (System.currentTimeMillis() - start);
+        boolean cookieSessionDead = !ok && withAuthCookie && cookieOnFinal && looksLikeProbeCookieExpired(err);
         jdbc.update("""
                 INSERT INTO ops_link_monitor_check_log (monitor_id, checked_at, ok, http_status, latency_ms, error_msg)
                 VALUES (?, NOW(), ?, ?, ?, ?)
                 """, monitorId, ok ? 1 : 0, status, latency, err);
+        if (cookieSessionDead) {
+            // 不改 last_ok，避免把「Cookie 挂了」记成「笔记挂了」；其它链接继续探测
+            jdbc.update("""
+                    UPDATE ops_link_monitor SET last_check_at = NOW(), last_error = ?, update_time = NOW()
+                    WHERE id = ?
+                    """, err, monitorId);
+            boolean alerted = maybeAlertProbeCookieExpired(monitorId, url, err);
+            return new ProbeResult(false, err, alerted);
+        }
         jdbc.update("""
                 UPDATE ops_link_monitor SET last_check_at = NOW(), last_ok = ?, last_status_code = ?,
                   last_error = ?, update_time = NOW()
                 WHERE id = ?
                 """, ok ? 1 : 0, status, err, monitorId);
-        boolean alerted = false;
-        if (!ok) {
-            if (withAuthCookie && looksLikeProbeCookieExpired(err)) {
-                // 预检漏网：仍跳登录 → 只催更新 Cookie，不发「链接失效」告警
-                alerted = maybeAlertProbeCookieExpired(monitorId, url, err);
-                invalidateProbeCookieHealthCache();
-                cookieHealthCache.set(new CookieHealthCache(sha256(resolveProbeCookieForUrl(url)), false, err,
-                        System.currentTimeMillis()));
-            } else {
-                alerted = alertFailure(monitorId, url, err, row, forceAlert);
-            }
-        }
+        boolean alerted = !ok && alertFailure(monitorId, url, err, row, forceAlert);
         return new ProbeResult(ok, err, alerted);
     }
 
     /**
-     * 对需要 Cookie 的 URL：先探测会话是否仍有效。
-     * 未配置 / 域名不匹配 → 不需要 Cookie，直接放行。
+     * 跟随重定向并在适用域名上重放 Cookie（含跳转途中的 Set-Cookie）。
+     * JDK {@code HttpClient.Redirect.NORMAL} 在主机变化时会丢掉 Cookie，小红书短链会落到登录页。
      */
-    CookiePrecheck precheckProbeCookieForUrl(String url) {
-        String cookie = resolveProbeCookieForUrl(url);
-        if (!StringUtils.hasText(cookie)) {
-            return CookiePrecheck.notNeeded();
-        }
-        String fp = sha256(cookie);
-        long now = System.currentTimeMillis();
-        CookieHealthCache cached = cookieHealthCache.get();
-        if (cached != null
-                && fp.equals(cached.cookieFp())
-                && now - cached.checkedAtMs() < COOKIE_HEALTH_CACHE_MS) {
-            return cached.alive() ? CookiePrecheck.ok() : CookiePrecheck.dead(cached.reason());
-        }
-        ProbeCookieConfig cfg = getProbeCookieConfig();
-        String checkUrl = buildCookieHealthCheckUrl(cfg.hostSuffixes());
-        String reason = pingProbeCookieSession(cookie, checkUrl);
-        boolean alive = !StringUtils.hasText(reason);
-        String deadReason = alive ? "" : ("探测 Cookie 已失效，已跳过探测（" + reason + "）");
-        cookieHealthCache.set(new CookieHealthCache(fp, alive, deadReason, now));
-        return alive ? CookiePrecheck.ok() : CookiePrecheck.dead(deadReason);
-    }
-
-    static String buildCookieHealthCheckUrl(String hostSuffixes) {
-        String suffix = "xiaohongshu.com";
-        if (StringUtils.hasText(hostSuffixes)) {
-            for (String raw : hostSuffixes.split("[,;\\s]+")) {
-                if (!StringUtils.hasText(raw)) {
-                    continue;
-                }
-                String s = raw.trim().toLowerCase(Locale.ROOT);
-                while (s.startsWith(".")) {
-                    s = s.substring(1);
-                }
-                if (StringUtils.hasText(s)) {
-                    suffix = s;
-                    break;
-                }
+    private FetchedPage fetchDocument(String url, String cookieHeader, String hostSuffixes, int timeoutMs) throws Exception {
+        Map<String, String> jar = parseCookiePairs(cookieHeader);
+        URI current = URI.create(url.trim());
+        int timeout = Math.max(3000, timeoutMs);
+        for (int hop = 0; hop <= MAX_PROBE_REDIRECTS; hop++) {
+            if (isBlockedProbeHost(current.getHost())) {
+                throw new IllegalStateException("重定向到内网地址，已中止");
             }
-        }
-        return "https://www." + suffix + "/";
-    }
-
-    /**
-     * @return 空串=会话可用；非空=失效原因
-     */
-    private String pingProbeCookieSession(String cookieHeader, String checkUrl) {
-        try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(checkUrl))
-                    .timeout(Duration.ofSeconds(12))
+            boolean sendCookie = !jar.isEmpty() && hostMatchesCookieSuffix(current.getHost(), hostSuffixes);
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(current)
+                    .timeout(Duration.ofMillis(timeout))
                     .GET()
                     .header("User-Agent", BROWSER_UA)
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-                    .header("Cookie", cookieHeader)
-                    .build();
-            HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
+                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+            if (sendCookie) {
+                builder.header("Cookie", formatCookiePairs(jar));
+            }
+            HttpResponse<byte[]> resp = http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+            absorbSetCookies(jar, current.getHost(), resp.headers().allValues("set-cookie"));
             int code = resp.statusCode();
-            if (code == 401 || code == 403) {
-                return "健康检查 HTTP " + code;
-            }
-            URI finalUri = resp.uri();
-            String path = finalUri == null ? "/" : normalizePath(finalUri.getPath()).toLowerCase(Locale.ROOT);
-            String query = "";
-            if (finalUri != null && StringUtils.hasText(finalUri.getRawQuery())) {
-                try {
-                    query = URLDecoder.decode(finalUri.getRawQuery(), StandardCharsets.UTF_8).toLowerCase(Locale.ROOT);
-                } catch (Exception ex) {
-                    query = finalUri.getRawQuery().toLowerCase(Locale.ROOT);
+            String contentType = resp.headers().firstValue("Content-Type").orElse("");
+            if (code >= 300 && code < 400 && hop < MAX_PROBE_REDIRECTS) {
+                String loc = resp.headers().firstValue("location").orElse("").trim();
+                if (!StringUtils.hasText(loc)) {
+                    return new FetchedPage(code, current, resp.body(), contentType, sendCookie);
                 }
+                URI next = current.resolve(loc);
+                String scheme = next.getScheme() == null ? "" : next.getScheme();
+                if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                    return new FetchedPage(code, current, resp.body(), contentType, sendCookie);
+                }
+                current = next;
+                continue;
             }
-            if (isLoginLanding(path, query)) {
-                return "健康检查跳转到登录页";
+            if (code >= 300 && code < 400) {
+                throw new IllegalStateException("重定向次数过多");
             }
-            // 首页正文常有「登录」入口文案，不能当会话失效；只认 URL 落到登录页 / 401·403
-            return "";
-        } catch (Exception ex) {
-            // 网络异常时不阻断业务探测（避免误杀）
-            log.warn("probe cookie health check error: {}", ex.getMessage());
-            return "";
+            return new FetchedPage(code, current, resp.body(), contentType, sendCookie);
         }
+        throw new IllegalStateException("重定向次数过多");
     }
 
     static boolean looksLikeProbeCookieExpired(String err) {
@@ -660,7 +721,8 @@ public class LinkMonitorService {
                 }
             }
             String content = """
-                    【链接监控】探测 Cookie 已失效，本轮相关探测已跳过
+                    【链接监控】这条链接带 Cookie 探测仍跳到登录页
+                    本次没有把它记成笔记失效，同轮其它链接会继续探测。
                     请到后台「机器人 → 链接监控 → 探测 Cookie」用浏览器重新登录后粘贴更新。
                     触发监控 #%d
                     URL：%s

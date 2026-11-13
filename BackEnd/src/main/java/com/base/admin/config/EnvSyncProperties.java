@@ -16,7 +16,7 @@ public class EnvSyncProperties {
 
     @Data
     public static class RdsEndpoint {
-        private String host = "rm-uf6l17zg54sh9378vso.mysql.rds.aliyuncs.com";
+        private String host = "rm-uf6l17zg54sh9378v.mysql.rds.aliyuncs.com";
         private int port = 3306;
         private String database = "base_admin";
         private String username = "xiaobayi0099";

@@ -173,6 +173,8 @@ export type TrainDocFile = {
   versionLabel?: string;
   title?: string;
   fileName?: string;
+  filePath?: string;
+  fileUrl?: string;
   fileSize?: number;
   questionCount?: number;
 };

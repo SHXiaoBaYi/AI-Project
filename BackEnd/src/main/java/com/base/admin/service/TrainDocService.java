@@ -342,7 +342,7 @@ public class TrainDocService {
 
     public List<com.base.admin.domain.vo.TrainDocFileVO> listFiles(Long versionId) {
         return jdbc.query("""
-                SELECT f.id, f.doc_id, f.version_id, v.version_label, f.title, f.file_name, f.file_size,
+                SELECT f.id, f.doc_id, f.version_id, v.version_label, f.title, f.file_name, f.file_path, f.file_size,
                        (SELECT COUNT(1) FROM train_qa_item i
                          WHERE i.is_active = 1 AND (
                            i.file_id = f.id
@@ -360,6 +360,9 @@ public class TrainDocService {
             vo.setVersionLabel(rs.getString("version_label"));
             vo.setTitle(rs.getString("title"));
             vo.setFileName(rs.getString("file_name"));
+            String filePath = rs.getString("file_path");
+            vo.setFilePath(filePath);
+            vo.setFileUrl(StringUtils.hasText(filePath) ? fileStorage.toPublicUrl(filePath) : null);
             vo.setFileSize(rs.getObject("file_size") == null ? null : rs.getLong("file_size"));
             vo.setQuestionCount(rs.getInt("question_count"));
             return vo;

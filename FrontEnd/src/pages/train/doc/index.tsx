@@ -66,20 +66,6 @@ const TrainDocPage = memo(function TrainDocPage() {
     }
   };
 
-  const downloadLatest = (record: TrainDoc) => {
-    if (record.latestFileUrl) {
-      window.open(record.latestFileUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    if (!record.latestVersionId) {
-      message.warning('暂无已上传版本');
-      return;
-    }
-    void downloadTrainVersionApi(record.latestVersionId, record.latestFileName, record.latestFilePath).catch(() =>
-      message.error('下载失败'),
-    );
-  };
-
   const openDocEdit = (record?: TrainDoc) => {
     setEditing(record ?? null);
     form.resetFields();
@@ -240,9 +226,22 @@ const TrainDocPage = memo(function TrainDocPage() {
             versionId: currentVersion.id,
             title: currentVersion.fileName,
             fileName: currentVersion.fileName,
+            filePath: currentVersion.filePath,
+            fileUrl: currentVersion.fileUrl,
           },
         ]
       : [];
+
+  const downloadDocFile = (row: TrainDocFile) => {
+    const versionId = row.versionId || fileVersionId;
+    if (!versionId && !row.fileUrl && !row.filePath) {
+      message.warning('暂无可下载文件');
+      return;
+    }
+    void downloadTrainVersionApi(versionId || 0, row.fileName, row.fileUrl || row.filePath).catch(() =>
+      message.error('下载失败'),
+    );
+  };
 
   const openQuestions = (row: TrainDocFile) => {
     const docId = row.docId || versionDoc?.id;
@@ -257,7 +256,7 @@ const TrainDocPage = memo(function TrainDocPage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 280,
+      width: 220,
       render: (_, record) => (
         <ActionButtons
           items={[
@@ -273,13 +272,6 @@ const TrainDocPage = memo(function TrainDocPage() {
               label: '文档',
               perm: 'train:doc:list',
               onClick: () => void openVersions(record),
-            },
-            {
-              key: 'download',
-              label: '下载最新',
-              perm: 'train:doc:list',
-              disabled: !record.latestVersionId,
-              onClick: () => downloadLatest(record),
             },
             {
               key: 'edit',
@@ -556,7 +548,7 @@ const TrainDocPage = memo(function TrainDocPage() {
             {
               title: '操作',
               valueType: 'option',
-              width: 160,
+              width: 200,
               render: (_, row) => (
                 <ActionButtons
                   items={[
@@ -565,6 +557,13 @@ const TrainDocPage = memo(function TrainDocPage() {
                       label: '查看题目',
                       perm: 'train:doc:list',
                       onClick: () => openQuestions(row),
+                    },
+                    {
+                      key: 'download',
+                      label: '下载',
+                      perm: 'train:doc:list',
+                      disabled: !row.fileUrl && !row.filePath && !row.versionId,
+                      onClick: () => downloadDocFile(row),
                     },
                     ...(row.id > 0 && versionDoc?.id && row.versionId
                       ? [

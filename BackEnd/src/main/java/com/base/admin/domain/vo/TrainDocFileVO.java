@@ -25,6 +25,12 @@ public class TrainDocFileVO {
     @Schema(description = "文件名")
     private String fileName;
 
+    @Schema(description = "存储路径", example = "/uploads/train/cashier.docx")
+    private String filePath;
+
+    @Schema(description = "公网下载地址")
+    private String fileUrl;
+
     @Schema(description = "文件大小")
     private Long fileSize;
 

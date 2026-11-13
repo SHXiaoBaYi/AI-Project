@@ -496,6 +496,11 @@ public class TrainQaCalibrateService {
 
     private boolean matchesIntent(String norm, Map<String, Object> row) {
         String storedQ = str(row.get("user_question"));
+        String topic = str(row.get("topic_title"));
+        String gateText = StringUtils.hasText(topic) ? topic : storedQ;
+        if (StringUtils.hasText(gateText) && !TrainQaIntentMatcher.passesHardGate(norm, gateText)) {
+            return false;
+        }
         String intentNorm = normalizeIntent(storedQ);
         if (norm.equals(intentNorm)) {
             return true;
@@ -506,7 +511,6 @@ public class TrainQaCalibrateService {
                 return true;
             }
         }
-        String topic = str(row.get("topic_title"));
         String topicNorm = normalizeIntent(topic);
         if (StringUtils.hasText(topicNorm) && norm.equals(topicNorm)) {
             return true;

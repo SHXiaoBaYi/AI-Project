@@ -21,6 +21,10 @@ class TrainQaIntentMatcherTest {
         assertFalse(TrainQaIntentMatcher.passesHardGate(
                 "使用肉票卡怎么结算。", "问：对账出现长短款怎么办产生收银差怎么办？"));
         assertFalse(TrainQaIntentMatcher.passesHardGate(
+                "支付方式能不能用云闪付", "问：对账出现长短款怎么办产生收银差怎么办？"));
+        assertFalse(TrainQaIntentMatcher.passesHardGate(
+                "能不能用云闪付", "问：对账出现长短款怎么办产生收银差怎么办？"));
+        assertFalse(TrainQaIntentMatcher.passesHardGate(
                 "寄存货品怎么操作。", "问：当天的销售流水在哪里可以查到，或者某个顾客的销售怎么查呢？"));
     }
 
@@ -32,6 +36,9 @@ class TrainQaIntentMatcherTest {
         assertTrue(TrainQaIntentMatcher.passesHardGate(
                 "使用肉票卡怎么结算。",
                 "问：支付过程中顾客选择多张肉票或者多张储值卡如何支付？"));
+        assertTrue(TrainQaIntentMatcher.passesHardGate(
+                "支付方式能不能用云闪付",
+                "问：云闪付怎么收款？"));
         assertTrue(TrainQaIntentMatcher.passesHardGate(
                 "退单怎么处理？",
                 "问：如何退货/退货步骤 如果客户购买后不想要商品了，可在前台进行退款操作，退货有两种方法？"));

@@ -137,16 +137,24 @@ public class TrainQaSearchService {
     }
 
     private List<TrainQaVectorIndex.Entry> buildPickPool(String question, List<TrainQaVectorIndex.Entry> entries) {
+        List<TrainQaVectorIndex.Entry> source;
         if (entries.size() <= FULL_CATALOG_LIMIT) {
-            return new ArrayList<>(entries);
-        }
-        List<Scored> ranked = rank(question, entries);
-        List<TrainQaVectorIndex.Entry> pool = new ArrayList<>();
-        for (Scored s : ranked) {
-            if (pool.size() >= RERANK_POOL) {
-                break;
+            source = entries;
+        } else {
+            List<Scored> ranked = rank(question, entries);
+            source = new ArrayList<>();
+            for (Scored s : ranked) {
+                if (source.size() >= RERANK_POOL) {
+                    break;
+                }
+                source.add(s.entry);
             }
-            pool.add(s.entry);
+        }
+        List<TrainQaVectorIndex.Entry> pool = new ArrayList<>();
+        for (TrainQaVectorIndex.Entry e : source) {
+            if (TrainQaIntentMatcher.passesHardGate(question, e.question, e.aliases)) {
+                pool.add(e);
+            }
         }
         return pool;
     }
@@ -200,6 +208,7 @@ public class TrainQaSearchService {
                 规则：
                 - 只描述用户意图，15~40 字
                 - 区分易混操作：退款/退货/退单 ≠ 寄存；会员登记/开卡 ≠ 积分兑换；肉票/储值卡结算 ≠ 长短款对账；出票 ≠ 查流水
+                - 支付方式/云闪付/闪付/支付宝/微信/刷卡/银行卡/能不能用某种支付 ≠ 长短款/收银差/对账
                 - 若原话在抱怨界面/功能缺失（如不能复制粘贴），意图里要保留该具体诉求
                 只输出 JSON：{"intent":"..."}
                 """;
@@ -249,6 +258,8 @@ public class TrainQaSearchService {
                   - 退款/退货/退单 ≠ 寄存/暂存
                   - 会员登记/开卡/录入手机号/能否复制粘贴 ≠ 积分兑换/取消兑换
                   - 肉票卡/储值卡结算/出票 ≠ 长短款/收银差/对账
+                  - 支付方式/云闪付/闪付/支付宝/微信/刷卡/银行卡/能不能用某种支付 ≠ 长短款/收银差/对账
+                    （问某种支付能不能用、怎么付时，题目必须在讲这种支付或收款方式；对账题一律不能选）
                   - 查流水/查销售 ≠ 寄存
                   - 一般退单/退货步骤 ≠ 「退单找不到/超期无法退」异常说明（用户未提找不到/超期时不要选）
                 confidence：蕴含 ≥0.9；不确定则 item_id=0、label=neutral、confidence 低于 0.75。
