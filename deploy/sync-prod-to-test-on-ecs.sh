@@ -20,10 +20,16 @@ DUMP_DIR="${DUMP_DIR:-/tmp}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 DUMP_FILE="${DUMP_DIR}/base_admin_prod_${STAMP}.sql"
 
+# MariaDB 客户端没有 --set-gtid-purged，硬传会报 unknown variable
+GTID_OPT=
+if mysqldump --help 2>&1 | grep -q 'set-gtid-purged'; then
+  GTID_OPT=--set-gtid-purged=OFF
+fi
+
 echo "==> dump 生产(外网) ${PROD_HOST}/${DB_NAME}"
 mysqldump \
   -h "$PROD_HOST" -P 3306 -u "$RDS_USER" -p"$RDS_PASS" \
-  --single-transaction --routines --triggers --set-gtid-purged=OFF \
+  --single-transaction --routines --triggers ${GTID_OPT} \
   --default-character-set=utf8mb4 \
   "$DB_NAME" > "$DUMP_FILE"
 

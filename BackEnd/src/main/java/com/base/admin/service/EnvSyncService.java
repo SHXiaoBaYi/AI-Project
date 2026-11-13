@@ -81,19 +81,7 @@ public class EnvSyncService {
             testCnf = writeClientCnf(testHost, testPort, testUsername, testPassword);
 
             details.add("生产 dump(仅数据): " + prod.getHost() + "/" + prod.getDatabase());
-            runProcess(List.of(
-                    "mysqldump",
-                    "--defaults-extra-file=" + prodCnf,
-                    "--single-transaction",
-                    "--no-create-info",
-                    "--skip-triggers",
-                    "--skip-routines",
-                    "--complete-insert",
-                    "--set-gtid-purged=OFF",
-                    "--default-character-set=utf8mb4",
-                    "--hex-blob",
-                    prod.getDatabase()
-            ), dumpFile, null, 30, TimeUnit.MINUTES);
+            runProcess(prodDataDumpCommand(prodCnf, prod.getDatabase()), dumpFile, null, 30, TimeUnit.MINUTES);
             details.add("dump 大小: " + Files.size(dumpFile) + " bytes");
 
             details.add("清空测试库全部表数据(保留表结构)");
@@ -213,6 +201,58 @@ public class EnvSyncService {
             throw new BusinessException("未配置生产库连接（xby.env-sync.prod）");
         }
         return prod;
+    }
+
+    /**
+     * {@code --set-gtid-purged} 只有 MySQL 官方客户端有。MariaDB 的 mysqldump 会直接报
+     * unknown variable 'set-gtid-purged=OFF'。新测试机若装的是 MariaDB 客户端，省略该参数即可。
+     */
+    private List<String> prodDataDumpCommand(Path prodCnf, String database) {
+        List<String> cmd = new ArrayList<>();
+        cmd.add("mysqldump");
+        cmd.add("--defaults-extra-file=" + prodCnf);
+        cmd.add("--single-transaction");
+        cmd.add("--no-create-info");
+        cmd.add("--skip-triggers");
+        cmd.add("--skip-routines");
+        cmd.add("--complete-insert");
+        if (supportsSetGtidPurged()) {
+            cmd.add("--set-gtid-purged=OFF");
+        } else {
+            log.info("本机 mysqldump 不支持 --set-gtid-purged，已省略（MariaDB 客户端导出不会写入 GTID_PURGED）");
+        }
+        cmd.add("--default-character-set=utf8mb4");
+        cmd.add("--hex-blob");
+        cmd.add(database);
+        return cmd;
+    }
+
+    private static volatile Boolean setGtidPurgedSupported;
+
+    private static boolean supportsSetGtidPurged() {
+        Boolean cached = setGtidPurgedSupported;
+        if (cached != null) {
+            return cached;
+        }
+        boolean supported = false;
+        try {
+            Process p = new ProcessBuilder("mysqldump", "--help")
+                    .redirectErrorStream(true)
+                    .start();
+            String help;
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                help = br.lines().collect(Collectors.joining("\n"));
+            }
+            if (!p.waitFor(20, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+            }
+            supported = help.contains("set-gtid-purged");
+        } catch (Exception e) {
+            supported = false;
+        }
+        setGtidPurgedSupported = supported;
+        return supported;
     }
 
     private static Path writeClientCnf(String host, int port, String user, String pass) throws IOException {

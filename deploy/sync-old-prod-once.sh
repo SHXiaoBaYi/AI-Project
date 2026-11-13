@@ -27,9 +27,15 @@ trap start_app EXIT
 echo "==> stop xby-admin"
 systemctl stop xby-admin || true
 
+# MariaDB 客户端没有 --set-gtid-purged，硬传会报 unknown variable
+GTID_OPT=
+if mysqldump --help 2>&1 | grep -q 'set-gtid-purged'; then
+  GTID_OPT=--set-gtid-purged=OFF
+fi
+
 echo "==> dump old prod ${OLD_RDS_HOST}/${DB}"
 mysqldump --defaults-extra-file="$OLD_CNF" -h "$OLD_RDS_HOST" -P 3306 \
-  --single-transaction --routines --triggers --hex-blob --set-gtid-purged=OFF \
+  --single-transaction --routines --triggers --hex-blob ${GTID_OPT} \
   --default-character-set=utf8mb4 \
   "$DB" >"$DUMP"
 ls -lh "$DUMP"
