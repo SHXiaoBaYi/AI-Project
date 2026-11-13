@@ -123,14 +123,13 @@ const TrainItemPage = memo(function TrainItemPage() {
     {
       title: '文档',
       dataIndex: 'docId',
-      width: 180,
+      hideInTable: true,
       valueType: 'select',
       fieldProps: { showSearch: true, allowClear: true, placeholder: '全部文档' },
       request: async () => {
         const docs = await listTrainDocsApi();
         return (docs || []).map((d) => ({ label: d.title, value: d.id }));
       },
-      render: (_, record) => record.docTitle || '—',
     },
     {
       title: '版本',
@@ -235,7 +234,7 @@ const TrainItemPage = memo(function TrainItemPage() {
         actionRef={actionRef}
         headerTitle='题目'
         columns={columns}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 920 }}
         form={{
           initialValues: {
             docId: presetDocId,
