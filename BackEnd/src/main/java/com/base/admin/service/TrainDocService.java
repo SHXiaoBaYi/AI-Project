@@ -1846,7 +1846,7 @@ public class TrainDocService {
      * 2) 无序序号「1.问：」「（3）问：」也要认；
      * 3) 文档已有「问：」题干时，不再把答文里的「如何/怎么」短行当新题。
      */
-    private static List<Integer> listQaStarts(String plain) {
+    static List<Integer> listQaStarts(String plain) {
         List<Integer> starts = new ArrayList<>();
         if (!StringUtils.hasText(plain)) {
             return starts;
@@ -1859,9 +1859,10 @@ public class TrainDocService {
         while (lineAsk.find()) {
             addQaStart(starts, plain, lineAsk.start());
         }
-        // HTML 粘连兜底：非行首的「问：」，但不得落在「请/反/追/疑」等字后面（避免「请问：」假切）
+        // 同一段里下一题直接粘在上一答后面，如「见图问：怎么给顾客办理会员」。
+        // 只避开「请问/反问/追问/疑问」里的「问：」，其余「问：」都是新题。
         Matcher glued = Pattern.compile(
-                "(?<![\\u4e00-\\u9fffA-Za-z0-9])(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]"
+                "(?<![请反追疑])(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：]"
         ).matcher(plain);
         while (glued.find()) {
             addQaStart(starts, plain, glued.start());
