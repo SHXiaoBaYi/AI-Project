@@ -157,7 +157,8 @@ const TrainQaCalibratePage = memo(function TrainQaCalibratePage() {
               key: 'rerecognize',
               label: '重新识别',
               perm: 'train:qa:recognize',
-              confirmTitle: '将按当前绑定版本文档重新识别，结果进入「待审」，是否继续？',
+              confirmTitle:
+                '将用这条用户问法按收银答疑再识别一次（与钉钉扫码同一条链路），结果进入「待审」，是否继续？',
               onClick: async () => {
                 await rerecognizeTrainQaCalibrateApi(record.id);
                 message.success('已重新识别，请审核后标为「准」');

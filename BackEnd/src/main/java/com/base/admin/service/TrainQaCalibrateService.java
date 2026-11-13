@@ -1,6 +1,7 @@
 package com.base.admin.service;
 
 import com.base.admin.common.PageResult;
+import com.base.admin.domain.dto.TrainAssistantAskDTO;
 import com.base.admin.domain.dto.TrainQaCalibrateQueryDTO;
 import com.base.admin.domain.dto.TrainQaCalibrateSaveDTO;
 import com.base.admin.domain.dto.TrainQaFeedbackDTO;
@@ -394,28 +395,39 @@ public class TrainQaCalibrateService {
         String userQ = str(row.get("user_question"));
         long docId = ((Number) row.get("doc_id")).longValue();
         long versionId = ((Number) row.get("version_id")).longValue();
-        List<TrainAssistantAskVO.QaItem> items = trainDocService.extractQaForVersion(userQ, docId, versionId);
-        if (items.isEmpty()) {
+        String category = str(row.get("category"));
+        TrainAssistantAskDTO ask = new TrainAssistantAskDTO();
+        ask.setQuestion(userQ);
+        ask.setCategory(StringUtils.hasText(category) ? category : "cashier");
+        ask.setSearchOld(false);
+        TrainAssistantAskVO asked = trainDocService.ask(ask);
+        List<TrainAssistantAskVO.QaItem> items = asked == null || asked.getItems() == null
+                ? List.of() : asked.getItems();
+        if (asked == null || !"HIT".equals(asked.getStatus()) || items.isEmpty()) {
             throw new BusinessException("重新识别未找到答案，请手动校准");
         }
         TrainAssistantAskVO.QaItem hit = items.get(0);
         if (TrainQaAnswerSanitizer.looksLikeSourceCode(hit.getAnswer(), hit.getAnswerHtml())) {
             throw new BusinessException("重新识别结果疑似程序代码，已拦截，请手动填写收银操作说明");
         }
+        long hitDocId = asked.getDocId() == null ? docId : asked.getDocId();
+        long hitVersionId = asked.getVersionId() == null ? versionId : asked.getVersionId();
         String operator = SecurityUtils.getCurrentUsername();
-        // 重新识别后进入待审，避免不准内容直接上线
+        // 与钉钉扫码同一条识别；写回后进入待审，避免直接上线
         jdbc.update("""
                 UPDATE train_qa_calibrate SET
+                  doc_id = ?, version_id = ?,
                   topic_title = ?, answer_text = ?, answer_html = ?, images_json = ?,
                   status = ?, source = 'RE_RECOGNIZE', update_by = ?
                 WHERE id = ?
                 """,
+                hitDocId, hitVersionId,
                 nz(hit.getQuestion()), nz(hit.getAnswer()), nz(hit.getAnswerHtml()),
                 toImagesJson(hit.getImages()), STATUS_PENDING, operator, id);
         TrainQaCalibrateVO vo = new TrainQaCalibrateVO();
         vo.setId(id);
-        vo.setDocId(docId);
-        vo.setVersionId(versionId);
+        vo.setDocId(hitDocId);
+        vo.setVersionId(hitVersionId);
         vo.setUserQuestion(userQ);
         vo.setTopicTitle(hit.getQuestion());
         vo.setAnswer(hit.getAnswer());
