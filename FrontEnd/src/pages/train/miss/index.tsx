@@ -4,7 +4,13 @@ import { App, Form, Modal, Select, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
-import { listTrainQaMissApi, markTrainQaMissHandledApi, type TrainQaHandleStatus, type TrainQaMiss } from '@/api/train';
+import {
+  listTrainQaMissApi,
+  markTrainQaMissHandledApi,
+  rerecognizeTrainQaMissApi,
+  type TrainQaHandleStatus,
+  type TrainQaMiss,
+} from '@/api/train';
 import {
   HANDLE_REASON_OPTIONS,
   HANDLE_STATUS_OPTIONS,
@@ -51,11 +57,23 @@ const TrainQaMissPage = memo(function TrainQaMissPage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 160,
+      width: 240,
       fixed: 'left',
       render: (_, record) => (
         <ActionButtons
           items={[
+            {
+              key: 'rerecognize',
+              label: '重新识别',
+              perm: 'train:qa:recognize',
+              confirmTitle: '将用这条原问按收银答疑再识别一次（与钉钉扫码同一条链路），是否继续？',
+              onClick: async () => {
+                const res = await rerecognizeTrainQaMissApi(record.id);
+                const title = res.items?.[0]?.question || '已命中';
+                message.success(`已重新识别，命中「${title}」`);
+                actionRef.current?.reload();
+              },
+            },
             {
               key: 'handle',
               label: record.handled ? '改处理' : '标记处理',
@@ -133,6 +151,22 @@ const TrainQaMissPage = memo(function TrainQaMissPage() {
       width: 280,
     },
     {
+      title: '识别话题',
+      dataIndex: 'recognizedTitle',
+      ellipsis: true,
+      search: false,
+      width: 220,
+      render: (_, r) => r.recognizedTitle || '-',
+    },
+    {
+      title: '识别答案',
+      dataIndex: 'recognizedAnswer',
+      ellipsis: true,
+      search: false,
+      width: 260,
+      render: (_, r) => r.recognizedAnswer || '-',
+    },
+    {
       title: '分词意图',
       dataIndex: 'intentTokens',
       ellipsis: true,
@@ -144,7 +178,14 @@ const TrainQaMissPage = memo(function TrainQaMissPage() {
       dataIndex: 'status',
       width: 110,
       search: false,
-      render: (_, r) => (r.status === 'NEED_OLD' ? <Tag color='warning'>建议搜旧版</Tag> : <Tag>没有找到答案</Tag>),
+      render: (_, r) =>
+        r.status === 'HIT' ? (
+          <Tag color='success'>已命中</Tag>
+        ) : r.status === 'NEED_OLD' ? (
+          <Tag color='warning'>建议搜旧版</Tag>
+        ) : (
+          <Tag>没有找到答案</Tag>
+        ),
     },
     {
       title: '处理人',
@@ -170,7 +211,7 @@ const TrainQaMissPage = memo(function TrainQaMissPage() {
         actionRef={actionRef}
         headerTitle='未命中提问'
         columns={columns}
-        scroll={{ x: 1400 }}
+        scroll={{ x: 1880 }}
         request={async (params) => {
           const res = await listTrainQaMissApi({
             pageNum: params.current,

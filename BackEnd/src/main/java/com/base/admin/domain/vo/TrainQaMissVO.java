@@ -16,6 +16,12 @@ public class TrainQaMissVO {
     @Schema(description = "用户原问")
     private String question;
 
+    @Schema(description = "重新识别命中的话题", nullable = true)
+    private String recognizedTitle;
+
+    @Schema(description = "重新识别命中的答案", nullable = true)
+    private String recognizedAnswer;
+
     @Schema(description = "分词意图")
     private String intentTokens;
 
@@ -28,7 +34,7 @@ public class TrainQaMissVO {
     @Schema(description = "提问人姓名")
     private String nickname;
 
-    @Schema(description = "状态 NEED_OLD/NOT_FOUND", example = "NOT_FOUND")
+    @Schema(description = "状态 HIT/NEED_OLD/NOT_FOUND", example = "NOT_FOUND")
     private String status;
 
     @Schema(description = "文档版本ID", example = "4", nullable = true)

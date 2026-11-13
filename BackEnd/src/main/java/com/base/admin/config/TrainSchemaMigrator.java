@@ -103,6 +103,8 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
                   category VARCHAR(64) NOT NULL DEFAULT 'cashier',
                   question VARCHAR(512) NOT NULL COMMENT '用户原问',
+                  recognized_title VARCHAR(512) NULL COMMENT '重新识别命中的话题',
+                  recognized_answer MEDIUMTEXT NULL COMMENT '重新识别命中的答案',
                   intent_tokens VARCHAR(512) NULL COMMENT '分词意图',
                   user_id BIGINT NULL COMMENT '提问人用户ID',
                   username VARCHAR(64) NULL COMMENT '登录账号',
@@ -127,6 +129,11 @@ public class TrainSchemaMigrator implements ApplicationRunner {
                   ADD COLUMN handle_by VARCHAR(64) NULL COMMENT '处理人' AFTER handle_status,
                   ADD COLUMN handle_time DATETIME NULL COMMENT '处理时间' AFTER handle_by,
                   ADD KEY idx_train_qa_handle (handle_status, is_active)
+                """);
+        ensureColumn("train_qa_miss", "recognized_title", """
+                ALTER TABLE train_qa_miss
+                  ADD COLUMN recognized_title VARCHAR(512) NULL COMMENT '重新识别命中的话题' AFTER question,
+                  ADD COLUMN recognized_answer MEDIUMTEXT NULL COMMENT '重新识别命中的答案' AFTER recognized_title
                 """);
         ensureColumn("train_qa_miss", "handle_status", """
                 ALTER TABLE train_qa_miss

@@ -7,6 +7,7 @@ import com.base.admin.domain.dto.TrainQaCalibrateQueryDTO;
 import com.base.admin.domain.dto.TrainQaCalibrateSaveDTO;
 import com.base.admin.domain.dto.TrainQaHandleDTO;
 import com.base.admin.domain.dto.TrainQaMissQueryDTO;
+import com.base.admin.domain.vo.TrainAssistantAskVO;
 import com.base.admin.domain.vo.TrainQaCalibrateVO;
 import com.base.admin.domain.vo.TrainQaMissVO;
 import com.base.admin.service.TrainQaCalibrateService;
@@ -68,6 +69,13 @@ public class TrainQaCalibrateController {
     public Result<Void> markCalibrateHandled(@Valid @RequestBody TrainQaHandleDTO dto) {
         trainQaCalibrateService.markHandled(dto);
         return Result.ok();
+    }
+
+    @Operation(summary = "对未命中提问按扫码答疑重新识别")
+    @PostMapping("/miss/{id}/rerecognize")
+    @RequiresPermission("train:qa:recognize")
+    public Result<TrainAssistantAskVO> rerecognizeMiss(@PathVariable Long id) {
+        return Result.ok(trainQaMissService.rerecognize(id));
     }
 
     @Operation(summary = "标记未命中提问处理状态")

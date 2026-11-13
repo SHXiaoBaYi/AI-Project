@@ -1,16 +1,19 @@
 package com.base.admin.service;
 
 import com.base.admin.common.PageResult;
+import com.base.admin.domain.dto.TrainAssistantAskDTO;
 import com.base.admin.domain.dto.TrainQaHandleDTO;
 import com.base.admin.domain.dto.TrainQaMissQueryDTO;
+import com.base.admin.domain.vo.TrainAssistantAskVO;
 import com.base.admin.domain.vo.TrainQaMissVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.security.LoginUser;
 import com.base.admin.util.SecurityUtils;
+import com.base.admin.util.TrainQaAnswerSanitizer;
 import com.base.admin.util.TrainQaHandleStatuses;
 import com.base.admin.util.TrainQaIntentMatcher;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,10 +26,15 @@ import java.util.Map;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class TrainQaMissService {
 
     private final JdbcTemplate jdbc;
+    private final TrainDocService trainDocService;
+
+    public TrainQaMissService(JdbcTemplate jdbc, @Lazy TrainDocService trainDocService) {
+        this.jdbc = jdbc;
+        this.trainDocService = trainDocService;
+    }
 
     public void record(String question, String category, String status, Long docId, Long versionId) {
         if (!StringUtils.hasText(question)) {
@@ -101,7 +109,7 @@ public class TrainQaMissService {
         listArgs.add(pageSize);
         listArgs.add(offset);
         List<TrainQaMissVO> rows = jdbc.query(
-                "SELECT id, category, question, intent_tokens, user_id, username, nickname, status, version_id, "
+                "SELECT id, category, question, recognized_title, recognized_answer, intent_tokens, user_id, username, nickname, status, version_id, "
                         + "handle_status, handle_by, handle_time, create_time "
                         + "FROM train_qa_miss " + where + " ORDER BY create_time DESC, id DESC LIMIT ? OFFSET ?",
                 (rs, i) -> {
@@ -109,6 +117,8 @@ public class TrainQaMissService {
                     vo.setId(rs.getLong("id"));
                     vo.setCategory(rs.getString("category"));
                     vo.setQuestion(rs.getString("question"));
+                    vo.setRecognizedTitle(rs.getString("recognized_title"));
+                    vo.setRecognizedAnswer(rs.getString("recognized_answer"));
                     vo.setIntentTokens(rs.getString("intent_tokens"));
                     long uid = rs.getLong("user_id");
                     vo.setUserId(rs.wasNull() ? null : uid);
@@ -156,6 +166,47 @@ public class TrainQaMissService {
         if (n <= 0) {
             throw new BusinessException("记录不存在");
         }
+    }
+
+    /** 用这条原问再走一遍收银扫码答疑。命中后写回话题和答案。 */
+    @Transactional
+    public TrainAssistantAskVO rerecognize(Long id) {
+        List<Map<String, Object>> found = jdbc.queryForList("""
+                SELECT id, category, question
+                FROM train_qa_miss WHERE id = ? AND is_active = 1
+                """, id);
+        if (found.isEmpty()) {
+            throw new BusinessException("记录不存在");
+        }
+        String question = nvl(found.get(0).get("question"));
+        String category = nvl(found.get(0).get("category"));
+        if (!StringUtils.hasText(question)) {
+            throw new BusinessException("原问为空");
+        }
+        TrainAssistantAskDTO ask = new TrainAssistantAskDTO();
+        ask.setQuestion(question);
+        ask.setCategory(StringUtils.hasText(category) ? category : "cashier");
+        ask.setSearchOld(false);
+        TrainAssistantAskVO asked = trainDocService.ask(ask);
+        List<TrainAssistantAskVO.QaItem> items = asked == null || asked.getItems() == null
+                ? List.of() : asked.getItems();
+        if (asked == null || !"HIT".equals(asked.getStatus()) || items.isEmpty()) {
+            throw new BusinessException("重新识别未找到答案");
+        }
+        TrainAssistantAskVO.QaItem hit = items.get(0);
+        if (TrainQaAnswerSanitizer.looksLikeSourceCode(hit.getAnswer(), hit.getAnswerHtml())) {
+            throw new BusinessException("重新识别结果疑似程序代码，已拦截");
+        }
+        int n = jdbc.update("""
+                UPDATE train_qa_miss
+                SET status = 'HIT', recognized_title = ?, recognized_answer = ?, version_id = ?
+                WHERE id = ? AND is_active = 1
+                """,
+                nvl(hit.getQuestion()), nvl(hit.getAnswer()), asked.getVersionId(), id);
+        if (n <= 0) {
+            throw new BusinessException("记录不存在");
+        }
+        return asked;
     }
 
     private String lookupNickname(Long userId, String username) {

@@ -332,6 +332,8 @@ export type TrainQaMiss = {
   username?: string;
   nickname?: string;
   status?: string;
+  recognizedTitle?: string;
+  recognizedAnswer?: string;
   versionId?: number;
   handled?: boolean;
   handleStatus?: string;
@@ -365,6 +367,12 @@ export function listTrainQaMissApi(params: {
 
 export function markTrainQaMissHandledApi(data: { id: number; handleStatus: TrainQaHandleStatus }) {
   return request.put('/train/qa/miss/handle', data);
+}
+
+export function rerecognizeTrainQaMissApi(id: number) {
+  return request.post<unknown, TrainAssistantAskResult>(`/train/qa/miss/${id}/rerecognize`, undefined, {
+    timeout: 120000,
+  });
 }
 
 export function listTrainQaCalibrateApi(params: {
