@@ -4,6 +4,7 @@ import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.TrainQaItemQueryDTO;
 import com.base.admin.domain.dto.TrainQaItemSaveDTO;
 import com.base.admin.domain.vo.TrainQaItemVO;
+import com.base.admin.domain.vo.TrainQaRebuildVO;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -66,45 +67,67 @@ public class TrainQaItemService {
         this.tx = new TransactionTemplate(transactionManager);
     }
 
-    public void rebuildVersion(long docId, long versionId) {
+    public TrainQaRebuildVO rebuildVersion(long docId, long versionId) {
         List<Map<String, Object>> files = jdbc.queryForList("""
-                SELECT id FROM train_doc_file
+                SELECT id, file_name, title FROM train_doc_file
                 WHERE version_id = ? AND doc_id = ? AND is_active = 1
                 ORDER BY sort_no ASC, id ASC
                 """, versionId, docId);
+        TrainQaRebuildVO vo = new TrainQaRebuildVO();
+        vo.setVersionId(versionId);
         if (files.isEmpty()) {
-            rebuildLegacyVersion(docId, versionId);
-            return;
+            vo.getFiles().add(rebuildLegacyVersion(docId, versionId));
+            return vo;
         }
         for (Map<String, Object> file : files) {
             Number id = (Number) file.get("id");
-            if (id != null) {
-                rebuildFile(docId, versionId, id.longValue());
+            if (id == null) {
+                continue;
             }
+            String name = str(file.get("title"));
+            if (!StringUtils.hasText(name)) {
+                name = str(file.get("file_name"));
+            }
+            vo.getFiles().add(rebuildFile(docId, versionId, id.longValue(), name));
         }
+        return vo;
     }
 
-    public void rebuildFile(long docId, long versionId, long fileId) {
+    public TrainQaRebuildVO.FileResult rebuildFile(long docId, long versionId, long fileId) {
+        return rebuildFile(docId, versionId, fileId, null);
+    }
+
+    private TrainQaRebuildVO.FileResult rebuildFile(long docId, long versionId, long fileId, String displayName) {
+        TrainQaRebuildVO.FileResult result = new TrainQaRebuildVO.FileResult();
+        result.setFileId(fileId);
+        result.setQuestionCount(0);
         List<Map<String, Object>> files = jdbc.queryForList("""
-                SELECT file_path, file_name FROM train_doc_file
+                SELECT file_path, file_name, title FROM train_doc_file
                 WHERE id = ? AND doc_id = ? AND version_id = ? AND is_active = 1
                 """, fileId, docId, versionId);
         if (files.isEmpty()) {
             log.warn("收银文档不存在 fileId={}", fileId);
-            return;
+            result.setFileName(StringUtils.hasText(displayName) ? displayName : "文档");
+            result.setError("文档不存在，未改动已有题目");
+            return result;
         }
         String filePath = str(files.get(0).get("file_path"));
         String fileName = str(files.get(0).get("file_name"));
+        String title = str(files.get(0).get("title"));
+        result.setFileName(StringUtils.hasText(displayName) ? displayName
+                : (StringUtils.hasText(title) ? title : fileName));
         List<TrainQaDraft> drafts;
         try {
             drafts = trainDocService.exportStructuredQaFile(docId, versionId, fileId, filePath, fileName);
         } catch (Exception e) {
             log.warn("拆题失败，保留原文件 fileId={}: {}", fileId, e.getMessage());
-            return;
+            result.setError("拆题失败，已保留原题目");
+            return result;
         }
         if (drafts == null || drafts.isEmpty()) {
             log.warn("未拆出问答，保留原文件与已有题目 fileId={}", fileId);
-            return;
+            result.setError("未拆出题目，已保留原题目");
+            return result;
         }
         String versionPath = jdbc.query("""
                 SELECT file_path FROM train_doc_version WHERE id = ?
@@ -112,22 +135,31 @@ public class TrainQaItemService {
         boolean primary = !StringUtils.hasText(versionPath) || versionPath.equals(filePath);
         replaceRows(docId, versionId, fileId, primary, drafts);
         scheduleEmbed(versionId);
+        result.setQuestionCount(drafts.size());
+        return result;
     }
 
-    private void rebuildLegacyVersion(long docId, long versionId) {
+    private TrainQaRebuildVO.FileResult rebuildLegacyVersion(long docId, long versionId) {
+        TrainQaRebuildVO.FileResult result = new TrainQaRebuildVO.FileResult();
+        result.setFileName("版本原文件");
+        result.setQuestionCount(0);
         List<TrainQaDraft> drafts;
         try {
             drafts = trainDocService.exportStructuredQa(docId, versionId);
         } catch (Exception e) {
             log.warn("拆题失败，保留原文件 versionId={}: {}", versionId, e.getMessage());
-            return;
+            result.setError("拆题失败，已保留原题目");
+            return result;
         }
         if (drafts == null || drafts.isEmpty()) {
             log.warn("未拆出问答，保留原文件与已有题目 versionId={}", versionId);
-            return;
+            result.setError("未拆出题目，已保留原题目");
+            return result;
         }
         replaceRows(docId, versionId, null, true, drafts);
         scheduleEmbed(versionId);
+        result.setQuestionCount(drafts.size());
+        return result;
     }
 
     public void backfillMissingLatest() {

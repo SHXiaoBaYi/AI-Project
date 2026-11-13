@@ -458,12 +458,21 @@ export function pageTrainQaItemsApi(params: {
   });
 }
 
+export type TrainQaRebuildResult = {
+  versionId?: number;
+  files?: { fileId?: number; fileName?: string; questionCount?: number; error?: string }[];
+};
+
 export function rebuildTrainQaItemsApi(docId: number) {
-  return request.post(`/train/doc/${docId}/qa-items/rebuild`, {}, { timeout: 180000 });
+  return request.post<unknown, TrainQaRebuildResult>(`/train/doc/${docId}/qa-items/rebuild`, {}, { timeout: 300000 });
 }
 
 export function rebuildTrainVersionQaApi(docId: number, versionId: number) {
-  return request.post(`/train/doc/${docId}/version/${versionId}/qa-items/rebuild`, {}, { timeout: 180000 });
+  return request.post<unknown, TrainQaRebuildResult>(
+    `/train/doc/${docId}/version/${versionId}/qa-items/rebuild`,
+    {},
+    { timeout: 300000 },
+  );
 }
 
 export function updateTrainQaItemApi(

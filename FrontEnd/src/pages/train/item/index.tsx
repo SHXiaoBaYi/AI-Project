@@ -6,6 +6,7 @@ import BaseProTable from '@/components/BaseProTable';
 import ActionButtons from '@/components/Buttons/ActionButtons';
 import {
   listTrainDocsApi,
+  listTrainFilesApi,
   listTrainVersionsApi,
   pageTrainQaItemsApi,
   updateTrainQaItemApi,
@@ -122,13 +123,30 @@ const TrainItemPage = memo(function TrainItemPage() {
     },
     {
       title: '文档',
-      dataIndex: 'docId',
+      dataIndex: 'fileId',
       hideInTable: true,
       valueType: 'select',
       fieldProps: { showSearch: true, allowClear: true, placeholder: '全部文档' },
       request: async () => {
-        const docs = await listTrainDocsApi();
-        return (docs || []).map((d) => ({ label: d.title, value: d.id }));
+        const docs = (await listTrainDocsApi()) || [];
+        const scoped = presetDocId ? docs.filter((d) => d.id === presetDocId) : docs;
+        const lists = await Promise.all(
+          scoped
+            .filter((d) => d.latestVersionId)
+            .map(async (d) => {
+              const files = (await listTrainFilesApi(d.latestVersionId!)) || [];
+              return files
+                .filter((f) => f.id > 0)
+                .map((f) => ({
+                  label:
+                    scoped.length > 1
+                      ? `${d.title} / ${f.title || f.fileName || '未命名'}`
+                      : f.title || f.fileName || '未命名',
+                  value: f.id,
+                }));
+            }),
+        );
+        return lists.flat();
       },
     },
     {
@@ -136,16 +154,20 @@ const TrainItemPage = memo(function TrainItemPage() {
       dataIndex: 'versionId',
       hideInTable: true,
       valueType: 'select',
-      dependencies: ['docId'],
-      fieldProps: { allowClear: true, placeholder: '先选文档，再选版本' },
-      request: async (params) => {
-        const docId = Number(params.docId);
-        if (!docId) return [];
-        const rows = await listTrainVersionsApi(docId);
-        return (rows || []).map((v) => ({
-          label: `${v.versionLabel || `v${v.versionNo}`}${v.latest ? ' · 最新' : ''}`,
-          value: v.id,
-        }));
+      fieldProps: { allowClear: true, placeholder: '全部版本' },
+      request: async () => {
+        const docs = (await listTrainDocsApi()) || [];
+        const scoped = presetDocId ? docs.filter((d) => d.id === presetDocId) : docs;
+        const lists = await Promise.all(
+          scoped.map(async (d) => {
+            const rows = (await listTrainVersionsApi(d.id)) || [];
+            return rows.map((v) => ({
+              label: `${scoped.length > 1 ? `${d.title} · ` : ''}${v.versionLabel || `v${v.versionNo}`}${v.latest ? ' · 最新' : ''}`,
+              value: v.id,
+            }));
+          }),
+        );
+        return lists.flat();
       },
     },
     {
@@ -237,20 +259,20 @@ const TrainItemPage = memo(function TrainItemPage() {
         scroll={{ x: 920 }}
         form={{
           initialValues: {
-            docId: presetDocId,
+            fileId: presetFileId,
             versionId: presetVersionId,
             scope: presetVersionId ? 'all' : 'latest',
           },
         }}
         request={async (params) => {
-          const docId = params.docId ? Number(params.docId) : presetDocId;
-          const versionId = params.versionId ? Number(params.versionId) : presetVersionId;
+          const fileId = params.fileId ? Number(params.fileId) : undefined;
+          const versionId = params.versionId ? Number(params.versionId) : undefined;
           const res = await pageTrainQaItemsApi({
             pageNum: params.current,
             pageSize: params.pageSize,
-            docId,
+            docId: presetDocId,
             versionId,
-            fileId: presetFileId,
+            fileId,
             onlyLatest: versionId ? false : params.scope !== 'all',
             keyword: params.keyword ? String(params.keyword) : undefined,
           });

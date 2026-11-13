@@ -10,6 +10,7 @@ import com.base.admin.domain.vo.TrainDocFileVO;
 import com.base.admin.domain.vo.TrainDocVO;
 import com.base.admin.domain.vo.TrainDocVersionVO;
 import com.base.admin.domain.vo.TrainQaItemVO;
+import com.base.admin.domain.vo.TrainQaRebuildVO;
 import com.base.admin.service.TrainDocService;
 import com.base.admin.service.TrainQaItemService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -129,9 +130,8 @@ public class TrainDocController {
     @Operation(summary = "把某一版本下每份收银文档拆成题目")
     @PostMapping("/{id}/version/{versionId}/qa-items/rebuild")
     @RequiresPermission("train:doc:upload")
-    public Result<Void> rebuildVersionQa(@PathVariable Long id, @PathVariable Long versionId) {
-        trainQaItemService.rebuildVersion(id, versionId);
-        return Result.ok();
+    public Result<TrainQaRebuildVO> rebuildVersionQa(@PathVariable Long id, @PathVariable Long versionId) {
+        return Result.ok(trainQaItemService.rebuildVersion(id, versionId));
     }
 
     @Operation(summary = "预览版本（抽取文本 HTML）")
@@ -187,13 +187,12 @@ public class TrainDocController {
     @Operation(summary = "按原文件重新拆题")
     @PostMapping("/{id}/qa-items/rebuild")
     @RequiresPermission("train:doc:upload")
-    public Result<Void> rebuildQaItems(@PathVariable Long id) {
+    public Result<TrainQaRebuildVO> rebuildQaItems(@PathVariable Long id) {
         Long versionId = trainDocService.latestVersionId(id);
         if (versionId == null) {
             return Result.fail("请先上传培训文档");
         }
-        trainQaItemService.rebuildVersion(id, versionId);
-        return Result.ok();
+        return Result.ok(trainQaItemService.rebuildVersion(id, versionId));
     }
 
     @Operation(summary = "修改题干、同义问法或答文")

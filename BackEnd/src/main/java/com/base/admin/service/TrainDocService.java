@@ -67,6 +67,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
@@ -2004,8 +2005,13 @@ public class TrainDocService {
             byte[] bytes = readDocBytes(doc);
             if (bytes != null && bytes.length > 0) {
                 IndexedDoc indexed = indexOriginalBytes(bytes, doc);
-                if (indexed != null && !indexed.images.isEmpty()) {
-                    preferStructuredPlainText(indexed, doc.text);
+                if (indexed != null && usableQaIndex(indexed)) {
+                    // 重新拆题以原文件段落为准。content_text 常把同一段里的下一题粘进上一答。
+                    boolean walked = listQaStarts(nullToEmpty(indexed.textForAi)).size() >= 2
+                            || listQaStarts(nullToEmpty(indexed.markedText)).size() >= 2;
+                    if (!(doc.forceReindex && walked)) {
+                        preferStructuredPlainText(indexed, doc.text);
+                    }
                     saveIndexedText(slot, indexed.textForAi);
                     if (doc.indexSlot <= 0) {
                         String rich = buildUrlPreviewHtml(indexed);
@@ -2100,7 +2106,7 @@ public class TrainDocService {
             return indexDocxPackage(bytes, slot, doc.text);
         }
         if (lower.endsWith(".doc") || pathLower.endsWith(".doc")) {
-            return indexDocHwpf(bytes, slot, doc.text);
+            return indexDocHwpf(bytes, slot, doc.text, doc.forceReindex);
         }
         return null;
     }
@@ -2577,51 +2583,84 @@ public class TrainDocService {
     }
 
     /**
-     * 段落内按 document.xml 出现顺序输出 w:t 与图片。
-     * Word 常把多组「问/答」挤在同一 &lt;w:p&gt;，若先抽全文再挂图，图会整坨落到上一段或段末。
+     * 段落内按 document.xml 出现顺序输出文字、换行与图片。
+     * Word 常把多组「问/答」挤在同一 w:p，中间用 w:br 换行。丢掉换行会把后一题粘进上一答。
      */
     private void appendDocxParagraphInOrder(String paraXml, ZipFile zip, Map<String, String> relTarget,
                                             Map<String, Integer> targetToFig, IndexedDoc indexed,
                                             long versionId, StringBuilder ai) {
-        if (!StringUtils.hasText(paraXml)) {
+        String s = renderDocxParagraph(paraXml, rId -> {
+            StringBuilder marks = new StringBuilder();
+            appendDocxImage(zip, relTarget, targetToFig, indexed, versionId, rId, marks);
+            return marks.toString();
+        });
+        if (!StringUtils.hasText(s)) {
             return;
+        }
+        ai.append(s).append('\n');
+    }
+
+    /**
+     * 抽出一段里的正文。w:br / w:cr 变成换行；图片由 imageMark 换成 [图N]。
+     */
+    static String renderDocxParagraph(String paraXml, Function<String, String> imageMark) {
+        if (!StringUtils.hasText(paraXml)) {
+            return "";
         }
         Pattern textPat = Pattern.compile("(?is)<w:t[^>]*>(.*?)</w:t>");
         Pattern blipPat = Pattern.compile(
                 "(?is)<(?:a:blip|asvg:svgBlip|v:imagedata)\\b[^>]*?(?:r:embed|r:link|r:id)\\s*=\\s*\"(rId[^\"]+)\"");
+        Pattern breakPat = Pattern.compile("(?is)<w:(?:br|cr)\\b[^>]*?/?>");
         List<int[]> events = new ArrayList<>();
         Matcher tm = textPat.matcher(paraXml);
         while (tm.find()) {
-            events.add(new int[]{tm.start(), 0, tm.start(), tm.end()});
+            events.add(new int[]{tm.start(), 0, tm.start(1), tm.end(1)});
         }
         Matcher bm = blipPat.matcher(paraXml);
         while (bm.find()) {
             events.add(new int[]{bm.start(), 1, bm.start(1), bm.end(1)});
         }
+        Matcher br = breakPat.matcher(paraXml);
+        while (br.find()) {
+            events.add(new int[]{br.start(), 2, br.start(), br.end()});
+        }
         if (events.isEmpty()) {
-            return;
+            return "";
         }
         events.sort(Comparator.comparingInt(a -> a[0]));
         StringBuilder out = new StringBuilder();
         for (int[] ev : events) {
             if (ev[1] == 0) {
-                out.append(unescapeXml(paraXml.substring(ev[2], ev[3])));
-            } else {
+                if (ev[3] > ev[2]) {
+                    out.append(unescapeXml(paraXml.substring(ev[2], ev[3])));
+                }
+            } else if (ev[1] == 2) {
+                out.append('\n');
+            } else if (imageMark != null) {
                 String rId = paraXml.substring(ev[2], ev[3]);
-                StringBuilder marks = new StringBuilder();
-                appendDocxImage(zip, relTarget, targetToFig, indexed, versionId, rId, marks);
-                if (!marks.isEmpty()) {
+                String marks = imageMark.apply(rId);
+                if (StringUtils.hasText(marks)) {
                     out.append(marks);
                 }
             }
         }
         String s = out.toString().replaceAll("[ \\t\\x0B\\f\\r]+", " ").trim();
         if (!StringUtils.hasText(s)) {
-            return;
+            return "";
         }
-        // 同一段粘了多问时，在后续「问：」前断开，保证一问一答切块能切开
-        s = s.replaceAll("(?<=\\S)(?=(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：])", "\n");
-        ai.append(s).append('\n');
+        // 同一段粘了多问时，在后续「问：」前断开；「请问/反问/追问/疑问」不拆
+        return s.replaceAll("(?<![请反追疑\\s])(?=(?:问答\\s*\\d+|问题\\s*\\d+|问)\\s*[：:：])", "\n");
+    }
+
+    private static boolean usableQaIndex(IndexedDoc indexed) {
+        if (indexed == null) {
+            return false;
+        }
+        if (indexed.images != null && !indexed.images.isEmpty()) {
+            return true;
+        }
+        return listQaStarts(nullToEmpty(indexed.textForAi)).size() >= 1
+                || listQaStarts(nullToEmpty(indexed.markedText)).size() >= 1;
     }
 
     private void appendDocxImage(ZipFile zip, Map<String, String> relTarget, Map<String, Integer> targetToFig,
@@ -2706,14 +2745,16 @@ public class TrainDocService {
         }
     }
 
-    private IndexedDoc indexDocHwpf(byte[] bytes, long versionId, String fallbackText) throws Exception {
+    private IndexedDoc indexDocHwpf(byte[] bytes, long versionId, String fallbackText, boolean forceReindex) throws Exception {
         IndexedDoc indexed = new IndexedDoc();
         if (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K') {
             return indexDocxPackage(bytes, versionId, fallbackText);
         }
-        IndexedDoc diskCached = loadCachedIndexedFromDisk(versionId);
-        if (diskCached != null && !diskCached.images.isEmpty()) {
-            return diskCached;
+        if (!forceReindex) {
+            IndexedDoc diskCached = loadCachedIndexedFromDisk(versionId);
+            if (diskCached != null && !diskCached.images.isEmpty()) {
+                return diskCached;
+            }
         }
         fileStorage.clearTrainVersionImages(versionId);
         try (HWPFDocument wordDocument = new HWPFDocument(new ByteArrayInputStream(bytes))) {

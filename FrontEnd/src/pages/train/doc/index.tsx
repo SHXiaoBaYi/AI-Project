@@ -201,12 +201,27 @@ const TrainDocPage = memo(function TrainDocPage() {
   };
 
   const handleStructure = async () => {
-    if (!versionDoc || !fileVersionId) return;
+    const latest = versions.find((v) => v.latest) || versions.find((v) => v.id === fileVersionId);
+    const versionId = latest?.id;
+    if (!versionDoc || !versionId) return;
     setStructuring(true);
     try {
-      await rebuildTrainVersionQaApi(versionDoc.id, fileVersionId);
-      message.success('这一版里每份文档的题目都已拆出');
-      await loadFiles(fileVersionId);
+      const result = await rebuildTrainVersionQaApi(versionDoc.id, versionId);
+      const rows = result?.files || [];
+      const failed = rows.filter((row) => row.error);
+      const total = rows.reduce((sum, row) => sum + (row.questionCount || 0), 0);
+      if (!rows.length) {
+        message.warning('最新版没有可拆的文档');
+      } else if (failed.length) {
+        message.warning(
+          `最新版 ${rows.length} 份文档拆出 ${total} 题，${failed.map((row) => `${row.fileName || '文档'}：${row.error}`).join('；')}`,
+        );
+      } else {
+        message.success(`已按最新版 ${rows.length} 份文档重新拆出 ${total} 题`);
+      }
+      setFileVersionId(versionId);
+      await loadFiles(versionId);
+      actionRef.current?.reload();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '拆题失败');
     } finally {
