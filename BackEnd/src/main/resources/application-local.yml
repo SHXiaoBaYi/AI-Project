@@ -40,4 +40,5 @@ dingtalk:
 geo:
   auto-monitor:
     browser:
+      headless: false
       executable-path: "${GEO_BROWSER_PATH:C:/Program Files/Google/Chrome/Application/chrome.exe}"

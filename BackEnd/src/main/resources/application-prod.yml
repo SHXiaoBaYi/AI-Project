@@ -36,3 +36,10 @@ springdoc:
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+# GEO 自动监测：生产用有界面 Chrome，避免各平台拦截无头/自动化会话
+geo:
+  auto-monitor:
+    browser:
+      headless: false
+      executable-path: ${GEO_BROWSER_PATH:/usr/bin/google-chrome-stable}

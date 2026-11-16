@@ -35,3 +35,9 @@ springdoc:
     enabled: true
   swagger-ui:
     enabled: true
+
+geo:
+  auto-monitor:
+    browser:
+      headless: false
+      executable-path: ${GEO_BROWSER_PATH:/usr/bin/google-chrome-stable}

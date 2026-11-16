@@ -69,7 +69,22 @@ ssh -i "$ECS_IDENTITY" root@47.117.132.161 \
   'export RDS_USER=xiaobayi0099 RDS_PASS='"'"'你的密码'"'"'; bash /tmp/sync-prod-to-test-on-ecs.sh'
 ```
 
-### C. 构建发布
+### C. GEO 自动监测浏览器（测试/生产 ECS）
+
+当前 `bootstrap-test-ecs.sh` **不包含** Chrome/Xvfb。有界面采集需要：
+
+1. 本机能 `ssh root@47.117.132.161`（把公钥写入 ECS，或配置 `deploy/.ecs-test.local` 中的 `SSHPASS` / `ECS_IDENTITY`）
+2. 执行一次：
+
+```bash
+scp deploy/bootstrap-geo-browser-ecs.sh deploy/xvfb-geo.service root@47.117.132.161:/tmp/
+ssh root@47.117.132.161 'bash /tmp/bootstrap-geo-browser-ecs.sh /tmp/xvfb-geo.service'
+ssh root@47.117.132.161 'systemctl restart xby-admin && journalctl -u xby-admin -n 30 --no-pager | grep "GEO 浏览器"'
+```
+
+脚本会：安装 `google-chrome-stable`、启用 `xvfb-geo.service`（`:99`）、为 `xby-admin` 注入 `DISPLAY` / `GEO_BROWSER_PATH`。
+
+### D. 构建发布
 
 ```bash
 cd BackEnd && mvn -DskipTests package

@@ -758,11 +758,25 @@ public class GeoBrowserProbeService {
             } else {
                 playwright = Playwright.create();
             }
+            List<String> launchArgs = new ArrayList<>();
+            launchArgs.add("--no-sandbox");
+            launchArgs.add("--disable-dev-shm-usage");
+            launchArgs.add("--disable-blink-features=AutomationControlled");
+            if (!properties.isHeadless()) {
+                launchArgs.add("--disable-infobars");
+            }
             BrowserType.LaunchOptions options = new BrowserType.LaunchOptions()
                     .setHeadless(properties.isHeadless())
-                    .setArgs(List.of("--no-sandbox", "--disable-blink-features=AutomationControlled"));
+                    .setArgs(launchArgs);
             if (useLocalBrowser) {
                 options.setExecutablePath(Path.of(properties.getExecutablePath()));
+            }
+            if (!properties.isHeadless() && !StringUtils.hasText(System.getenv("DISPLAY"))) {
+                String os = System.getProperty("os.name", "").toLowerCase();
+                if (!os.contains("win") && !os.contains("mac")) {
+                    log.warn("GEO 浏览器为有界面模式但未设置 DISPLAY：Linux 上请先启动 Xvfb，例如 "
+                            + "`Xvfb :99 -screen 0 1440x900x24 &` 且 export DISPLAY=:99");
+                }
             }
             browser = playwright.chromium().launch(options);
             log.info("GEO 浏览器采集器就绪（headless={}, executablePath={}）",

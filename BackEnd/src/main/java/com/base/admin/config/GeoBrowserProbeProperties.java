@@ -25,8 +25,11 @@ public class GeoBrowserProbeProperties {
     /** 是否启用浏览器采集（关闭时任务统一记为 CALL_FAILED，便于临时降级） */
     private boolean enabled = true;
 
-    /** 无头模式；本地排查可设 false 观察真实页面 */
-    private boolean headless = true;
+    /**
+     * 无头模式。各平台对无头/自动化 UA 识别较严，默认用有界面浏览器更接近真实用户。
+     * Linux 服务器需配置 DISPLAY（常用 Xvfb：DISPLAY=:99），并通过 executable-path 指向系统 Chrome。
+     */
+    private boolean headless = false;
 
     /**
      * Chromium 内核浏览器可执行文件。为空时使用 Playwright 自带 Chromium；

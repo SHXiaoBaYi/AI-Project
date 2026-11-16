@@ -68,7 +68,7 @@ export default function BrowserProbeDrawer({ open, onClose }: BrowserProbeDrawer
 
   const currentAccount = accounts.find((a) => a.platform === selectedPlatform);
 
-  /** 用系统维护的平台账号在服务器无头浏览器模拟登录，登录后可直接试跑 */
+  /** 用系统维护的平台账号在服务器有界面浏览器模拟登录，登录后可直接试跑 */
   const doBrowserLogin = async () => {
     if (!selectedPlatform) {
       message.warning('请先选择平台');
@@ -188,7 +188,7 @@ export default function BrowserProbeDrawer({ open, onClose }: BrowserProbeDrawer
           }
           description={
             currentAccount?.error ||
-            '采集前会用系统维护的平台账号在服务器无头浏览器模拟登录；登录态按平台缓存，一批 3 题内只登录一次。只有扫码/验证码登录的平台请改用人工导出登录态。'
+            '采集前会用系统维护的平台账号在服务器有界面 Chrome 登录并缓存登录态（一批 3 题内只登录一次）。只有扫码/验证码登录的平台请改用人工导出登录态。'
           }
           action={
             <Button

@@ -122,8 +122,9 @@ geo:
     batch-max-duration-ms: ${GEO_MONITOR_BATCH_MAX_DURATION_MS:1800000}
     browser:
       enabled: true
-      # 无头模式；本地排查选择器时可设 false 观察真实页面
-      headless: ${GEO_BROWSER_HEADLESS:true}
+      # 默认有界面浏览器（各平台风控更易放过）；仅调试可设 GEO_BROWSER_HEADLESS=true
+      # Linux ECS 需 DISPLAY（如 Xvfb :99）+ GEO_BROWSER_PATH 指向 google-chrome-stable
+      headless: ${GEO_BROWSER_HEADLESS:false}
       # 留空用 Playwright 内置 Chromium（首次会从 cdn.playwright.dev 下载，国内常卡住）；
       # 强烈建议显式指向本机/服务器已安装的 Chrome/Chromium，指向后采集器会自动跳过浏览器下载
       executable-path: ${GEO_BROWSER_PATH:}

@@ -127,7 +127,7 @@ export function uploadGeoAutoScreenshotApi(resultId: number, file: File) {
   });
 }
 
-/** v28 用系统维护的平台账号在服务器无头浏览器模拟登录并刷新登录态 */
+/** v28 用系统维护的平台账号在服务器有界面浏览器模拟登录并刷新登录态 */
 export function browserLoginGeoAutoApi(data: GeoAutoBrowserLoginDTO) {
   return request.post<unknown, GeoBrowserLoginVO>('/geo/auto/browser/login', data);
 }
