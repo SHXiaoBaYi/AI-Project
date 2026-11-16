@@ -141,20 +141,20 @@ public class TrainQaCalibrateService {
             id = findIdByNorm(doc.docId, doc.versionId, norm);
         }
         String operator = SecurityUtils.getCurrentUsername();
-        String imagesJson = toImagesJson(dto.getImages());
         rejectIfCodeAnswer(status, dto.getAnswer(), dto.getAnswerHtml());
         if (id != null) {
-            jdbc.update("""
-                    UPDATE train_qa_calibrate SET
-                      user_question = ?, intent_norm = ?, topic_title = ?, answer_text = ?, answer_html = ?,
-                      images_json = ?, status = ?, source = 'ASSISTANT_MARK', update_by = ?, is_active = 1
+            // 提问时已写入待审记录，手动标准时只改状态，不覆盖问法与答案
+            int n = jdbc.update("""
+                    UPDATE train_qa_calibrate SET status = ?, update_by = ?
                     WHERE id = ? AND is_active = 1
-                    """,
-                    userQ, norm, nz(dto.getTopicTitle()), nz(dto.getAnswer()), nz(dto.getAnswerHtml()),
-                    imagesJson, status, operator, id);
+                    """, status, operator, id);
+            if (n <= 0) {
+                throw new BusinessException("记录不存在");
+            }
             syncAccurateWording(dto);
             return id;
         }
+        String imagesJson = toImagesJson(dto.getImages());
         KeyHolder kh = new GeneratedKeyHolder();
         String finalStatus = status;
         jdbc.update(con -> {
@@ -182,6 +182,90 @@ public class TrainQaCalibrateService {
         Number key = kh.getKey();
         syncAccurateWording(dto);
         return key == null ? null : key.longValue();
+    }
+
+    /**
+     * 用户每问一次就落一条待审记录。已命中人工校准的不再另开一行，之后标准/不准只改那条的状态。
+     * 写入失败不影响本次答疑返回。
+     */
+    public void recordAsked(String question, String category, TrainAssistantAskVO vo) {
+        try {
+            insertAsked(question, category, vo);
+        } catch (Exception e) {
+            log.warn("提问写入答疑校准失败: {}", e.getMessage());
+        }
+    }
+
+    private void insertAsked(String question, String category, TrainAssistantAskVO vo) {
+        if (vo == null || !StringUtils.hasText(question)) {
+            return;
+        }
+        TrainAssistantAskVO.QaItem shown = null;
+        if (vo.getItems() != null && !vo.getItems().isEmpty()) {
+            shown = vo.getItems().get(0);
+        }
+        if (shown != null && Boolean.TRUE.equals(shown.getFromCalibrate()) && shown.getCalibrateId() != null) {
+            return;
+        }
+        String userQ = clip(question.trim(), 512);
+        String norm = clip(normalizeIntent(userQ), 512);
+        if (!StringUtils.hasText(norm)) {
+            return;
+        }
+        String cat = normalizeCategory(category);
+        DocRef doc;
+        try {
+            doc = resolveDoc(vo.getDocId(), vo.getVersionId(), cat);
+        } catch (BusinessException e) {
+            log.warn("提问未写入校准：{}", e.getMessage());
+            return;
+        }
+        String topic = shown == null ? "" : clip(nz(shown.getQuestion()), 512);
+        String answer = shown == null ? "" : nz(shown.getAnswer());
+        String html = shown == null ? "" : nz(shown.getAnswerHtml());
+        if (TrainQaAnswerSanitizer.looksLikeSourceCode(answer, html)) {
+            log.warn("提问结果疑似程序代码，校准只保留问法");
+            answer = "";
+            html = "";
+        }
+        String imagesJson = shown == null ? "[]" : toImagesJson(shown.getImages());
+        String operator = SecurityUtils.getCurrentUsername();
+        KeyHolder kh = new GeneratedKeyHolder();
+        String finalTopic = topic;
+        String finalAnswer = answer;
+        String finalHtml = html;
+        jdbc.update(con -> {
+            PreparedStatement ps = con.prepareStatement("""
+                    INSERT INTO train_qa_calibrate
+                      (doc_id, version_id, category, user_question, intent_norm, aliases_json, topic_title,
+                       answer_text, answer_html, images_json, status, hit_count, source, remark, create_by, update_by, is_active)
+                    VALUES (?,?,?,?,?, '[]', ?,?,?,?,?,0,'ASSISTANT_ASK',NULL,?,?,1)
+                    """, Statement.RETURN_GENERATED_KEYS);
+            ps.setLong(1, doc.docId);
+            ps.setLong(2, doc.versionId);
+            ps.setString(3, cat);
+            ps.setString(4, userQ);
+            ps.setString(5, norm);
+            ps.setString(6, finalTopic);
+            ps.setString(7, finalAnswer);
+            ps.setString(8, finalHtml);
+            ps.setString(9, imagesJson);
+            ps.setString(10, STATUS_PENDING);
+            ps.setString(11, operator);
+            ps.setString(12, operator);
+            return ps;
+        }, kh);
+        Number key = kh.getKey();
+        if (key != null && shown != null) {
+            shown.setCalibrateId(key.longValue());
+        }
+    }
+
+    private static String clip(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= max ? s : s.substring(0, max);
     }
 
     private void syncAccurateWording(TrainQaFeedbackDTO dto) {
