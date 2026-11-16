@@ -20,11 +20,11 @@ export const GEO_AUTO_WEEK_DAYS = [
   { label: '周日', value: 7 },
 ] as const;
 
-/** 截图存证模式（对标模力指数：禁用 / 提及截图 / 全部截图） */
+/** 截图存证：提及截图 / 禁用截图 / 开启截图 */
 export const GEO_AUTO_SCREENSHOT_MODES = [
   { label: '禁用截图', value: 'DISABLED' },
   { label: '提及截图', value: 'MENTION' },
-  { label: '全部截图', value: 'ALL' },
+  { label: '开启截图', value: 'ALL' },
 ] as const;
 
 /** 提问位置（浏览器采集地域配置，预留给代理/地理位置） */

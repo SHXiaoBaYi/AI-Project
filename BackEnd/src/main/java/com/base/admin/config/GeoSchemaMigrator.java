@@ -286,28 +286,30 @@ public class GeoSchemaMigrator implements ApplicationRunner {
     private void ensureAutoMonitorMenus(Connection connection) {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         SysMenuIdRanges.Owner owner = SysMenuIdRanges.Owner.GEO;
-        SysMenuSeedSupport.upsert(jdbc, owner, 355, "自动监测", 100, 4, "geo/auto", "", "M",
-                "", "RobotOutlined", "问题自动提问监测，结果回写日监测");
+        SysMenuSeedSupport.upsert(jdbc, owner, 355, "自动监测", 100, 4, "geo/auto", "", "C",
+                "geo:auto:result:list", "FundProjectionScreenOutlined", "问题自动提问监测，结果回写日监测");
         SysMenuSeedSupport.upsert(jdbc, owner, 356, "监控问题库", 355, 1, "geo/auto/questions", "", "C",
-                "geo:auto:question:list", "QuestionCircleOutlined", "目标问题结构化管理");
-        SysMenuSeedSupport.upsert(jdbc, owner, 357, "问题新增", 356, 1, "", "", "F",
+                "geo:auto:question:list", "QuestionCircleOutlined", "已合并进自动监测，菜单下线");
+        SysMenuSeedSupport.upsert(jdbc, owner, 357, "问题新增", 355, 1, "", "", "F",
                 "geo:auto:question:add", "#", "");
-        SysMenuSeedSupport.upsert(jdbc, owner, 358, "问题编辑", 356, 2, "", "", "F",
+        SysMenuSeedSupport.upsert(jdbc, owner, 358, "问题编辑", 355, 2, "", "", "F",
                 "geo:auto:question:edit", "#", "");
-        SysMenuSeedSupport.upsert(jdbc, owner, 359, "问题删除", 356, 3, "", "", "F",
+        SysMenuSeedSupport.upsert(jdbc, owner, 359, "问题删除", 355, 3, "", "", "F",
                 "geo:auto:question:delete", "#", "");
         SysMenuSeedSupport.upsert(jdbc, owner, 360, "监测任务", 355, 2, "geo/auto/tasks", "", "C",
-                "geo:auto:task:list", "ControlOutlined", "问题×平台定时自动监测");
-        SysMenuSeedSupport.upsert(jdbc, owner, 361, "任务新增", 360, 1, "", "", "F",
+                "geo:auto:task:list", "ControlOutlined", "已合并进自动监测，菜单下线");
+        SysMenuSeedSupport.upsert(jdbc, owner, 361, "任务新增", 355, 4, "", "", "F",
                 "geo:auto:task:add", "#", "");
-        SysMenuSeedSupport.upsert(jdbc, owner, 362, "任务编辑", 360, 2, "", "", "F",
+        SysMenuSeedSupport.upsert(jdbc, owner, 362, "任务编辑", 355, 5, "", "", "F",
                 "geo:auto:task:edit", "#", "");
-        SysMenuSeedSupport.upsert(jdbc, owner, 363, "任务删除", 360, 3, "", "", "F",
+        SysMenuSeedSupport.upsert(jdbc, owner, 363, "任务删除", 355, 6, "", "", "F",
                 "geo:auto:task:delete", "#", "");
-        SysMenuSeedSupport.upsert(jdbc, owner, 364, "任务运行", 360, 4, "", "", "F",
+        SysMenuSeedSupport.upsert(jdbc, owner, 364, "任务运行", 355, 7, "", "", "F",
                 "geo:auto:task:run", "#", "手动立即运行");
         SysMenuSeedSupport.upsert(jdbc, owner, 365, "问题监控", 355, 3, "geo/auto/results", "", "C",
-                "geo:auto:result:list", "FundProjectionScreenOutlined", "问题×平台监测结果与分析");
+                "geo:auto:result:list", "FundProjectionScreenOutlined", "已合并进自动监测，菜单下线");
+        jdbc.update("UPDATE sys_menu SET is_active = 0, visible = 1 WHERE menu_id IN (356, 360, 365)");
+        jdbc.update("UPDATE sys_menu SET parent_id = 355 WHERE menu_id IN (357, 358, 359, 361, 362, 363, 364)");
         // 授权：admin + 持有「日监测数据」菜单的角色随动
         Integer[] menuIds = {355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365};
         try {

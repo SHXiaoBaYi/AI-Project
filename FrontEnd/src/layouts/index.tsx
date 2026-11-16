@@ -36,14 +36,16 @@ function convertMenusToRoute(menus: MenuTree[], parentPath = ''): any[] {
     const isGroupingOnly = clean.includes('/') && !!parentPath;
     const childParent = isGroupingOnly ? parentPath : fullPath;
     const leafPath = `/${clean.includes('/') ? clean : fullPath}`;
+    // 自动监测三个子页已合并，侧栏只留一个入口
+    const collapseGeoAuto = fullPath === 'geo/auto' || clean === 'geo/auto';
 
     return {
       // ProLayout 用 path/key 做 React key；目录必须有唯一 key，避免多个 undefined → ``
       key: item.menuId != null ? `menu-${item.menuId}` : leafPath,
-      path: hasChildren ? `/${fullPath}` : leafPath,
+      path: collapseGeoAuto ? '/geo/auto' : hasChildren ? `/${fullPath}` : leafPath,
       name: item.menuName,
       icon: IconComp ? <IconComp /> : undefined,
-      children: hasChildren ? convertMenusToRoute(item.children, childParent) : undefined,
+      children: collapseGeoAuto ? undefined : hasChildren ? convertMenusToRoute(item.children, childParent) : undefined,
     };
   });
 }

@@ -24,17 +24,17 @@
 
 | ID | 名称 | 备注 |
 |----|------|------|
-| 355 | 自动监测 | 目录，父=100，path=`geo/auto` |
-| 356 | 监控问题库 | `geo/auto/questions`，`geo:auto:question:list` |
-| 357 | 问题新增 | 按钮 `geo:auto:question:add` |
-| 358 | 问题编辑 | 按钮 `geo:auto:question:edit` |
-| 359 | 问题删除 | 按钮 `geo:auto:question:delete` |
-| 360 | 监测任务 | `geo/auto/tasks`，`geo:auto:task:list` |
-| 361 | 任务新增 | 按钮 `geo:auto:task:add` |
-| 362 | 任务编辑 | 按钮 `geo:auto:task:edit` |
-| 363 | 任务删除 | 按钮 `geo:auto:task:delete` |
-| 364 | 任务运行 | 按钮 `geo:auto:task:run` |
-| 365 | 问题监控 | `geo/auto/results`，`geo:auto:result:list` |
+| 355 | 自动监测 | **唯一可见入口**，父=100，path=`geo/auto`，`geo:auto:result:list` |
+| 356 | 监控问题库（已下线） | 原 `geo/auto/questions`，`is_active=0`，交互合并进 355 |
+| 357 | 问题新增 | 按钮 `geo:auto:question:add`，父=355 |
+| 358 | 问题编辑 | 按钮 `geo:auto:question:edit`，父=355 |
+| 359 | 问题删除 | 按钮 `geo:auto:question:delete`，父=355 |
+| 360 | 监测任务（已下线） | 原 `geo/auto/tasks`，`is_active=0`，交互合并进 355 |
+| 361 | 任务新增 | 按钮 `geo:auto:task:add`，父=355 |
+| 362 | 任务编辑 | 按钮 `geo:auto:task:edit`，父=355 |
+| 363 | 任务删除 | 按钮 `geo:auto:task:delete`，父=355 |
+| 364 | 任务运行 | 按钮 `geo:auto:task:run`，父=355 |
+| 365 | 问题监控（已下线） | 原 `geo/auto/results`，`is_active=0`，交互合并进 355 |
 | 366–369 | 空闲（GEO 自动监测下一菜单从 366 起） | P2 预留：结果导出等 |
 
 ## 招聘 HR（200–249、261–279）

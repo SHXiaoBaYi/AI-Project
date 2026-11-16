@@ -1,0 +1,32 @@
+/* antd 6 弹窗外壳是 .ant-modal-container，不是 v5 的 .ant-modal-content */
+.geo-batch-add-modal .ant-modal {
+  top: 7.5vh !important;
+  padding-bottom: 0 !important;
+  width: min(1480px, calc(100vw - 48px)) !important;
+  max-width: calc(100vw - 48px) !important;
+  height: 85vh !important;
+  max-height: 85vh !important;
+  margin: 0 auto !important;
+}
+
+.geo-batch-add-modal .ant-modal-container,
+.geo-batch-add-modal .ant-modal-content {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 85vh !important;
+  max-height: 85vh !important;
+  box-sizing: border-box !important;
+}
+
+.geo-batch-add-modal .ant-modal-header,
+.geo-batch-add-modal .ant-modal-footer {
+  flex: 0 0 auto !important;
+}
+
+.geo-batch-add-modal .ant-modal-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+}

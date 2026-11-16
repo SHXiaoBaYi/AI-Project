@@ -72,6 +72,18 @@ function buildDynamicRoutes(menus: MenuTree[], parentPath = ''): any[] {
     const hasComponent = !!componentMap[elementKey];
     const hasChildren = !!(menu.children && menu.children.length > 0);
     const isDir = menu.menuType === 'M' || (!hasComponent && hasChildren);
+    // 自动监测合并为单页后，目录仍可能暂时带着旧子菜单，优先挂 index
+    if (fullPath === 'geo/auto' && hasComponent) {
+      routes.push({
+        path: relativePath,
+        element: withSuspense(componentMap[elementKey]),
+        errorElement: <RouteErrorPage />,
+      });
+      if (hasChildren) {
+        routes.push(...buildDynamicRoutes(menu.children, parentPath));
+      }
+      continue;
+    }
 
     if (isDir && hasChildren) {
       // 叶子 path 含 / 且不属于当前父级（如 hr/board 被拖到「数据看板」下）时，
