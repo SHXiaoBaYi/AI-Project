@@ -274,6 +274,8 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         // 同一话题下待分配任务统一负责人，避免交叉用发布人/撰写人导致负责人不一致
         Long assignOwnerId = fallbackUserId;
 
+        boolean video = isHasVideoTask(p);
+
         if (isPublisherMissing(p)) {
             if (!taskExists(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER)) {
                 createAssignTask(p, Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER, "发布人", assignOwnerId);
@@ -281,7 +283,8 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
             }
         } else {
             cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER);
-            if (p.getPublisherUserId() != null && ensureExecTask(p, Constants.TASK_TYPE_GEO_PUBLISH, p.getPublisherUserId())) {
+            if (!video && p.getPublisherUserId() != null
+                    && ensureExecTask(p, Constants.TASK_TYPE_GEO_PUBLISH, p.getPublisherUserId())) {
                 publisherCreated++;
             }
         }
@@ -293,13 +296,17 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
             }
         } else {
             cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_ASSIGN_WRITER);
-            if (p.getOwnerUserId() != null && ensureExecTask(p, Constants.TASK_TYPE_GEO_WRITE, p.getOwnerUserId())) {
+            if (!video && p.getOwnerUserId() != null
+                    && ensureExecTask(p, Constants.TASK_TYPE_GEO_WRITE, p.getOwnerUserId())) {
                 writerCreated++;
             }
         }
 
-        // 勾选「是否有视频任务」：撰写人→抖音视频剪辑，发布人→抖音视频发布
-        if (isHasVideoTask(p)) {
+        // 有视频任务：只保留剪辑/视频发布，取消未完成的文章撰写、文章发布。
+        // 关掉视频：取消未完成的视频任务，并按撰写人/发布人补回文章任务。
+        if (video) {
+            cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_WRITE);
+            cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_PUBLISH);
             if (p.getOwnerUserId() != null
                     && ensureExecTask(p, Constants.TASK_TYPE_GEO_VIDEO_EDIT, p.getOwnerUserId())) {
                 writerCreated++;

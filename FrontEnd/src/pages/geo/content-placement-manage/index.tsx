@@ -319,7 +319,8 @@ const ContentPlacementManagePage = memo(function ContentPlacementManagePage() {
       width: 120,
       valueType: 'switch',
       hideInSearch: true,
-      tooltip: '勾选后自动生成抖音视频剪辑（撰写人）、抖音视频发布（发布人）任务',
+      tooltip:
+        '勾选后只生成抖音视频剪辑（撰写人）和抖音视频发布（发布人），不生成文章撰写、文章发布。取消勾选则反过来。来回修改时，未完成的对应任务会取消或补上',
       fieldProps: {
         checkedChildren: '是',
         unCheckedChildren: '否',

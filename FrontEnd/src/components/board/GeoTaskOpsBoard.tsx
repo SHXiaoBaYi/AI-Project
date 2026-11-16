@@ -315,7 +315,7 @@ export function GeoTaskOpsBoard({
           </div>
         </div>
         <p className='mt-2 mb-0 text-xs text-neutral-400'>
-          完成率分母与「任务看板」一致：计划截止落在所选区间，或区间内实际完成（含待分配类任务）
+          完成率分母：计划截止在所选区间，或区间内实际完成；没有计划截止的未完成任务按创建日计入。文章发布、抖音视频发布在投放进度为「待投放」或「未投放」时不算完成
         </p>
       </Card>
 
@@ -339,7 +339,7 @@ export function GeoTaskOpsBoard({
         >
           <DimTableCard
             title='按人员'
-            hint='发布任务归发布人、撰写归撰写人、审核归审核人；点击查看明细'
+            hint='发布任务归发布人、撰写归撰写人、审核归审核人。投放进度为「待投放」或「未投放」的发布任务计为未完成'
             loading={loading}
             rows={writerRows}
             nameTitle='人员'

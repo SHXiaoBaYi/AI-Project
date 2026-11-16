@@ -30,6 +30,6 @@ public class GeoContentPlacementDTO {
     @Schema(description = "备注")
     private String remark;
 
-    @Schema(description = "是否有视频任务（勾选后自动生成抖音视频剪辑/发布；撰写人→剪辑，发布人→发布）", example = "false", nullable = true)
+    @Schema(description = "是否有视频任务。勾选后只生成抖音视频剪辑/发布，不生成文章撰写/发布；取消勾选则反过来。编辑来回切换时，未完成的对应任务取消或补上", example = "false", nullable = true)
     private Boolean hasVideoTask;
 }

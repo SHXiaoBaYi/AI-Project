@@ -60,7 +60,7 @@ public class GeoContentPlacement extends BaseEntity {
     @Schema(description = "备注")
     private String remark;
 
-    @Schema(description = "是否有视频任务 1=是 0=否（勾选后自动生成抖音视频剪辑/发布任务）", example = "0")
+    @Schema(description = "是否有视频任务 1=是 0=否。为 1 时只生成抖音视频剪辑/发布，不生成文章撰写/发布", example = "0")
     private Integer hasVideoTask;
 
     @Schema(description = "是否演示数据 1=是 0=否", example = "0")

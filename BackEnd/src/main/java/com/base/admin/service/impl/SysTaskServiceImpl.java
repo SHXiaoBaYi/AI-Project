@@ -1235,7 +1235,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         if (typeCfg == null || !StringUtils.hasText(typeCfg.getSpawnTaskType())) {
             return;
         }
-        String spawnType = typeCfg.getSpawnTaskType().trim();
+        String spawnType = remapSpawnTypeForVideoPlacement(source, typeCfg.getSpawnTaskType().trim());
         taskTypeService.resolveTypeName(spawnType);
         if (hasActiveSpawnChild(source, spawnType)) {
             return;
@@ -1261,6 +1261,27 @@ public class SysTaskServiceImpl implements SysTaskService {
             spawned.setParentId(source.getId());
             taskMapper.updateById(spawned);
         }
+    }
+
+    /**
+     * 投放勾了视频任务时，待分配撰写人/发布人完成后派视频任务，不再派文章撰写、文章发布。
+     */
+    private String remapSpawnTypeForVideoPlacement(SysTask source, String spawnType) {
+        if (source.getBizId() == null
+                || !Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT.equals(nz(source.getBizType()))) {
+            return spawnType;
+        }
+        GeoContentPlacement placement = placementMapper.selectById(source.getBizId());
+        if (placement == null || placement.getHasVideoTask() == null || placement.getHasVideoTask() != 1) {
+            return spawnType;
+        }
+        if (Constants.TASK_TYPE_GEO_WRITE.equals(spawnType)) {
+            return Constants.TASK_TYPE_GEO_VIDEO_EDIT;
+        }
+        if (Constants.TASK_TYPE_GEO_PUBLISH.equals(spawnType)) {
+            return Constants.TASK_TYPE_GEO_VIDEO_PUBLISH;
+        }
+        return spawnType;
     }
 
     private boolean hasSpawnConfig(String taskType) {

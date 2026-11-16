@@ -116,7 +116,7 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
 
         Map<String, Agg> map = new LinkedHashMap<>();
         for (TaskView v : views) {
-            // 完成率分母口径：计划截止在区间 或 区间内完成（与任务看板一致）
+            // 完成率分母：计划截止在区间，或区间内真正完成；无计划截止的未完成任务按创建日计入
             if (!inCompletionScope(v, ctx)) {
                 continue;
             }
@@ -250,10 +250,14 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
             }
 
             String st = nz(t.getStatus(), "未开始");
-            boolean open = OPEN.contains(st);
-            boolean done = "已完成".equals(st);
+            // 投放进度仍是待投放/未投放时，发布任务没有做完，不能沿用任务表上的「已完成」
+            String awaitingProgress = publishAwaitingProgress(t, p);
+            boolean publishAwaiting = awaitingProgress != null;
+            boolean done = "已完成".equals(st) && !publishAwaiting;
+            boolean open = OPEN.contains(st) || (publishAwaiting && !"已取消".equals(st) && !done);
             LocalDate planDay = t.getPlanEndTime() == null ? null : t.getPlanEndTime().toLocalDate();
             LocalDate actualDay = resolveActualEndDay(t);
+            LocalDate createDay = t.getCreateTime() == null ? null : t.getCreateTime().toLocalDate();
             boolean overdue = open && t.getPlanEndTime() != null && t.getPlanEndTime().isBefore(ctx.now);
 
             TaskView v = new TaskView();
@@ -264,10 +268,13 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
             v.writerName = person.name;
             v.articleWriterName = articleWriterName;
             v.targetQuestion = targetQuestion;
+            v.publishAwaiting = publishAwaiting;
+            v.awaitingProgress = awaitingProgress;
             v.open = open;
             v.done = done;
             v.planDay = planDay;
             v.actualDay = actualDay;
+            v.createDay = createDay;
             v.overdue = overdue;
             views.add(v);
         }
@@ -393,13 +400,46 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
                         (a, b) -> a, LinkedHashMap::new));
     }
 
+    /**
+     * 文章发布 / 抖音视频发布，且投放进度仍是待投放或未投放。
+     * 返回进度原文；不是这类未发布任务时返回 null。剪辑到「待投放」即算完成，不在此列。
+     */
+    private static String publishAwaitingProgress(SysTask t, GeoContentPlacement p) {
+        String type = StringUtils.hasText(t.getTaskType()) ? t.getTaskType().trim() : "";
+        if (!Constants.TASK_TYPE_GEO_PUBLISH.equals(type)
+                && !Constants.TASK_TYPE_GEO_VIDEO_PUBLISH.equals(type)) {
+            return null;
+        }
+        if (p == null || !StringUtils.hasText(p.getPlacementProgress())) {
+            return null;
+        }
+        String progress = p.getPlacementProgress().trim();
+        if (Constants.CONTENT_AGG_PENDING.equals(progress)
+                || Constants.CONTENT_AGG_NONE.equals(progress)
+                || "全部未投放".equals(progress)) {
+            return progress;
+        }
+        return null;
+    }
+
     private static boolean inCompletionScope(TaskView v, QueryCtx ctx) {
         if ("已取消".equals(nz(v.task.getStatus(), "未开始"))) {
             return false;
         }
         boolean planInRange = v.planDay != null && inRange(v.planDay, ctx.rangeStart, ctx.rangeEnd);
         boolean doneInRange = v.done && v.actualDay != null && inRange(v.actualDay, ctx.rangeStart, ctx.rangeEnd);
-        return planInRange || doneInRange;
+        if (planInRange || doneInRange) {
+            return true;
+        }
+        // 投放自动生成的执行任务多数没有计划截止。未完成时若只认「区间内完成」，
+        // 待投放文章不会进入分母，完成率会被做成 100%。
+        if (v.done || v.planDay != null) {
+            return false;
+        }
+        if (v.createDay != null && inRange(v.createDay, ctx.rangeStart, ctx.rangeEnd)) {
+            return true;
+        }
+        return v.actualDay != null && inRange(v.actualDay, ctx.rangeStart, ctx.rangeEnd);
     }
 
     private static boolean isDue(TaskView v, QueryCtx ctx) {
@@ -469,14 +509,24 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
         row.setAssigneeNames(assigneeNames);
         row.setTargetQuestion(v.targetQuestion);
         row.setPlanEndTime(t.getPlanEndTime());
-        row.setActualEndTime(t.getActualEndTime() != null ? t.getActualEndTime()
-                : (v.done ? t.getUpdateTime() : null));
+        row.setActualEndTime(v.done
+                ? (t.getActualEndTime() != null ? t.getActualEndTime() : t.getUpdateTime())
+                : null);
+        if (v.publishAwaiting && "已完成".equals(row.getStatus())) {
+            row.setStatus(v.awaitingProgress);
+            row.setProgress(0);
+        }
         row.setOverdue(v.overdue);
         if (v.overdue && t.getPlanEndTime() != null) {
             long days = ChronoUnit.DAYS.between(t.getPlanEndTime().toLocalDate(), LocalDate.now());
             row.setOverdueDays((int) Math.max(days, 0));
         }
-        fillTiming(row, t, v.done);
+        if (v.publishAwaiting && !v.overdue) {
+            row.setTimingTag("OPEN");
+            row.setTimingLabel(v.awaitingProgress + "，发布未完成");
+        } else {
+            fillTiming(row, t, v.done);
+        }
         return row;
     }
 
@@ -643,10 +693,14 @@ public class BoardGeoTaskServiceImpl implements BoardGeoTaskService {
         /** 文章撰写人（明细列展示） */
         String articleWriterName;
         String targetQuestion;
+        /** 发布类任务，且投放进度仍是待投放/未投放 */
+        boolean publishAwaiting;
+        String awaitingProgress;
         boolean open;
         boolean done;
         LocalDate planDay;
         LocalDate actualDay;
+        LocalDate createDay;
         boolean overdue;
     }
 }
