@@ -341,8 +341,14 @@ public class GeoBrowserProbeService {
             boolean entryClicked = clickFirstVisible(page, profile.getLoginEntrySelectors(), diag, "loginEntry");
             diag.put("loginEntryClicked", entryClicked);
 
-            // 2) 切到「账号密码登录」tab（部分平台默认是扫码）
+            // 2) 切到「账号密码登录」tab（部分平台默认是扫码/验证码，链接可能晚于首屏出现）
             if (StringUtils.hasText(profile.getLoginTabSelector())) {
+                try {
+                    page.locator(profile.getLoginTabSelector()).first()
+                            .waitFor(new Locator.WaitForOptions().setTimeout(8_000));
+                } catch (Exception ignored) {
+                    // 没有密码登录入口时继续，后面按「找不到输入框 / 验证码」给出提示
+                }
                 clickIfVisible(page, profile.getLoginTabSelector(), diag, "loginTab");
             }
 
@@ -352,7 +358,9 @@ public class GeoBrowserProbeService {
             boolean inputsReady = false;
             try {
                 accountInput.waitFor(new Locator.WaitForOptions().setTimeout(8_000));
-                inputsReady = passwordInput.count() > 0;
+                // 密码框往往要点「密码登录」后才出现，账号框此时已经在页面上，不能只看瞬时 count
+                passwordInput.waitFor(new Locator.WaitForOptions().setTimeout(8_000));
+                inputsReady = true;
             } catch (Exception ignored) {
                 // 落到下面统一给可执行提示
             }

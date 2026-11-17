@@ -17,10 +17,22 @@ install_chrome() {
   echo "==> 安装 Google Chrome..."
   if command -v dnf >/dev/null 2>&1; then
     dnf install -y wget || true
+    # Alibaba Linux 没有名为 liberation-fonts 的元包，Chrome RPM 会因此装不上。
+    # 先装真实字体和运行库，再在缺元包时用 --nodeps 装 Chrome。
+    dnf install -y liberation-sans-fonts liberation-fonts-common \
+      google-noto-sans-cjk-sc-fonts \
+      alsa-lib atk at-spi2-atk cups-libs gtk3 \
+      libXcomposite libXdamage libXrandr libXScrnSaver libxkbcommon \
+      nss nspr pango cairo mesa-libgbm libdrm xdg-utils || true
     rpm -qa | grep -q google-chrome-stable || {
       tmp="/tmp/google-chrome-stable.rpm"
-      wget -O "$tmp" https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm
-      dnf install -y "$tmp" || yum localinstall -y "$tmp"
+      if [[ ! -s "$tmp" ]]; then
+        wget -q -O "$tmp" https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm
+      fi
+      if ! dnf install -y "$tmp"; then
+        echo "==> dnf 因 liberation-fonts 元包失败，改用 --nodeps"
+        rpm -Uvh --nodeps "$tmp"
+      fi
       rm -f "$tmp"
     }
   elif command -v yum >/dev/null 2>&1; then

@@ -41,3 +41,19 @@ geo:
     browser:
       headless: false
       executable-path: ${GEO_BROWSER_PATH:/usr/bin/google-chrome-stable}
+      # DS 登录页不在对话首页。直接打开 sign_in，避免把「登录」按钮当成入口先点掉。
+      profiles:
+        - name: DS
+          login-url: https://chat.deepseek.com/sign_in
+          login-entry-selectors:
+            - "[data-geo-no-login-entry='1']"
+          login-tab-selector: "text=/密码登录|Login with password/ >> visible=true"
+          login-account-selector: "input[placeholder*='手机'], input[placeholder*='Phone'], input[type='tel']"
+          login-password-selector: "input[type='password']"
+          login-submit-selectors:
+            - "button[type='submit']"
+            - "text=/^登录$/"
+          login-success-selector: "textarea, [contenteditable='true']"
+          login-captcha-selectors:
+            - "iframe[src*='captcha']"
+            - "text=/请完成安全验证|拖动滑块|人机验证/"
