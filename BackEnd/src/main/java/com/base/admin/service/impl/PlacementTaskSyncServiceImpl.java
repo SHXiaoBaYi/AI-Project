@@ -7,6 +7,7 @@ import com.base.admin.domain.dto.SysTaskDTO;
 import com.base.admin.domain.dto.SysTaskTypeDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
 import com.base.admin.domain.entity.GeoContentPlacementItem;
+import com.base.admin.domain.entity.GeoContentReview;
 import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysTaskAssignee;
 import com.base.admin.domain.entity.SysTaskFile;
@@ -14,6 +15,7 @@ import com.base.admin.domain.entity.SysTaskType;
 import com.base.admin.domain.entity.SysUser;
 import com.base.admin.mapper.GeoContentPlacementItemMapper;
 import com.base.admin.mapper.GeoContentPlacementMapper;
+import com.base.admin.mapper.GeoContentReviewMapper;
 import com.base.admin.mapper.SysTaskAssigneeMapper;
 import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
@@ -40,6 +42,7 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
 
     private final GeoContentPlacementMapper placementMapper;
     private final GeoContentPlacementItemMapper itemMapper;
+    private final GeoContentReviewMapper reviewMapper;
     private final SysTaskMapper taskMapper;
     private final SysTaskAssigneeMapper assigneeMapper;
     private final SysTaskFileMapper taskFileMapper;
@@ -321,6 +324,7 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
             cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_VIDEO_EDIT);
             cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_VIDEO_PUBLISH);
         }
+        syncPlacementRemark(p);
         return new int[]{publisherCreated, writerCreated};
     }
 
@@ -420,10 +424,9 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
         if (assigneeUserId == null || taskExists(p.getId(), taskType)) {
             return false;
         }
-        String question = StringUtils.hasText(p.getTargetQuestion()) ? p.getTargetQuestion().trim() : ("投放#" + p.getId());
+        String question = questionText(p);
         String title = "【" + taskType + "】" + abbreviate(question, 80);
-        String content = "话题：" + nzDash(p.getTopicName()) + "\n目标问题：" + question
-                + (StringUtils.hasText(p.getTitle()) ? "\n标题：" + p.getTitle().trim() : "");
+        String content = taskContent(p);
 
         SysTaskType typeCfg = taskTypeService.getByTypeName(taskType);
         String bizType = typeCfg != null && StringUtils.hasText(typeCfg.getBizType())
@@ -463,10 +466,9 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
     }
 
     private void createAssignTask(GeoContentPlacement p, String taskType, String roleLabel, Long ownerUserId) {
-        String question = StringUtils.hasText(p.getTargetQuestion()) ? p.getTargetQuestion().trim() : ("投放#" + p.getId());
+        String question = questionText(p);
         String title = "【待分配" + roleLabel + "】" + abbreviate(question, 80);
-        String content = "话题：" + nzDash(p.getTopicName()) + "\n目标问题：" + question
-                + (StringUtils.hasText(p.getTitle()) ? "\n标题：" + p.getTitle().trim() : "");
+        String content = taskContent(p);
 
         SysTaskType typeCfg = taskTypeService.getByTypeName(taskType);
         String bizType = typeCfg != null && StringUtils.hasText(typeCfg.getBizType())
@@ -605,6 +607,91 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
                 .orderByAsc(SysUser::getUserId)
                 .last("LIMIT 1"));
         return any == null ? null : any.getUserId();
+    }
+
+    /** 把目标问题备注写进已有关联任务的说明，改备注后任务上能跟着看到 */
+    private void syncPlacementRemark(GeoContentPlacement p) {
+        if (p.getId() == null) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, p.getId())
+                .select(SysTask::getId, SysTask::getContent));
+        String remark = p.getRemark();
+        for (SysTask task : tasks) {
+            String next = applyRemarkBlock(task.getContent(), remark);
+            if (Objects.equals(task.getContent() == null ? "" : task.getContent(), next)) {
+                continue;
+            }
+            taskMapper.update(null, new LambdaUpdateWrapper<SysTask>()
+                    .eq(SysTask::getId, task.getId())
+                    .set(SysTask::getContent, next));
+        }
+        syncReviewTaskRemark(p, remark);
+    }
+
+    /** 审核任务说明保留 placementId=，并把目标问题备注附在后面 */
+    private void syncReviewTaskRemark(GeoContentPlacement p, String remark) {
+        List<Long> reviewIds = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
+                        .eq(GeoContentReview::getPlacementId, p.getId())
+                        .select(GeoContentReview::getId))
+                .stream()
+                .map(GeoContentReview::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (reviewIds.isEmpty()) {
+            return;
+        }
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_REVIEW)
+                .in(SysTask::getBizId, reviewIds)
+                .select(SysTask::getId, SysTask::getContent));
+        for (SysTask task : tasks) {
+            String raw = task.getContent() == null ? "" : task.getContent().replace("\r\n", "\n");
+            if (p.getId() != null && !raw.contains("placementId=")) {
+                raw = raw.isBlank() ? ("placementId=" + p.getId()) : ("placementId=" + p.getId() + "\n" + raw.trim());
+            }
+            String next = applyRemarkBlock(raw, remark);
+            if (Objects.equals(task.getContent() == null ? "" : task.getContent(), next)) {
+                continue;
+            }
+            taskMapper.update(null, new LambdaUpdateWrapper<SysTask>()
+                    .eq(SysTask::getId, task.getId())
+                    .set(SysTask::getContent, next));
+        }
+    }
+
+    static String reviewTaskContent(Long placementId, String remark) {
+        String prefix = placementId == null ? "" : ("placementId=" + placementId);
+        return applyRemarkBlock(prefix, remark);
+    }
+
+    private static String questionText(GeoContentPlacement p) {
+        return StringUtils.hasText(p.getTargetQuestion()) ? p.getTargetQuestion().trim() : ("投放#" + p.getId());
+    }
+
+    private static String taskContent(GeoContentPlacement p) {
+        String body = "话题：" + nzDash(p.getTopicName()) + "\n目标问题：" + questionText(p)
+                + (StringUtils.hasText(p.getTitle()) ? "\n标题：" + p.getTitle().trim() : "");
+        return applyRemarkBlock(body, p.getRemark());
+    }
+
+    /** 说明末尾维护「备注：」整段（可多行）。备注之前的正文保留。 */
+    static String applyRemarkBlock(String content, String remark) {
+        String base = content == null ? "" : content.replace("\r\n", "\n");
+        int idx = base.lastIndexOf("\n备注：");
+        if (base.startsWith("备注：")) {
+            idx = 0;
+        } else if (idx >= 0) {
+            idx = idx + 1;
+        }
+        String stripped = idx >= 0 ? base.substring(0, idx).trim() : base.trim();
+        if (!StringUtils.hasText(remark)) {
+            return stripped;
+        }
+        String block = "备注：" + remark.trim();
+        return stripped.isEmpty() ? block : stripped + "\n" + block;
     }
 
     private static String nz(String s) {

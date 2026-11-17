@@ -91,6 +91,9 @@ public class SysTaskVO {
     @Schema(description = "备注")
     private String remark;
 
+    @Schema(description = "关联目标问题备注（来自内容投放，只读）")
+    private String bizRemark;
+
     @Schema(description = "是否允许删除（外源生成的业务任务不可删）", example = "true")
     private boolean deletable = true;
 

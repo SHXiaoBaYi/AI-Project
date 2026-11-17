@@ -244,6 +244,18 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       fieldProps: { maxLength: 200 },
     },
     {
+      title: '目标问题备注',
+      dataIndex: 'bizRemark',
+      width: 200,
+      search: false,
+      ellipsis: true,
+      tooltip: '关联目标问题上填写的备注',
+      valueType: 'textarea',
+      hideInForm: !editing?.bizRemark?.trim(),
+      fieldProps: { disabled: true, rows: 2 },
+      render: (_, r) => r.bizRemark?.trim() || '-',
+    },
+    {
       title: '类型',
       dataIndex: 'taskType',
       width: 140,

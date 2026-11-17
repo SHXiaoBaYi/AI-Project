@@ -39,6 +39,8 @@ export type SysTask = {
   bizId?: number;
   bizTitle?: string;
   remark?: string;
+  /** 关联目标问题上的备注，只读 */
+  bizRemark?: string;
   createTime?: string;
   deletable?: boolean;
   assignable?: boolean;

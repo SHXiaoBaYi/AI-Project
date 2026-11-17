@@ -14,6 +14,7 @@ import com.base.admin.domain.dto.SysTaskDTO;
 import com.base.admin.domain.dto.SysTaskFileItemDTO;
 import com.base.admin.domain.dto.SysTaskQueryDTO;
 import com.base.admin.domain.entity.GeoContentPlacement;
+import com.base.admin.domain.entity.GeoContentReview;
 import com.base.admin.domain.entity.SysTask;
 import com.base.admin.domain.entity.SysTaskAssignee;
 import com.base.admin.domain.entity.SysTaskFile;
@@ -25,6 +26,7 @@ import com.base.admin.domain.vo.SysTaskVO;
 import com.base.admin.domain.vo.SysUserOptionVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoContentPlacementMapper;
+import com.base.admin.mapper.GeoContentReviewMapper;
 import com.base.admin.mapper.SysTaskAssigneeMapper;
 import com.base.admin.mapper.SysTaskFileMapper;
 import com.base.admin.mapper.SysTaskMapper;
@@ -47,6 +49,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -69,6 +72,7 @@ public class SysTaskServiceImpl implements SysTaskService {
     private final SysTaskFileMapper taskFileMapper;
     private final SysUserMapper userMapper;
     private final GeoContentPlacementMapper placementMapper;
+    private final GeoContentReviewMapper reviewMapper;
     private final SysTaskTypeService taskTypeService;
     private final TaskBizFieldWriteDispatcher bizFieldWriteDispatcher;
     private final ObjectProvider<HrHirePipelineService> hirePipeline;
@@ -618,7 +622,7 @@ public class SysTaskServiceImpl implements SysTaskService {
             SysUser user = requireUser(reviewerId, "审核人");
             SysTaskDTO dto = new SysTaskDTO();
             dto.setTitle("【审核文章·" + stageName + "】" + abbreviate(titleBase, 80));
-            dto.setContent(placementId == null ? "" : ("placementId=" + placementId));
+            dto.setContent(reviewTaskContent(placementId));
             dto.setTaskType(Constants.TASK_TYPE_GEO_REVIEW);
             dto.setPriority(2);
             dto.setStatus("未开始");
@@ -648,7 +652,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         task.setTitle("【审核文章·" + stageName + "】" + abbreviate(titleBase, 80));
         task.setBizTitle(titleBase);
         if (placementId != null) {
-            task.setContent("placementId=" + placementId);
+            task.setContent(reviewTaskContent(placementId));
         }
         task.setStatus("未开始");
         task.setProgress(0);
@@ -1518,8 +1522,10 @@ public class SysTaskServiceImpl implements SysTaskService {
         Map<String, SysTaskType> typeMap = taskTypeService.listOptions().stream()
                 .collect(Collectors.toMap(SysTaskType::getTypeName, t -> t, (a, b) -> a));
         Map<Long, Long> fileCountMap = loadFileCounts(tasks.stream().map(SysTask::getId).toList());
+        Map<Long, String> remarkByTaskId = loadPlacementRemarks(tasks);
         return tasks.stream()
-                .map(t -> toVo(t, map.getOrDefault(t.getId(), List.of()), typeMap, fileCountMap))
+                .map(t -> toVo(t, map.getOrDefault(t.getId(), List.of()), typeMap, fileCountMap,
+                        remarkByTaskId.get(t.getId())))
                 .toList();
     }
 
@@ -1530,11 +1536,12 @@ public class SysTaskServiceImpl implements SysTaskService {
             typeMap = Map.of(cfg.getTypeName(), cfg);
         }
         Map<Long, Long> fileCountMap = loadFileCounts(List.of(task.getId()));
-        return toVo(task, assignees, typeMap, fileCountMap);
+        String bizRemark = loadPlacementRemarks(List.of(task)).get(task.getId());
+        return toVo(task, assignees, typeMap, fileCountMap, bizRemark);
     }
 
     private SysTaskVO toVo(SysTask task, List<SysTaskAssignee> assignees,
-                           Map<String, SysTaskType> typeMap, Map<Long, Long> fileCountMap) {
+                           Map<String, SysTaskType> typeMap, Map<Long, Long> fileCountMap, String bizRemark) {
         SysTaskVO vo = new SysTaskVO();
         vo.setId(task.getId());
         vo.setTitle(task.getTitle());
@@ -1557,6 +1564,7 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setBizId(task.getBizId());
         vo.setBizTitle(task.getBizTitle());
         vo.setRemark(task.getRemark());
+        vo.setBizRemark(StringUtils.hasText(bizRemark) ? bizRemark.trim() : null);
         vo.setCreateTime(task.getCreateTime());
         vo.setOverdue(isOverdue(task));
         vo.setDeletable(true);
@@ -1584,6 +1592,82 @@ public class SysTaskServiceImpl implements SysTaskService {
         vo.setAssigneeUserIds(ids);
         vo.setAssigneeNames(String.join("、", names));
         return vo;
+    }
+
+    private String reviewTaskContent(Long placementId) {
+        String remark = null;
+        if (placementId != null) {
+            GeoContentPlacement placement = placementMapper.selectById(placementId);
+            if (placement != null) {
+                remark = placement.getRemark();
+            }
+        }
+        return PlacementTaskSyncServiceImpl.reviewTaskContent(placementId, remark);
+    }
+
+    /** 任务列表展示关联目标问题的备注：投放任务用 bizId，审核任务经审核记录反查投放 */
+    private Map<Long, String> loadPlacementRemarks(List<SysTask> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> placementIds = new LinkedHashSet<>();
+        Set<Long> reviewIds = new LinkedHashSet<>();
+        for (SysTask task : tasks) {
+            if (task.getBizId() == null || !StringUtils.hasText(task.getBizType())) {
+                continue;
+            }
+            if (Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT.equals(task.getBizType())) {
+                placementIds.add(task.getBizId());
+            } else if (Constants.TASK_BIZ_GEO_CONTENT_REVIEW.equals(task.getBizType())) {
+                reviewIds.add(task.getBizId());
+            }
+        }
+        Map<Long, Long> reviewToPlacement = new HashMap<>();
+        if (!reviewIds.isEmpty()) {
+            List<GeoContentReview> reviews = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
+                    .in(GeoContentReview::getId, reviewIds)
+                    .select(GeoContentReview::getId, GeoContentReview::getPlacementId));
+            for (GeoContentReview review : reviews) {
+                if (review.getId() == null || review.getPlacementId() == null) {
+                    continue;
+                }
+                reviewToPlacement.put(review.getId(), review.getPlacementId());
+                placementIds.add(review.getPlacementId());
+            }
+        }
+        if (placementIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> remarkByPlacement = new HashMap<>();
+        List<GeoContentPlacement> placements = placementMapper.selectList(new LambdaQueryWrapper<GeoContentPlacement>()
+                .in(GeoContentPlacement::getId, placementIds)
+                .select(GeoContentPlacement::getId, GeoContentPlacement::getRemark));
+        for (GeoContentPlacement placement : placements) {
+            if (placement.getId() == null || !StringUtils.hasText(placement.getRemark())) {
+                continue;
+            }
+            remarkByPlacement.put(placement.getId(), placement.getRemark().trim());
+        }
+        Map<Long, String> byTaskId = new HashMap<>();
+        for (SysTask task : tasks) {
+            if (task.getId() == null || task.getBizId() == null) {
+                continue;
+            }
+            Long placementId = null;
+            if (Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT.equals(task.getBizType())) {
+                placementId = task.getBizId();
+            } else if (Constants.TASK_BIZ_GEO_CONTENT_REVIEW.equals(task.getBizType())) {
+                placementId = reviewToPlacement.get(task.getBizId());
+            }
+            if (placementId == null) {
+                continue;
+            }
+            String remark = remarkByPlacement.get(placementId);
+            if (StringUtils.hasText(remark)) {
+                byTaskId.put(task.getId(), remark);
+            }
+        }
+        return byTaskId;
     }
 
     private Map<Long, Long> loadFileCounts(List<Long> taskIds) {
