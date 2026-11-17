@@ -503,6 +503,54 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
     }
 
     @Override
+    public void saveAccountBrowserState(Long accountId, MultipartFile file) {
+        if (accountId == null) {
+            throw new BusinessException("请指定平台账号");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("请选择 storageState JSON 文件");
+        }
+        try {
+            byte[] bytes = file.getBytes();
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(bytes);
+            com.fasterxml.jackson.databind.JsonNode cookies = root.get("cookies");
+            if (cookies == null || !cookies.isArray() || cookies.isEmpty()) {
+                throw new BusinessException("登录态文件里没有 Cookie，不能加入候选");
+            }
+            probeService.saveAccountStorageState(accountId, bytes);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("登录态文件保存失败：" + e.getMessage());
+        }
+    }
+
+    @Override
+    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO startLoginBooth(Long accountId) {
+        return probeService.startLoginBooth(accountId);
+    }
+
+    @Override
+    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO snapshotLoginBooth(Long accountId) {
+        return probeService.snapshotLoginBooth(accountId);
+    }
+
+    @Override
+    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO inputLoginBooth(com.base.admin.domain.dto.GeoBrowserBoothInputDTO input) {
+        return probeService.inputLoginBooth(input);
+    }
+
+    @Override
+    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO finishLoginBooth(Long accountId) {
+        return probeService.finishLoginBooth(accountId);
+    }
+
+    @Override
+    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO cancelLoginBooth(Long accountId) {
+        return probeService.cancelLoginBooth(accountId);
+    }
+
+    @Override
     public GeoAutoResultMatrixVO resultMatrix(GeoAutoResultQueryDTO query) {
         LocalDate end = query.getDateEnd() != null ? query.getDateEnd() : LocalDate.now();
         LocalDate start = query.getDateStart() != null ? query.getDateStart() : end.minusDays(6);
@@ -752,6 +800,8 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
         vo.setTopicId(result.getTopicId());
         vo.setTopicName(topicName);
         vo.setPlatform(result.getPlatform());
+        vo.setPlatformAccountId(result.getPlatformAccountId());
+        vo.setPlatformAccountMask(result.getPlatformAccountMask());
         vo.setChannel(result.getChannel());
         vo.setAnswerModel(result.getAnswerModel());
         vo.setDeepThink(result.getDeepThink());

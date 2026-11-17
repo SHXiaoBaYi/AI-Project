@@ -16,6 +16,6 @@ public class GeoAutoBrowserLoginDTO {
     @Schema(description = "是否强制重新登录（忽略未过期的登录态缓存）", example = "false")
     private Boolean forceRefresh;
 
-    @Schema(description = "按账号ID指定账号；为空则取该平台第一个启用的浏览器账号", example = "1")
+    @Schema(description = "按账号ID指定账号；为空则从该平台可用登录态里抽取", example = "1")
     private Long accountId;
 }

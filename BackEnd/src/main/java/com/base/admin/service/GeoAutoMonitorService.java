@@ -94,4 +94,17 @@ public interface GeoAutoMonitorService {
 
     /** 上传平台登录态 storageState JSON */
     String saveBrowserState(String platform, MultipartFile file);
+
+    /** 把 storageState 绑定到指定账号，不写到平台共用文件。 */
+    void saveAccountBrowserState(Long accountId, MultipartFile file);
+
+    com.base.admin.domain.vo.GeoBrowserLoginBoothVO startLoginBooth(Long accountId);
+
+    com.base.admin.domain.vo.GeoBrowserLoginBoothVO snapshotLoginBooth(Long accountId);
+
+    com.base.admin.domain.vo.GeoBrowserLoginBoothVO inputLoginBooth(com.base.admin.domain.dto.GeoBrowserBoothInputDTO input);
+
+    com.base.admin.domain.vo.GeoBrowserLoginBoothVO finishLoginBooth(Long accountId);
+
+    com.base.admin.domain.vo.GeoBrowserLoginBoothVO cancelLoginBooth(Long accountId);
 }

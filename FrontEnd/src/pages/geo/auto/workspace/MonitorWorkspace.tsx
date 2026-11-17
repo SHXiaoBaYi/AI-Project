@@ -29,7 +29,7 @@ import {
 } from '@/api/geoAuto';
 import type { GeoAutoQuestionOption, GeoAutoResult, GeoAutoTask } from '@/types/geoAuto';
 import type { GeoTopic } from '@/types/geo';
-import { GEO_AUTO_RUN_STATUS_MAP } from '@/constants/geoAuto';
+import { GEO_AUTO_RESULT_STATUS_MAP, GEO_AUTO_RUN_STATUS_MAP } from '@/constants/geoAuto';
 import ResultDetailDrawer from '../results/components/ResultDetailDrawer';
 import RunsDrawer from '../tasks/components/RunsDrawer';
 import BrowserProbeDrawer from '../tasks/components/BrowserProbeDrawer';
@@ -256,25 +256,11 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
   };
 
   const resultColumns: ColumnsType<GeoAutoResult> = [
-    { title: '问题', dataIndex: 'questionText', ellipsis: true },
-    { title: '模型', dataIndex: 'platform', width: 120 },
-    {
-      title: '提及',
-      dataIndex: 'mentioned',
-      width: 80,
-      render: (v) =>
-        v === 1 ? <span className='text-violet-600'>提及</span> : <span className='text-neutral-400'>未提及</span>,
-    },
-    {
-      title: '排名',
-      dataIndex: 'rankNo',
-      width: 80,
-      render: (v) => (v != null ? `第${v}位` : '-'),
-    },
-    { title: '情感', dataIndex: 'sentiment', width: 80, render: (v) => v || '-' },
     {
       title: '操作',
-      width: 80,
+      key: 'option',
+      width: 72,
+      fixed: 'left',
       render: (_, r) => (
         <Button
           type='link'
@@ -284,6 +270,61 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
           详情
         </Button>
       ),
+    },
+    { title: '问题', dataIndex: 'questionText', ellipsis: true, width: 220 },
+    { title: '模型', dataIndex: 'platform', width: 90 },
+    {
+      title: '登录账号',
+      dataIndex: 'platformAccountMask',
+      width: 110,
+      render: (v: string) => v || <span className='text-neutral-300'>-</span>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: string) => {
+        const meta = GEO_AUTO_RESULT_STATUS_MAP[v];
+        return <Tag color={meta?.color || 'default'}>{meta?.label || v || '-'}</Tag>;
+      },
+    },
+    {
+      title: '失败原因',
+      dataIndex: 'errorMsg',
+      ellipsis: { showTitle: false },
+      render: (v: string, r) =>
+        r.status === 'SUCCESS' || r.status === 'SKIPPED_MANUAL' || !v ? (
+          <span className='text-neutral-300'>-</span>
+        ) : (
+          <Tooltip title={v}>
+            <span className='text-red-600'>{v}</span>
+          </Tooltip>
+        ),
+    },
+    {
+      title: '提及',
+      dataIndex: 'mentioned',
+      width: 80,
+      render: (v, r) =>
+        r.status !== 'SUCCESS' && r.status !== 'SKIPPED_MANUAL' ? (
+          <span className='text-neutral-300'>-</span>
+        ) : v === 1 ? (
+          <span className='text-violet-600'>提及</span>
+        ) : (
+          <span className='text-neutral-400'>未提及</span>
+        ),
+    },
+    {
+      title: '排名',
+      dataIndex: 'rankNo',
+      width: 80,
+      render: (v, r) => (r.status !== 'SUCCESS' && r.status !== 'SKIPPED_MANUAL' ? '-' : v != null ? `第${v}位` : '-'),
+    },
+    {
+      title: '情感',
+      dataIndex: 'sentiment',
+      width: 80,
+      render: (v, r) => (r.status !== 'SUCCESS' && r.status !== 'SKIPPED_MANUAL' ? '-' : v || '-'),
     },
   ];
 
@@ -676,6 +717,7 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
                       columns={resultColumns}
                       dataSource={results.slice(0, 8)}
                       pagination={false}
+                      scroll={{ x: 1100 }}
                     />
                   ) : (
                     <EmptyBlock />
@@ -717,6 +759,7 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
                     columns={resultColumns}
                     dataSource={results}
                     pagination={{ pageSize: 20 }}
+                    scroll={{ x: 1100 }}
                   />
                 ) : (
                   <EmptyBlock />

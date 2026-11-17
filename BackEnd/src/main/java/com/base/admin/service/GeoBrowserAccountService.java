@@ -14,8 +14,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 浏览器自动监测的「平台账号」数据面：只读 geo_platform_account，不碰浏览器。
@@ -36,22 +39,67 @@ public class GeoBrowserAccountService {
     public static final String STATE_FAILED = "FAILED";
     public static final String STATE_EXPIRED = "EXPIRED";
 
+    /** 连续失败达到该次数后不再进入候选，直到人工重新登录把计数清零 */
+    public static final int MAX_CONSECUTIVE_FAILS = 3;
+
     private final GeoPlatformAccountMapper accountMapper;
     private final GeoBrowserProbeProperties properties;
 
-    /** 取该平台第一个可用的浏览器自动监测账号（停用/过期账号不参与） */
-    public Optional<GeoPlatformAccount> findUsable(String platform) {
+    /**
+     * 一次执行抽一个登录态：在可用候选里取最久未使用的若干个，再随机一个。
+     * 排除本轮已经失效的账号。没有候选时返回空，调用方不要再回退到共用的「平台名.json」。
+     */
+    public Optional<GeoPlatformAccount> pickForRun(String platform, Set<Long> excludeIds) {
         if (!StringUtils.hasText(platform)) {
             return Optional.empty();
         }
-        List<GeoPlatformAccount> rows = accountMapper.selectList(new LambdaQueryWrapper<GeoPlatformAccount>()
-                .eq(GeoPlatformAccount::getPlatformName, platform.trim())
+        List<GeoPlatformAccount> eligible = new ArrayList<>();
+        for (GeoPlatformAccount row : listEnabled(platform.trim())) {
+            if (excludeIds != null && excludeIds.contains(row.getId())) {
+                continue;
+            }
+            if (isPoolCandidate(row)) {
+                eligible.add(row);
+            }
+        }
+        if (eligible.isEmpty()) {
+            return Optional.empty();
+        }
+        eligible.sort(Comparator
+                .comparing(GeoPlatformAccount::getBrowserLastUsedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(GeoPlatformAccount::getId));
+        int window = Math.min(3, eligible.size());
+        return Optional.of(eligible.get(ThreadLocalRandom.current().nextInt(window)));
+    }
+
+    /** 是否还能被抽中。人工登录态失效后必须重登；密码号的缓存过期仍可重新登录。 */
+    public boolean isPoolCandidate(GeoPlatformAccount account) {
+        if (account == null || account.getBrowserEnabled() == null || account.getBrowserEnabled() != 1) {
+            return false;
+        }
+        if (!"正常".equals(account.getAccountStatus())) {
+            return false;
+        }
+        int fails = account.getBrowserLoginFailCount() == null ? 0 : account.getBrowserLoginFailCount();
+        if (fails >= MAX_CONSECUTIVE_FAILS || STATE_FAILED.equals(account.getBrowserLoginStatus())) {
+            return false;
+        }
+        String type = StringUtils.hasText(account.getBrowserLoginType()) ? account.getBrowserLoginType() : LOGIN_PASSWORD;
+        if (LOGIN_STORAGE_STATE.equalsIgnoreCase(type)) {
+            if (STATE_EXPIRED.equals(account.getBrowserLoginStatus())) {
+                return false;
+            }
+            return stateFileExists(account);
+        }
+        return StringUtils.hasText(account.getPassword());
+    }
+
+    private List<GeoPlatformAccount> listEnabled(String platform) {
+        return accountMapper.selectList(new LambdaQueryWrapper<GeoPlatformAccount>()
+                .eq(GeoPlatformAccount::getPlatformName, platform)
                 .eq(GeoPlatformAccount::getBrowserEnabled, 1)
                 .eq(GeoPlatformAccount::getAccountStatus, "正常")
-                .orderByAsc(GeoPlatformAccount::getSortOrder)
-                .orderByAsc(GeoPlatformAccount::getId)
-                .last("LIMIT 1"));
-        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+                .orderByAsc(GeoPlatformAccount::getId));
     }
 
     public GeoPlatformAccount require(Long accountId) {
@@ -134,16 +182,77 @@ public class GeoBrowserAccountService {
     }
 
     public void markExpired(GeoPlatformAccount account) {
-        accountMapper.update(null, new LambdaUpdateWrapper<GeoPlatformAccount>()
-                .eq(GeoPlatformAccount::getId, account.getId())
-                .set(GeoPlatformAccount::getBrowserLoginStatus, STATE_EXPIRED));
-        account.setBrowserLoginStatus(STATE_EXPIRED);
+        invalidateSession(account, "");
     }
 
-    /** 就绪状态：READY 且文件存在且未过期才算可复用 */
+    /** 密码号的缓存失效：状态改为过期，账号仍留在候选里，下次用密码重新登录。 */
+    public void invalidateSession(GeoPlatformAccount account, String reason) {
+        String message = clip(reason);
+        accountMapper.update(null, new LambdaUpdateWrapper<GeoPlatformAccount>()
+                .eq(GeoPlatformAccount::getId, account.getId())
+                .set(GeoPlatformAccount::getBrowserLoginStatus, STATE_EXPIRED)
+                .set(GeoPlatformAccount::getBrowserLoginError, message));
+        account.setBrowserLoginStatus(STATE_EXPIRED);
+        account.setBrowserLoginError(message);
+    }
+
+    /** 登录墙或人工登录态失效：移出候选，直到在平台账号管理里重新登录。 */
+    public void quarantine(GeoPlatformAccount account, String reason) {
+        int fails = (account.getBrowserLoginFailCount() == null ? 0 : account.getBrowserLoginFailCount()) + 1;
+        String message = clip(reason);
+        accountMapper.update(null, new LambdaUpdateWrapper<GeoPlatformAccount>()
+                .eq(GeoPlatformAccount::getId, account.getId())
+                .set(GeoPlatformAccount::getBrowserLoginStatus, STATE_EXPIRED)
+                .set(GeoPlatformAccount::getBrowserLoginError, message)
+                .set(GeoPlatformAccount::getBrowserLoginFailCount, fails));
+        account.setBrowserLoginStatus(STATE_EXPIRED);
+        account.setBrowserLoginError(message);
+        account.setBrowserLoginFailCount(fails);
+    }
+
+    /** 记录这次执行抽中了该登录态，供下一轮优先换一个更久没用的。 */
+    public void touchUsed(Long accountId) {
+        if (accountId == null) {
+            return;
+        }
+        accountMapper.update(null, new LambdaUpdateWrapper<GeoPlatformAccount>()
+                .eq(GeoPlatformAccount::getId, accountId)
+                .set(GeoPlatformAccount::getBrowserLastUsedAt, LocalDateTime.now()));
+    }
+
+    /**
+     * 把上传的 storageState 落到该账号自己的文件。文件在不代表已经登录成功，
+     * 先标成 READY 让它进入候选；采集时若仍看到登录墙，再单独淘汰这一条。
+     */
+    public Path installUploadedState(GeoPlatformAccount account, byte[] json) {
+        try {
+            Path file = stateDir().resolve(safeFileName("account-" + account.getId() + ".json"));
+            Files.createDirectories(file.getParent());
+            Files.write(file, json);
+            markReady(account, file);
+            return file;
+        } catch (Exception e) {
+            throw new com.base.admin.exception.BusinessException("保存登录态失败：" + e.getMessage());
+        }
+    }
+
+    /** 密码号：READY 且未超过缓存时间。人工登录态：READY 且文件还在，不按 12 小时作废。 */
     public boolean isReady(GeoPlatformAccount account) {
-        return stateFileExists(account) && !isExpired(account)
-                && !STATE_FAILED.equals(account.getBrowserLoginStatus());
+        if (!stateFileExists(account) || !STATE_READY.equals(account.getBrowserLoginStatus())) {
+            return false;
+        }
+        String type = StringUtils.hasText(account.getBrowserLoginType()) ? account.getBrowserLoginType() : LOGIN_PASSWORD;
+        if (LOGIN_STORAGE_STATE.equalsIgnoreCase(type)) {
+            return true;
+        }
+        return !isExpired(account);
+    }
+
+    private static String clip(String reason) {
+        if (reason == null) {
+            return "";
+        }
+        return reason.length() > 900 ? reason.substring(0, 900) : reason;
     }
 
     public List<GeoBrowserAccountVO> statusList() {

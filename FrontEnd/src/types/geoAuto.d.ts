@@ -156,6 +156,10 @@ export interface GeoAutoResult {
   topicId: number;
   topicName?: string;
   platform: string;
+  /** 本次使用的平台账号 */
+  platformAccountId?: number;
+  /** 本次使用的平台账号（脱敏） */
+  platformAccountMask?: string;
   channel?: string;
   answerModel?: string;
   runDate?: string;
@@ -299,6 +303,19 @@ export interface GeoAutoBrowserLoginDTO {
   platform: string;
   forceRefresh?: boolean;
   accountId?: number;
+}
+
+/** 服务器登录窗口快照 */
+export interface GeoBrowserLoginBoothVO {
+  accountId?: number;
+  platform?: string;
+  /** OPEN / SAVED / CLOSED */
+  phase?: string;
+  loginDetected?: boolean;
+  message?: string;
+  imageBase64?: string;
+  viewportWidth?: number;
+  viewportHeight?: number;
 }
 
 /** v28 平台账号模拟登录结果 */

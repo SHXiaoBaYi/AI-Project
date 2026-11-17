@@ -152,6 +152,7 @@ export interface GeoPlatformAccount {
   browserLoginAt?: string;
   browserLoginError?: string;
   browserLoginFailCount?: number;
+  browserLastUsedAt?: string;
   sortOrder?: number;
   remark?: string;
 }

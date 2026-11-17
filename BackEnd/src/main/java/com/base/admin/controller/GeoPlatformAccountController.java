@@ -4,6 +4,7 @@ import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
+import com.base.admin.domain.dto.GeoBrowserPoolToggleDTO;
 import com.base.admin.domain.dto.GeoPlatformAccountDTO;
 import com.base.admin.domain.dto.GeoPlatformAccountQueryDTO;
 import com.base.admin.domain.vo.GeoPlatformAccountListVO;
@@ -60,6 +61,15 @@ public class GeoPlatformAccountController {
     @Log(title = "GEO平台账号", businessType = 2)
     public Result<Void> update(@Valid @RequestBody GeoPlatformAccountDTO dto) {
         accountService.update(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "加入或移出浏览器监测候选池")
+    @PutMapping("/{id:\\d+}/browser-enabled")
+    @RequiresPermission("geo:platformAccount:edit")
+    @Log(title = "GEO平台账号-监测池", businessType = 2)
+    public Result<Void> setBrowserEnabled(@PathVariable Long id, @Valid @RequestBody GeoBrowserPoolToggleDTO dto) {
+        accountService.setBrowserEnabled(id, dto.getEnabled());
         return Result.ok();
     }
 

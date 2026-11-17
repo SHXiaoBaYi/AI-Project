@@ -20,4 +20,7 @@ public interface GeoPlatformAccountService {
     void delete(Long id);
 
     void deleteBatch(List<Long> ids);
+
+    /** 加入或移出浏览器监测候选池，不删除账号和登录态文件。 */
+    void setBrowserEnabled(Long id, Integer enabled);
 }

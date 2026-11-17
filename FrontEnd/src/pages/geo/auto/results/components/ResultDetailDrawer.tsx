@@ -99,6 +99,7 @@ export default function ResultDetailDrawer({ resultId, onClose }: ResultDetailDr
             <div className='mt-2 flex flex-wrap items-center gap-2'>
               <Tag color='blue'>{detail.topicName || `话题#${detail.topicId}`}</Tag>
               <Tag color='geekblue'>{detail.platform}</Tag>
+              {detail.platformAccountMask && <Tag>登录账号 {detail.platformAccountMask}</Tag>}
               <Tag color='purple'>{detail.channel === 'BROWSER' ? '网页版采集' : detail.channel || 'API'}</Tag>
               <Tag color={detail.deepThink === 1 ? 'cyan' : 'default'}>
                 深度思考 {detail.deepThink === 1 ? '开启' : '关闭'}
@@ -112,16 +113,33 @@ export default function ResultDetailDrawer({ resultId, onClose }: ResultDetailDr
             </div>
           </div>
 
+          {detail.errorMsg && detail.status !== 'SUCCESS' && detail.status !== 'SKIPPED_MANUAL' && (
+            <div className='rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'>
+              <div className='font-medium'>失败原因</div>
+              <div className='mt-1 leading-6 whitespace-pre-wrap'>{detail.errorMsg}</div>
+            </div>
+          )}
+
           <div className='grid grid-cols-4 gap-3'>
             <div className='rounded-lg bg-neutral-50 px-3 py-2 text-center'>
               <div className='text-xs text-neutral-500'>是否提及</div>
               <div className={detail.mentioned === 1 ? 'text-green-600' : 'text-neutral-500'}>
-                {detail.mentioned === 1 ? '提及' : '未提及'}
+                {detail.status !== 'SUCCESS' && detail.status !== 'SKIPPED_MANUAL'
+                  ? '-'
+                  : detail.mentioned === 1
+                    ? '提及'
+                    : '未提及'}
               </div>
             </div>
             <div className='rounded-lg bg-neutral-50 px-3 py-2 text-center'>
               <div className='text-xs text-neutral-500'>排名</div>
-              <div>{detail.rankNo != null ? `第 ${detail.rankNo} 位` : '未上榜'}</div>
+              <div>
+                {detail.status !== 'SUCCESS' && detail.status !== 'SKIPPED_MANUAL'
+                  ? '-'
+                  : detail.rankNo != null
+                    ? `第 ${detail.rankNo} 位`
+                    : '未上榜'}
+              </div>
             </div>
             <div className='rounded-lg bg-neutral-50 px-3 py-2 text-center'>
               <div className='text-xs text-neutral-500'>首次出现</div>

@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -39,6 +40,11 @@ public class SecurityConfig {
                                 "/auth/dingtalk/config",
                                 "/auth/dingtalk/login",
                                 "/auth/dingtalk/sso")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.POST,
+                                "/geo/platform/list",
+                                "/geo/auto/tasks/list",
+                                "/geo/auto/questions/list")
                         .permitAll()
                         .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()

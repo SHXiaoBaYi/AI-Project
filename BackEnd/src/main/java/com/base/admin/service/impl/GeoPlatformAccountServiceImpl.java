@@ -1,6 +1,7 @@
 package com.base.admin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.PageResult;
 import com.base.admin.domain.dto.GeoPlatformAccountDTO;
@@ -160,6 +161,15 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
         }
     }
 
+    @Override
+    public void setBrowserEnabled(Long id, Integer enabled) {
+        GeoPlatformAccount row = require(id);
+        int flag = enabled != null && enabled == 1 ? 1 : 0;
+        accountMapper.update(null, new LambdaUpdateWrapper<GeoPlatformAccount>()
+                .eq(GeoPlatformAccount::getId, row.getId())
+                .set(GeoPlatformAccount::getBrowserEnabled, flag));
+    }
+
     private GeoPlatformAccount require(Long id) {
         GeoPlatformAccount row = accountMapper.selectById(id);
         if (row == null) {
@@ -201,6 +211,7 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
         vo.setBrowserLoginAt(row.getBrowserLoginAt());
         vo.setBrowserLoginError(row.getBrowserLoginError());
         vo.setBrowserLoginFailCount(row.getBrowserLoginFailCount());
+        vo.setBrowserLastUsedAt(row.getBrowserLastUsedAt());
         vo.setSortOrder(row.getSortOrder());
         vo.setRemark(row.getRemark());
         return vo;

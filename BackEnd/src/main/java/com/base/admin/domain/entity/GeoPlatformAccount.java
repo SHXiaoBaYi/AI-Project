@@ -87,7 +87,7 @@ public class GeoPlatformAccount extends BaseEntity {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lastLoginTime;
 
-    /** 浏览器自动监测：是否启用该账号（一个平台可有多个，按 sort_order 取第一个可用） */
+    /** 浏览器自动监测：是否进入该平台的登录态候选池（一次执行只抽一个） */
     @Schema(description = "是否用于浏览器自动监测 1=是 0=否", example = "0")
     private Integer browserEnabled;
 
@@ -111,6 +111,10 @@ public class GeoPlatformAccount extends BaseEntity {
 
     @Schema(description = "浏览器登录连续失败次数")
     private Integer browserLoginFailCount;
+
+    @Schema(description = "浏览器登录态最近一次被监测任务使用的时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime browserLastUsedAt;
 
     @Schema(description = "排序", example = "0")
     private Integer sortOrder;

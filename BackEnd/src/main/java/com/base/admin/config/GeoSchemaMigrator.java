@@ -219,6 +219,10 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                 + "COMMENT '探测截图地址（人工上传真实截图或回答快照）'");
         ddlByColumn.put("screenshot_type", "ADD COLUMN screenshot_type VARCHAR(16) NOT NULL DEFAULT '' "
                 + "COMMENT 'MANUAL/API_SNAPSHOT/BROWSER_SHOT'");
+        ddlByColumn.put("platform_account_id", "ADD COLUMN platform_account_id BIGINT NULL "
+                + "COMMENT '本次采集使用的平台账号ID'");
+        ddlByColumn.put("platform_account_mask", "ADD COLUMN platform_account_mask VARCHAR(32) NOT NULL DEFAULT '' "
+                + "COMMENT '本次采集使用的平台账号（脱敏）'");
         for (Map.Entry<String, String> entry : ddlByColumn.entrySet()) {
             if (columnExists(connection, "geo_monitor_result", entry.getKey())) {
                 continue;
@@ -251,6 +255,8 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     + "COMMENT '浏览器最近一次登录失败原因（不含密码）'");
             accountDdl.put("browser_login_fail_count", "ADD COLUMN browser_login_fail_count INT NOT NULL DEFAULT 0 "
                     + "COMMENT '浏览器登录连续失败次数'");
+            accountDdl.put("browser_last_used_at", "ADD COLUMN browser_last_used_at DATETIME NULL "
+                    + "COMMENT '该登录态最近一次被监测任务抽中的时间'");
             for (Map.Entry<String, String> entry : accountDdl.entrySet()) {
                 if (columnExists(connection, "geo_platform_account", entry.getKey())) {
                     continue;

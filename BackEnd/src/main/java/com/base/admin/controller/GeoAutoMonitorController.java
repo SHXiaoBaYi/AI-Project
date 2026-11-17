@@ -53,10 +53,12 @@ public class GeoAutoMonitorController {
 
     // ==================== 监控问题库 ====================
 
-    @Operation(summary = "监控问题分页")
+    @Operation(summary = "监控问题分页（免登录，公网可按查询条件调用）")
     @PostMapping("/questions/list")
-    @RequiresPermission("geo:auto:question:list")
-    public Result<PageResult<GeoAutoQuestionVO>> listQuestions(@RequestBody GeoAutoQuestionQueryDTO query) {
+    public Result<PageResult<GeoAutoQuestionVO>> listQuestions(@RequestBody(required = false) GeoAutoQuestionQueryDTO query) {
+        if (query == null) {
+            query = new GeoAutoQuestionQueryDTO();
+        }
         return Result.ok(autoMonitorService.listQuestions(query));
     }
 
@@ -122,10 +124,12 @@ public class GeoAutoMonitorController {
 
     // ==================== 监测任务 ====================
 
-    @Operation(summary = "监测任务分页")
+    @Operation(summary = "监测任务分页（免登录，公网可按查询条件调用）")
     @PostMapping("/tasks/list")
-    @RequiresPermission("geo:auto:task:list")
-    public Result<PageResult<GeoAutoTaskVO>> listTasks(@RequestBody GeoAutoTaskQueryDTO query) {
+    public Result<PageResult<GeoAutoTaskVO>> listTasks(@RequestBody(required = false) GeoAutoTaskQueryDTO query) {
+        if (query == null) {
+            query = new GeoAutoTaskQueryDTO();
+        }
         return Result.ok(autoMonitorService.listTasks(query));
     }
 
@@ -249,6 +253,57 @@ public class GeoAutoMonitorController {
                                                               @RequestParam("file") MultipartFile file) {
         String stored = autoMonitorService.saveResultScreenshot(id, file);
         return Result.ok(Map.of("screenshotUrl", stored));
+    }
+
+    @Operation(summary = "打开服务器登录窗口（扫码/短信），画面只返回给当前操作者")
+    @PostMapping("/browser/booth/start")
+    @RequiresPermission("geo:platformAccount:edit")
+    @Log(title = "GEO自动监测-服务器登录", businessType = 2)
+    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> startLoginBooth(
+            @Valid @RequestBody com.base.admin.domain.dto.GeoBrowserBoothInputDTO dto) {
+        return Result.ok(autoMonitorService.startLoginBooth(dto.getAccountId()));
+    }
+
+    @Operation(summary = "刷新服务器登录窗口画面")
+    @GetMapping("/browser/booth")
+    @RequiresPermission("geo:platformAccount:edit")
+    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> snapshotLoginBooth(@RequestParam Long accountId) {
+        return Result.ok(autoMonitorService.snapshotLoginBooth(accountId));
+    }
+
+    @Operation(summary = "向服务器登录窗口发送点击或输入")
+    @PostMapping("/browser/booth/input")
+    @RequiresPermission("geo:platformAccount:edit")
+    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> inputLoginBooth(
+            @Valid @RequestBody com.base.admin.domain.dto.GeoBrowserBoothInputDTO dto) {
+        return Result.ok(autoMonitorService.inputLoginBooth(dto));
+    }
+
+    @Operation(summary = "登录完成后保存该账号自己的登录态")
+    @PostMapping("/browser/booth/finish")
+    @RequiresPermission("geo:platformAccount:edit")
+    @Log(title = "GEO自动监测-保存服务器登录态", businessType = 2)
+    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> finishLoginBooth(
+            @Valid @RequestBody com.base.admin.domain.dto.GeoBrowserBoothInputDTO dto) {
+        return Result.ok(autoMonitorService.finishLoginBooth(dto.getAccountId()));
+    }
+
+    @Operation(summary = "关闭服务器登录窗口且不保存")
+    @PostMapping("/browser/booth/cancel")
+    @RequiresPermission("geo:platformAccount:edit")
+    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> cancelLoginBooth(
+            @Valid @RequestBody com.base.admin.domain.dto.GeoBrowserBoothInputDTO dto) {
+        return Result.ok(autoMonitorService.cancelLoginBooth(dto.getAccountId()));
+    }
+
+    @Operation(summary = "把 storageState 绑定到指定平台账号")
+    @PostMapping("/browser/state/account")
+    @RequiresPermission("geo:platformAccount:edit")
+    @Log(title = "GEO自动监测-绑定账号登录态", businessType = 2)
+    public Result<Map<String, Long>> uploadAccountBrowserState(@RequestParam("accountId") Long accountId,
+                                                               @RequestParam("file") MultipartFile file) {
+        autoMonitorService.saveAccountBrowserState(accountId, file);
+        return Result.ok(Map.of("accountId", accountId));
     }
 
     @Operation(summary = "上传平台网页版登录态（Playwright storageState JSON）")

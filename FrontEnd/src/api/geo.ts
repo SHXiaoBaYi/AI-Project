@@ -202,6 +202,11 @@ export function updateGeoPlatformAccountApi(data: GeoPlatformAccountDTO) {
   return request.put('/geo/platform-account', data);
 }
 
+/** 加入或移出浏览器监测候选池 */
+export function setGeoPlatformAccountBrowserEnabledApi(id: number, enabled: number) {
+  return request.put(`/geo/platform-account/${id}/browser-enabled`, { enabled });
+}
+
 export function deleteGeoPlatformAccountApi(id: number) {
   return request.delete(`/geo/platform-account/${id}`);
 }

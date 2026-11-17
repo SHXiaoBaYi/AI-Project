@@ -104,6 +104,10 @@ public class GeoPlatformAccountListVO {
     @Schema(description = "浏览器登录连续失败次数")
     private Integer browserLoginFailCount;
 
+    @Schema(description = "该登录态最近一次被监测任务使用的时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime browserLastUsedAt;
+
     @Schema(description = "排序")
     private Integer sortOrder;
 

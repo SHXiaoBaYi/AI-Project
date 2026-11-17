@@ -32,10 +32,12 @@ public class GeoPlatformController {
 
     private final GeoPlatformService platformService;
 
-    @Operation(summary = "分页查询平台")
+    @Operation(summary = "分页查询平台（免登录，公网可按查询条件调用）")
     @PostMapping("/list")
-    @RequiresPermission("geo:platform:list")
-    public Result<PageResult<GeoPlatform>> list(@RequestBody GeoPlatformQueryDTO query) {
+    public Result<PageResult<GeoPlatform>> list(@RequestBody(required = false) GeoPlatformQueryDTO query) {
+        if (query == null) {
+            query = new GeoPlatformQueryDTO();
+        }
         return Result.ok(platformService.list(query));
     }
 

@@ -30,6 +30,12 @@ public class GeoAutoResultVO {
     @Schema(description = "平台", example = "豆包")
     private String platform;
 
+    @Schema(description = "本次使用的平台账号ID", example = "4")
+    private Long platformAccountId;
+
+    @Schema(description = "本次使用的平台账号（脱敏）", example = "18****86")
+    private String platformAccountMask;
+
     @Schema(description = "通道：API/BROWSER", example = "API")
     private String channel;
 

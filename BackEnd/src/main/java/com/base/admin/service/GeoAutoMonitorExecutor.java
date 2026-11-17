@@ -8,6 +8,7 @@ import com.base.admin.domain.entity.GeoMonitorResult;
 import com.base.admin.domain.entity.GeoMonitorRun;
 import com.base.admin.domain.entity.GeoMonitorTask;
 import com.base.admin.domain.entity.GeoPlatform;
+import com.base.admin.domain.entity.GeoPlatformAccount;
 import com.base.admin.domain.vo.GeoAutoResultDetailVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoMonitorQuestionMapper;
@@ -23,7 +24,10 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -49,6 +53,7 @@ public class GeoAutoMonitorExecutor {
     private final GeoMonitorQuestionMapper questionMapper;
     private final GeoPlatformMapper platformMapper;
     private final GeoBrowserProbeService probeService;
+    private final GeoBrowserAccountService accountService;
     private final GeoMonitorJudgeService judgeService;
     private final GeoMonitorDailySyncService dailySyncService;
     private final GeoAutoMonitorProperties properties;
@@ -70,6 +75,7 @@ public class GeoAutoMonitorExecutor {
                                   GeoMonitorQuestionMapper questionMapper,
                                   GeoPlatformMapper platformMapper,
                                   GeoBrowserProbeService probeService,
+                                  GeoBrowserAccountService accountService,
                                   GeoMonitorJudgeService judgeService,
                                   GeoMonitorDailySyncService dailySyncService,
                                   GeoAutoMonitorProperties properties,
@@ -80,6 +86,7 @@ public class GeoAutoMonitorExecutor {
         this.questionMapper = questionMapper;
         this.platformMapper = platformMapper;
         this.probeService = probeService;
+        this.accountService = accountService;
         this.judgeService = judgeService;
         this.dailySyncService = dailySyncService;
         this.properties = properties;
@@ -193,6 +200,7 @@ public class GeoAutoMonitorExecutor {
         for (int i = 0; i < questions.size(); i += batchSize) {
             batches.add(new ArrayList<>(questions.subList(i, Math.min(i + batchSize, questions.size()))));
         }
+        RunLoginPool loginPool = new RunLoginPool();
         try {
             for (int b = 0; b < batches.size(); b++) {
                 if (Thread.currentThread().isInterrupted()) {
@@ -208,7 +216,7 @@ public class GeoAutoMonitorExecutor {
 
                 for (GeoMonitorQuestion question : batch) {
                     for (GeoPlatform platform : platforms) {
-                        executeItemSafely(run, task, question, platform);
+                        executeItemSafely(run, task, question, platform, loginPool);
                         if (properties.getBatchItemIntervalMs() > 0) {
                             sleep(properties.getBatchItemIntervalMs());
                         }
@@ -258,9 +266,9 @@ public class GeoAutoMonitorExecutor {
     }
 
     private void executeItemSafely(GeoMonitorRun run, GeoMonitorTask task,
-                                   GeoMonitorQuestion question, GeoPlatform platform) {
+                                   GeoMonitorQuestion question, GeoPlatform platform, RunLoginPool loginPool) {
         try {
-            executeItem(run, task, question, platform);
+            executeItem(run, task, question, platform, loginPool);
         } catch (Exception e) {
             log.error("监测项异常 runId={} q={} p={}", run.getId(), question.getId(), platform.getPlatformName(), e);
             bumpCount(run.getId(), false);
@@ -268,7 +276,7 @@ public class GeoAutoMonitorExecutor {
     }
 
     private void executeItem(GeoMonitorRun run, GeoMonitorTask task,
-                             GeoMonitorQuestion question, GeoPlatform platform) {
+                             GeoMonitorQuestion question, GeoPlatform platform, RunLoginPool loginPool) {
         long start = System.currentTimeMillis();
         GeoMonitorResult result = new GeoMonitorResult();
         result.setRunId(run.getId());
@@ -284,9 +292,10 @@ public class GeoAutoMonitorExecutor {
         boolean wantScreenshot = !GeoMonitorTask.SHOT_DISABLED.equals(shotMode);
 
         GeoBrowserProbeService.ProbeOutcome outcome =
-                probeWithRetry(question, platform, deepThink, wantScreenshot, task.getProbeRegion());
+                probeWithRetry(question, platform, deepThink, wantScreenshot, task.getProbeRegion(), loginPool);
 
-        // 取证信息即使采集失败也尽量留档，便于排查选择器/登录态
+        result.setPlatformAccountId(outcome.accountId());
+        result.setPlatformAccountMask(outcome.accountLabel() == null ? "" : outcome.accountLabel());
         result.setDeepThink(outcome.deepThinkApplied() ? 1 : 0);
         result.setReasoningText(truncate(outcome.reasoningText(), 60_000));
         result.setProbeUrl(truncate(outcome.probeUrl(), 1000));
@@ -356,34 +365,104 @@ public class GeoAutoMonitorExecutor {
     }
 
     /** 浏览器采集（含重试）；失败也返回带诊断的 outcome，由引擎记录 CALL_FAILED */
+    /**
+     * 本轮每个平台先抽一个登录态用到底。登录墙只淘汰这一个，再抽下一个；
+     * 其他失败仍在同一个登录态上按次数重试。
+     */
     private GeoBrowserProbeService.ProbeOutcome probeWithRetry(GeoMonitorQuestion question,
                                                                GeoPlatform platform,
                                                                boolean deepThink,
                                                                boolean screenshot,
-                                                               String region) {
-        int attempts = Math.max(1, properties.getMaxRetries() + 1);
+                                                               String region,
+                                                               RunLoginPool loginPool) {
+        int transientLeft = Math.max(1, properties.getMaxRetries() + 1);
+        int switchesLeft = 4;
         GeoBrowserProbeService.ProbeOutcome last = null;
-        for (int i = 0; i < attempts; i++) {
+        int attempt = 0;
+        while (transientLeft > 0 && switchesLeft > 0) {
+            Long accountId = resolveSticky(platform.getPlatformName(), loginPool);
+            if (accountId == null) {
+                if (last != null) {
+                    return last;
+                }
+                return probeService.failed(platform.getPlatformName(), question.getQuestionText(),
+                        "平台「" + platform.getPlatformName() + "」没有可用登录态。请到「平台账号管理」把账号加入监测并完成登录");
+            }
+            attempt++;
             try {
                 GeoBrowserProbeService.ProbeOutcome outcome = probeService.probe(
                         platform.getPlatformName(), question.getQuestionText(),
-                        deepThink, screenshot, region, null);
+                        deepThink, screenshot, region, null, accountId, false);
                 if (outcome.success()) {
                     return outcome;
                 }
                 last = outcome;
-                log.warn("浏览器采集失败（第{}次）p={} q={}: {}",
-                        i + 1, platform.getPlatformName(), question.getId(), outcome.error());
+                log.warn("浏览器采集失败（第{}次）p={} q={} account={}: {}",
+                        attempt, platform.getPlatformName(), question.getId(), accountId, outcome.error());
+                if (outcome.switchAccount()) {
+                    loginPool.burn(platform.getPlatformName(), accountId);
+                    switchesLeft--;
+                    continue;
+                }
             } catch (Exception e) {
                 log.warn("浏览器采集异常（第{}次）p={} q={}: {}",
-                        i + 1, platform.getPlatformName(), question.getId(), e.getMessage());
+                        attempt, platform.getPlatformName(), question.getId(), e.getMessage());
             }
-            if (i < attempts - 1) {
-                sleep(backoffMs(i));
+            transientLeft--;
+            if (transientLeft > 0 && switchesLeft > 0) {
+                sleep(backoffMs(Math.max(0, attempt - 1)));
             }
         }
         return last != null ? last : probeService.failed(platform.getPlatformName(),
                 question.getQuestionText(), "浏览器采集异常（已重试），详见服务日志与后台诊断");
+    }
+
+    /** 本轮已抽中且仍可用的账号；否则在未淘汰的候选里再抽一个。 */
+    private Long resolveSticky(String platform, RunLoginPool loginPool) {
+        Long sticky = loginPool.sticky(platform);
+        if (sticky != null && !loginPool.burned().contains(sticky)) {
+            try {
+                GeoPlatformAccount row = accountService.require(sticky);
+                if (accountService.isPoolCandidate(row)) {
+                    return sticky;
+                }
+            } catch (Exception ignored) {
+                // 账号被删掉时重新抽
+            }
+            loginPool.burn(platform, sticky);
+        }
+        return accountService.pickForRun(platform, loginPool.burned())
+                .map(GeoPlatformAccount::getId)
+                .map(id -> {
+                    loginPool.stick(platform, id);
+                    return id;
+                })
+                .orElse(null);
+    }
+
+    /** 一次执行内记住每个平台抽中的登录态，以及已经确认失效的账号。 */
+    private static final class RunLoginPool {
+        private final Map<String, Long> sticky = new HashMap<>();
+        private final Set<Long> burned = new HashSet<>();
+
+        private Long sticky(String platform) {
+            return sticky.get(platform);
+        }
+
+        private void stick(String platform, Long accountId) {
+            sticky.put(platform, accountId);
+        }
+
+        private void burn(String platform, Long accountId) {
+            if (accountId != null) {
+                burned.add(accountId);
+            }
+            sticky.remove(platform);
+        }
+
+        private Set<Long> burned() {
+            return burned;
+        }
     }
 
     /** 页面信源（带链接）优先，裁判补充的信源去重后追加 */
