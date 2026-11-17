@@ -43,9 +43,12 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/geo/platform/list",
+                                "/geo/topic/list",
                                 "/geo/auto/tasks/list",
                                 "/geo/auto/questions/list",
                                 "/geo/auto/results/save")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/geo/auto/results/{id:\\d+}")
                         .permitAll()
                         .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()

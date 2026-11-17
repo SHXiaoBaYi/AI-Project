@@ -31,10 +31,12 @@ public class GeoTopicController {
 
     private final GeoTopicService topicService;
 
-    @Operation(summary = "分页查询话题")
+    @Operation(summary = "分页查询话题（免登录，公网可按查询条件调用）")
     @PostMapping("/list")
-    @RequiresPermission("geo:topic:list")
-    public Result<PageResult<GeoTopic>> list(@RequestBody GeoTopicQueryDTO query) {
+    public Result<PageResult<GeoTopic>> list(@RequestBody(required = false) GeoTopicQueryDTO query) {
+        if (query == null) {
+            query = new GeoTopicQueryDTO();
+        }
         return Result.ok(topicService.list(query));
     }
 

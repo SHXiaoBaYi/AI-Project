@@ -219,9 +219,8 @@ public class GeoAutoMonitorController {
         return Result.ok(autoMonitorService.listResults(query));
     }
 
-    @Operation(summary = "监测结果详情（回答原文/引用/与上次对比）")
+    @Operation(summary = "监测结果详情（免登录；回答原文/引用/与上次对比）")
     @GetMapping("/results/{id:\\d+}")
-    @RequiresPermission("geo:auto:result:list")
     public Result<GeoAutoResultDetailVO> getResultDetail(@PathVariable Long id) {
         return Result.ok(autoMonitorService.getResultDetail(id));
     }
