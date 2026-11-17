@@ -8,7 +8,7 @@ xby:
     database: base_admin
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.117.113.28/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:https://47.117.113.28/shxby/api}
   auth:
     password-login-enabled: false
   env-sync:
@@ -16,9 +16,13 @@ xby:
 
 # ActionCard / bridge 必须指向生产公网，避免落到测试机 47.117.132.161
 dingtalk:
-  h5-base-url: ${DINGTALK_H5_BASE_URL:http://47.117.113.28/shxby}
+  h5-base-url: ${DINGTALK_H5_BASE_URL:https://47.117.113.28/shxby}
   robot:
     stream-enabled: ${DINGTALK_ROBOT_STREAM_ENABLED:true}
+
+server:
+  # nginx 终结 TLS 后，让后端按 X-Forwarded-Proto 识别 https
+  forward-headers-strategy: framework
 
 spring:
   datasource:

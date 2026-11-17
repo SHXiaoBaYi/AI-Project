@@ -63,7 +63,7 @@ public class EnvPublicBaseGuard implements ApplicationRunner {
             throw new IllegalStateException(
                     "生产环境禁止使用测试 ECS 地址 " + TEST_HOST + " 或旧测试机 " + TEST_HOST_LEGACY
                             + "（配置项 " + name + "=" + value
-                            + "）。请使用 application-prod.yml 中的 http://" + PROD_HOST + "/shxby");
+                            + "）。请使用 application-prod.yml 中的 https://" + PROD_HOST + "/shxby");
         }
     }
 }
