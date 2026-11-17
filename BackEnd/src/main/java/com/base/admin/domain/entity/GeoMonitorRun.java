@@ -30,6 +30,8 @@ public class GeoMonitorRun extends BaseEntity {
     public static final String TRIGGER_SCHEDULED = "SCHEDULED";
     /** 手动触发 */
     public static final String TRIGGER_MANUAL = "MANUAL";
+    /** 外网提交 */
+    public static final String TRIGGER_EXTERNAL = "EXTERNAL";
 
     @TableId(type = IdType.AUTO)
     @Schema(description = "主键", example = "1")
@@ -44,8 +46,14 @@ public class GeoMonitorRun extends BaseEntity {
     @Schema(description = "监测归属日期（回写日监测的inspect_date）", example = "2026-11-05")
     private LocalDate runDate;
 
-    @Schema(description = "触发方式：SCHEDULED/MANUAL", example = "MANUAL")
+    @Schema(description = "触发方式：SCHEDULED/MANUAL/EXTERNAL", example = "MANUAL")
     private String triggerType;
+
+    @Schema(description = "外网提交批次号，同一值重复提交会覆盖", example = "1_20261117_110500")
+    private String externalRunId;
+
+    @Schema(description = "外网提交来源", example = "browser-skill")
+    private String externalSource;
 
     @Schema(description = "状态：RUNNING/SUCCESS/PARTIAL/FAILED", example = "RUNNING")
     private String status;

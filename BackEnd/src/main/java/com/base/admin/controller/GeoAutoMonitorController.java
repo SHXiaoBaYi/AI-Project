@@ -9,6 +9,7 @@ import com.base.admin.domain.dto.GeoAutoProbeDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionEnabledDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionQueryDTO;
+import com.base.admin.domain.dto.GeoAutoExternalResultSaveDTO;
 import com.base.admin.domain.dto.GeoAutoResultQueryDTO;
 import com.base.admin.domain.dto.GeoAutoTaskDTO;
 import com.base.admin.domain.dto.GeoAutoTaskQueryDTO;
@@ -16,6 +17,7 @@ import com.base.admin.domain.entity.GeoMonitorRun;
 import com.base.admin.domain.vo.GeoAutoPlatformOptionVO;
 import com.base.admin.domain.vo.GeoAutoQuestionOptionVO;
 import com.base.admin.domain.vo.GeoAutoQuestionVO;
+import com.base.admin.domain.vo.GeoAutoExternalSaveVO;
 import com.base.admin.domain.vo.GeoAutoResultDetailVO;
 import com.base.admin.domain.vo.GeoAutoResultMatrixVO;
 import com.base.admin.domain.vo.GeoAutoResultVO;
@@ -24,6 +26,7 @@ import com.base.admin.domain.vo.GeoAutoTaskVO;
 import com.base.admin.domain.vo.GeoBrowserAccountVO;
 import com.base.admin.domain.vo.GeoBrowserLoginVO;
 import com.base.admin.domain.vo.GeoBrowserProbeVO;
+import com.base.admin.service.GeoAutoExternalResultService;
 import com.base.admin.service.GeoAutoMonitorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -50,6 +53,7 @@ import java.util.Map;
 public class GeoAutoMonitorController {
 
     private final GeoAutoMonitorService autoMonitorService;
+    private final GeoAutoExternalResultService externalResultService;
 
     // ==================== 监控问题库 ====================
 
@@ -200,6 +204,12 @@ public class GeoAutoMonitorController {
     @RequiresPermission({"geo:auto:task:list", "geo:auto:result:list"})
     public Result<GeoMonitorRun> getRun(@PathVariable Long id) {
         return Result.ok(autoMonitorService.getRun(id));
+    }
+
+    @Operation(summary = "外网提交一轮监控结果（免登录；同一 runId 再次提交会覆盖）")
+    @PostMapping("/results/save")
+    public Result<GeoAutoExternalSaveVO> saveExternalResults(@Valid @RequestBody GeoAutoExternalResultSaveDTO dto) {
+        return Result.ok(externalResultService.save(dto));
     }
 
     @Operation(summary = "监测结果分页（明细视图）")

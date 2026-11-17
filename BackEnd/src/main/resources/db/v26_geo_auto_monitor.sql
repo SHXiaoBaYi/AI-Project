@@ -59,7 +59,9 @@ CREATE TABLE IF NOT EXISTS geo_monitor_run (
   task_id       BIGINT        NOT NULL                COMMENT '任务ID',
   task_name     VARCHAR(128)  NOT NULL DEFAULT ''     COMMENT '任务名快照',
   run_date      DATE          NOT NULL                COMMENT '监测归属日期（回写日监测的inspect_date）',
-  trigger_type  VARCHAR(16)   NOT NULL DEFAULT 'SCHEDULED' COMMENT 'SCHEDULED/MANUAL',
+  trigger_type  VARCHAR(16)   NOT NULL DEFAULT 'SCHEDULED' COMMENT 'SCHEDULED/MANUAL/EXTERNAL',
+  external_run_id VARCHAR(64) DEFAULT NULL              COMMENT '外网提交批次号，同一值重复提交会覆盖',
+  external_source VARCHAR(32) NOT NULL DEFAULT ''       COMMENT '外网提交来源',
   status        VARCHAR(16)   NOT NULL DEFAULT 'RUNNING' COMMENT 'RUNNING/SUCCESS/PARTIAL/FAILED',
   total_count   INT           NOT NULL DEFAULT 0      COMMENT '问题×平台总数',
   done_count    INT           NOT NULL DEFAULT 0      COMMENT '已处理数',
@@ -80,7 +82,8 @@ CREATE TABLE IF NOT EXISTS geo_monitor_run (
   is_active     TINYINT       NOT NULL DEFAULT 1      COMMENT '是否有效 1=有效 0=已删除',
   PRIMARY KEY (id),
   KEY idx_task_date (task_id, run_date),
-  KEY idx_status (status)
+  KEY idx_status (status),
+  UNIQUE KEY uk_geo_run_external (external_run_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GEO自动监测-运行批次';
 
 CREATE TABLE IF NOT EXISTS geo_monitor_result (

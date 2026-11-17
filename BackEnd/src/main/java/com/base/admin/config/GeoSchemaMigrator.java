@@ -273,6 +273,10 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             runDdl.put("batch_total", "ADD COLUMN batch_total INT NOT NULL DEFAULT 0 COMMENT '总批次数'");
             runDdl.put("batch_done", "ADD COLUMN batch_done INT NOT NULL DEFAULT 0 COMMENT '已完成批次数'");
             runDdl.put("current_batch_no", "ADD COLUMN current_batch_no INT NOT NULL DEFAULT 0 COMMENT '当前执行批次号'");
+            runDdl.put("external_run_id", "ADD COLUMN external_run_id VARCHAR(64) NULL "
+                    + "COMMENT '外网提交批次号，同一值重复提交会覆盖'");
+            runDdl.put("external_source", "ADD COLUMN external_source VARCHAR(32) NOT NULL DEFAULT '' "
+                    + "COMMENT '外网提交来源'");
             for (Map.Entry<String, String> entry : runDdl.entrySet()) {
                 if (columnExists(connection, "geo_monitor_run", entry.getKey())) {
                     continue;
@@ -281,6 +285,13 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                     statement.execute("ALTER TABLE geo_monitor_run " + entry.getValue());
                 }
                 log.info("已为 geo_monitor_run 增加 {} 列", entry.getKey());
+            }
+            if (columnExists(connection, "geo_monitor_run", "external_run_id")
+                    && !indexExists(connection, "geo_monitor_run", "uk_geo_run_external")) {
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute("CREATE UNIQUE INDEX uk_geo_run_external ON geo_monitor_run (external_run_id)");
+                }
+                log.info("已为 geo_monitor_run 增加 uk_geo_run_external");
             }
         }
     }

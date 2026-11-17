@@ -79,6 +79,22 @@ public class FileStorageService {
         }
     }
 
+    /** 删除本系统保存的 GEO 图片。只接受 /uploads/geo/ 下的相对路径。 */
+    public void deleteGeoUpload(String relativeUrl) {
+        if (!StringUtils.hasText(relativeUrl) || !relativeUrl.startsWith("/uploads/geo/")) {
+            return;
+        }
+        try {
+            Path root = Path.of(uploadDir).toAbsolutePath().normalize();
+            Path file = root.resolve(relativeUrl.substring("/uploads/".length())).normalize();
+            if (file.startsWith(root)) {
+                Files.deleteIfExists(file);
+            }
+        } catch (IOException ignored) {
+            // 覆盖提交时旧图删不掉不影响新数据落库
+        }
+    }
+
     /** 任务完成证明等通用附件（不限图片） */
     public String saveTaskAttachment(MultipartFile file) {
         if (file == null || file.isEmpty()) {
