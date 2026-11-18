@@ -1,18 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
-import { Badge, Drawer, Table, Tag } from 'antd';
+import { App, Badge, Button, Drawer, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { getGeoAutoRunListApi } from '@/api/geoAuto';
+import { closeGeoAutoRunApi, getGeoAutoRunListApi } from '@/api/geoAuto';
 import { formatDateTime } from '@/utils/datetime';
 import type { GeoAutoRun, GeoAutoTask } from '@/types/geoAuto';
 import { GEO_AUTO_RUN_STATUS_MAP } from '@/constants/geoAuto';
+import { usePermission } from '@/hooks/usePermission';
 
 interface RunsDrawerProps {
   task: GeoAutoTask | null;
   onClose: () => void;
+  onChanged?: () => void;
 }
 
 /** 运行记录抽屉：批次进度轮询（RUNNING 时每 5s 刷新） */
-export default function RunsDrawer({ task, onClose }: RunsDrawerProps) {
+export default function RunsDrawer({ task, onClose, onChanged }: RunsDrawerProps) {
+  const { modal, message } = App.useApp();
+  const { has } = usePermission();
+  const canClose = has('geo:auto:task:run');
   const [rows, setRows] = useState<GeoAutoRun[]>([]);
   const [total, setTotal] = useState(0);
   const [pageNum, setPageNum] = useState(1);
@@ -60,7 +65,46 @@ export default function RunsDrawer({ task, onClose }: RunsDrawerProps) {
 
   const statusMeta = (status: string) => GEO_AUTO_RUN_STATUS_MAP[status] || { label: status, color: 'default' };
 
+  const closeRun = (runId: number) => {
+    modal.confirm({
+      title: '结束进行中的批次',
+      content: '未完成的题目会停止采集，已经回传的结果保留。结束后可以重新执行。',
+      okText: '结束批次',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await closeGeoAutoRunApi(runId);
+        message.success(`批次 #${runId} 已结束`);
+        if (task) {
+          await load(task.id, pageNumRef.current);
+        }
+        onChanged?.();
+      },
+    });
+  };
+
   const columns: ColumnsType<GeoAutoRun> = [
+    ...(canClose
+      ? [
+          {
+            title: '操作',
+            key: 'action',
+            width: 88,
+            fixed: 'left' as const,
+            render: (_: unknown, row: GeoAutoRun) =>
+              row.status === 'RUNNING' ? (
+                <Button
+                  type='link'
+                  size='small'
+                  danger
+                  className='!px-0'
+                  onClick={() => closeRun(row.id)}
+                >
+                  结束
+                </Button>
+              ) : null,
+          },
+        ]
+      : []),
     { title: '批次', dataIndex: 'id', width: 70 },
     { title: '监测日期', dataIndex: 'runDate', width: 105 },
     {
@@ -140,6 +184,7 @@ export default function RunsDrawer({ task, onClose }: RunsDrawerProps) {
         loading={loading}
         columns={columns}
         dataSource={rows}
+        scroll={{ x: 1100 }}
         pagination={{
           current: pageNum,
           pageSize: 10,

@@ -318,6 +318,20 @@ public class GeoMonitorWorkerService {
         retryOrFail(job, message);
     }
 
+    /** 页面手动结束卡住的批次：未完成的题目不再领取。已经回传的结果保留。 */
+    public int abandonOpenJobs(Long runId, String message) {
+        if (runId == null) {
+            return 0;
+        }
+        return jobMapper.update(null, new LambdaUpdateWrapper<GeoMonitorJob>()
+                .eq(GeoMonitorJob::getRunId, runId)
+                .in(GeoMonitorJob::getStatus, GeoMonitorJob.STATUS_PENDING, GeoMonitorJob.STATUS_LEASED)
+                .set(GeoMonitorJob::getStatus, GeoMonitorJob.STATUS_FAILED)
+                .set(GeoMonitorJob::getLeaseOwner, "")
+                .set(GeoMonitorJob::getErrorMsg, clip(message, 500))
+                .setSql("lease_until = NULL"));
+    }
+
     /** 收回过期领取，并收尾已经没有待做题目的批次。 */
     public void sweep() {
         if (!properties.getWorker().isEnabled()) {

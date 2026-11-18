@@ -65,6 +65,9 @@ public interface GeoAutoMonitorService {
 
     GeoMonitorRun startTaskRun(Long taskId);
 
+    /** 结束卡在运行中的批次，未完成题目不再采集。 */
+    GeoMonitorRun closeRun(Long runId);
+
     // ---------- 运行批次与结果 ----------
 
     PageResult<GeoMonitorRun> listRuns(Long taskId, Integer pageNum, Integer pageSize);

@@ -199,6 +199,14 @@ public class GeoAutoMonitorController {
         return Result.ok(autoMonitorService.listRuns(taskId, pageNum, pageSize));
     }
 
+    @Operation(summary = "结束卡在运行中的批次")
+    @PostMapping("/runs/{id:\\d+}/close")
+    @RequiresPermission("geo:auto:task:run")
+    @Log(title = "GEO监测批次-结束", businessType = 2)
+    public Result<GeoMonitorRun> closeRun(@PathVariable Long id) {
+        return Result.ok(autoMonitorService.closeRun(id));
+    }
+
     @Operation(summary = "运行批次详情")
     @GetMapping("/runs/{id:\\d+}")
     @RequiresPermission({"geo:auto:task:list", "geo:auto:result:list"})

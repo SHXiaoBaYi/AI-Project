@@ -350,6 +350,11 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
         return executor.startRun(taskId, GeoMonitorRun.TRIGGER_MANUAL);
     }
 
+    @Override
+    public GeoMonitorRun closeRun(Long runId) {
+        return executor.closeRun(runId);
+    }
+
     // ==================== 运行批次与结果 ====================
 
     @Override

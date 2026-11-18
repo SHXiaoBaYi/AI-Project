@@ -149,7 +149,7 @@ public class GeoAutoMonitorExecutor {
                 .eq(GeoMonitorRun::getTaskId, taskId)
                 .eq(GeoMonitorRun::getStatus, GeoMonitorRun.STATUS_RUNNING));
         if (runningCount != null && runningCount > 0) {
-            throw new BusinessException("该任务存在进行中的批次（可能服务重启残留），请稍后再试");
+            throw new BusinessException("该任务存在进行中的批次，请先在页面上结束该批次");
         }
 
         List<GeoMonitorQuestion> questions = resolveQuestions(task);
@@ -557,6 +557,35 @@ public class GeoAutoMonitorExecutor {
                 .set(GeoMonitorRun::getStatus, GeoMonitorRun.STATUS_FAILED)
                 .set(GeoMonitorRun::getEndTime, LocalDateTime.now())
                 .set(GeoMonitorRun::getErrorMsg, errorMsg));
+    }
+
+    /** 结束卡在运行中的批次，并放开这个任务，便于重新执行。 */
+    public GeoMonitorRun closeRun(Long runId) {
+        GeoMonitorRun run = runMapper.selectById(runId);
+        if (run == null) {
+            throw new BusinessException("批次不存在");
+        }
+        if (!GeoMonitorRun.STATUS_RUNNING.equals(run.getStatus())) {
+            throw new BusinessException("该批次已经结束");
+        }
+        String message = "已在页面手动结束";
+        workerService.abandonOpenJobs(runId, message);
+        int success = run.getSuccessCount() == null ? 0 : run.getSuccessCount();
+        String status = success > 0 ? GeoMonitorRun.STATUS_PARTIAL : GeoMonitorRun.STATUS_FAILED;
+        int updated = runMapper.update(null, new LambdaUpdateWrapper<GeoMonitorRun>()
+                .eq(GeoMonitorRun::getId, runId)
+                .eq(GeoMonitorRun::getStatus, GeoMonitorRun.STATUS_RUNNING)
+                .set(GeoMonitorRun::getStatus, status)
+                .set(GeoMonitorRun::getEndTime, LocalDateTime.now())
+                .set(GeoMonitorRun::getErrorMsg, message));
+        if (updated != 1) {
+            throw new BusinessException("该批次已经结束");
+        }
+        runningTaskIds.remove(run.getTaskId());
+        run.setStatus(status);
+        run.setErrorMsg(message);
+        log.info("手动结束监测批次 runId={} taskId={} status={}", runId, run.getTaskId(), status);
+        return run;
     }
 
     /** 计算并落库任务下次运行时间 */

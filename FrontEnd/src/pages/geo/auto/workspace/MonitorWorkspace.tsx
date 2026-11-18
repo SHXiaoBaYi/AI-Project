@@ -11,6 +11,7 @@ import {
   InboxOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  StopOutlined,
   SearchOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
@@ -18,6 +19,7 @@ import dayjs from 'dayjs';
 import PermissionButton from '@/components/Buttons/PermissionButton';
 import { getGeoTopicOptionsApi } from '@/api/geo';
 import {
+  closeGeoAutoRunApi,
   createGeoAutoTaskApi,
   deleteGeoAutoTaskApi,
   getGeoAutoPlatformOptionsApi,
@@ -248,6 +250,20 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
     }
     const q = questions.find((item) => task.scopeIdList?.includes(item.id));
     return q?.topicName || task.taskName;
+  };
+
+  const closeRun = (runId: number) => {
+    modal.confirm({
+      title: '结束进行中的批次',
+      content: '未完成的题目会停止采集，已经回传的结果保留。结束后可以重新执行。',
+      okText: '结束批次',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await closeGeoAutoRunApi(runId);
+        message.success(`批次 #${runId} 已结束`);
+        await loadTasks();
+      },
+    });
   };
 
   const runTask = (record: GeoAutoTask) => {
@@ -493,6 +509,19 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
                     <Tag color={GEO_AUTO_RUN_STATUS_MAP[selected.lastRunStatus]?.color || 'default'}>
                       {GEO_AUTO_RUN_STATUS_MAP[selected.lastRunStatus]?.label || selected.lastRunStatus}
                     </Tag>
+                  )}
+                  {selected.lastRunStatus === 'RUNNING' && selected.lastRunId && (
+                    <PermissionButton
+                      perm='geo:auto:task:run'
+                      type='link'
+                      size='small'
+                      danger
+                      className='!px-0'
+                      icon={<StopOutlined />}
+                      onClick={() => closeRun(selected.lastRunId as number)}
+                    >
+                      结束批次
+                    </PermissionButton>
                   )}
                   <PermissionButton
                     perm='geo:auto:task:run'
@@ -832,6 +861,9 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
       <RunsDrawer
         task={runsTask}
         onClose={() => setRunsTask(null)}
+        onChanged={() => {
+          void loadTasks();
+        }}
       />
       <BrowserProbeDrawer
         open={probeOpen}

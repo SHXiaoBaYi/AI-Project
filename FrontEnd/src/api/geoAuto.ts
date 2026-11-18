@@ -101,6 +101,10 @@ export function getGeoAutoRunApi(id: number) {
   return request.get<unknown, GeoAutoRun>(`/geo/auto/runs/${id}`);
 }
 
+export function closeGeoAutoRunApi(id: number) {
+  return request.post<unknown, GeoAutoRun>(`/geo/auto/runs/${id}/close`);
+}
+
 export function getGeoAutoResultListApi(data: GeoAutoResultQuery) {
   return request.post<unknown, PageResult<GeoAutoResult>>('/geo/auto/results/list', data);
 }
