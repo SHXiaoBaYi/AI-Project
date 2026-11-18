@@ -119,15 +119,25 @@ function profileDir(accountId) {
 }
 
 async function waitUntilLoggedIn(page) {
-  const deadline = Date.now() + 4 * 60 * 1000;
+  const deadline = Date.now() + 8 * 60 * 1000;
+  let stable = 0;
   while (Date.now() < deadline) {
     const url = page.url();
-    const loginBtn = page.locator("[data-testid='to_login_button'], text=/扫码登录|请先登录|Sign in/").first();
-    const loginVisible = (await loginBtn.count().catch(() => 0)) > 0 && (await loginBtn.isVisible().catch(() => false));
-    const onLoginUrl = /sign_in|\/login|passport/i.test(url);
-    const chat = page.locator("textarea, [contenteditable='true']").first();
-    const chatVisible = (await chat.count().catch(() => 0)) > 0 && (await chat.isVisible().catch(() => false));
-    if (!loginVisible && !onLoginUrl && chatVisible) return true;
+    const onLoginUrl = /sign_in|\/login|passport|from_logout/i.test(url);
+    const loginBtn = page
+      .locator("[data-testid='to_login_button']")
+      .or(page.getByText('登录', { exact: true }))
+      .or(page.getByText(/立即登录|扫码登录|请先登录|Sign in/))
+      .filter({ visible: true });
+    const loginVisible = (await loginBtn.count().catch(() => 0)) > 0;
+    const chat = page.locator("textarea, [contenteditable='true']").filter({ visible: true });
+    const chatVisible = (await chat.count().catch(() => 0)) > 0;
+    if (!loginVisible && !onLoginUrl && chatVisible) {
+      stable += 1;
+      if (stable >= 3) return true;
+    } else {
+      stable = 0;
+    }
     await page.waitForTimeout(2000);
   }
   return false;
@@ -143,6 +153,10 @@ async function loginAll() {
   for (const account of accounts) {
     if (!account.url) {
       console.log(`跳过 ${account.platform} ${account.accountLabel}：服务器没有配置提问页地址`);
+      continue;
+    }
+    if (account.loginStatus === 'READY') {
+      console.log(`跳过已就绪的 ${account.platform} ${account.accountLabel}`);
       continue;
     }
     console.log(`打开 ${account.platform} ${account.accountLabel}。请在弹出的窗口里完成登录，完成后会自动继续。`);
@@ -184,6 +198,7 @@ async function runLoop() {
   }, 20000);
   await heartbeat();
   console.log(`采集已启动，电脑名 ${config.node}，等待题目`);
+  let idleTicks = 0;
   for (;;) {
     let job = null;
     try {
@@ -195,9 +210,12 @@ async function runLoop() {
       continue;
     }
     if (!job?.jobId) {
+      idleTicks += 1;
+      if (idleTicks % 6 === 0) console.log('没有可领的题目，继续等待');
       await sleep(config.pollMs);
       continue;
     }
+    idleTicks = 0;
     state.jobId = job.jobId;
     state.accountId = job.accountId;
     console.log(`领取 ${job.platform} #${job.jobId}：${job.question}`);
@@ -205,8 +223,9 @@ async function runLoop() {
       await ask(job);
     } catch (error) {
       console.error(`提问异常 #${job.jobId}：${error.message}`);
+      const message = String(error.message || '提问失败').split('\n')[0].slice(0, 400);
       await api('/geo/auto/worker/fail', {
-        json: { node: config.node, jobId: job.jobId, reason: 'ERROR', message: error.message },
+        json: { node: config.node, jobId: job.jobId, reason: 'ERROR', message },
       }).catch((failError) => console.error('回报失败：' + failError.message));
     } finally {
       state.jobId = null;
@@ -237,10 +256,12 @@ async function ask(job) {
       return;
     }
     if (job.deepThink && profile.deepThinkSelector) {
-      await page.locator(profile.deepThinkSelector).first().click({ timeout: 4000 }).catch(() => {});
+      const think = page.locator(profile.deepThinkSelector).filter({ visible: true }).first();
+      if (await think.count().catch(() => 0)) {
+        await think.click({ timeout: 4000 }).catch(() => {});
+      }
     }
-    const input = page.locator(profile.inputSelector || 'textarea').first();
-    await input.click({ timeout: 15000 });
+    await clickVisibleInput(page, profile.inputSelector || 'textarea');
     await page.keyboard.type(job.question, { delay: 35 + Math.floor(Math.random() * 45) });
     await page.waitForTimeout(400);
     if (profile.submitSelector) {
@@ -249,8 +270,8 @@ async function ask(job) {
       await page.keyboard.press('Enter');
     }
     const answer = await waitAnswer(page, profile, job.answerTimeoutMs || 120000);
-    if (!answer || rejected(answer, profile.answerRejectPatterns)) {
-      throw new Error(answer ? '页面文本不是回答' : '等待回答超时');
+    if (!answer || answer.length < 30 || rejected(answer, profile.answerRejectPatterns)) {
+      throw new Error(answer ? `回答过短或不是正文（${answer.length} 字）` : '等待回答超时');
     }
     const reasoning = profile.reasoningContentSelector
       ? await textOf(page, profile.reasoningContentSelector)
@@ -287,6 +308,17 @@ async function upload(job, payload) {
     form.set('screenshot', new Blob([bytes], { type: 'image/jpeg' }), 'page.jpg');
   }
   await api('/geo/auto/worker/result', { form });
+}
+
+async function clickVisibleInput(page, selector) {
+  await page.keyboard.press('Escape').catch(() => {});
+  let target = page.locator(selector).filter({ visible: true }).last();
+  if (!(await target.count().catch(() => 0))) {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+    target = page.locator(selector).filter({ visible: true }).last();
+  }
+  await target.click({ timeout: 20000 });
 }
 
 async function waitAnswer(page, profile, timeoutMs) {
@@ -328,10 +360,8 @@ async function dismiss(page, selectors) {
 
 async function loginWall(page, selectors) {
   for (const sel of selectors || []) {
-    const loc = page.locator(sel).first();
-    if ((await loc.count().catch(() => 0)) && (await loc.isVisible().catch(() => false))) {
-      return true;
-    }
+    const loc = page.locator(sel).filter({ visible: true });
+    if ((await loc.count().catch(() => 0)) > 0) return true;
   }
   return false;
 }

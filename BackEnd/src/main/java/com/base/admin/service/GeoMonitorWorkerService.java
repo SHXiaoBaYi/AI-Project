@@ -222,7 +222,11 @@ public class GeoMonitorWorkerService {
         for (GeoMonitorJob job : pending) {
             GeoBrowserProbeProperties.PlatformProfile profile = profileOf(job.getPlatformName());
             if (profile == null || !StringUtils.hasText(profile.getUrl())) {
-                failTerminal(job, "平台「" + job.getPlatformName() + "」没有配置网页提问入口");
+                try {
+                    failTerminal(job, "平台「" + job.getPlatformName() + "」没有配置网页提问入口");
+                } catch (Exception e) {
+                    log.warn("跳过未配置入口的题目失败 jobId={}: {}", job.getId(), e.getMessage());
+                }
                 continue;
             }
             GeoPlatformAccount account = pickAccount(job.getPlatformName(), node);
@@ -316,7 +320,12 @@ public class GeoMonitorWorkerService {
                 .lt(GeoMonitorJob::getLeaseUntil, LocalDateTime.now())
                 .last("LIMIT 50"));
         for (GeoMonitorJob job : expired) {
-            retryOrFail(job, "本机领取后未在时限内回传");
+            try {
+                retryOrFail(job, "本机领取后未在时限内回传");
+            } catch (Exception e) {
+                log.warn("回收过期题目失败 jobId={}: {}", job.getId(), e.getMessage());
+                releasePending(job, "回收失败，已放回队列");
+            }
         }
         List<Long> runIds = jobMapper.selectList(new LambdaQueryWrapper<GeoMonitorJob>()
                         .select(GeoMonitorJob::getRunId)
@@ -425,23 +434,32 @@ public class GeoMonitorWorkerService {
 
     private void failTerminal(GeoMonitorJob job, String message) {
         GeoMonitorRun run = runMapper.selectById(job.getRunId());
-        if (run != null && job.getResultId() == null) {
-            GeoMonitorResult result = new GeoMonitorResult();
-            result.setRunId(run.getId());
-            result.setQuestionId(job.getQuestionId());
-            result.setQuestionText(job.getQuestionText());
-            result.setPlatform(job.getPlatformName());
-            result.setChannel("BROWSER");
-            result.setPlatformAccountId(job.getAccountId());
-            result.setAnswerModel(clip(job.getPlatformName() + " 网页版", 64));
-            result.setStatus(GeoMonitorResult.STATUS_CALL_FAILED);
-            result.setErrorMsg(clip(message, 450));
-            result.setCreateBy(StringUtils.hasText(job.getLeaseOwner()) ? job.getLeaseOwner() : "worker");
-            resultMapper.insert(result);
-            jobMapper.update(null, new LambdaUpdateWrapper<GeoMonitorJob>()
-                    .eq(GeoMonitorJob::getId, job.getId())
-                    .set(GeoMonitorJob::getResultId, result.getId()));
-            bump(run.getId(), false);
+        try {
+            if (run != null && job.getResultId() == null) {
+                GeoMonitorQuestion question = questionMapper.selectById(job.getQuestionId());
+                GeoMonitorResult result = new GeoMonitorResult();
+                result.setRunId(run.getId());
+                result.setQuestionId(job.getQuestionId());
+                result.setQuestionText(StringUtils.hasText(job.getQuestionText()) ? clip(job.getQuestionText(), 512) : "");
+                result.setTopicId(question != null && question.getTopicId() != null ? question.getTopicId() : 0L);
+                result.setPlatform(job.getPlatformName());
+                result.setChannel("BROWSER");
+                result.setPlatformAccountId(job.getAccountId());
+                result.setAnswerModel(clip(job.getPlatformName() + " 网页版", 64));
+                result.setMentioned(0);
+                result.setRecommendStatus("");
+                result.setSentiment("");
+                result.setStatus(GeoMonitorResult.STATUS_CALL_FAILED);
+                result.setErrorMsg(clip(message, 450));
+                result.setCreateBy(StringUtils.hasText(job.getLeaseOwner()) ? job.getLeaseOwner() : "worker");
+                resultMapper.insert(result);
+                jobMapper.update(null, new LambdaUpdateWrapper<GeoMonitorJob>()
+                        .eq(GeoMonitorJob::getId, job.getId())
+                        .set(GeoMonitorJob::getResultId, result.getId()));
+                bump(run.getId(), false);
+            }
+        } catch (Exception e) {
+            log.warn("记录采集失败明细出错，仍会释放这题 jobId={}: {}", job.getId(), e.getMessage());
         }
         jobMapper.update(null, new LambdaUpdateWrapper<GeoMonitorJob>()
                 .eq(GeoMonitorJob::getId, job.getId())
