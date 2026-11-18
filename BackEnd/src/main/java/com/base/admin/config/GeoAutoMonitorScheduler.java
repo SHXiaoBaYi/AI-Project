@@ -2,6 +2,7 @@ package com.base.admin.config;
 
 import com.base.admin.domain.entity.GeoMonitorRun;
 import com.base.admin.service.GeoAutoMonitorExecutor;
+import com.base.admin.service.GeoMonitorWorkerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -22,6 +23,7 @@ public class GeoAutoMonitorScheduler implements ApplicationRunner {
 
     private final GeoAutoMonitorProperties properties;
     private final GeoAutoMonitorExecutor executor;
+    private final GeoMonitorWorkerService workerService;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -38,6 +40,11 @@ public class GeoAutoMonitorScheduler implements ApplicationRunner {
             return;
         }
         try {
+            workerService.sweep();
+        } catch (Exception e) {
+            log.warn("本机采集队列回收失败：{}", e.getMessage());
+        }
+        try {
             executor.forEachDueTask(task -> {
                 if (executor.isRunning(task.getId())) {
                     return;
@@ -46,6 +53,9 @@ public class GeoAutoMonitorScheduler implements ApplicationRunner {
                     GeoMonitorRun run = executor.startRun(task.getId(), GeoMonitorRun.TRIGGER_SCHEDULED);
                     log.info("自动监测定时触发：taskId={} runId={}", task.getId(), run.getId());
                 } catch (Exception e) {
+                    if (e.getMessage() != null && e.getMessage().contains("进行中")) {
+                        return;
+                    }
                     // 触发失败（如厂商未配置）：顺延下次运行，避免每 30s 反复报错
                     log.warn("自动监测任务触发失败 taskId={}：{}", task.getId(), e.getMessage());
                     executor.scheduleNextRun(task.getId());

@@ -48,4 +48,24 @@ public class GeoAutoMonitorProperties {
 
     /** 送裁判的回答原文最大字符数（超长截断） */
     private int answerMaxChars = 8000;
+
+    /**
+     * 本机 Windows 采集。开启后，定时和手动运行只把题目放进队列，
+     * 由办公电脑上的 Chrome 用户目录提问；服务器不再为这批任务启动浏览器。
+     */
+    private Worker worker = new Worker();
+
+    @Data
+    public static class Worker {
+        /** 关闭后回退到服务器进程内的 Playwright */
+        private boolean enabled = true;
+        /** 边缘 worker 令牌，只放环境变量 GEO_WORKER_TOKEN */
+        private String token = "";
+        /** 一题领取后必须回传的时限（毫秒） */
+        private long leaseMs = 900_000L;
+        /** 心跳超过该时间视为离线（毫秒） */
+        private long offlineMs = 90_000L;
+        /** 同一题连续失败达到该次数后记为调用失败，不再重试 */
+        private int maxAttempts = 3;
+    }
 }

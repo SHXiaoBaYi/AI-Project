@@ -39,6 +39,8 @@ springdoc:
 geo:
   auto-monitor:
     browser:
+      # 测试机不跑浏览器。提问由办公电脑的 Chrome 用户目录完成。
+      enabled: false
       headless: false
       executable-path: ${GEO_BROWSER_PATH:/usr/bin/google-chrome-stable}
       # DS 登录页不在对话首页。直接打开 sign_in，避免把「登录」按钮当成入口先点掉。

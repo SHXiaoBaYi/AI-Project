@@ -4,6 +4,13 @@ import { getToken, removeToken } from '@/utils/auth';
 import { withBase } from '@/utils/basePath';
 import type { ApiResult } from '@/types/api';
 
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    /** 为 true 时失败不弹出全局 message，调用方自己处理 */
+    silent?: boolean;
+  }
+}
+
 const HTTP_UNAUTHORIZED = 401;
 const HTTP_FORBIDDEN = 403;
 const HTTP_SUCCESS = 200;
@@ -104,7 +111,9 @@ service.interceptors.response.use(
       return Promise.reject(new Error(res.msg));
     }
     if (res.code !== HTTP_SUCCESS) {
-      message.error(res.msg || '请求失败');
+      if (!(response.config as { silent?: boolean }).silent) {
+        message.error(res.msg || '请求失败');
+      }
       return Promise.reject(new Error(res.msg || '请求失败'));
     }
     return res.data as any;
@@ -129,7 +138,7 @@ service.interceptors.response.use(
       handleAuthError(body.code, body.msg);
       return Promise.reject(error);
     }
-    if (!handleAuthError(httpStatus)) {
+    if (!handleAuthError(httpStatus) && !(error.config as { silent?: boolean } | undefined)?.silent) {
       const raw = error.message || '';
       const msg =
         error.code === 'ECONNABORTED' || /timeout/i.test(raw)

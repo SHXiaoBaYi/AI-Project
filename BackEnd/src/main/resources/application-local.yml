@@ -42,3 +42,6 @@ geo:
     browser:
       headless: false
       executable-path: "${GEO_BROWSER_PATH:C:/Program Files/Google/Chrome/Application/chrome.exe}"
+    # 本机后端联调 worker 用。连测试 ECS 时令牌以 ECS 环境变量为准，不要用这个默认值。
+    worker:
+      token: ${GEO_WORKER_TOKEN:local-dev-worker}

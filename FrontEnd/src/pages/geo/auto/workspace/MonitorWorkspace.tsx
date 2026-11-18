@@ -24,10 +24,11 @@ import {
   getGeoAutoQuestionOptionsApi,
   getGeoAutoResultListApi,
   getGeoAutoTaskListApi,
+  listGeoWorkersApi,
   runGeoAutoTaskApi,
   toggleGeoAutoTaskApi,
 } from '@/api/geoAuto';
-import type { GeoAutoQuestionOption, GeoAutoResult, GeoAutoTask } from '@/types/geoAuto';
+import type { GeoAutoQuestionOption, GeoAutoResult, GeoAutoTask, GeoWorkerBoard } from '@/types/geoAuto';
 import type { GeoTopic } from '@/types/geo';
 import { GEO_AUTO_RESULT_STATUS_MAP, GEO_AUTO_RUN_STATUS_MAP } from '@/constants/geoAuto';
 import ResultDetailDrawer from '../results/components/ResultDetailDrawer';
@@ -118,6 +119,7 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [runsTask, setRunsTask] = useState<GeoAutoTask | null>(null);
   const [probeOpen, setProbeOpen] = useState(false);
+  const [workerBoard, setWorkerBoard] = useState<GeoWorkerBoard | null>(null);
 
   const selected = useMemo(() => tasks.find((t) => t.id === selectedId) ?? null, [tasks, selectedId]);
 
@@ -150,6 +152,26 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
+
+  useEffect(() => {
+    let stop = false;
+    const tick = async () => {
+      try {
+        const board = await listGeoWorkersApi();
+        if (!stop) setWorkerBoard(board);
+      } catch {
+        if (!stop) setWorkerBoard(null);
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => {
+      void tick();
+    }, 15000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     getGeoTopicOptionsApi()
@@ -350,6 +372,15 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
           >
             添加
           </PermissionButton>
+        </div>
+        <div className='px-3 pb-2 text-[11px] leading-5 text-neutral-500'>
+          {(workerBoard?.nodes || []).some((item) => item.online)
+            ? `本机采集在线：${(workerBoard?.nodes || [])
+                .filter((item) => item.online)
+                .map((item) => item.nodeName)
+                .join('、')}`
+            : '本机采集未在线。运行后会排队，直到这台电脑的 worker 启动。'}
+          {workerBoard && workerBoard.pendingJobs > 0 ? ` 排队 ${workerBoard.pendingJobs} 题。` : ''}
         </div>
         <div className='px-3 pb-2'>
           <Input

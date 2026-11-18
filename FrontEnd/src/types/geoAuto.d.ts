@@ -347,3 +347,20 @@ export interface GeoBrowserAccountVO {
   error?: string;
   failCount?: number;
 }
+
+/** 一台办公电脑上的采集进程 */
+export interface GeoWorkerNode {
+  nodeName: string;
+  lastSeen?: string;
+  online: boolean;
+  currentJobId?: number;
+  currentAccountId?: number;
+  version?: string;
+}
+
+/** 自动监测页上的本机采集状态 */
+export interface GeoWorkerBoard {
+  nodes: GeoWorkerNode[];
+  pendingJobs: number;
+  leasedJobs: number;
+}

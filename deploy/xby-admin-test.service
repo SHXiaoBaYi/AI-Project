@@ -7,6 +7,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/xby-admin
 Environment=SPRING_PROFILES_ACTIVE=test
+Environment=GEO_WORKER_TOKEN=b5332cc1741ef81d5abe806c683b01337e069306cccf3430
 ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/xby-admin/base-admin-1.0.0.jar --spring.config.additional-location=optional:file:/opt/xby-admin/config/
 SuccessExitStatus=143
 Restart=always

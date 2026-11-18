@@ -90,6 +90,7 @@ public class GeoSchemaMigrator implements ApplicationRunner {
             ensureAutoMonitorColumns(connection);
             ensureAutoMonitorEvidenceColumns(connection);
             ensureBrowserAccountAndBatchColumns(connection);
+            ensureEdgeWorker(connection);
             ensureAutoMonitorMenus(connection);
             if (cleanupEmptyDaily) {
                 cleanupEmptyUninspectedDailyBeforeToday(connection);
@@ -293,6 +294,77 @@ public class GeoSchemaMigrator implements ApplicationRunner {
                 }
                 log.info("已为 geo_monitor_run 增加 uk_geo_run_external");
             }
+        }
+    }
+
+    /**
+     * 本机边缘采集：账号归属哪台电脑，以及提问队列、心跳。可重复执行。
+     */
+    private void ensureEdgeWorker(Connection connection) throws Exception {
+        if (tableExists(connection, "geo_platform_account")
+                && !columnExists(connection, "geo_platform_account", "worker_node")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("ALTER TABLE geo_platform_account ADD COLUMN worker_node VARCHAR(64) NOT NULL DEFAULT '' "
+                        + "COMMENT '本机采集电脑名称，登录方式为 PROFILE 时必填'");
+            }
+            log.info("已为 geo_platform_account 增加 worker_node 列");
+        }
+        if (!tableExists(connection, "geo_monitor_job")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_monitor_job (
+                          id              BIGINT       NOT NULL AUTO_INCREMENT,
+                          run_id          BIGINT       NOT NULL,
+                          task_id         BIGINT       NOT NULL,
+                          question_id     BIGINT       NOT NULL,
+                          question_text   VARCHAR(512) NOT NULL DEFAULT '',
+                          platform_id     BIGINT       NULL,
+                          platform_name   VARCHAR(64)  NOT NULL DEFAULT '',
+                          account_id      BIGINT       NULL,
+                          status          VARCHAR(16)  NOT NULL DEFAULT 'PENDING',
+                          lease_owner     VARCHAR(64)  NOT NULL DEFAULT '',
+                          lease_until     DATETIME     NULL,
+                          attempt         INT          NOT NULL DEFAULT 0,
+                          error_msg       VARCHAR(500) NOT NULL DEFAULT '',
+                          result_id       BIGINT       NULL,
+                          deep_think      TINYINT      NOT NULL DEFAULT 0,
+                          screenshot_mode VARCHAR(16)  NOT NULL DEFAULT 'MENTION',
+                          probe_region    VARCHAR(64)  NOT NULL DEFAULT '',
+                          create_by       VARCHAR(64)  NULL DEFAULT '',
+                          create_time     DATETIME     NULL,
+                          update_by       VARCHAR(64)  NULL DEFAULT '',
+                          update_time     DATETIME     NULL,
+                          is_active       TINYINT      NOT NULL DEFAULT 1,
+                          PRIMARY KEY (id),
+                          KEY idx_geo_job_status (status, id),
+                          KEY idx_geo_job_run (run_id)
+                        ) COMMENT='GEO自动监测-本机采集队列'
+                        """);
+            }
+            log.info("已创建 geo_monitor_job");
+        }
+        if (!tableExists(connection, "geo_monitor_worker")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        CREATE TABLE geo_monitor_worker (
+                          id                  BIGINT       NOT NULL AUTO_INCREMENT,
+                          node_name           VARCHAR(64)  NOT NULL,
+                          last_seen           DATETIME     NULL,
+                          current_job_id      BIGINT       NULL,
+                          current_account_id  BIGINT       NULL,
+                          version             VARCHAR(32)  NOT NULL DEFAULT '',
+                          remark              VARCHAR(255) NOT NULL DEFAULT '',
+                          create_by           VARCHAR(64)  NULL DEFAULT '',
+                          create_time         DATETIME     NULL,
+                          update_by           VARCHAR(64)  NULL DEFAULT '',
+                          update_time         DATETIME     NULL,
+                          is_active           TINYINT      NOT NULL DEFAULT 1,
+                          PRIMARY KEY (id),
+                          UNIQUE KEY uk_geo_worker_node (node_name)
+                        ) COMMENT='GEO自动监测-本机采集进程'
+                        """);
+            }
+            log.info("已创建 geo_monitor_worker");
         }
     }
 

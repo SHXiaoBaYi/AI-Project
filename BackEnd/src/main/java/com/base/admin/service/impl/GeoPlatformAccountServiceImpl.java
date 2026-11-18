@@ -130,6 +130,7 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
         row.setLastLoginTime(dto.getLastLoginTime());
         row.setBrowserEnabled(dto.getBrowserEnabled() != null && dto.getBrowserEnabled() == 1 ? 1 : 0);
         row.setBrowserLoginType(normalizeLoginType(dto.getBrowserLoginType()));
+        row.setWorkerNode(normalizeWorkerNode(dto.getWorkerNode(), row));
         row.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : 0);
         row.setRemark(dto.getRemark());
     }
@@ -206,6 +207,7 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
         vo.setLastLoginTime(row.getLastLoginTime());
         vo.setBrowserEnabled(row.getBrowserEnabled());
         vo.setBrowserLoginType(row.getBrowserLoginType());
+        vo.setWorkerNode(row.getWorkerNode());
         vo.setBrowserLoginStatus(row.getBrowserLoginStatus());
         vo.setBrowserStatePath(row.getBrowserStatePath());
         vo.setBrowserLoginAt(row.getBrowserLoginAt());
@@ -224,9 +226,29 @@ public class GeoPlatformAccountServiceImpl implements GeoPlatformAccountService 
         return STATUS_NORMAL;
     }
 
-    /** 只接受两种可执行的登录方式，其余按账号密码处理 */
+    /** 账号密码、手工登录态，或本机 Chrome 用户目录 */
     private static String normalizeLoginType(String raw) {
-        return "STORAGE_STATE".equalsIgnoreCase(nz(raw).trim()) ? "STORAGE_STATE" : "PASSWORD";
+        String value = nz(raw).trim();
+        if ("STORAGE_STATE".equalsIgnoreCase(value)) {
+            return "STORAGE_STATE";
+        }
+        if ("PROFILE".equalsIgnoreCase(value)) {
+            return "PROFILE";
+        }
+        return "PASSWORD";
+    }
+
+    private static String normalizeWorkerNode(String raw, GeoPlatformAccount row) {
+        String node = nz(raw).trim();
+        if (StringUtils.hasText(node) && !node.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) {
+            throw new BusinessException("采集电脑名称只能包含字母、数字、点、下划线和中划线");
+        }
+        if (row.getBrowserEnabled() != null && row.getBrowserEnabled() == 1
+                && "PROFILE".equals(row.getBrowserLoginType())
+                && !StringUtils.hasText(node)) {
+            throw new BusinessException("本机 Chrome 登录必须填写采集电脑名称，例如 office-pc-01");
+        }
+        return node;
     }
 
     private static String maskPassword(String password) {

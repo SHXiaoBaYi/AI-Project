@@ -85,8 +85,11 @@ public class GeoPlatformAccountListVO {
     @Schema(description = "是否用于浏览器自动监测 1=是 0=否")
     private Integer browserEnabled;
 
-    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE")
+    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE/PROFILE")
     private String browserLoginType;
+
+    @Schema(description = "本机采集电脑名称")
+    private String workerNode;
 
     @Schema(description = "浏览器登录态：NONE/READY/FAILED/EXPIRED")
     private String browserLoginStatus;

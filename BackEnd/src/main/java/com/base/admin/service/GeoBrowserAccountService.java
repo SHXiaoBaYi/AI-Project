@@ -33,6 +33,8 @@ public class GeoBrowserAccountService {
 
     public static final String LOGIN_PASSWORD = "PASSWORD";
     public static final String LOGIN_STORAGE_STATE = "STORAGE_STATE";
+    /** 登录态留在某台 Windows 的 Chrome 用户目录里，不上传到服务器 */
+    public static final String LOGIN_PROFILE = "PROFILE";
 
     public static final String STATE_NONE = "NONE";
     public static final String STATE_READY = "READY";
@@ -85,6 +87,9 @@ public class GeoBrowserAccountService {
             return false;
         }
         String type = StringUtils.hasText(account.getBrowserLoginType()) ? account.getBrowserLoginType() : LOGIN_PASSWORD;
+        if (LOGIN_PROFILE.equalsIgnoreCase(type)) {
+            return false;
+        }
         if (LOGIN_STORAGE_STATE.equalsIgnoreCase(type)) {
             if (STATE_EXPIRED.equals(account.getBrowserLoginStatus())) {
                 return false;
@@ -236,16 +241,36 @@ public class GeoBrowserAccountService {
         }
     }
 
-    /** 密码号：READY 且未超过缓存时间。人工登录态：READY 且文件还在，不按 12 小时作废。 */
+    /** 密码号：READY 且未超过缓存时间。人工登录态和本机 profile：READY 即可，不按 12 小时作废。 */
     public boolean isReady(GeoPlatformAccount account) {
-        if (!stateFileExists(account) || !STATE_READY.equals(account.getBrowserLoginStatus())) {
+        if (account == null || !STATE_READY.equals(account.getBrowserLoginStatus())) {
             return false;
         }
         String type = StringUtils.hasText(account.getBrowserLoginType()) ? account.getBrowserLoginType() : LOGIN_PASSWORD;
+        if (LOGIN_PROFILE.equalsIgnoreCase(type)) {
+            return true;
+        }
+        if (!stateFileExists(account)) {
+            return false;
+        }
         if (LOGIN_STORAGE_STATE.equalsIgnoreCase(type)) {
             return true;
         }
         return !isExpired(account);
+    }
+
+    /** 本机窗口登录成功。不写 storageState 文件。 */
+    public void markProfileReady(GeoPlatformAccount account) {
+        accountMapper.update(null, new LambdaUpdateWrapper<GeoPlatformAccount>()
+                .eq(GeoPlatformAccount::getId, account.getId())
+                .set(GeoPlatformAccount::getBrowserLoginStatus, STATE_READY)
+                .set(GeoPlatformAccount::getBrowserLoginAt, LocalDateTime.now())
+                .set(GeoPlatformAccount::getBrowserLoginError, "")
+                .set(GeoPlatformAccount::getBrowserLoginFailCount, 0)
+                .set(GeoPlatformAccount::getLastLoginTime, LocalDateTime.now()));
+        account.setBrowserLoginStatus(STATE_READY);
+        account.setBrowserLoginError("");
+        account.setBrowserLoginFailCount(0);
     }
 
     private static String clip(String reason) {

@@ -58,6 +58,7 @@ public class GeoAutoMonitorExecutor {
     private final GeoMonitorDailySyncService dailySyncService;
     private final GeoAutoMonitorProperties properties;
     private final ObjectMapper objectMapper;
+    private final GeoMonitorWorkerService workerService;
 
     /** 批次编排单线程：全局同一时刻只跑一个任务的一个批次，其余任务排队，避免 ECS 叠加满载 */
     private final ExecutorService runDispatcher = Executors.newSingleThreadExecutor(r -> {
@@ -79,7 +80,8 @@ public class GeoAutoMonitorExecutor {
                                   GeoMonitorJudgeService judgeService,
                                   GeoMonitorDailySyncService dailySyncService,
                                   GeoAutoMonitorProperties properties,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  GeoMonitorWorkerService workerService) {
         this.taskMapper = taskMapper;
         this.runMapper = runMapper;
         this.resultMapper = resultMapper;
@@ -91,6 +93,7 @@ public class GeoAutoMonitorExecutor {
         this.dailySyncService = dailySyncService;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.workerService = workerService;
     }
 
     public boolean isRunning(Long taskId) {
@@ -179,6 +182,17 @@ public class GeoAutoMonitorExecutor {
 
         task.setLastRunId(run.getId());
         taskMapper.updateById(task);
+
+        if (properties.getWorker().isEnabled()) {
+            try {
+                workerService.enqueue(run, task, questions, platforms);
+            } catch (RuntimeException e) {
+                markRunFailed(run.getId(), truncate(e.getMessage(), 900));
+                scheduleNextRun(task.getId());
+                throw e;
+            }
+            return run;
+        }
 
         runningTaskIds.add(taskId);
         runDispatcher.submit(() -> executeRun(run, task, questions, platforms));

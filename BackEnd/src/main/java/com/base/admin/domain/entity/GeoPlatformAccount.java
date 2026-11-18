@@ -92,8 +92,12 @@ public class GeoPlatformAccount extends BaseEntity {
     private Integer browserEnabled;
 
     /** PASSWORD=用账号密码模拟登录；STORAGE_STATE=直接使用人工导出的登录态文件 */
-    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE", example = "PASSWORD")
+    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE/PROFILE", example = "PROFILE")
     private String browserLoginType;
+
+    /** PROFILE 登录时，这个账号的 Chrome 用户目录在哪台电脑上 */
+    @Schema(description = "本机采集电脑名称", example = "office-pc-01")
+    private String workerNode;
 
     /** 自动登录成功后导出的 Playwright storageState 文件（相对 storage-state-dir） */
     @Schema(description = "浏览器登录态文件")

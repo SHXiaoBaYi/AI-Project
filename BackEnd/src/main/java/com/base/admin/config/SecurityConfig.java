@@ -46,7 +46,13 @@ public class SecurityConfig {
                                 "/geo/topic/list",
                                 "/geo/auto/tasks/list",
                                 "/geo/auto/questions/list",
-                                "/geo/auto/results/save")
+                                "/geo/auto/results/save",
+                                "/geo/auto/worker/heartbeat",
+                                "/geo/auto/worker/claim",
+                                "/geo/auto/worker/result",
+                                "/geo/auto/worker/fail",
+                                "/geo/auto/worker/accounts",
+                                "/geo/auto/worker/account-status")
                         .permitAll()
                         .requestMatchers(HttpMethod.GET, "/geo/auto/results/{id:\\d+}")
                         .permitAll()

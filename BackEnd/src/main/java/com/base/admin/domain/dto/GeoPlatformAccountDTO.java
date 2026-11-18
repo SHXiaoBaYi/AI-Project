@@ -77,8 +77,11 @@ public class GeoPlatformAccountDTO {
     @Schema(description = "是否用于浏览器自动监测 1=是 0=否", example = "0")
     private Integer browserEnabled;
 
-    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE", example = "PASSWORD")
+    @Schema(description = "浏览器登录方式：PASSWORD/STORAGE_STATE/PROFILE", example = "PROFILE")
     private String browserLoginType;
+
+    @Schema(description = "本机采集电脑名称。登录方式为 PROFILE 且启用浏览器监测时必填", example = "office-pc-01")
+    private String workerNode;
 
     @Schema(description = "排序", example = "0")
     private Integer sortOrder;

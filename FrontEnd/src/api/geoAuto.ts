@@ -22,6 +22,7 @@ import type {
   GeoBrowserLoginBoothVO,
   GeoBrowserLoginVO,
   GeoBrowserProbeVO,
+  GeoWorkerBoard,
 } from '@/types/geoAuto';
 
 // ==================== 监控问题库 ====================
@@ -188,6 +189,10 @@ export function uploadGeoAutoBrowserStateApi(platform: string, file: File) {
   return request.post<unknown, { platform: string }>('/geo/auto/browser/state', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
+}
+
+export function listGeoWorkersApi() {
+  return request.get<unknown, GeoWorkerBoard>('/geo/auto/worker/board', { silent: true });
 }
 
 export type { GeoAutoMatrixRow };

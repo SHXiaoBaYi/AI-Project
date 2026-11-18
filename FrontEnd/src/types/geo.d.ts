@@ -144,8 +144,10 @@ export interface GeoPlatformAccount {
   lastLoginTime?: string;
   /** v28 浏览器自动监测账号 */
   browserEnabled?: number;
-  /** PASSWORD / STORAGE_STATE */
+  /** PASSWORD / STORAGE_STATE / PROFILE */
   browserLoginType?: string;
+  /** 本机采集电脑名称，PROFILE 时必填 */
+  workerNode?: string;
   /** NONE / READY / FAILED / EXPIRED */
   browserLoginStatus?: string;
   browserStatePath?: string;
@@ -178,8 +180,10 @@ export interface GeoPlatformAccountDTO {
   accountStatus?: string;
   lastLoginTime?: string;
   browserEnabled?: number;
-  /** PASSWORD / STORAGE_STATE */
+  /** PASSWORD / STORAGE_STATE / PROFILE */
   browserLoginType?: string;
+  /** 本机采集电脑名称 */
+  workerNode?: string;
   sortOrder?: number;
   remark?: string;
 }

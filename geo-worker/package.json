@@ -1,0 +1,13 @@
+{
+  "name": "geo-edge-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node src/index.mjs check",
+    "login": "node src/index.mjs login",
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.49.1"
+  }
+}

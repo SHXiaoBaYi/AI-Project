@@ -29,9 +29,16 @@ const YES_NO = [
 
 /** v28 浏览器自动监测登录方式 */
 const BROWSER_LOGIN_TYPES = [
+  { label: '本机 Chrome 用户目录', value: 'PROFILE' },
   { label: '账号密码模拟登录', value: 'PASSWORD' },
   { label: '人工导出登录态（STORAGE_STATE）', value: 'STORAGE_STATE' },
 ];
+
+function browserLoginLabel(type?: string) {
+  if (type === 'PROFILE') return '本机 Chrome';
+  if (type === 'STORAGE_STATE') return '人工登录态';
+  return '账号密码登录';
+}
 
 const BROWSER_LOGIN_STATUS: Record<string, { label: string; color: string }> = {
   READY: { label: '就绪', color: 'success' },
@@ -254,7 +261,30 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
       valueType: 'select',
       fieldProps: { options: BROWSER_LOGIN_TYPES, allowClear: false },
       search: false,
-      render: (_, r) => (r.browserLoginType === 'STORAGE_STATE' ? '人工登录态' : '账号密码登录'),
+      render: (_, r) => browserLoginLabel(r.browserLoginType),
+    },
+    {
+      title: '采集电脑',
+      dataIndex: 'workerNode',
+      width: 140,
+      search: false,
+      fieldProps: { placeholder: 'office-pc-01' },
+      formItemProps: {
+        rules: [
+          ({ getFieldValue }) => ({
+            validator(_: unknown, value: string) {
+              const enabled = getFieldValue('browserEnabled');
+              const type = getFieldValue('browserLoginType');
+              const on = enabled === 1 || enabled === true;
+              if (on && type === 'PROFILE' && !String(value || '').trim()) {
+                return Promise.reject(new Error('本机 Chrome 必须填写采集电脑名称'));
+              }
+              return Promise.resolve();
+            },
+          }),
+        ],
+      },
+      render: (_, r) => r.workerNode || '-',
     },
     {
       title: '登录态',
@@ -518,6 +548,7 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
                 accountStatus: editing.accountStatus || '正常',
                 browserEnabled: editing.browserEnabled ?? 0,
                 browserLoginType: editing.browserLoginType || 'PASSWORD',
+                workerNode: editing.workerNode || '',
               }
             : {
                 platformId: fixedPlatformId,
@@ -527,7 +558,8 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
                 accountStatus: '正常',
                 loginMethod: '账号密码',
                 browserEnabled: 0,
-                browserLoginType: 'PASSWORD',
+                browserLoginType: 'PROFILE',
+                workerNode: 'office-pc-01',
               }
         }
         onFinish={async (values) => {

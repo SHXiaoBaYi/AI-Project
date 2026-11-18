@@ -157,6 +157,14 @@ geo:
       #     login-password-selector: "input[type='password']"
       #     login-submit-selectors: ["button[type='submit']", "text=/^登录$/"]
       #     login-success-selector: "[data-testid='user_avatar']"
+    # 本机 Windows 采集。开启后任务只入队，由办公电脑的 Chrome 用户目录提问。
+    # 令牌必须用环境变量 GEO_WORKER_TOKEN，不要写进仓库。
+    worker:
+      enabled: true
+      token: ${GEO_WORKER_TOKEN:}
+      lease-ms: 900000
+      offline-ms: 90000
+      max-attempts: 3
 
 # 投放联动任务启动刷数：默认关闭。开启会导致用户删除的任务在重启后被重新生成。
 task:
