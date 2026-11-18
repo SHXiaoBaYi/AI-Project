@@ -17,8 +17,8 @@
 #   rds:
 #     username: your_prod_user
 #     password: your_prod_password
-#   upload-public-base: http://47.117.113.28/shxby/api
+#   upload-public-base: https://47.117.113.28/shxby/api
 # dingtalk:
-#   h5-base-url: http://47.117.113.28/shxby
+#   h5-base-url: https://47.117.113.28/shxby
 #   robot:
 #     stream-enabled: true

@@ -129,6 +129,6 @@ ssh -i "$ECS_IDENTITY" root@47.117.132.161 'systemctl restart xby-admin && syste
 
 ```bash
 # FrontEnd/.env.development.local
-VITE_API_PROXY_TARGET=http://47.117.113.28/shxby
-VITE_UPLOAD_PUBLIC_BASE=http://47.117.113.28/shxby/api
+VITE_API_PROXY_TARGET=https://47.117.113.28/shxby
+VITE_UPLOAD_PUBLIC_BASE=https://47.117.113.28/shxby/api
 ```

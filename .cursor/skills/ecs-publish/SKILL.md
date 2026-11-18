@@ -16,9 +16,9 @@ description: >-
 | 环境 | 公网 | Profile | systemd 源 | 入口 |
 |------|------|---------|------------|------|
 | 测试 | `47.117.132.161` | `test` | `deploy/xby-admin-test.service` | http://47.117.132.161/shxby/ |
-| 生产 | `47.117.113.28` | `prod` | `deploy/xby-admin.service` | http://47.117.113.28/shxby/ |
+| 生产 | `47.117.113.28` | `prod` | `deploy/xby-admin.service` | https://47.117.113.28/shxby/ |
 
-两边布局相同：jar `/opt/xby-admin/base-admin-1.0.0.jar`，前端 `/opt/xby-admin/html/shxby/`，nginx `/etc/nginx/conf.d/xby-admin.conf`，服务名 `xby-admin`。`VITE_BASE=/shxby/`。不要自创发布路径。
+两边布局相同：jar `/opt/xby-admin/base-admin-1.0.0.jar`，前端 `/opt/xby-admin/html/shxby/`，nginx `/etc/nginx/conf.d/xby-admin.conf`，服务名 `xby-admin`。`VITE_BASE=/shxby/`。生产 nginx 用 `deploy/nginx-xby-admin-prod.conf`（HTTPS，80 跳转到 https://47.117.113.28），测试仍用 `deploy/nginx-xby-admin.conf`。不要自创发布路径。
 
 脚本：`./deploy/publish-ecs.sh test` 或 `./deploy/publish-ecs.sh prod`（也可 `./deploy/publish-ecs-test.sh`）。
 

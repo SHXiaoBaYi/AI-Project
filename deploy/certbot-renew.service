@@ -1,0 +1,9 @@
+[Unit]
+Description=Renew Let's Encrypt certificates
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Certbot 续期前会随机等待数分钟；默认 90 秒超时会把任务杀掉，证书就续不上。
+TimeoutStartSec=30min
+ExecStart=/opt/certbot/bin/certbot renew --quiet --no-random-sleep-on-renew

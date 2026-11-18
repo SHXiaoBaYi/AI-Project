@@ -32,14 +32,16 @@ fi
 if [[ "$ENV_NAME" == "test" ]]; then
   ECS_HOST="${ECS_HOST:-47.117.132.161}"
   UNIT_SRC="$ROOT/deploy/xby-admin-test.service"
+  NGINX_SRC="$ROOT/deploy/nginx-xby-admin.conf"
 else
   ECS_HOST="${ECS_HOST:-47.117.113.28}"
   UNIT_SRC="$ROOT/deploy/xby-admin.service"
+  # 生产固定 HTTPS。测试机没有这张 IP 证书，不能共用这份配置。
+  NGINX_SRC="$ROOT/deploy/nginx-xby-admin-prod.conf"
 fi
 
 ECS_USER="${ECS_USER:-root}"
 ECS_DIR="${ECS_DIR:-/opt/xby-admin}"
-NGINX_SRC="$ROOT/deploy/nginx-xby-admin.conf"
 JAR="$ROOT/BackEnd/target/base-admin-1.0.0.jar"
 DIST="$ROOT/FrontEnd/dist"
 RELEASE_FILE="$ECS_DIR/.prod-release"
@@ -206,5 +208,9 @@ if [[ "$ENV_NAME" == "prod" ]]; then
   echo "==> 已记录生产基线 $CURRENT_SHA"
 fi
 
-echo "UPLOAD_DONE  http://${ECS_HOST}/shxby/"
+if [[ "$ENV_NAME" == "prod" ]]; then
+  echo "UPLOAD_DONE  https://${ECS_HOST}/shxby/"
+else
+  echo "UPLOAD_DONE  http://${ECS_HOST}/shxby/"
+fi
 echo "请轮询 :8080 与 /shxby/、/shxby/api/auth/login 直至 200"
