@@ -173,45 +173,11 @@ public class GeoBrowserProbeService {
     private Playwright playwright;
     private Browser browser;
 
-    /** 服务器上的人工登录窗口。只在 probe 线程里读写。 */
-    private LoginBooth loginBooth;
-
-    private static final java.util.Set<String> BOOTH_KEYS = java.util.Set.of(
-            "Enter", "Backspace", "Tab", "Escape", "ArrowLeft", "ArrowRight");
-
     public GeoBrowserProbeService(GeoBrowserProbeProperties properties, ObjectMapper objectMapper,
                                   GeoBrowserAccountService accountService) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.accountService = accountService;
-    }
-
-    /**
-     * 对外：按平台账号模拟登录 / 刷新登录态。与采集共用同一个 Playwright 单线程，
-     * 避免两套浏览器实例互相抢资源；登录成功会把 storageState 落盘并回写账号状态。
-     */
-    public LoginOutcome ensureLogin(String platform, boolean forceRefresh, Long accountId) {
-        if (!properties.isEnabled()) {
-            return loginOutcomeFail(platform, "浏览器采集已关闭（geo.auto-monitor.browser.enabled=false）", new LinkedHashMap<>());
-        }
-        Future<LoginOutcome> future = probeThread.submit(() -> doEnsureLogin(platform, forceRefresh, accountId));
-        long budgetMs = properties.getLoginTimeoutMs() + properties.getNavigationTimeoutMs() + 30_000;
-        try {
-            return future.get(budgetMs, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            future.cancel(true);
-            Map<String, Object> diag = new LinkedHashMap<>();
-            diag.put("stage", "LOGIN_OUTER_TIMEOUT");
-            diag.put("timeoutMs", budgetMs);
-            return loginOutcomeFail(platform, "登录超时：超过 " + (budgetMs / 1000) + "s，请检查登录页可达性与登录适配器选择器", diag);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            future.cancel(true);
-            return loginOutcomeFail(platform, "登录被中断", new LinkedHashMap<>());
-        } catch (Exception e) {
-            future.cancel(true);
-            return loginOutcomeFail(platform, "登录异常：" + rootMessage(e), new LinkedHashMap<>());
-        }
     }
 
     private LoginOutcome loginOutcomeFail(String platform, String error, Map<String, Object> diag) {
@@ -289,8 +255,7 @@ public class GeoBrowserProbeService {
             }
             diag.put("stage", "NO_ACCOUNT");
             return loginOutcomeFail(platform,
-                    "平台「" + platform + "」未配置浏览器自动监测账号：请到「平台账号管理」把该平台账号设为「用于浏览器监测」并填写账号密码，"
-                            + "或在「采集诊断」上传 Playwright storageState（" + platform + ".json）", diag);
+                    "平台「" + platform + "」未配置浏览器自动监测账号：请到「平台账号管理」把该平台账号加入监测", diag);
         }
 
         com.base.admin.domain.entity.GeoPlatformAccount account = accOpt.get();
@@ -314,7 +279,7 @@ public class GeoBrowserProbeService {
                 return new LoginOutcome(true, "", platform, label, "STORAGE_STATE", file, "", writeJson(diag), account.getId());
             }
             diag.put("stage", "STATE_FILE_MISSING");
-            return new LoginOutcome(false, "账号「" + label + "」还没有登录态文件：请到「平台账号管理」在服务器上登录，或上传该账号的 storageState",
+            return new LoginOutcome(false, "账号「" + label + "」还没有登录态文件：请在办公电脑上登录该账号",
                     platform, label, "", null, "", writeJson(diag), account.getId());
         }
 
@@ -328,7 +293,7 @@ public class GeoBrowserProbeService {
         if (GeoBrowserAccountService.STATE_FAILED.equals(account.getBrowserLoginStatus())
                 || fails >= GeoBrowserAccountService.MAX_CONSECUTIVE_FAILS) {
             diag.put("stage", "LOGIN_PAUSED");
-            return new LoginOutcome(false, "账号「" + label + "」登录连续失败，已暂停使用。请到「平台账号管理」核对后再模拟登录",
+            return new LoginOutcome(false, "账号「" + label + "」登录连续失败，已暂停使用。请到「平台账号管理」核对后重新登录",
                     platform, label, "", null, "", writeJson(diag), account.getId());
         }
         if (!StringUtils.hasText(account.getPassword())) {
@@ -410,7 +375,7 @@ public class GeoBrowserProbeService {
                 boolean captcha = isAnyVisible(page, profile.getLoginCaptchaSelectors());
                 diag.put("captchaDetected", captcha);
                 String hint = captcha
-                        ? "该平台当前只提供扫码/短信验证码登录，无法用密码自动完成：请到「平台账号管理」对该账号使用「在服务器上登录」"
+                        ? "该平台当前只提供扫码/短信验证码登录，无法用密码自动完成：请在办公电脑上登录该账号"
                         : "未找到账号/密码输入框：请在 geo.auto-monitor.browser.profiles 按平台覆盖 login-*-selector，"
                         + "或把该账号登录方式改为 STORAGE_STATE";
                 screenshot = screenshotOnFailure(page, profile, diag);
@@ -581,10 +546,6 @@ public class GeoBrowserProbeService {
         String usedAccountLabel = "";
         boolean switchAccount = false;
         try {
-            if (loginBooth != null) {
-                throw new LoginBlockedException("服务器登录进行中，请先在「平台账号管理」结束登录",
-                        "", "", false, null, "");
-            }
             diag.put("stage", "LAUNCH_BROWSER");
             ensureBrowser();
             diag.put("stage", "ENSURE_LOGIN");
@@ -1251,20 +1212,6 @@ public class GeoBrowserProbeService {
         return storageStateFile(platform) != null;
     }
 
-    /** 保存平台登录态（Playwright storageState JSON），下次采集自动复用 */
-    public void saveStorageState(String platform, byte[] json) {
-        try {
-            Path dir = accountService.stateDir();
-            Files.createDirectories(dir);
-            String safeName = platform.replaceAll("[\\\\/:*?\"<>|]", "_");
-            Path file = dir.resolve(safeName + ".json");
-            Files.write(file, json);
-            log.info("已更新平台手工登录态 platform={} file={}（不绑定具体账号，监测任务只使用账号池）", platform, file.getFileName());
-        } catch (Exception e) {
-            throw new BusinessException("保存登录态失败：" + rootMessage(e));
-        }
-    }
-
     private boolean shouldRefreshPassword(LoginOutcome login) {
         if (login.accountId() == null || !"CACHED".equals(login.source())) {
             return false;
@@ -1313,239 +1260,9 @@ public class GeoBrowserProbeService {
     private record Opened(BrowserContext context, Page page) {
     }
 
-    private static final class LoginBooth {
-        private final long accountId;
-        private final String platform;
-        private BrowserContext context;
-        private Page page;
-        private String message = "";
-        private boolean loginDetected;
-
-        private LoginBooth(long accountId, String platform) {
-            this.accountId = accountId;
-            this.platform = platform;
-        }
-    }
-
-    /** 在服务器有界面浏览器打开该账号的平台页面，供人工完成扫码或短信。 */
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO startLoginBooth(Long accountId) {
-        return submitBooth(() -> doStartBooth(accountId), 90);
-    }
-
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO snapshotLoginBooth(Long accountId) {
-        return submitBooth(() -> doSnapshotBooth(accountId, true), 30);
-    }
-
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO inputLoginBooth(com.base.admin.domain.dto.GeoBrowserBoothInputDTO input) {
-        return submitBooth(() -> doInputBooth(input), 30);
-    }
-
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO finishLoginBooth(Long accountId) {
-        return submitBooth(() -> doFinishBooth(accountId), 60);
-    }
-
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO cancelLoginBooth(Long accountId) {
-        return submitBooth(() -> {
-            if (loginBooth != null && accountId != null && loginBooth.accountId == accountId) {
-                closeBoothQuietly();
-            }
-            com.base.admin.domain.vo.GeoBrowserLoginBoothVO vo = new com.base.admin.domain.vo.GeoBrowserLoginBoothVO();
-            vo.setAccountId(accountId);
-            vo.setPhase("CLOSED");
-            vo.setMessage("已关闭，未保存登录态");
-            return vo;
-        }, 20);
-    }
-
-    /** 把上传的 storageState 绑定到指定账号自己的文件。 */
-    public void saveAccountStorageState(Long accountId, byte[] json) {
-        com.base.admin.domain.entity.GeoPlatformAccount account = accountService.require(accountId);
-        if (account.getBrowserEnabled() == null || account.getBrowserEnabled() != 1) {
-            throw new BusinessException("请先把该账号设为用于浏览器监测");
-        }
-        accountService.installUploadedState(account, json);
-        log.info("已绑定账号登录态 accountId={} file=account-{}.json", accountId, accountId);
-    }
-
-    private com.base.admin.domain.vo.GeoBrowserLoginBoothVO submitBooth(
-            java.util.concurrent.Callable<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> call, int timeoutSec) {
-        Future<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> future = probeThread.submit(call);
-        try {
-            return future.get(timeoutSec, TimeUnit.SECONDS);
-        } catch (TimeoutException e) {
-            future.cancel(true);
-            throw new BusinessException("服务器登录操作超时");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BusinessException("服务器登录被中断");
-        } catch (Exception e) {
-            Throwable root = e.getCause() == null ? e : e.getCause();
-            if (root instanceof BusinessException business) {
-                throw business;
-            }
-            throw new BusinessException("服务器登录失败：" + rootMessage(root));
-        }
-    }
-
-    private com.base.admin.domain.vo.GeoBrowserLoginBoothVO doStartBooth(Long accountId) {
-        if (accountId == null) {
-            throw new BusinessException("请指定平台账号");
-        }
-        com.base.admin.domain.entity.GeoPlatformAccount account = accountService.require(accountId);
-        if (account.getBrowserEnabled() == null || account.getBrowserEnabled() != 1) {
-            throw new BusinessException("请先把该账号设为用于浏览器监测");
-        }
-        GeoBrowserProbeProperties.PlatformProfile profile = properties.effectiveProfiles().get(account.getPlatformName());
-        if (profile == null || !StringUtils.hasText(profile.getUrl())) {
-            throw new BusinessException("平台「" + account.getPlatformName() + "」没有浏览器采集地址");
-        }
-        closeBoothQuietly();
-        ensureBrowser();
-        LoginBooth booth = new LoginBooth(account.getId(), account.getPlatformName());
-        Browser.NewContextOptions options = new Browser.NewContextOptions()
-                .setViewportSize(properties.getViewportWidth(), properties.getViewportHeight())
-                .setLocale("zh-CN");
-        if (StringUtils.hasText(properties.getUserAgent())) {
-            options.setUserAgent(properties.getUserAgent());
-        }
-        booth.context = browser.newContext(options);
-        booth.page = booth.context.newPage();
-        booth.page.setDefaultTimeout(15_000);
-        String entry = StringUtils.hasText(profile.getLoginUrl()) ? profile.getLoginUrl() : profile.getUrl();
-        booth.page.navigate(entry, new Page.NavigateOptions()
-                .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
-                .setTimeout(properties.getNavigationTimeoutMs()));
-        booth.page.waitForTimeout(800);
-        loginBooth = booth;
-        return snapshotBooth(booth, profile, false);
-    }
-
-    private com.base.admin.domain.vo.GeoBrowserLoginBoothVO doSnapshotBooth(Long accountId, boolean withImage) {
-        LoginBooth booth = requireBooth(accountId);
-        GeoBrowserProbeProperties.PlatformProfile profile = properties.effectiveProfiles().get(booth.platform);
-        return snapshotBooth(booth, profile, withImage);
-    }
-
-    private com.base.admin.domain.vo.GeoBrowserLoginBoothVO doInputBooth(com.base.admin.domain.dto.GeoBrowserBoothInputDTO input) {
-        if (input == null || input.getAccountId() == null) {
-            throw new BusinessException("请指定平台账号");
-        }
-        LoginBooth booth = requireBooth(input.getAccountId());
-        String action = input.getAction() == null ? "" : input.getAction().trim();
-        if ("click".equals(action)) {
-            double x = input.getX() == null ? 0 : input.getX();
-            double y = input.getY() == null ? 0 : input.getY();
-            int maxW = properties.getViewportWidth();
-            int maxH = properties.getViewportHeight();
-            if (x < 0 || y < 0 || x > maxW || y > maxH) {
-                throw new BusinessException("点击位置超出页面范围");
-            }
-            booth.page.mouse().click(x, y);
-        } else if ("type".equals(action)) {
-            String text = input.getText() == null ? "" : input.getText();
-            if (text.length() > 32) {
-                throw new BusinessException("一次最多输入 32 个字符");
-            }
-            text = text.replaceAll("[\\p{Cntrl}]", "");
-            if (StringUtils.hasText(text)) {
-                booth.page.keyboard().type(text);
-            }
-        } else if ("key".equals(action)) {
-            String key = input.getKey() == null ? "" : input.getKey().trim();
-            if (!BOOTH_KEYS.contains(key)) {
-                throw new BusinessException("不支持该按键");
-            }
-            booth.page.keyboard().press(key);
-        } else {
-            throw new BusinessException("不支持的操作");
-        }
-        booth.page.waitForTimeout(400);
-        GeoBrowserProbeProperties.PlatformProfile profile = properties.effectiveProfiles().get(booth.platform);
-        return snapshotBooth(booth, profile, true);
-    }
-
-    private com.base.admin.domain.vo.GeoBrowserLoginBoothVO doFinishBooth(Long accountId) {
-        LoginBooth booth = requireBooth(accountId);
-        GeoBrowserProbeProperties.PlatformProfile profile = properties.effectiveProfiles().get(booth.platform);
-        Map<String, Object> diag = new LinkedHashMap<>();
-        boolean wall = profile != null && detectLoginRequired(booth.page, profile, diag);
-        com.base.admin.domain.vo.GeoBrowserLoginBoothVO vo = snapshotBooth(booth, profile, false);
-        if (wall) {
-            vo.setLoginDetected(false);
-            vo.setMessage("页面仍显示登录，未保存。请先完成验证码或扫码");
-            booth.message = vo.getMessage();
-            return vo;
-        }
-        try {
-            com.base.admin.domain.entity.GeoPlatformAccount account = accountService.require(accountId);
-            Path file = accountService.accountStateFile(account);
-            if (!file.getFileName().toString().startsWith("account-")) {
-                file = accountService.stateDir().resolve("account-" + account.getId() + ".json");
-            }
-            Files.createDirectories(file.getParent());
-            booth.context.storageState(new BrowserContext.StorageStateOptions().setPath(file));
-            accountService.markReady(account, file);
-            vo.setPhase("SAVED");
-            vo.setLoginDetected(true);
-            vo.setMessage("登录态已保存到该账号，监测任务会从候选池里抽取");
-            closeBoothQuietly();
-            return vo;
-        } catch (Exception e) {
-            throw new BusinessException("保存登录态失败：" + rootMessage(e));
-        }
-    }
-
-    private LoginBooth requireBooth(Long accountId) {
-        if (loginBooth == null || accountId == null || loginBooth.accountId != accountId) {
-            throw new BusinessException("服务器登录窗口未打开");
-        }
-        return loginBooth;
-    }
-
-    private com.base.admin.domain.vo.GeoBrowserLoginBoothVO snapshotBooth(LoginBooth booth,
-                                                                          GeoBrowserProbeProperties.PlatformProfile profile,
-                                                                          boolean withImage) {
-        com.base.admin.domain.vo.GeoBrowserLoginBoothVO vo = new com.base.admin.domain.vo.GeoBrowserLoginBoothVO();
-        vo.setAccountId(booth.accountId);
-        vo.setPlatform(booth.platform);
-        vo.setPhase("OPEN");
-        vo.setViewportWidth(properties.getViewportWidth());
-        vo.setViewportHeight(properties.getViewportHeight());
-        Map<String, Object> diag = new LinkedHashMap<>();
-        boolean wall = profile != null && booth.page != null && detectLoginRequired(booth.page, profile, diag);
-        booth.loginDetected = !wall;
-        vo.setLoginDetected(!wall);
-        vo.setMessage(wall ? "请在画面里完成登录" : "未检测到登录按钮，可以保存");
-        if (withImage && booth.page != null) {
-            try {
-                byte[] jpeg = booth.page.screenshot(new Page.ScreenshotOptions()
-                        .setType(com.microsoft.playwright.options.ScreenshotType.JPEG)
-                        .setQuality(55));
-                vo.setImageBase64(java.util.Base64.getEncoder().encodeToString(jpeg));
-            } catch (Exception e) {
-                vo.setMessage("画面刷新失败：" + rootMessage(e));
-            }
-        }
-        return vo;
-    }
-
-    private void closeBoothQuietly() {
-        LoginBooth booth = loginBooth;
-        loginBooth = null;
-        if (booth == null || booth.context == null) {
-            return;
-        }
-        try {
-            booth.context.close();
-        } catch (Exception ignored) {
-            // 关闭失败不影响下次打开
-        }
-    }
-
     @PreDestroy
     public void shutdown() {
         probeThread.shutdownNow();
-        closeBoothQuietly();
         closeBrowserQuietly();
     }
 

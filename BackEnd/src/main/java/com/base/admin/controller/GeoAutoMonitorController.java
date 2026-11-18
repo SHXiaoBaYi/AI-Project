@@ -4,7 +4,6 @@ import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
 import com.base.admin.common.PageResult;
 import com.base.admin.common.Result;
-import com.base.admin.domain.dto.GeoAutoBrowserLoginDTO;
 import com.base.admin.domain.dto.GeoAutoProbeDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionEnabledDTO;
@@ -24,7 +23,6 @@ import com.base.admin.domain.vo.GeoAutoResultVO;
 import com.base.admin.domain.vo.GeoAutoSeedResultVO;
 import com.base.admin.domain.vo.GeoAutoTaskVO;
 import com.base.admin.domain.vo.GeoBrowserAccountVO;
-import com.base.admin.domain.vo.GeoBrowserLoginVO;
 import com.base.admin.domain.vo.GeoBrowserProbeVO;
 import com.base.admin.service.GeoAutoExternalResultService;
 import com.base.admin.service.GeoAutoMonitorService;
@@ -247,14 +245,6 @@ public class GeoAutoMonitorController {
         return Result.ok(autoMonitorService.probeOnce(dto));
     }
 
-    @Operation(summary = "用系统维护的平台账号在服务器无头浏览器模拟登录，导出并缓存登录态")
-    @PostMapping("/browser/login")
-    @RequiresPermission({"geo:auto:task:run", "geo:platformAccount:edit"})
-    @Log(title = "GEO自动监测-平台账号模拟登录", businessType = 2)
-    public Result<GeoBrowserLoginVO> browserLogin(@Valid @RequestBody GeoAutoBrowserLoginDTO dto) {
-        return Result.ok(autoMonitorService.browserLogin(dto));
-    }
-
     @Operation(summary = "各平台浏览器自动监测账号与登录态就绪状态")
     @GetMapping("/browser/accounts")
     @RequiresPermission({"geo:auto:task:list", "geo:platformAccount:list"})
@@ -272,64 +262,4 @@ public class GeoAutoMonitorController {
         return Result.ok(Map.of("screenshotUrl", stored));
     }
 
-    @Operation(summary = "打开服务器登录窗口（扫码/短信），画面只返回给当前操作者")
-    @PostMapping("/browser/booth/start")
-    @RequiresPermission("geo:platformAccount:edit")
-    @Log(title = "GEO自动监测-服务器登录", businessType = 2)
-    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> startLoginBooth(
-            @Valid @RequestBody com.base.admin.domain.dto.GeoBrowserBoothInputDTO dto) {
-        return Result.ok(autoMonitorService.startLoginBooth(dto.getAccountId()));
-    }
-
-    @Operation(summary = "刷新服务器登录窗口画面")
-    @GetMapping("/browser/booth")
-    @RequiresPermission("geo:platformAccount:edit")
-    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> snapshotLoginBooth(@RequestParam Long accountId) {
-        return Result.ok(autoMonitorService.snapshotLoginBooth(accountId));
-    }
-
-    @Operation(summary = "向服务器登录窗口发送点击或输入")
-    @PostMapping("/browser/booth/input")
-    @RequiresPermission("geo:platformAccount:edit")
-    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> inputLoginBooth(
-            @Valid @RequestBody com.base.admin.domain.dto.GeoBrowserBoothInputDTO dto) {
-        return Result.ok(autoMonitorService.inputLoginBooth(dto));
-    }
-
-    @Operation(summary = "登录完成后保存该账号自己的登录态")
-    @PostMapping("/browser/booth/finish")
-    @RequiresPermission("geo:platformAccount:edit")
-    @Log(title = "GEO自动监测-保存服务器登录态", businessType = 2)
-    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> finishLoginBooth(
-            @Valid @RequestBody com.base.admin.domain.dto.GeoBrowserBoothInputDTO dto) {
-        return Result.ok(autoMonitorService.finishLoginBooth(dto.getAccountId()));
-    }
-
-    @Operation(summary = "关闭服务器登录窗口且不保存")
-    @PostMapping("/browser/booth/cancel")
-    @RequiresPermission("geo:platformAccount:edit")
-    public Result<com.base.admin.domain.vo.GeoBrowserLoginBoothVO> cancelLoginBooth(
-            @Valid @RequestBody com.base.admin.domain.dto.GeoBrowserBoothInputDTO dto) {
-        return Result.ok(autoMonitorService.cancelLoginBooth(dto.getAccountId()));
-    }
-
-    @Operation(summary = "把 storageState 绑定到指定平台账号")
-    @PostMapping("/browser/state/account")
-    @RequiresPermission("geo:platformAccount:edit")
-    @Log(title = "GEO自动监测-绑定账号登录态", businessType = 2)
-    public Result<Map<String, Long>> uploadAccountBrowserState(@RequestParam("accountId") Long accountId,
-                                                               @RequestParam("file") MultipartFile file) {
-        autoMonitorService.saveAccountBrowserState(accountId, file);
-        return Result.ok(Map.of("accountId", accountId));
-    }
-
-    @Operation(summary = "上传平台网页版登录态（Playwright storageState JSON）")
-    @PostMapping("/browser/state")
-    @RequiresPermission("geo:auto:task:edit")
-    @Log(title = "GEO自动监测-更新平台登录态", businessType = 2)
-    public Result<Map<String, String>> uploadBrowserState(@RequestParam("platform") String platform,
-                                                          @RequestParam("file") MultipartFile file) {
-        String name = autoMonitorService.saveBrowserState(platform, file);
-        return Result.ok(Map.of("platform", name));
-    }
 }

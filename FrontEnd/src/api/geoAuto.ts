@@ -1,7 +1,6 @@
 import request from './request';
 import type { PageQuery, PageResult } from '@/types/api';
 import type {
-  GeoAutoBrowserLoginDTO,
   GeoAutoMatrixRow,
   GeoAutoPlatformOption,
   GeoAutoProbeDTO,
@@ -19,8 +18,6 @@ import type {
   GeoAutoTaskDTO,
   GeoAutoTaskQuery,
   GeoBrowserAccountVO,
-  GeoBrowserLoginBoothVO,
-  GeoBrowserLoginVO,
   GeoBrowserProbeVO,
   GeoWorkerBoard,
 } from '@/types/geoAuto';
@@ -133,66 +130,9 @@ export function uploadGeoAutoScreenshotApi(resultId: number, file: File) {
   });
 }
 
-/** v28 用系统维护的平台账号在服务器有界面浏览器模拟登录并刷新登录态 */
-export function browserLoginGeoAutoApi(data: GeoAutoBrowserLoginDTO) {
-  return request.post<unknown, GeoBrowserLoginVO>('/geo/auto/browser/login', data);
-}
-
-/** v28 各平台浏览器自动监测账号与登录态就绪状态 */
+/** 各平台浏览器自动监测账号与登录态就绪状态 */
 export function getGeoAutoBrowserAccountsApi() {
   return request.get<unknown, GeoBrowserAccountVO[]>('/geo/auto/browser/accounts');
-}
-
-/** 打开服务器登录窗口 */
-export function startGeoBrowserBoothApi(accountId: number) {
-  return request.post<unknown, GeoBrowserLoginBoothVO>('/geo/auto/browser/booth/start', { accountId });
-}
-
-/** 刷新服务器登录窗口画面 */
-export function snapshotGeoBrowserBoothApi(accountId: number) {
-  return request.get<unknown, GeoBrowserLoginBoothVO>('/geo/auto/browser/booth', { params: { accountId } });
-}
-
-/** 向服务器登录窗口发送点击或输入 */
-export function inputGeoBrowserBoothApi(data: {
-  accountId: number;
-  action: 'click' | 'type' | 'key';
-  x?: number;
-  y?: number;
-  text?: string;
-  key?: string;
-}) {
-  return request.post<unknown, GeoBrowserLoginBoothVO>('/geo/auto/browser/booth/input', data);
-}
-
-/** 登录完成后保存该账号自己的登录态 */
-export function finishGeoBrowserBoothApi(accountId: number) {
-  return request.post<unknown, GeoBrowserLoginBoothVO>('/geo/auto/browser/booth/finish', { accountId });
-}
-
-/** 关闭服务器登录窗口且不保存 */
-export function cancelGeoBrowserBoothApi(accountId: number) {
-  return request.post<unknown, GeoBrowserLoginBoothVO>('/geo/auto/browser/booth/cancel', { accountId });
-}
-
-/** 把 storageState 绑定到指定平台账号 */
-export function uploadAccountBrowserStateApi(accountId: number, file: File) {
-  const formData = new FormData();
-  formData.append('accountId', String(accountId));
-  formData.append('file', file);
-  return request.post<unknown, { accountId: number }>('/geo/auto/browser/state/account', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-}
-
-/** 上传平台登录态 storageState JSON */
-export function uploadGeoAutoBrowserStateApi(platform: string, file: File) {
-  const formData = new FormData();
-  formData.append('platform', platform);
-  formData.append('file', file);
-  return request.post<unknown, { platform: string }>('/geo/auto/browser/state', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
 }
 
 export function listGeoWorkersApi() {

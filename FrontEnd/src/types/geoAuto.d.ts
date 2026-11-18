@@ -300,40 +300,7 @@ export interface GeoBrowserProbeVO {
   diagnostic?: string;
 }
 
-/** v28 平台账号模拟登录入参 */
-export interface GeoAutoBrowserLoginDTO {
-  platform: string;
-  forceRefresh?: boolean;
-  accountId?: number;
-}
-
-/** 服务器登录窗口快照 */
-export interface GeoBrowserLoginBoothVO {
-  accountId?: number;
-  platform?: string;
-  /** OPEN / SAVED / CLOSED */
-  phase?: string;
-  loginDetected?: boolean;
-  message?: string;
-  imageBase64?: string;
-  viewportWidth?: number;
-  viewportHeight?: number;
-}
-
-/** v28 平台账号模拟登录结果 */
-export interface GeoBrowserLoginVO {
-  success: boolean;
-  error?: string;
-  platform: string;
-  accountLabel?: string;
-  /** CACHED / PASSWORD_LOGIN / STORAGE_STATE / MANUAL_UPLOAD */
-  source?: string;
-  statePath?: string;
-  screenshotUrl?: string;
-  diagnostic?: string;
-}
-
-/** v28 各平台浏览器自动监测账号就绪状态 */
+/** 各平台浏览器自动监测账号就绪状态 */
 export interface GeoBrowserAccountVO {
   platform: string;
   accountId: number;

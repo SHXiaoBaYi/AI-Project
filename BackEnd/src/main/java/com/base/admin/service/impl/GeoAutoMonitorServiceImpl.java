@@ -5,7 +5,6 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.base.admin.common.PageResult;
 import com.base.admin.config.GeoAutoMonitorProperties;
-import com.base.admin.domain.dto.GeoAutoBrowserLoginDTO;
 import com.base.admin.domain.dto.GeoAutoProbeDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionQueryDTO;
@@ -29,7 +28,6 @@ import com.base.admin.domain.vo.GeoAutoResultVO;
 import com.base.admin.domain.vo.GeoAutoSeedResultVO;
 import com.base.admin.domain.vo.GeoAutoTaskVO;
 import com.base.admin.domain.vo.GeoBrowserAccountVO;
-import com.base.admin.domain.vo.GeoBrowserLoginVO;
 import com.base.admin.domain.vo.GeoBrowserProbeVO;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.mapper.GeoContentPlacementMapper;
@@ -452,22 +450,6 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
     }
 
     @Override
-    public GeoBrowserLoginVO browserLogin(GeoAutoBrowserLoginDTO dto) {
-        GeoBrowserProbeService.LoginOutcome outcome = probeService.ensureLogin(
-                dto.getPlatform().trim(), Boolean.TRUE.equals(dto.getForceRefresh()), dto.getAccountId());
-        GeoBrowserLoginVO vo = new GeoBrowserLoginVO();
-        vo.setSuccess(outcome.success());
-        vo.setError(outcome.error());
-        vo.setPlatform(outcome.platform());
-        vo.setAccountLabel(outcome.accountLabel());
-        vo.setSource(outcome.source());
-        vo.setStatePath(outcome.statePath() == null ? "" : outcome.statePath().toString());
-        vo.setScreenshotUrl(outcome.screenshotUrl());
-        vo.setDiagnostic(outcome.diagnostic());
-        return vo;
-    }
-
-    @Override
     public List<GeoBrowserAccountVO> browserAccountStatus() {
         return accountService.statusList();
     }
@@ -484,75 +466,6 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
         result.setScreenshotType("MANUAL");
         resultMapper.updateById(result);
         return stored;
-    }
-
-    /** 上传平台登录态 storageState（Playwright 导出的 JSON），供后续采集复用 */
-    @Override
-    public String saveBrowserState(String platform, MultipartFile file) {
-        if (!StringUtils.hasText(platform)) {
-            throw new BusinessException("平台名不能为空");
-        }
-        if (file == null || file.isEmpty()) {
-            throw new BusinessException("请选择 storageState JSON 文件");
-        }
-        try {
-            byte[] bytes = file.getBytes();
-            objectMapper.readTree(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
-            probeService.saveStorageState(platform.trim(), bytes);
-            return platform.trim();
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new BusinessException("登录态文件保存失败：" + e.getMessage());
-        }
-    }
-
-    @Override
-    public void saveAccountBrowserState(Long accountId, MultipartFile file) {
-        if (accountId == null) {
-            throw new BusinessException("请指定平台账号");
-        }
-        if (file == null || file.isEmpty()) {
-            throw new BusinessException("请选择 storageState JSON 文件");
-        }
-        try {
-            byte[] bytes = file.getBytes();
-            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(bytes);
-            com.fasterxml.jackson.databind.JsonNode cookies = root.get("cookies");
-            if (cookies == null || !cookies.isArray() || cookies.isEmpty()) {
-                throw new BusinessException("登录态文件里没有 Cookie，不能加入候选");
-            }
-            probeService.saveAccountStorageState(accountId, bytes);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new BusinessException("登录态文件保存失败：" + e.getMessage());
-        }
-    }
-
-    @Override
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO startLoginBooth(Long accountId) {
-        return probeService.startLoginBooth(accountId);
-    }
-
-    @Override
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO snapshotLoginBooth(Long accountId) {
-        return probeService.snapshotLoginBooth(accountId);
-    }
-
-    @Override
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO inputLoginBooth(com.base.admin.domain.dto.GeoBrowserBoothInputDTO input) {
-        return probeService.inputLoginBooth(input);
-    }
-
-    @Override
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO finishLoginBooth(Long accountId) {
-        return probeService.finishLoginBooth(accountId);
-    }
-
-    @Override
-    public com.base.admin.domain.vo.GeoBrowserLoginBoothVO cancelLoginBooth(Long accountId) {
-        return probeService.cancelLoginBooth(accountId);
     }
 
     @Override

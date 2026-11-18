@@ -1,28 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  App,
-  Alert,
-  Button,
-  Drawer,
-  Form,
-  Image,
-  Input,
-  Select,
-  Space,
-  Spin,
-  Switch,
-  Tag,
-  Typography,
-  Upload,
-} from 'antd';
-import { CopyOutlined, ExperimentOutlined, UploadOutlined } from '@ant-design/icons';
-import {
-  browserLoginGeoAutoApi,
-  getGeoAutoBrowserAccountsApi,
-  getGeoAutoPlatformOptionsApi,
-  probeGeoAutoBrowserApi,
-  uploadGeoAutoBrowserStateApi,
-} from '@/api/geoAuto';
+import { App, Alert, Button, Drawer, Form, Image, Input, Select, Space, Spin, Switch, Tag, Typography } from 'antd';
+import { CopyOutlined, ExperimentOutlined } from '@ant-design/icons';
+import { getGeoAutoBrowserAccountsApi, getGeoAutoPlatformOptionsApi, probeGeoAutoBrowserApi } from '@/api/geoAuto';
 import { resolveUploadUrl } from '@/utils/uploadUrl';
 import { GEO_AUTO_PROBE_REGIONS } from '@/constants/geoAuto';
 import type { GeoAutoPlatformOption, GeoBrowserAccountVO, GeoBrowserProbeVO } from '@/types/geoAuto';
@@ -42,10 +21,7 @@ export default function BrowserProbeDrawer({ open, onClose }: BrowserProbeDrawer
   const [platforms, setPlatforms] = useState<GeoAutoPlatformOption[]>([]);
   const [probing, setProbing] = useState(false);
   const [result, setResult] = useState<GeoBrowserProbeVO | null>(null);
-  const [statePlatform, setStatePlatform] = useState<string>('');
-  const [uploadingState, setUploadingState] = useState(false);
   const [accounts, setAccounts] = useState<GeoBrowserAccountVO[]>([]);
-  const [loggingIn, setLoggingIn] = useState(false);
   const selectedPlatform = Form.useWatch('platform', form) as string | undefined;
 
   const loadAccounts = () =>
@@ -67,28 +43,6 @@ export default function BrowserProbeDrawer({ open, onClose }: BrowserProbeDrawer
   }, [open, form]);
 
   const currentAccount = accounts.find((a) => a.platform === selectedPlatform);
-
-  /** 用系统维护的平台账号在服务器有界面浏览器模拟登录，登录后可直接试跑 */
-  const doBrowserLogin = async () => {
-    if (!selectedPlatform) {
-      message.warning('请先选择平台');
-      return;
-    }
-    setLoggingIn(true);
-    try {
-      const res = await browserLoginGeoAutoApi({ platform: selectedPlatform, forceRefresh: true });
-      if (res.success) {
-        message.success(`登录态已刷新（${res.source || 'READY'}）`);
-      } else {
-        message.warning(res.error || '模拟登录未完成，请查看平台账号诊断');
-      }
-      await loadAccounts();
-    } catch {
-      message.error('模拟登录请求失败');
-    } finally {
-      setLoggingIn(false);
-    }
-  };
 
   const diagnosticText = useMemo(() => {
     if (!result?.diagnostic) return '';
@@ -119,23 +73,6 @@ export default function BrowserProbeDrawer({ open, onClose }: BrowserProbeDrawer
       message.error('试跑请求失败');
     } finally {
       setProbing(false);
-    }
-  };
-
-  const uploadState = async (file: File) => {
-    const platform = statePlatform || form.getFieldValue('platform');
-    if (!platform) {
-      message.warning('请先选择要上传登录态的平台');
-      return;
-    }
-    setUploadingState(true);
-    try {
-      await uploadGeoAutoBrowserStateApi(platform, file);
-      message.success(`已更新「${platform}」登录态，下次采集自动复用`);
-    } catch {
-      message.error('登录态上传失败（需为 Playwright storageState JSON）');
-    } finally {
-      setUploadingState(false);
     }
   };
 
@@ -175,7 +112,7 @@ export default function BrowserProbeDrawer({ open, onClose }: BrowserProbeDrawer
           type='info'
           showIcon
           message='浏览器通道直接驱动各模型网页版，产出官方分享链接、整页截图、思考过程与页面引用信源。'
-          description='试跑不写入业务库；若未取到回答或分享链接，多半是登录态缺失或平台改版，可先上传 storageState 或调整 application.yml 里的选择器。'
+          description='试跑不写入业务库。正式采集由本机 worker 用已登录的 Chrome 档案提问；若未取到回答或分享链接，先在办公电脑上完成登录，或调整 application.yml 里的选择器。'
         />
 
         <Alert
@@ -187,17 +124,7 @@ export default function BrowserProbeDrawer({ open, onClose }: BrowserProbeDrawer
               : '当前平台尚未配置「用于浏览器监测」的平台账号'
           }
           description={
-            currentAccount?.error ||
-            '采集前会用系统维护的平台账号在服务器有界面 Chrome 登录并缓存登录态（一批 3 题内只登录一次）。只有扫码/验证码登录的平台请改用人工导出登录态。'
-          }
-          action={
-            <Button
-              size='small'
-              loading={loggingIn}
-              onClick={() => void doBrowserLogin()}
-            >
-              模拟登录 / 刷新
-            </Button>
+            currentAccount?.error || '登录在办公电脑的 Chrome 档案里完成，不在服务器上模拟登录或上传登录态。'
           }
         />
 
@@ -253,42 +180,6 @@ export default function BrowserProbeDrawer({ open, onClose }: BrowserProbeDrawer
             </Form.Item>
           </div>
         </Form>
-
-        <div className='rounded-lg border border-neutral-200 p-3'>
-          <div className='mb-2 flex items-center justify-between'>
-            <Typography.Text strong>平台登录态（storageState）</Typography.Text>
-            <Space>
-              <Select
-                style={{ width: 150 }}
-                placeholder='选择平台'
-                value={statePlatform || undefined}
-                onChange={setStatePlatform}
-                options={platforms.map((p) => ({ label: p.platformName, value: p.platformName }))}
-                allowClear
-              />
-              <Upload
-                accept='.json,application/json'
-                showUploadList={false}
-                beforeUpload={(file) => {
-                  void uploadState(file);
-                  return false;
-                }}
-              >
-                <Button
-                  size='small'
-                  icon={<UploadOutlined />}
-                  loading={uploadingState}
-                >
-                  上传 JSON
-                </Button>
-              </Upload>
-            </Space>
-          </div>
-          <div className='text-xs text-neutral-400'>
-            用 Playwright 登录后导出 storageState（含
-            cookies/origins），文件名会自动按平台保存；未登录时部分平台无法提问或生成分享链接。
-          </div>
-        </div>
 
         <Spin spinning={probing}>
           {result && (

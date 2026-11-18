@@ -1,7 +1,6 @@
 package com.base.admin.service;
 
 import com.base.admin.common.PageResult;
-import com.base.admin.domain.dto.GeoAutoBrowserLoginDTO;
 import com.base.admin.domain.dto.GeoAutoProbeDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionDTO;
 import com.base.admin.domain.dto.GeoAutoQuestionQueryDTO;
@@ -18,7 +17,6 @@ import com.base.admin.domain.vo.GeoAutoResultVO;
 import com.base.admin.domain.vo.GeoAutoSeedResultVO;
 import com.base.admin.domain.vo.GeoAutoTaskVO;
 import com.base.admin.domain.vo.GeoBrowserAccountVO;
-import com.base.admin.domain.vo.GeoBrowserLoginVO;
 import com.base.admin.domain.vo.GeoBrowserProbeVO;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -86,28 +84,9 @@ public interface GeoAutoMonitorService {
     /** 单题采集试跑（不落业务库），用于核对选择器、登录态与分享链接 */
     GeoBrowserProbeVO probeOnce(GeoAutoProbeDTO dto);
 
-    /** 用系统维护的平台账号在服务器无头浏览器模拟登录，导出并缓存 storageState */
-    GeoBrowserLoginVO browserLogin(GeoAutoBrowserLoginDTO dto);
-
     /** 各平台浏览器账号与登录态就绪状态 */
     List<GeoBrowserAccountVO> browserAccountStatus();
 
     /** 人工补录真实 C 端截图，返回 /uploads/... 相对路径 */
     String saveResultScreenshot(Long id, MultipartFile file);
-
-    /** 上传平台登录态 storageState JSON */
-    String saveBrowserState(String platform, MultipartFile file);
-
-    /** 把 storageState 绑定到指定账号，不写到平台共用文件。 */
-    void saveAccountBrowserState(Long accountId, MultipartFile file);
-
-    com.base.admin.domain.vo.GeoBrowserLoginBoothVO startLoginBooth(Long accountId);
-
-    com.base.admin.domain.vo.GeoBrowserLoginBoothVO snapshotLoginBooth(Long accountId);
-
-    com.base.admin.domain.vo.GeoBrowserLoginBoothVO inputLoginBooth(com.base.admin.domain.dto.GeoBrowserBoothInputDTO input);
-
-    com.base.admin.domain.vo.GeoBrowserLoginBoothVO finishLoginBooth(Long accountId);
-
-    com.base.admin.domain.vo.GeoBrowserLoginBoothVO cancelLoginBooth(Long accountId);
 }

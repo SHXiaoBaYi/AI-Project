@@ -225,22 +225,6 @@ public class GeoBrowserAccountService {
                 .set(GeoPlatformAccount::getBrowserLastUsedAt, LocalDateTime.now()));
     }
 
-    /**
-     * 把上传的 storageState 落到该账号自己的文件。文件在不代表已经登录成功，
-     * 先标成 READY 让它进入候选；采集时若仍看到登录墙，再单独淘汰这一条。
-     */
-    public Path installUploadedState(GeoPlatformAccount account, byte[] json) {
-        try {
-            Path file = stateDir().resolve(safeFileName("account-" + account.getId() + ".json"));
-            Files.createDirectories(file.getParent());
-            Files.write(file, json);
-            markReady(account, file);
-            return file;
-        } catch (Exception e) {
-            throw new com.base.admin.exception.BusinessException("保存登录态失败：" + e.getMessage());
-        }
-    }
-
     /** 密码号：READY 且未超过缓存时间。人工登录态和本机 profile：READY 即可，不按 12 小时作废。 */
     public boolean isReady(GeoPlatformAccount account) {
         if (account == null || !STATE_READY.equals(account.getBrowserLoginStatus())) {

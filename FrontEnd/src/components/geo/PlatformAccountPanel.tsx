@@ -18,8 +18,6 @@ import {
 import type { GeoOwnerOption, GeoPlatform, GeoPlatformAccount } from '@/types/geo';
 import { GEO_PLATFORM_ACCOUNT_STATUS, GEO_PLATFORM_LOGIN_METHODS, GEO_PLATFORM_VERIFY_METHODS } from '@/constants/geo';
 import { createTimeDisplayColumn, createTimeRangeColumn } from '@/components/table/createTimeColumns';
-import { browserLoginGeoAutoApi, uploadAccountBrowserStateApi } from '@/api/geoAuto';
-import BrowserLoginBooth from '@/components/geo/BrowserLoginBooth';
 import { formatDateTime } from '@/utils/datetime';
 
 const YES_NO = [
@@ -66,9 +64,6 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<GeoPlatformAccount | null>(null);
-  const [boothAccount, setBoothAccount] = useState<GeoPlatformAccount | null>(null);
-  const uploadTarget = useRef<number | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const [platforms, setPlatforms] = useState<GeoPlatform[]>([]);
   const [owners, setOwners] = useState<GeoOwnerOption[]>([]);
 
@@ -357,9 +352,8 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
     {
       title: '操作',
       valueType: 'option',
-      width: 320,
+      width: 200,
       render: (_, record) => {
-        const loginType = record.browserLoginType || 'PASSWORD';
         const inPool = record.browserEnabled === 1;
         return (
           <ActionButtons
@@ -371,49 +365,6 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
                 onClick: () => {
                   setEditing(record);
                   setOpen(true);
-                },
-              },
-              {
-                key: 'browserLogin',
-                label: '模拟登录',
-                perm: 'geo:platformAccount:edit',
-                disabled: !inPool || loginType !== 'PASSWORD',
-                onClick: async () => {
-                  const hide = message.loading('正在用平台账号在服务器模拟登录…', 0);
-                  try {
-                    const res = await browserLoginGeoAutoApi({
-                      platform: record.platformName || record.account,
-                      accountId: record.id,
-                      forceRefresh: true,
-                    });
-                    if (res.success) {
-                      message.success(`登录态已刷新（${res.source || 'READY'}）`);
-                    } else {
-                      message.warning(res.error || '模拟登录未完成，请查看诊断信息');
-                    }
-                    actionRef.current?.reload();
-                  } catch {
-                    message.error('模拟登录请求失败');
-                  } finally {
-                    hide();
-                  }
-                },
-              },
-              {
-                key: 'serverLogin',
-                label: '在服务器上登录',
-                perm: 'geo:platformAccount:edit',
-                disabled: !inPool || loginType !== 'STORAGE_STATE',
-                onClick: () => setBoothAccount(record),
-              },
-              {
-                key: 'uploadState',
-                label: '上传登录态',
-                perm: 'geo:platformAccount:edit',
-                disabled: !inPool || loginType !== 'STORAGE_STATE',
-                onClick: () => {
-                  uploadTarget.current = record.id;
-                  fileRef.current?.click();
                 },
               },
               {
@@ -583,37 +534,6 @@ const PlatformAccountPanel = memo(function PlatformAccountPanel({
           }
           actionRef.current?.reload();
           return true;
-        }}
-      />
-      <input
-        ref={fileRef}
-        type='file'
-        accept='application/json,.json'
-        className='hidden'
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          const accountId = uploadTarget.current;
-          event.target.value = '';
-          if (!file || accountId == null) {
-            return;
-          }
-          void uploadAccountBrowserStateApi(accountId, file)
-            .then(() => {
-              message.success('已绑定到该账号，采集时若仍要求登录会自动移出候选');
-              actionRef.current?.reload();
-            })
-            .catch(() => message.error('上传登录态失败'));
-        }}
-      />
-      <BrowserLoginBooth
-        accountId={boothAccount?.id ?? null}
-        accountLabel={boothAccount?.account}
-        platform={boothAccount?.platformName}
-        onClose={(saved) => {
-          setBoothAccount(null);
-          if (saved) {
-            actionRef.current?.reload();
-          }
         }}
       />
     </>
