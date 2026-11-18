@@ -192,6 +192,8 @@ export interface GeoAutoResultQuery extends PageQuery {
   sentiment?: string;
   status?: string;
   runId?: number;
+  /** 按监控任务汇总所选日期内的全部批次 */
+  taskId?: number;
 }
 
 export interface GeoAutoCitation {

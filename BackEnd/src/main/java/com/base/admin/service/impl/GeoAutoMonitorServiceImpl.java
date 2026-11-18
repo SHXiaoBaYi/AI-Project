@@ -769,6 +769,20 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
         return vo;
     }
 
+    /** 该监控下的全部批次。没有批次时用不可能的 id，避免 IN () 扫到别的任务。 */
+    private List<Long> runIdsOfTask(Long taskId) {
+        if (taskId == null) {
+            return List.of(-1L);
+        }
+        List<Long> ids = runMapper.selectList(new LambdaQueryWrapper<GeoMonitorRun>()
+                        .select(GeoMonitorRun::getId)
+                        .eq(GeoMonitorRun::getTaskId, taskId))
+                .stream()
+                .map(GeoMonitorRun::getId)
+                .toList();
+        return ids.isEmpty() ? List.of(-1L) : ids;
+    }
+
     private LambdaQueryWrapper<GeoMonitorResult> resultWrapper(GeoAutoResultQueryDTO query) {
         LocalDate end = query.getDateEnd() != null ? query.getDateEnd() : LocalDate.now();
         LocalDate start = query.getDateStart() != null ? query.getDateStart() : end.minusDays(6);
@@ -783,6 +797,7 @@ public class GeoAutoMonitorServiceImpl implements GeoAutoMonitorService {
                 .eq(StringUtils.hasText(query.getSentiment()), GeoMonitorResult::getSentiment, query.getSentiment())
                 .eq(StringUtils.hasText(query.getStatus()), GeoMonitorResult::getStatus, query.getStatus())
                 .eq(query.getRunId() != null, GeoMonitorResult::getRunId, query.getRunId())
+                .in(query.getTaskId() != null, GeoMonitorResult::getRunId, runIdsOfTask(query.getTaskId()))
                 .orderByDesc(GeoMonitorResult::getId);
     }
 

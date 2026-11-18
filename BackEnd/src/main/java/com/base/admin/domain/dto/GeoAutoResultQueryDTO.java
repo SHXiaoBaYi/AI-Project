@@ -41,4 +41,7 @@ public class GeoAutoResultQueryDTO extends PageQuery {
 
     @Schema(description = "批次ID", example = "1")
     private Long runId;
+
+    @Schema(description = "监控任务ID。传入后按该任务全部批次查询，不限最近一次", example = "1")
+    private Long taskId;
 }

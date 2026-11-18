@@ -1,4 +1,6 @@
 import { chromium } from 'playwright';
+import { readAnswer, readCitations, readReasoning, setDeepThink } from './collect.mjs';
+import { shareLink } from './share.mjs';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -255,12 +257,10 @@ async function ask(job) {
       console.log(`${job.platform} 需要重新登录，本题已放回队列`);
       return;
     }
-    if (job.deepThink && profile.deepThinkSelector) {
-      const think = page.locator(profile.deepThinkSelector).filter({ visible: true }).first();
-      if (await think.count().catch(() => 0)) {
-        await think.click({ timeout: 4000 }).catch(() => {});
-      }
-    }
+    const thinkReady = await setDeepThink(page, !!job.deepThink, profile);
+    console.log(
+      `${job.platform} 深度思考${job.deepThink ? '开启' : '关闭'}${thinkReady ? '' : '（页面上没找到对应开关）'}，截图${job.screenshot ? '开启' : '关闭'}`,
+    );
     await clickVisibleInput(page, profile.inputSelector || 'textarea');
     await page.keyboard.type(job.question, { delay: 35 + Math.floor(Math.random() * 45) });
     await page.waitForTimeout(400);
@@ -273,22 +273,32 @@ async function ask(job) {
     if (!answer || answer.length < 30 || rejected(answer, profile.answerRejectPatterns)) {
       throw new Error(answer ? `回答过短或不是正文（${answer.length} 字）` : '等待回答超时');
     }
-    const reasoning = profile.reasoningContentSelector
-      ? await textOf(page, profile.reasoningContentSelector)
-      : '';
-    const citations = await collectCitations(page, profile.citationSelector);
-    const probeUrl = await shareLink(page, profile);
+    const reasoning = await readReasoning(page);
+    const citations = await readCitations(page);
     let shot = '';
     if (job.screenshot) {
       shot = path.join(root, 'shots', `${job.jobId}.jpg`);
-      await page.screenshot({ path: shot, fullPage: true, type: 'jpeg', quality: 60 });
+      mkdirSync(path.dirname(shot), { recursive: true });
+      const list = page.locator("[data-testid='message-list']").last();
+      if (await list.count().catch(() => 0)) {
+        await list.screenshot({ path: shot, type: 'jpeg', quality: 60 });
+      } else {
+        await page.screenshot({ path: shot, fullPage: false, type: 'jpeg', quality: 60 });
+      }
       const size = (await readFile(shot)).length;
       if (size > 8 * 1024 * 1024) {
         await page.screenshot({ path: shot, fullPage: false, type: 'jpeg', quality: 50 });
       }
     }
+    const probeUrl = await shareLink(page, profile);
+    if (!probeUrl) {
+      throw new Error('没有生成公开分享链接，不上传私有对话地址');
+    }
+    console.log(`公开分享 ${probeUrl}`);
     await upload(job, { answer, reasoning, probeUrl, citations, shot });
-    console.log(`已回传 #${job.jobId}，回答 ${answer.length} 字`);
+    console.log(
+      `已回传 #${job.jobId}，回答 ${answer.length} 字，思考 ${reasoning.length} 字，信源 ${citations.length} 条，截图 ${shot ? '有' : '无'}`,
+    );
   } finally {
     await context.close().catch(() => {});
   }
@@ -330,7 +340,7 @@ async function waitAnswer(page, profile, timeoutMs) {
     const streaming = profile.streamingSelector
       ? await page.locator(profile.streamingSelector).count().catch(() => 0)
       : 0;
-    answer = await textOf(page, profile.answerSelector);
+    answer = await readAnswer(page);
     if (!streaming && answer && answer === last) stable += 1;
     else stable = 0;
     last = answer;
@@ -338,13 +348,6 @@ async function waitAnswer(page, profile, timeoutMs) {
     await page.waitForTimeout(1000);
   }
   return answer;
-}
-
-async function textOf(page, selector) {
-  if (!selector) return '';
-  const loc = page.locator(selector).last();
-  if (!(await loc.count().catch(() => 0))) return '';
-  return ((await loc.innerText().catch(() => '')) || '').trim();
 }
 
 async function dismiss(page, selectors) {
@@ -368,36 +371,6 @@ async function loginWall(page, selectors) {
 
 function rejected(answer, patterns) {
   return (patterns || []).some((item) => item && answer.includes(item) && answer.length < item.length + 80);
-}
-
-async function collectCitations(page, selector) {
-  const sel = selector || "a[href^='http']";
-  const links = await page.locator(sel).evaluateAll((nodes) =>
-    nodes.slice(0, 20).map((node) => ({
-      title: (node.innerText || node.getAttribute('title') || '').trim().slice(0, 200),
-      url: node.href || '',
-    })),
-  ).catch(() => []);
-  const seen = new Set();
-  return links.filter((item) => item.url && !seen.has(item.url) && seen.add(item.url));
-}
-
-async function shareLink(page, profile) {
-  if (!profile.shareSelector) return page.url();
-  try {
-    await page.locator(profile.shareSelector).last().click({ timeout: 4000 });
-    await page.waitForTimeout(800);
-    const box = page.locator(profile.shareLinkSelector || "input[value^='http']").first();
-    if (await box.count()) {
-      const value = await box.inputValue().catch(() => '');
-      if (value.startsWith('http')) return value;
-      const href = await box.getAttribute('href').catch(() => '');
-      if (href && href.startsWith('http')) return href;
-    }
-  } catch {
-    // 分享按钮各平台不一样，拿不到就留当前页地址
-  }
-  return page.url();
 }
 
 function sleep(ms) {

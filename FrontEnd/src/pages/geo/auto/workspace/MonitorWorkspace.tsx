@@ -186,27 +186,34 @@ const MonitorWorkspace = memo(function MonitorWorkspace() {
   }, []);
 
   const loadResults = useCallback(async () => {
-    if (!selected?.lastRunId) {
+    if (!selected?.id) {
       setResults([]);
       return;
     }
     setResultLoading(true);
     try {
-      const res = await getGeoAutoResultListApi({
-        pageNum: 1,
-        pageSize: 200,
-        runId: selected.lastRunId,
+      const query = {
         dateStart: dateRange[0].format('YYYY-MM-DD'),
         dateEnd: dateRange[1].format('YYYY-MM-DD'),
         platform: filterPlatform,
         topicId: filterBrand,
         questionText: filterQuestion,
-      });
-      setResults(res.rows || []);
+        taskId: selected.id,
+      };
+      const rows: GeoAutoResult[] = [];
+      let pageNum = 1;
+      let total = 0;
+      do {
+        const res = await getGeoAutoResultListApi({ ...query, pageNum, pageSize: 200 });
+        rows.push(...(res.rows || []));
+        total = res.total || rows.length;
+        pageNum += 1;
+      } while (rows.length < total && pageNum <= 10);
+      setResults(rows);
     } finally {
       setResultLoading(false);
     }
-  }, [selected?.lastRunId, dateRange, filterPlatform, filterBrand, filterQuestion]);
+  }, [selected?.id, dateRange, filterPlatform, filterBrand, filterQuestion]);
 
   useEffect(() => {
     void loadResults();

@@ -763,14 +763,14 @@ public class GeoBrowserProbeService {
             }
 
             pageUrl = safePageUrl(page);
-            if (StringUtils.hasText(shared)) {
+            if (StringUtils.hasText(shared) && !isPrivateChatUrl(shared)) {
                 probeUrl = shared;
                 probeUrlSource = "OFFICIAL_SHARE";
-            } else if (error == null && StringUtils.hasText(pageUrl)) {
+            } else if (error == null && StringUtils.hasText(pageUrl) && !isPrivateChatUrl(pageUrl)) {
                 probeUrl = pageUrl;
                 probeUrlSource = "PAGE_URL";
             } else {
-                diag.put("probeUrlOmitted", "采集未成功，不把落地页 URL 冒充真实回答链接");
+                diag.put("probeUrlOmitted", "没有公开分享链接，不把私有对话地址上传给别人打开");
             }
             diag.put("probeUrlSource", probeUrlSource);
             diag.put("pageUrl", pageUrl);
@@ -1164,6 +1164,24 @@ public class GeoBrowserProbeService {
 
     private boolean isHttp(String value) {
         return StringUtils.hasText(value) && value.trim().startsWith("http");
+    }
+
+    /** 登录账号自己的对话页，别人打开会提示对话不存在。 */
+    private boolean isPrivateChatUrl(String url) {
+        if (!StringUtils.hasText(url)) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(url.trim());
+            String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase();
+            String path = uri.getPath() == null ? "" : uri.getPath();
+            if (host.endsWith("doubao.com") && path.matches("/chat/\\d+.*")) {
+                return true;
+            }
+            return host.contains("deepseek.com") && path.contains("/a/chat/s/");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String writeJson(Map<String, Object> diag) {

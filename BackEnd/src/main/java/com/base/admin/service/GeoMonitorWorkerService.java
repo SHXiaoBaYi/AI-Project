@@ -105,7 +105,8 @@ public class GeoMonitorWorkerService {
     public void enqueue(GeoMonitorRun run, GeoMonitorTask task,
                         List<GeoMonitorQuestion> questions, List<GeoPlatform> platforms) {
         String shot = StringUtils.hasText(task.getScreenshotMode()) ? task.getScreenshotMode() : GeoMonitorTask.SHOT_MENTION;
-        int deep = task.getDeepThink() != null && task.getDeepThink() == 1 ? 1 : 0;
+        Set<String> thinkNames = thinkPlatforms(task);
+        boolean legacyAllThink = thinkNames.isEmpty() && task.getDeepThink() != null && task.getDeepThink() == 1;
         String region = task.getProbeRegion() == null ? "" : task.getProbeRegion();
         for (GeoMonitorQuestion question : questions) {
             for (GeoPlatform platform : platforms) {
@@ -120,7 +121,7 @@ public class GeoMonitorWorkerService {
                 job.setLeaseOwner("");
                 job.setAttempt(0);
                 job.setErrorMsg("");
-                job.setDeepThink(deep);
+                job.setDeepThink(legacyAllThink || thinkNames.contains(platform.getPlatformName()) ? 1 : 0);
                 job.setScreenshotMode(shot);
                 job.setProbeRegion(region);
                 jobMapper.insert(job);
@@ -259,6 +260,10 @@ public class GeoMonitorWorkerService {
             retryOrFail(job, "页面上没有取到回答");
             return;
         }
+        if (isPrivateChatUrl(probeUrl)) {
+            log.info("丢弃私有对话地址 jobId={}，只保存公开分享链接", job.getId());
+            probeUrl = "";
+        }
         GeoMonitorRun run = runMapper.selectById(job.getRunId());
         GeoMonitorTask task = taskMapper.selectById(job.getTaskId());
         GeoMonitorQuestion question = questionMapper.selectById(job.getQuestionId());
@@ -268,23 +273,26 @@ public class GeoMonitorWorkerService {
         }
         GeoMonitorJudgeService.JudgeOutcome judge = null;
         String judgeError = null;
-        try {
-            judge = judgeService.judge(
-                    question.getQuestionText(),
-                    clip(answerText, properties.getAnswerMaxChars()),
-                    words(question.getBrandWords(), properties.getBrandWords()),
-                    words(question.getCompetitorWords(), properties.getCompetitorWords()));
-        } catch (Exception e) {
-            judgeError = e.getMessage();
-            log.warn("本机采集裁判失败 jobId={}: {}", job.getId(), e.getMessage());
+        for (int attempt = 1; attempt <= 2 && judge == null; attempt++) {
+            try {
+                judge = judgeService.judge(
+                        question.getQuestionText(),
+                        clip(answerText, properties.getAnswerMaxChars()),
+                        words(question.getBrandWords(), properties.getBrandWords()),
+                        words(question.getCompetitorWords(), properties.getCompetitorWords()));
+            } catch (Exception e) {
+                judgeError = e.getMessage();
+                log.warn("本机采集裁判失败 jobId={} 第{}次: {}", job.getId(), attempt, e.getMessage());
+            }
         }
+        String shotMode = screenshotMode(task, job);
         String shotUrl = "";
-        if (screenshot != null && !screenshot.isEmpty() && !GeoMonitorTask.SHOT_DISABLED.equals(job.getScreenshotMode())) {
+        if (screenshot != null && !screenshot.isEmpty() && !GeoMonitorTask.SHOT_DISABLED.equals(shotMode)) {
             shotUrl = fileStorageService.saveGeoImage(screenshot);
         }
-        boolean dropShot = GeoMonitorTask.SHOT_MENTION.equals(job.getScreenshotMode())
-                && (judge == null || judge.mentioned() == null || judge.mentioned() == 0);
-        if (dropShot && StringUtils.hasText(shotUrl)) {
+        if (GeoMonitorTask.SHOT_MENTION.equals(shotMode)
+                && StringUtils.hasText(shotUrl)
+                && (judge == null || judge.mentioned() == null || judge.mentioned() == 0)) {
             fileStorageService.deleteGeoUpload(shotUrl);
             shotUrl = "";
         }
@@ -352,7 +360,7 @@ public class GeoMonitorWorkerService {
         result.setChannel("BROWSER");
         result.setPlatformAccountId(job.getAccountId());
         result.setPlatformAccountMask(account == null ? "" : accountService.mask(account.getAccount()));
-        result.setDeepThink(job.getDeepThink() == null ? 0 : job.getDeepThink());
+        result.setDeepThink(wantsDeepThink(task, job.getPlatformName()) ? 1 : 0);
         result.setReasoningText(clip(reasoningText, 60_000));
         result.setProbeUrl(clip(probeUrl, 1000));
         result.setProbeRequest(diagnosticJson(node, job, diagnostic));
@@ -363,10 +371,12 @@ public class GeoMonitorWorkerService {
             result.setScreenshotUrl(shotUrl);
             result.setScreenshotType("BROWSER_SHOT");
         }
+        List<GeoAutoResultDetailVO.Citation> pageCitations = parseCitations(citationsJson);
         boolean success = false;
         if (judge == null) {
             result.setStatus(GeoMonitorResult.STATUS_JUDGE_FAILED);
             result.setErrorMsg(clip(judgeError, 450));
+            result.setCitations(writeJson(pageCitations));
         } else {
             result.setMentioned(judge.mentioned());
             result.setRankNo(judge.rankNo());
@@ -375,7 +385,7 @@ public class GeoMonitorWorkerService {
             result.setMentionPosition(judge.mentionPosition());
             result.setNegativeContent(judge.negativeContent());
             result.setCompetitors(judge.competitors());
-            result.setCitations(writeJson(mergeCitations(parseCitations(citationsJson), judge.citations())));
+            result.setCitations(writeJson(mergeCitations(pageCitations, judge.citations())));
             result.setJudgeRaw(judge.judgeRaw());
             result.setStatus(GeoMonitorResult.STATUS_SUCCESS);
             success = true;
@@ -551,8 +561,9 @@ public class GeoMonitorWorkerService {
         vo.setAccountLabel(accountService.mask(account.getAccount()));
         vo.setPlatform(job.getPlatformName());
         vo.setQuestion(job.getQuestionText());
-        vo.setDeepThink(job.getDeepThink() != null && job.getDeepThink() == 1 && profile.isDeepThinkSupported());
-        vo.setScreenshot(!GeoMonitorTask.SHOT_DISABLED.equals(job.getScreenshotMode()) && profile.isScreenshotSupported());
+        GeoMonitorTask task = taskMapper.selectById(job.getTaskId());
+        vo.setDeepThink(wantsDeepThink(task, job.getPlatformName()) && profile.isDeepThinkSupported());
+        vo.setScreenshot(!GeoMonitorTask.SHOT_DISABLED.equals(screenshotMode(task, job)) && profile.isScreenshotSupported());
         vo.setNavigationTimeoutMs(browserProperties.getNavigationTimeoutMs());
         vo.setAnswerTimeoutMs(browserProperties.getAnswerTimeoutMs());
         vo.setProfile(toProfile(profile));
@@ -695,6 +706,66 @@ public class GeoMonitorWorkerService {
     /** 只拼 Long 或 NULL，避免把心跳里的空闲状态更新丢弃。 */
     private static String sqlId(Long id) {
         return id == null ? "NULL" : Long.toString(id);
+    }
+
+    /** 监控里按平台勾的「深度思考模型」优先；旧任务只有总开关时，总开关打开则全部平台开启。 */
+    private static boolean wantsDeepThink(GeoMonitorTask task, String platform) {
+        if (task == null) {
+            return false;
+        }
+        Set<String> named = thinkPlatforms(task);
+        if (!named.isEmpty()) {
+            return named.contains(platform);
+        }
+        return task.getDeepThink() != null && task.getDeepThink() == 1;
+    }
+
+    private static Set<String> thinkPlatforms(GeoMonitorTask task) {
+        if (task == null || !StringUtils.hasText(task.getRemark())) {
+            return Set.of();
+        }
+        Set<String> names = new LinkedHashSet<>();
+        for (String part : task.getRemark().split("[；;]")) {
+            String text = part == null ? "" : part.trim();
+            String prefix = "深度思考模型:";
+            if (!text.startsWith(prefix)) {
+                continue;
+            }
+            for (String name : text.substring(prefix.length()).split("[,，]")) {
+                if (StringUtils.hasText(name)) {
+                    names.add(name.trim());
+                }
+            }
+        }
+        return names;
+    }
+
+    private static String screenshotMode(GeoMonitorTask task, GeoMonitorJob job) {
+        if (task != null && StringUtils.hasText(task.getScreenshotMode())) {
+            return task.getScreenshotMode();
+        }
+        if (job != null && StringUtils.hasText(job.getScreenshotMode())) {
+            return job.getScreenshotMode();
+        }
+        return GeoMonitorTask.SHOT_MENTION;
+    }
+
+    /** 登录账号自己的对话页，别人打开会提示对话不存在。 */
+    private static boolean isPrivateChatUrl(String url) {
+        if (!StringUtils.hasText(url)) {
+            return false;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(url.trim());
+            String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase();
+            String path = uri.getPath() == null ? "" : uri.getPath();
+            if (host.endsWith("doubao.com") && path.matches("/chat/\\d+.*")) {
+                return true;
+            }
+            return host.contains("deepseek.com") && path.contains("/a/chat/s/");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static String clip(String value, int max) {
