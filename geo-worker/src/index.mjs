@@ -1,5 +1,4 @@
 import { chromium } from 'playwright';
-import { createInterface } from 'node:readline';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -119,14 +118,19 @@ function profileDir(accountId) {
   return dir;
 }
 
-function waitEnter(prompt) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(prompt, () => {
-      rl.close();
-      resolve();
-    });
-  });
+async function waitUntilLoggedIn(page) {
+  const deadline = Date.now() + 4 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const url = page.url();
+    const loginBtn = page.locator("[data-testid='to_login_button'], text=/扫码登录|请先登录|Sign in/").first();
+    const loginVisible = (await loginBtn.count().catch(() => 0)) > 0 && (await loginBtn.isVisible().catch(() => false));
+    const onLoginUrl = /sign_in|\/login|passport/i.test(url);
+    const chat = page.locator("textarea, [contenteditable='true']").first();
+    const chatVisible = (await chat.count().catch(() => 0)) > 0 && (await chat.isVisible().catch(() => false));
+    if (!loginVisible && !onLoginUrl && chatVisible) return true;
+    await page.waitForTimeout(2000);
+  }
+  return false;
 }
 
 async function loginAll() {
@@ -141,12 +145,23 @@ async function loginAll() {
       console.log(`跳过 ${account.platform} ${account.accountLabel}：服务器没有配置提问页地址`);
       continue;
     }
-    console.log(`打开 ${account.platform} ${account.accountLabel}（当前状态 ${account.loginStatus}）`);
+    console.log(`打开 ${account.platform} ${account.accountLabel}。请在弹出的窗口里完成登录，完成后会自动继续。`);
     const context = await chromium.launchPersistentContext(profileDir(account.accountId), launchOptions());
     try {
       const page = context.pages()[0] || (await context.newPage());
       await page.goto(account.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-      await waitEnter('在窗口里完成登录后，回到这里按回车...');
+      const loggedIn = await waitUntilLoggedIn(page);
+      if (!loggedIn) {
+        await api('/geo/auto/worker/account-status', {
+          json: {
+            node: config.node,
+            accountId: account.accountId,
+            status: 'EXPIRED',
+            error: '4 分钟内没有在本机窗口完成登录',
+          },
+        }).catch(() => {});
+        throw new Error(`${account.platform} 尚未登录`);
+      }
       await api('/geo/auto/worker/account-status', {
         json: { node: config.node, accountId: account.accountId, status: 'READY' },
       });
