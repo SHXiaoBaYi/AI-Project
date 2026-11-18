@@ -1,8 +1,11 @@
 {
-  "baseUrl": "http://47.117.132.161/shxby/api",
-  "token": "",
+  "env": "test",
   "node": "office-pc-01",
   "profileRoot": "D:/geo-worker/profiles",
   "executablePath": "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  "pollMs": 5000
+  "pollMs": 5000,
+  "tokens": {
+    "test": "",
+    "prod": ""
+  }
 }

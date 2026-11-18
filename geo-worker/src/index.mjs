@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import { readAnswer, readCitations, readReasoning, setDeepThink } from './collect.mjs';
 import { shareLink } from './share.mjs';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,12 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.join(root, 'config.json');
 const mode = process.argv[2] === 'login' ? 'login' : process.argv[2] === 'check' ? 'check' : 'run';
+
+/** 地址写死。env 只负责挑选，避免配置里的地址和开关对不上。 */
+const ENDPOINTS = {
+  test: { label: '测试', baseUrl: 'http://47.117.132.161/shxby/api', host: '47.117.132.161' },
+  prod: { label: '生产', baseUrl: 'https://47.117.113.28/shxby/api', host: '47.117.113.28' },
+};
 
 const config = loadConfig();
 const state = { jobId: null, accountId: null };
@@ -18,29 +24,57 @@ function loadConfig() {
     throw new Error('缺少 config.json，请先复制 config.example.json');
   }
   const raw = JSON.parse(readFileSync(configPath, 'utf8'));
-  if (!raw.baseUrl || !raw.token || !raw.node) {
-    throw new Error('config.json 需要 baseUrl、token、node');
+  const env = resolveEnv(raw);
+  const endpoint = ENDPOINTS[env];
+  const token = String(raw.tokens?.[env] || (env === 'test' ? raw.token : '') || '').trim();
+  if (!token) {
+    throw new Error(`${endpoint.label}令牌是空的，已停止。不会改用另一边的令牌，也不会连接另一边。`);
   }
-  raw.baseUrl = String(raw.baseUrl).replace(/\/$/, '');
-  raw.profileRoot = raw.profileRoot || path.join(root, 'profiles');
-  raw.pollMs = Number(raw.pollMs) > 0 ? Number(raw.pollMs) : 5000;
-  mkdirSync(raw.profileRoot, { recursive: true });
+  if (!raw.node) {
+    throw new Error('config.json 需要 node');
+  }
+  const profileRoot = raw.profileRoot || path.join(root, 'profiles');
+  mkdirSync(path.join(profileRoot, env), { recursive: true });
   mkdirSync(path.join(root, 'shots'), { recursive: true });
-  return raw;
+  return {
+    env,
+    envLabel: endpoint.label,
+    baseUrl: endpoint.baseUrl,
+    host: endpoint.host,
+    token,
+    node: raw.node,
+    profileRoot,
+    executablePath: raw.executablePath,
+    pollMs: Number(raw.pollMs) > 0 ? Number(raw.pollMs) : 5000,
+  };
+}
+
+function resolveEnv(raw) {
+  const picked = String(raw.env || '').trim().toLowerCase();
+  if (picked === 'test' || picked === 'prod') {
+    return picked;
+  }
+  const host = String(raw.baseUrl || '');
+  if (host.includes('47.117.113.28')) return 'prod';
+  if (host.includes('47.117.132.161')) return 'test';
+  throw new Error('config.json 的 env 只能是 test 或 prod');
 }
 
 function takeLock() {
   const lockFile = path.join(config.profileRoot, '.worker.lock');
   if (existsSync(lockFile)) {
-    const pid = Number(readFileSync(lockFile, 'utf8'));
+    const [pidText, lockedEnv] = readFileSync(lockFile, 'utf8').trim().split(/\s+/);
+    const pid = Number(pidText);
     if (pid && pid !== process.pid && pidAlive(pid)) {
-      throw new Error(`已有采集进程在运行（pid ${pid}）。不要开第二个，否则 Chrome 用户目录会冲突。`);
+      const where = lockedEnv === 'prod' ? '生产' : '测试';
+      throw new Error(`已有采集进程在跑${where}（pid ${pid}）。同一台电脑同时只跑一个环境。`);
     }
   }
-  writeFileSync(lockFile, String(process.pid));
+  writeFileSync(lockFile, `${process.pid} ${config.env}`);
   const release = () => {
     try {
-      if (existsSync(lockFile) && readFileSync(lockFile, 'utf8').trim() === String(process.pid)) {
+      const current = existsSync(lockFile) ? readFileSync(lockFile, 'utf8').trim() : '';
+      if (current.startsWith(String(process.pid))) {
         unlinkSync(lockFile);
       }
     } catch {
@@ -64,7 +98,16 @@ function pidAlive(pid) {
 }
 
 async function api(pathname, { json, form } = {}) {
-  const response = await fetch(config.baseUrl + pathname, {
+  const url = config.baseUrl + pathname;
+  const host = new URL(url).hostname;
+  if (host !== config.host) {
+    const error = new Error(
+      config.env === 'prod' ? '生产模式拒绝连接测试环境' : '测试模式拒绝连接生产环境',
+    );
+    error.fatal = true;
+    throw error;
+  }
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'X-Geo-Worker-Token': config.token,
@@ -74,7 +117,9 @@ async function api(pathname, { json, form } = {}) {
   });
   const body = await response.json().catch(() => ({}));
   if (response.status === 401 || response.status === 404) {
-    const error = new Error('测试环境还没有本机采集接口。需要先把这次改动发布到测试 ECS，服务起来后再执行。');
+    const error = new Error(
+      `${config.envLabel}环境还没有接通本机采集。请确认该环境已发布，并且服务里配置了对应的采集令牌。`,
+    );
     error.fatal = true;
     throw error;
   }
@@ -87,7 +132,18 @@ async function api(pathname, { json, form } = {}) {
   return body.data;
 }
 
+function assertSwitchUnchanged() {
+  const raw = JSON.parse(readFileSync(configPath, 'utf8'));
+  const env = resolveEnv(raw);
+  if (env !== config.env) {
+    const error = new Error(`开关已从${config.envLabel}改掉，采集已停止。请重新启动后再跑另一边。`);
+    error.fatal = true;
+    throw error;
+  }
+}
+
 async function heartbeat() {
+  assertSwitchUnchanged();
   await api('/geo/auto/worker/heartbeat', {
     json: {
       node: config.node,
@@ -115,9 +171,25 @@ function launchOptions() {
 }
 
 function profileDir(accountId) {
-  const dir = path.join(config.profileRoot, String(accountId));
+  const dir = path.join(config.profileRoot, config.env, String(accountId));
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/** 旧版本把测试登录档案直接放在档案根目录。只在测试模式下收进 test，生产目录保持空白。 */
+function migrateFlatProfiles() {
+  if (config.env !== 'test') {
+    return;
+  }
+  const destRoot = path.join(config.profileRoot, 'test');
+  mkdirSync(destRoot, { recursive: true });
+  for (const name of readdirSync(config.profileRoot)) {
+    if (!/^\d+$/.test(name)) continue;
+    const from = path.join(config.profileRoot, name);
+    const to = path.join(destRoot, name);
+    if (existsSync(to)) continue;
+    renameSync(from, to);
+  }
 }
 
 async function waitUntilLoggedIn(page) {
@@ -191,7 +263,9 @@ async function loginAll() {
 async function check() {
   await heartbeat();
   const accounts = await api('/geo/auto/worker/accounts', { json: { node: config.node } });
-  console.log(`服务器已接通，电脑名 ${config.node}，分配到 ${(accounts || []).length} 个账号`);
+  console.log(
+    `服务器已接通：${config.envLabel} ${config.baseUrl}，电脑名 ${config.node}，分配到 ${(accounts || []).length} 个账号`,
+  );
 }
 
 async function runLoop() {
@@ -199,11 +273,12 @@ async function runLoop() {
     heartbeat().catch((error) => console.error('心跳失败：' + error.message));
   }, 20000);
   await heartbeat();
-  console.log(`采集已启动，电脑名 ${config.node}，等待题目`);
+  console.log(`采集已启动：${config.envLabel} ${config.baseUrl}，电脑名 ${config.node}。不会连接另一边。`);
   let idleTicks = 0;
   for (;;) {
     let job = null;
     try {
+      assertSwitchUnchanged();
       job = await api('/geo/auto/worker/claim', { json: { node: config.node } });
     } catch (error) {
       console.error('领取失败：' + error.message);
@@ -377,7 +452,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+migrateFlatProfiles();
 takeLock();
+console.log(`当前开关：${config.envLabel}。只连接 ${config.baseUrl}`);
 const task = mode === 'login' ? loginAll() : mode === 'check' ? check() : runLoop();
 task.catch((error) => {
   console.error(error.message);

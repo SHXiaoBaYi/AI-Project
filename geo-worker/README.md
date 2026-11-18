@@ -7,9 +7,14 @@
 1. 安装 Node.js 20 和 Google Chrome。
 2. 在本目录执行 `npm install`。不需要再执行 `playwright install`。
 3. 复制 `config.example.json` 为 `config.json`。
-   - `baseUrl`：测试环境 `http://47.117.132.161/shxby/api`。本机后端调试用 `http://127.0.0.1:8080/api`。
-   - `token`：与服务器环境变量 `GEO_WORKER_TOKEN` 相同。本机后端默认是 `local-dev-worker`。
+   - `env`：唯一开关，`test` 或 `prod`。地址由程序按开关选定，不在配置里写。
+     - `test` 只连接 `http://47.117.132.161/shxby/api`
+     - `prod` 只连接 `https://47.117.113.28/shxby/api`
+   - `tokens.test` / `tokens.prod`：各自对应服务器环境变量 `GEO_WORKER_TOKEN`。开关拨到哪一边，就只用那一边的令牌；另一边为空时直接退出，不会拿错令牌，也不会去连另一边。
    - `node`：采集电脑名称，要和平台账号里的「采集电脑」完全一致，例如 `office-pc-01`。
+   - 登录档案按环境分开，放在 `profileRoot/test` 和 `profileRoot/prod`。同一台电脑同时只允许一个采集进程。
+
+切到生产之前，生产服务里要先写上 `GEO_WORKER_TOKEN`，生产库里的平台账号也要设成「本机 Chrome」并重新登录一次。生产账号编号和测试不是同一条，不能共用测试的登录档案。
 4. 在系统的「平台账号」里，把要参与监测的号设为：浏览器监测开启、登录方式「本机 Chrome 用户目录」、采集电脑填同一个名称。
 
 ## 检查服务器

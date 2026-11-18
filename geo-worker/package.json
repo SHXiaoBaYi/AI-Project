@@ -8,6 +8,7 @@
     "start": "node src/index.mjs"
   },
   "dependencies": {
+    "mysql2": "^3.24.6",
     "playwright": "1.49.1"
   }
 }
