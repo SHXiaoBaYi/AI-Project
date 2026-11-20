@@ -325,6 +325,7 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
             cancelOpenAssignTasks(p.getId(), Constants.TASK_TYPE_GEO_VIDEO_PUBLISH);
         }
         syncPlacementRemark(p);
+        syncPlacementQuestionTitles(p);
         return new int[]{publisherCreated, writerCreated};
     }
 
@@ -607,6 +608,134 @@ public class PlacementTaskSyncServiceImpl implements PlacementTaskSyncService {
                 .orderByAsc(SysUser::getUserId)
                 .last("LIMIT 1"));
         return any == null ? null : any.getUserId();
+    }
+
+    /**
+     * 目标问题改了之后，把已关联任务的标题和业务标题改成新问题。
+     * 投放任务说明里的「目标问题：」一行一并换掉；审核任务只改标题。
+     */
+    private void syncPlacementQuestionTitles(GeoContentPlacement p) {
+        if (p.getId() == null) {
+            return;
+        }
+        String question = questionText(p);
+        String shortQuestion = abbreviate(question, 80);
+        String bizTitle = abbreviate(question, 180);
+        List<SysTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_PLACEMENT)
+                .eq(SysTask::getBizId, p.getId())
+                .select(SysTask::getId, SysTask::getTitle, SysTask::getBizTitle,
+                        SysTask::getContent, SysTask::getTaskType));
+        for (SysTask task : tasks) {
+            applyQuestionTitle(task, shortQuestion, bizTitle, question, true);
+        }
+        List<Long> reviewIds = reviewMapper.selectList(new LambdaQueryWrapper<GeoContentReview>()
+                        .eq(GeoContentReview::getPlacementId, p.getId())
+                        .select(GeoContentReview::getId))
+                .stream()
+                .map(GeoContentReview::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (reviewIds.isEmpty()) {
+            return;
+        }
+        List<SysTask> reviewTasks = taskMapper.selectList(new LambdaQueryWrapper<SysTask>()
+                .eq(SysTask::getBizType, Constants.TASK_BIZ_GEO_CONTENT_REVIEW)
+                .in(SysTask::getBizId, reviewIds)
+                .select(SysTask::getId, SysTask::getTitle, SysTask::getBizTitle, SysTask::getTaskType));
+        for (SysTask task : reviewTasks) {
+            applyQuestionTitle(task, shortQuestion, bizTitle, question, false);
+        }
+    }
+
+    private void applyQuestionTitle(SysTask task, String shortQuestion, String bizTitle,
+                                    String question, boolean patchContent) {
+        if (task.getId() == null) {
+            return;
+        }
+        String nextTitle = retitle(task.getTitle(), task.getTaskType(), shortQuestion);
+        String currentContent = task.getContent() == null ? "" : task.getContent();
+        String nextContent = patchContent ? replaceTargetQuestionLine(currentContent, question) : currentContent;
+        boolean titleChanged = !Objects.equals(nz(task.getTitle()), nextTitle);
+        boolean bizChanged = !Objects.equals(nz(task.getBizTitle()), bizTitle);
+        boolean contentChanged = patchContent && !Objects.equals(currentContent, nextContent);
+        if (!titleChanged && !bizChanged && !contentChanged) {
+            return;
+        }
+        LambdaUpdateWrapper<SysTask> update = new LambdaUpdateWrapper<SysTask>()
+                .eq(SysTask::getId, task.getId());
+        if (titleChanged) {
+            update.set(SysTask::getTitle, nextTitle);
+        }
+        if (bizChanged) {
+            update.set(SysTask::getBizTitle, bizTitle);
+        }
+        if (contentChanged) {
+            update.set(SysTask::getContent, nextContent);
+        }
+        taskMapper.update(null, update);
+    }
+
+    /** 保留「【类型】」前缀，只替换后面的目标问题 */
+    static String retitle(String current, String taskType, String shortQuestion) {
+        String prefix = titlePrefix(current);
+        if (prefix == null) {
+            prefix = defaultTitlePrefix(taskType);
+        }
+        return prefix + (shortQuestion == null ? "" : shortQuestion);
+    }
+
+    static String titlePrefix(String title) {
+        if (title == null) {
+            return null;
+        }
+        String text = title.trim();
+        if (!text.startsWith("【")) {
+            return null;
+        }
+        int end = text.indexOf('】');
+        if (end <= 0) {
+            return null;
+        }
+        return text.substring(0, end + 1);
+    }
+
+    static String defaultTitlePrefix(String taskType) {
+        if (Constants.TASK_TYPE_GEO_ASSIGN_PUBLISHER.equals(taskType)) {
+            return "【待分配发布人】";
+        }
+        if (Constants.TASK_TYPE_GEO_ASSIGN_WRITER.equals(taskType)) {
+            return "【待分配撰写人】";
+        }
+        if (Constants.TASK_TYPE_GEO_REVIEW.equals(taskType)) {
+            return "【审核文章·一审】";
+        }
+        String type = StringUtils.hasText(taskType) ? taskType.trim() : "任务";
+        return "【" + type + "】";
+    }
+
+    /** 只替换说明里的「目标问题：」那一行；没有这一行则原样返回 */
+    static String replaceTargetQuestionLine(String content, String question) {
+        if (content == null || content.isEmpty()) {
+            return content == null ? "" : content;
+        }
+        String normalized = content.replace("\r\n", "\n");
+        String[] lines = normalized.split("\n", -1);
+        boolean changed = false;
+        String nextLine = "目标问题：" + (question == null ? "" : question);
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith("目标问题：")) {
+                if (!lines[i].equals(nextLine)) {
+                    lines[i] = nextLine;
+                    changed = true;
+                }
+                break;
+            }
+        }
+        if (!changed) {
+            return content;
+        }
+        return String.join("\n", lines);
     }
 
     /** 把目标问题备注写进已有关联任务的说明，改备注后任务上能跟着看到 */

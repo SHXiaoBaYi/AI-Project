@@ -95,6 +95,8 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
   const [filesTitle, setFilesTitle] = useState('附件');
   const [filesLoading, setFilesLoading] = useState(false);
   const [files, setFiles] = useState<SysTaskFile[]>([]);
+  const [remarkOpen, setRemarkOpen] = useState(false);
+  const [remarkText, setRemarkText] = useState('');
   const [owners, setOwners] = useState<TaskUserOption[]>([]);
   const [typeOptions, setTypeOptions] = useState<{ label: string; value: string }[]>([]);
   const [writeOpen, setWriteOpen] = useState(false);
@@ -242,18 +244,6 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
       ellipsis: true,
       formItemProps: { rules: [{ required: true, message: '请输入标题' }] },
       fieldProps: { maxLength: 200 },
-    },
-    {
-      title: '目标问题备注',
-      dataIndex: 'bizRemark',
-      width: 200,
-      search: false,
-      ellipsis: true,
-      tooltip: '关联目标问题上填写的备注',
-      valueType: 'textarea',
-      hideInForm: !editing?.bizRemark?.trim(),
-      fieldProps: { disabled: true, rows: 2 },
-      render: (_, r) => r.bizRemark?.trim() || '-',
     },
     {
       title: '类型',
@@ -528,9 +518,20 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
     {
       title: '操作',
       valueType: 'option',
-      width: mineOnly ? 200 : 180,
+      width: mineOnly ? 260 : 280,
       render: (_, record) => {
+        const questionRemark = record.bizRemark?.trim();
         const items = [
+          questionRemark
+            ? {
+                key: 'biz-remark',
+                label: '查看目标问题备注',
+                onClick: () => {
+                  setRemarkText(questionRemark);
+                  setRemarkOpen(true);
+                },
+              }
+            : null,
           mineOnly && record.completable
             ? {
                 key: 'complete',
@@ -1177,6 +1178,19 @@ const TaskPanel = memo(function TaskPanel({ mineOnly = false, headerTitle }: Pro
             ))}
           </ul>
         )}
+      </Modal>
+
+      <Modal
+        title='目标问题备注'
+        open={remarkOpen}
+        onCancel={() => {
+          setRemarkOpen(false);
+          setRemarkText('');
+        }}
+        footer={null}
+        destroyOnHidden
+      >
+        <div className='whitespace-pre-wrap text-sm leading-6'>{remarkText || '暂无备注'}</div>
       </Modal>
 
       <GeoContentWriteDrawer
