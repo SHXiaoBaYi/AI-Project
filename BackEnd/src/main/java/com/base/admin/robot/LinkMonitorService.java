@@ -47,14 +47,41 @@ public class LinkMonitorService {
     private static final ObjectMapper JSON = new ObjectMapper();
     /** 自行跟随的跳转上限。JDK 在跨主机 302 时会丢掉 Cookie，短链会因此被误判成登录失效。 */
     private static final int MAX_PROBE_REDIRECTS = 6;
+    /** 小红书游客票（a1/webId 等）缓存时长。不是登录态，过期后自动重领。 */
+    private static final long XHS_GUEST_TTL_MS = Duration.ofHours(6).toMillis();
+    private static final String XHS_HOME = "https://www.xiaohongshu.com/";
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalkCalendarClient;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
+    private final Object xhsGuestLock = new Object();
+    private volatile String xhsGuestCookie = "";
+    private volatile long xhsGuestCookieAt = 0L;
 
-    private record FetchedPage(int status, URI uri, byte[] body, String contentType, boolean cookieOnFinal) {
+    private record FetchedPage(int status, URI uri, byte[] body, String contentType, boolean cookieOnFinal,
+                               String cookieJar, String contentIdSeen, String xsecQuery) {
+    }
+
+    /** 小红书笔记三态：有效、确认失效、这次无法判断（不告警、不改 last_ok）。 */
+    enum XhsVerdict { OK, DEAD, UNKNOWN }
+
+    record XhsJudgement(XhsVerdict verdict, String reason) {
+        static XhsJudgement ok() {
+            return new XhsJudgement(XhsVerdict.OK, "");
+        }
+
+        static XhsJudgement dead(String reason) {
+            return new XhsJudgement(XhsVerdict.DEAD, reason);
+        }
+
+        static XhsJudgement unknown(String reason) {
+            return new XhsJudgement(XhsVerdict.UNKNOWN, reason);
+        }
+    }
+
+    private record XhsFetch(XhsVerdict verdict, Integer status, String reason) {
     }
 
     public record ProbeCookieConfig(boolean configured, boolean enabled, String cookieHeader,
@@ -474,7 +501,7 @@ public class LinkMonitorService {
     public record ProbeFailItem(long id, String url, String error) {
     }
 
-    public record ProbeBatchSummary(int total, int okCount, int failCount, List<ProbeFailItem> failures) {
+    public record ProbeBatchSummary(int total, int okCount, int failCount, int unknownCount, List<ProbeFailItem> failures) {
     }
 
     /**
@@ -484,6 +511,7 @@ public class LinkMonitorService {
     public ProbeBatchSummary probeAllActiveNow(boolean forceAlert) {
         List<Map<String, Object>> active = listActive(200);
         int okCount = 0;
+        int unknownCount = 0;
         List<ProbeFailItem> failures = new ArrayList<>();
         for (Map<String, Object> row : active) {
             long id = ((Number) row.get("id")).longValue();
@@ -491,12 +519,14 @@ public class LinkMonitorService {
             ProbeResult r = probeOne(id, forceAlert);
             if (r.ok()) {
                 okCount++;
+            } else if (r.inconclusive()) {
+                unknownCount++;
             } else {
                 String err = StringUtils.hasText(r.error()) ? r.error() : "探测失败";
                 failures.add(new ProbeFailItem(id, url, err));
             }
         }
-        return new ProbeBatchSummary(active.size(), okCount, failures.size(), failures);
+        return new ProbeBatchSummary(active.size(), okCount, failures.size(), unknownCount, failures);
     }
 
     /** @return 被停用的链接，便于回复时对上用户刚看到的那一条 */
@@ -548,7 +578,10 @@ public class LinkMonitorService {
                 """, (rs, i) -> rs.getLong(1));
     }
 
-    public record ProbeResult(boolean ok, String error, boolean alerted) {
+    public record ProbeResult(boolean ok, String error, boolean alerted, boolean inconclusive) {
+        public ProbeResult(boolean ok, String error, boolean alerted) {
+            this(ok, error, alerted, false);
+        }
     }
 
     /** 定时探测：失败时按自然日去重告警。 */
@@ -578,41 +611,56 @@ public class LinkMonitorService {
         String hostSuffixes = withAuthCookie ? getProbeCookieConfig().hostSuffixes() : "";
 
         boolean ok = false;
+        boolean inconclusive = false;
         Integer status = null;
         String err = "";
         // 只有最终一跳确实带上了 Cookie 才把登录墙当成会话问题；跨站丢 Cookie 不再误判。
         boolean cookieOnFinal = false;
         try {
-            FetchedPage page = fetchDocument(url, probeCookie, hostSuffixes, timeout);
-            status = page.status();
-            cookieOnFinal = page.cookieOnFinal();
-            boolean judgeWithCookie = withAuthCookie && cookieOnFinal;
-            if (status == 404 || status == 403 || status == 410 || status == 451 || status >= 500) {
-                err = "HTTP " + status;
-            } else if (status < 200 || status >= 400) {
-                err = "HTTP " + status;
-            } else {
-                // 失效笔记常见：302→首页/404/其它内容，落地仍 HTTP 200，不能只看状态码。
-                // 无 Cookie：跳登录页 ≠ 失效；有 Cookie：登录墙可视为会话失效或内容不可见。
-                boolean contentDeep = isContentDeepLink(url);
-                String soft = detectSoftRedirect(url, page.uri(), judgeWithCookie);
-                if (StringUtils.hasText(soft)) {
-                    err = soft;
+            if (isXiaohongshuUrl(url)) {
+                // 小红书不把登录 Cookie 当主信号：游客票看笔记内容，登录弹框不算失效。
+                XhsFetch judged = probeXiaohongshu(url, timeout);
+                status = judged.status();
+                if (judged.verdict() == XhsVerdict.OK) {
+                    ok = true;
+                } else if (judged.verdict() == XhsVerdict.UNKNOWN) {
+                    inconclusive = true;
+                    err = judged.reason();
                 } else {
-                    String body = decodeBody(page.body(), page.contentType());
-                    String unavailable = detectUnavailableHint(body, contentDeep, judgeWithCookie);
-                    // 仅登录态探测才校验 SSR 笔记载荷：无 Cookie 时登录空壳与失效空壳难区分，避免误杀
-                    if (!StringUtils.hasText(unavailable) && contentDeep && judgeWithCookie) {
-                        // 同 id 落地仍可能是空壳：失效笔记常不跳转、也无「已删除」明文
-                        String contentId = extractContentId(normalizePath(URI.create(url.trim()).getPath()));
-                        unavailable = detectMissingNotePayload(body, contentId);
-                    }
-                    if (StringUtils.hasText(unavailable)) {
-                        err = contentDeep
-                                ? "笔记链接已失效（" + unavailable + "）"
-                                : "页面提示不可用：" + unavailable;
+                    err = judged.reason();
+                }
+            } else {
+                FetchedPage page = fetchDocument(url, probeCookie, hostSuffixes, timeout);
+                status = page.status();
+                cookieOnFinal = page.cookieOnFinal();
+                boolean judgeWithCookie = withAuthCookie && cookieOnFinal;
+                if (status == 404 || status == 403 || status == 410 || status == 451 || status >= 500) {
+                    err = "HTTP " + status;
+                } else if (status < 200 || status >= 400) {
+                    err = "HTTP " + status;
+                } else {
+                    // 失效笔记常见：302→首页/404/其它内容，落地仍 HTTP 200，不能只看状态码。
+                    // 无 Cookie：跳登录页 ≠ 失效；有 Cookie：登录墙可视为会话失效或内容不可见。
+                    boolean contentDeep = isContentDeepLink(url);
+                    String soft = detectSoftRedirect(url, page.uri(), judgeWithCookie);
+                    if (StringUtils.hasText(soft)) {
+                        err = soft;
                     } else {
-                        ok = true;
+                        String body = decodeBody(page.body(), page.contentType());
+                        String unavailable = detectUnavailableHint(body, contentDeep, judgeWithCookie);
+                        // 仅登录态探测才校验 SSR 笔记载荷：无 Cookie 时登录空壳与失效空壳难区分，避免误杀
+                        if (!StringUtils.hasText(unavailable) && contentDeep && judgeWithCookie) {
+                            // 同 id 落地仍可能是空壳：失效笔记常不跳转、也无「已删除」明文
+                            String contentId = extractContentId(normalizePath(URI.create(url.trim()).getPath()));
+                            unavailable = detectMissingNotePayload(body, contentId);
+                        }
+                        if (StringUtils.hasText(unavailable)) {
+                            err = contentDeep
+                                    ? "笔记链接已失效（" + unavailable + "）"
+                                    : "页面提示不可用：" + unavailable;
+                        } else {
+                            ok = true;
+                        }
                     }
                 }
             }
@@ -623,11 +671,20 @@ public class LinkMonitorService {
             }
         }
         int latency = (int) (System.currentTimeMillis() - start);
-        boolean cookieSessionDead = !ok && withAuthCookie && cookieOnFinal && looksLikeProbeCookieExpired(err);
+        boolean cookieSessionDead = !inconclusive && !ok && withAuthCookie && cookieOnFinal
+                && looksLikeProbeCookieExpired(err);
         jdbc.update("""
                 INSERT INTO ops_link_monitor_check_log (monitor_id, checked_at, ok, http_status, latency_ms, error_msg)
                 VALUES (?, NOW(), ?, ?, ?, ?)
                 """, monitorId, ok ? 1 : 0, status, latency, err);
+        if (inconclusive) {
+            // 不改 last_ok：风控空壳、登录跳转、暂时无法浏览都不算笔记失效，也不告警
+            jdbc.update("""
+                    UPDATE ops_link_monitor SET last_check_at = NOW(), last_status_code = ?, last_error = ?, update_time = NOW()
+                    WHERE id = ?
+                    """, status, err, monitorId);
+            return new ProbeResult(false, err, false, true);
+        }
         if (cookieSessionDead) {
             // 不改 last_ok，避免把「Cookie 挂了」记成「笔记挂了」；其它链接继续探测
             jdbc.update("""
@@ -653,10 +710,20 @@ public class LinkMonitorService {
     private FetchedPage fetchDocument(String url, String cookieHeader, String hostSuffixes, int timeoutMs) throws Exception {
         Map<String, String> jar = parseCookiePairs(cookieHeader);
         URI current = URI.create(url.trim());
+        String contentIdSeen = "";
+        String xsecQuery = "";
         int timeout = Math.max(3000, timeoutMs);
         for (int hop = 0; hop <= MAX_PROBE_REDIRECTS; hop++) {
             if (isBlockedProbeHost(current.getHost())) {
                 throw new IllegalStateException("重定向到内网地址，已中止");
+            }
+            String hopId = extractContentId(normalizePath(current.getPath()));
+            if (StringUtils.hasText(hopId)) {
+                contentIdSeen = hopId;
+            }
+            if (current.getRawQuery() != null
+                    && current.getRawQuery().toLowerCase(Locale.ROOT).contains("xsec_token")) {
+                xsecQuery = current.getRawQuery();
             }
             boolean sendCookie = !jar.isEmpty() && hostMatchesCookieSuffix(current.getHost(), hostSuffixes);
             HttpRequest.Builder builder = HttpRequest.newBuilder()
@@ -676,12 +743,14 @@ public class LinkMonitorService {
             if (code >= 300 && code < 400 && hop < MAX_PROBE_REDIRECTS) {
                 String loc = resp.headers().firstValue("location").orElse("").trim();
                 if (!StringUtils.hasText(loc)) {
-                    return new FetchedPage(code, current, resp.body(), contentType, sendCookie);
+                    return new FetchedPage(code, current, resp.body(), contentType, sendCookie,
+                            formatCookiePairs(jar), contentIdSeen, xsecQuery);
                 }
                 URI next = current.resolve(loc);
                 String scheme = next.getScheme() == null ? "" : next.getScheme();
                 if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
-                    return new FetchedPage(code, current, resp.body(), contentType, sendCookie);
+                    return new FetchedPage(code, current, resp.body(), contentType, sendCookie,
+                            formatCookiePairs(jar), contentIdSeen, xsecQuery);
                 }
                 current = next;
                 continue;
@@ -689,9 +758,417 @@ public class LinkMonitorService {
             if (code >= 300 && code < 400) {
                 throw new IllegalStateException("重定向次数过多");
             }
-            return new FetchedPage(code, current, resp.body(), contentType, sendCookie);
+            return new FetchedPage(code, current, resp.body(), contentType, sendCookie,
+                    formatCookiePairs(jar), contentIdSeen, xsecQuery);
         }
         throw new IllegalStateException("重定向次数过多");
+    }
+
+    /**
+     * 小红书：先用游客票看 SSR 笔记内容。确认失效才告警；登录弹框、风控空壳、暂时无法浏览记为未判定。
+     * 游客页无法判断时，才用后台保存的登录 Cookie 再看一次，仍看不清也不催人更新 Cookie。
+     */
+    private XhsFetch probeXiaohongshu(String url, int timeout) {
+        try {
+            String guest = xiaohongshuGuestCookie(timeout);
+            FetchedPage page = fetchDocument(url, guest, DEFAULT_COOKIE_HOSTS, timeout);
+            XhsJudgement judgement = judgementOf(url, page);
+            if (judgement.verdict() == XhsVerdict.UNKNOWN && guestCookieLooksStale(judgement.reason())) {
+                invalidateXhsGuestCookie();
+                guest = xiaohongshuGuestCookie(timeout);
+                page = fetchDocument(url, guest, DEFAULT_COOKIE_HOSTS, timeout);
+                judgement = judgementOf(url, page);
+            }
+            if (judgement.verdict() == XhsVerdict.UNKNOWN) {
+                String noteId = StringUtils.hasText(page.contentIdSeen())
+                        ? page.contentIdSeen()
+                        : extractContentId(normalizePath(URI.create(url.trim()).getPath()));
+                String xsec = StringUtils.hasText(page.xsecQuery()) ? page.xsecQuery() : queryOf(url);
+                for (String alt : xhsAlternateNoteUrls(noteId, xsec)) {
+                    if (sameNotePath(alt, url) || sameNotePath(alt, page.uri().toString())) {
+                        continue;
+                    }
+                    FetchedPage altPage = fetchDocument(alt, guest, DEFAULT_COOKIE_HOSTS, timeout);
+                    XhsJudgement altJudgement = judgementOf(url, altPage);
+                    if (altJudgement.verdict() != XhsVerdict.UNKNOWN) {
+                        return new XhsFetch(altJudgement.verdict(), altPage.status(), altJudgement.reason());
+                    }
+                }
+            }
+            if (judgement.verdict() == XhsVerdict.UNKNOWN) {
+                String loginCookie = resolveProbeCookieForUrl(url);
+                if (StringUtils.hasText(loginCookie)) {
+                    FetchedPage authPage = fetchDocument(url, loginCookie, getProbeCookieConfig().hostSuffixes(), timeout);
+                    XhsJudgement authJudgement = judgementOf(url, authPage);
+                    if (authJudgement.verdict() != XhsVerdict.UNKNOWN) {
+                        return new XhsFetch(authJudgement.verdict(), authPage.status(), authJudgement.reason());
+                    }
+                    return new XhsFetch(XhsVerdict.UNKNOWN, authPage.status(),
+                            unknownReason("游客页和登录 Cookie 都没有确认到笔记内容"));
+                }
+            }
+            String reason = judgement.verdict() == XhsVerdict.UNKNOWN
+                    ? unknownReason(judgement.reason()) : judgement.reason();
+            return new XhsFetch(judgement.verdict(), page.status(), reason);
+        } catch (Exception ex) {
+            String msg = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+            if (msg.length() > 200) {
+                msg = msg.substring(0, 200);
+            }
+            return new XhsFetch(XhsVerdict.UNKNOWN, null, unknownReason(msg));
+        }
+    }
+
+    private XhsJudgement judgementOf(String originalUrl, FetchedPage page) {
+        String body = decodeBody(page.body(), page.contentType());
+        return judgeXiaohongshuPage(originalUrl, page.status(), page.uri(), body);
+    }
+
+    private String xiaohongshuGuestCookie(int timeoutMs) {
+        long now = System.currentTimeMillis();
+        String cached = xhsGuestCookie;
+        if (StringUtils.hasText(cached) && now - xhsGuestCookieAt < XHS_GUEST_TTL_MS) {
+            return cached;
+        }
+        synchronized (xhsGuestLock) {
+            now = System.currentTimeMillis();
+            cached = xhsGuestCookie;
+            if (StringUtils.hasText(cached) && now - xhsGuestCookieAt < XHS_GUEST_TTL_MS) {
+                return cached;
+            }
+            try {
+                FetchedPage home = fetchDocument(XHS_HOME, "", DEFAULT_COOKIE_HOSTS, timeoutMs);
+                String jar = home.cookieJar();
+                if (StringUtils.hasText(jar)) {
+                    xhsGuestCookie = jar;
+                    xhsGuestCookieAt = System.currentTimeMillis();
+                    return jar;
+                }
+            } catch (Exception ex) {
+                log.warn("xhs guest cookie failed: {}", ex.getMessage());
+            }
+            return StringUtils.hasText(xhsGuestCookie) ? xhsGuestCookie : "";
+        }
+    }
+
+    private void invalidateXhsGuestCookie() {
+        synchronized (xhsGuestLock) {
+            xhsGuestCookieAt = 0L;
+        }
+    }
+
+    private static boolean guestCookieLooksStale(String reason) {
+        if (!StringUtils.hasText(reason)) {
+            return false;
+        }
+        return reason.contains("登录")
+                || reason.contains("验证码")
+                || reason.contains("安全验证")
+                || reason.contains("HTTP 403")
+                || reason.contains("HTTP 429")
+                || reason.contains("HTTP 5");
+    }
+
+    private static String unknownReason(String detail) {
+        if (!StringUtils.hasText(detail)) {
+            return "未判定：页面没有可确认的笔记内容";
+        }
+        if (detail.startsWith("未判定")) {
+            return detail;
+        }
+        return "未判定：" + detail;
+    }
+
+    private static String queryOf(String url) {
+        try {
+            String raw = URI.create(url.trim()).getRawQuery();
+            return raw == null ? "" : raw;
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    static boolean isXiaohongshuUrl(String url) {
+        if (!StringUtils.hasText(url)) {
+            return false;
+        }
+        try {
+            String host = URI.create(url.trim()).getHost();
+            if (!StringUtils.hasText(host)) {
+                return false;
+            }
+            String h = host.toLowerCase(Locale.ROOT);
+            return h.equals("xiaohongshu.com") || h.endsWith(".xiaohongshu.com")
+                    || h.equals("xhslink.com") || h.endsWith(".xhslink.com")
+                    || h.equals("xhs.cn") || h.endsWith(".xhs.cn");
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    /** 同一笔记的 explore / discovery 地址，保留分享参数 xsec_token。 */
+    static List<String> xhsAlternateNoteUrls(String noteId, String rawQuery) {
+        if (!StringUtils.hasText(noteId)) {
+            return List.of();
+        }
+        String q = xsecQuery(rawQuery);
+        String suffix = StringUtils.hasText(q) ? "?" + q : "";
+        return List.of(
+                "https://www.xiaohongshu.com/explore/" + noteId + suffix,
+                "https://www.xiaohongshu.com/discovery/item/" + noteId + suffix
+        );
+    }
+
+    static String xsecQuery(String rawQuery) {
+        if (!StringUtils.hasText(rawQuery)) {
+            return "";
+        }
+        String token = "";
+        String source = "";
+        for (String part : rawQuery.split("&")) {
+            int eq = part.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String key = part.substring(0, eq);
+            String val = part.substring(eq + 1);
+            if ("xsec_token".equalsIgnoreCase(key)) {
+                token = val;
+            } else if ("xsec_source".equalsIgnoreCase(key)) {
+                source = val;
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        if (StringUtils.hasText(token)) {
+            sb.append("xsec_token=").append(token);
+        }
+        if (StringUtils.hasText(source)) {
+            if (!sb.isEmpty()) {
+                sb.append('&');
+            }
+            sb.append("xsec_source=").append(source);
+        }
+        return sb.toString();
+    }
+
+    static boolean sameNotePath(String a, String b) {
+        try {
+            URI ua = URI.create(a.trim());
+            URI ub = URI.create(b.trim());
+            String ha = ua.getHost() == null ? "" : ua.getHost().toLowerCase(Locale.ROOT);
+            String hb = ub.getHost() == null ? "" : ub.getHost().toLowerCase(Locale.ROOT);
+            return ha.equals(hb) && normalizePath(ua.getPath()).equalsIgnoreCase(normalizePath(ub.getPath()));
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    /**
+     * 小红书页面三态。登录弹框文案忽略；只有笔记被删、跳走、note 明确为空才判失效。
+     */
+    static XhsJudgement judgeXiaohongshuPage(String originalUrl, int status, URI finalUri, String body) {
+        if (status == 404 || status == 410 || status == 451) {
+            return XhsJudgement.dead("笔记链接已失效（HTTP " + status + "）");
+        }
+        if (status == 403 || status == 429 || status >= 500) {
+            return XhsJudgement.unknown("访问被拦截（HTTP " + status + "）");
+        }
+        if (status < 200 || status >= 400) {
+            return XhsJudgement.unknown("HTTP " + status);
+        }
+        String finalPath = finalUri == null ? "/" : normalizePath(finalUri.getPath());
+        String finalPathLower = finalPath.toLowerCase(Locale.ROOT);
+        String queryDecoded = "";
+        if (finalUri != null && StringUtils.hasText(finalUri.getRawQuery())) {
+            try {
+                queryDecoded = URLDecoder.decode(finalUri.getRawQuery(), StandardCharsets.UTF_8);
+            } catch (Exception ex) {
+                queryDecoded = finalUri.getRawQuery();
+            }
+        }
+        if (isLoginLanding(finalPathLower, queryDecoded.toLowerCase(Locale.ROOT))) {
+            return XhsJudgement.unknown("落到登录页，无法确认笔记是否仍有效");
+        }
+        String soft = detectSoftRedirect(originalUrl, finalUri, false);
+        if (StringUtils.hasText(soft)) {
+            return XhsJudgement.dead(soft);
+        }
+        String contentId = "";
+        try {
+            contentId = extractContentId(normalizePath(URI.create(originalUrl.trim()).getPath()));
+        } catch (Exception ignored) {
+            // keep empty
+        }
+        if (!StringUtils.hasText(contentId)) {
+            contentId = extractContentId(finalPath);
+        }
+        if (xhsNotePayloadPresent(body, contentId)) {
+            return XhsJudgement.ok();
+        }
+        String hard = xhsHardDeadHint(body);
+        if (StringUtils.hasText(hard)) {
+            return XhsJudgement.dead("笔记链接已失效（" + hard + "）");
+        }
+        if (xhsNoteExplicitlyEmpty(body, contentId)) {
+            if (isAcceptableXhsTitle(body) || hasSpecificOgTitle(body)) {
+                return XhsJudgement.ok();
+            }
+            return XhsJudgement.dead("笔记链接已失效（笔记数据为空或不存在）");
+        }
+        if (isAcceptableXhsTitle(body) || hasSpecificOgTitle(body)) {
+            return XhsJudgement.ok();
+        }
+        String raw = unescapeJsonUnicode(body == null ? "" : body);
+        if (raw.contains("当前笔记暂时无法浏览") || raw.contains("暂时无法浏览")) {
+            return XhsJudgement.unknown("页面只提示暂时无法浏览");
+        }
+        if (looksLikeXhsRiskShell(body)) {
+            return XhsJudgement.unknown("页面是验证码或登录壳，看不到笔记内容");
+        }
+        return XhsJudgement.unknown("页面没有可确认的笔记内容");
+    }
+
+    static boolean xhsNotePayloadPresent(String body, String contentId) {
+        String window = xhsNoteWindow(body, contentId);
+        if (!StringUtils.hasText(window)) {
+            return false;
+        }
+        int noteKey = window.indexOf("\"note\"");
+        if (noteKey < 0) {
+            return false;
+        }
+        return looksLikeNoteObject(window.substring(noteKey));
+    }
+
+    static boolean xhsNoteExplicitlyEmpty(String body, String contentId) {
+        if (!StringUtils.hasText(contentId)) {
+            return false;
+        }
+        String window = xhsNoteWindow(body, contentId);
+        if (!StringUtils.hasText(window)) {
+            return false;
+        }
+        int noteKey = window.indexOf("\"note\"");
+        if (noteKey < 0) {
+            return false;
+        }
+        return Pattern.compile("^\"note\"\\s*:\\s*(null|\\{\\s*\\})").matcher(window.substring(noteKey)).find();
+    }
+
+    /** noteDetailMap 里该笔记附近的片段；没有 id 时从 map 起点截一段。找不到 map 返回空串。 */
+    private static String xhsNoteWindow(String body, String contentId) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        String raw = unescapeJsonUnicode(body);
+        int mapIdx = indexOfNoteDetailMap(raw);
+        if (mapIdx < 0) {
+            return "";
+        }
+        int from = mapIdx;
+        if (StringUtils.hasText(contentId)) {
+            int idInMap = raw.indexOf("\"" + contentId + "\"", mapIdx);
+            if (idInMap < 0) {
+                return "";
+            }
+            from = idInMap;
+        }
+        return raw.substring(from, Math.min(raw.length(), from + 12000));
+    }
+
+    static String xhsHardDeadHint(String body) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        String raw = unescapeJsonUnicode(body);
+        String[][] patterns = {
+                {"你访问的页面不见了", "你访问的页面不见了"},
+                {"页面不见了", "页面不见了"},
+                {"文章不存在", "文章不存在"},
+                {"笔记不存在", "笔记不存在"},
+                {"内容不存在", "内容不存在"},
+                {"页面不存在", "页面不存在"},
+                {"不存在或已被删除", "不存在或已被删除"},
+                {"已被删除", "已被删除"},
+                {"文章被删", "文章被删"},
+                {"笔记被删", "笔记被删"},
+                {"笔记已删除", "笔记已删除"},
+                {"内容已删除", "内容已删除"},
+                {"该内容无法展示", "该内容无法展示"},
+                {"page not found", "page not found"},
+                {"404 not found", "404 not found"},
+        };
+        String lower = raw.toLowerCase(Locale.ROOT);
+        for (String[] p : patterns) {
+            if (raw.contains(p[0]) || lower.contains(p[0])) {
+                return p[1];
+            }
+        }
+        return "";
+    }
+
+    static boolean isAcceptableXhsTitle(String body) {
+        if (!hasSpecificNoteHtmlTitle(body)) {
+            return false;
+        }
+        return !isLoginLikeTitle(htmlTitle(body));
+    }
+
+    static boolean hasSpecificOgTitle(String body) {
+        String title = extractOgTitle(body);
+        if (!StringUtils.hasText(title) || isGenericXhsTitle(title) || isLoginLikeTitle(title)) {
+            return false;
+        }
+        return title.contains("小红书") || title.length() >= 8;
+    }
+
+    static String htmlTitle(String body) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        Matcher titleM = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
+        if (!titleM.find()) {
+            return "";
+        }
+        return titleM.group(1).replaceAll("\\s+", " ").trim();
+    }
+
+    static String extractOgTitle(String body) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        Matcher tags = Pattern.compile("(?is)<meta\\b[^>]*>").matcher(body);
+        while (tags.find()) {
+            String tag = tags.group();
+            if (!tag.toLowerCase(Locale.ROOT).contains("og:title")) {
+                continue;
+            }
+            Matcher content = Pattern.compile("(?is)\\bcontent\\s*=\\s*([\"'])(.*?)\\1").matcher(tag);
+            if (content.find()) {
+                return content.group(2).replaceAll("\\s+", " ").trim();
+            }
+        }
+        return "";
+    }
+
+    static boolean isLoginLikeTitle(String title) {
+        if (!StringUtils.hasText(title)) {
+            return false;
+        }
+        String t = title.toLowerCase(Locale.ROOT);
+        return t.contains("登录") || t.contains("login") || t.contains("sign in");
+    }
+
+    /** 整页是验证码或登录壳。笔记正文里偶然出现「登录」按钮不算。 */
+    static boolean looksLikeXhsRiskShell(String body) {
+        if (!StringUtils.hasText(body)) {
+            return false;
+        }
+        if (isLoginLikeTitle(htmlTitle(body))) {
+            return true;
+        }
+        String raw = unescapeJsonUnicode(body);
+        return raw.contains("验证码") || raw.contains("安全验证") || raw.toLowerCase(Locale.ROOT).contains("captcha");
     }
 
     static boolean looksLikeProbeCookieExpired(String err) {

@@ -230,6 +230,7 @@ public class RobotAdminController {
         data.put("ok", r.ok());
         data.put("error", r.error() == null ? "" : r.error());
         data.put("alerted", r.alerted());
+        data.put("inconclusive", r.inconclusive());
         return Result.ok(data);
     }
 

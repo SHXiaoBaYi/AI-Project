@@ -113,6 +113,7 @@ export function probeLinkMonitorApi(id: number) {
       ok: boolean;
       error?: string;
       alerted?: boolean;
+      inconclusive?: boolean;
     }
   >(`/robot/link-monitors/${id}/probe`);
 }

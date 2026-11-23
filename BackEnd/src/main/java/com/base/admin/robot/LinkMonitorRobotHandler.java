@@ -198,7 +198,11 @@ public class LinkMonitorRobotHandler {
         StringBuilder md = new StringBuilder();
         md.append("已即时探测 ").append(batch.total()).append(" 条监控链接：")
                 .append("正常 ").append(batch.okCount())
-                .append("，异常 ").append(batch.failCount()).append("。\n");
+                .append("，异常 ").append(batch.failCount());
+        if (batch.unknownCount() > 0) {
+            md.append("，未判定 ").append(batch.unknownCount());
+        }
+        md.append("。\n");
         if (batch.failCount() == 0) {
             md.append("目前没有异常。");
             return RobotReply.text(md.toString());
