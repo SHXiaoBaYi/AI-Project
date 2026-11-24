@@ -53,6 +53,7 @@ public class HrInviteService {
     private final DingTalkScheduleRuleService dingTalkScheduleRuleService;
     private final SysTaskService taskService;
     private final HrTalentBlacklistService talentBlacklistService;
+    private final HrDataScope dataScope;
 
     @Transactional
     public HrInviteSaveVO create(HrInviteCreateDTO dto) {
@@ -281,6 +282,7 @@ public class HrInviteService {
             args.add(q.getEndDate().plusDays(1).atStartOfDay());
         }
         HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
+        dataScope.apply(sql, args, "r", "a");
         sql.append(" ORDER BY i.interview_at DESC, i.id DESC");
         return jdbc.queryForList(sql.toString(), args.toArray());
     }

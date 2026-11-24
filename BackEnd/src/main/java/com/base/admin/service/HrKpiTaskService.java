@@ -21,8 +21,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,10 +43,14 @@ public class HrKpiTaskService {
 
     private final JdbcTemplate jdbc;
     private final HrRequisitionMonthTaskService monthTaskService;
+    private final HrDataScope dataScope;
 
-    public HrKpiTaskService(JdbcTemplate jdbc, @Lazy HrRequisitionMonthTaskService monthTaskService) {
+    public HrKpiTaskService(JdbcTemplate jdbc,
+                            @Lazy HrRequisitionMonthTaskService monthTaskService,
+                            HrDataScope dataScope) {
         this.jdbc = jdbc;
         this.monthTaskService = monthTaskService;
+        this.dataScope = dataScope;
     }
 
     /** 需求保存/改状态/改负责人或 HC 后同步任务槽位（当前自然月）。 */
@@ -621,8 +627,9 @@ public class HrKpiTaskService {
         String settleMonthKey = settleYm.toString();
         List<HrRequisitionMonthTaskService.ActiveAssessmentTask> activeTasks =
                 monthTaskService.loadActiveAssessmentTasks(settleMonthKey);
-        // 入职/合格简历只认核算月窗口；纠正误标 DONE（如用了上月简历）
+        // 入职/合格简历只认核算月窗口；纠正误标 DONE（如用了上月简历）。计分仍覆盖全部岗位，展示再按数据权限收窄。
         reevaluateCompletionForSettleMonth(settleYm, activeTasks, from, to);
+        activeTasks = visibleAssessmentTasks(activeTasks);
         Map<Long, MonthTaskRule> monthRules = new LinkedHashMap<>();
         for (HrRequisitionMonthTaskService.ActiveAssessmentTask item : activeTasks) {
             monthRules.put(item.rule().requisitionId(), item.rule());
@@ -896,12 +903,48 @@ public class HrKpiTaskService {
         return MonthAttainment.notDone();
     }
 
+    /**
+     * 考核展示只保留当前用户招聘数据权限内的岗位（部门、负责人/面试官范围与其它招聘列表一致）。
+     */
+    private List<HrRequisitionMonthTaskService.ActiveAssessmentTask> visibleAssessmentTasks(
+            List<HrRequisitionMonthTaskService.ActiveAssessmentTask> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return tasks == null ? List.of() : tasks;
+        }
+        List<Long> ids = tasks.stream()
+                .map(t -> t.rule().requisitionId())
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> allowed = visibleRequisitionIds(ids);
+        return tasks.stream().filter(t -> allowed.contains(t.rule().requisitionId())).toList();
+    }
+
+    private void assertRequisitionVisible(Long requisitionId) {
+        if (requisitionId == null || !visibleRequisitionIds(List.of(requisitionId)).contains(requisitionId)) {
+            throw new BusinessException("无权查看该岗位");
+        }
+    }
+
+    private Set<Long> visibleRequisitionIds(List<Long> ids) {
+        String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
+        StringBuilder sql = new StringBuilder(
+                "SELECT r.id FROM hr_requisition r WHERE r.id IN (" + placeholders + ") ");
+        List<Object> args = new ArrayList<>(ids);
+        dataScope.apply(sql, args, "r", null);
+        return new HashSet<>(jdbc.query(sql.toString(), (rs, i) -> rs.getLong(1), args.toArray()));
+    }
+
     /** 任务明细「完成方式」下钻：与 evaluateMonthAttainment 同口径列出核算月内命中的候选人。 */
     public HrKpiAssessmentCandidateVO assessmentCandidates(HrKpiAssessmentCandidateQueryDTO query) {
         if (query == null || query.getRequisitionId() == null) {
             throw new BusinessException("岗位不能为空");
         }
         Long reqId = query.getRequisitionId();
+        assertRequisitionVisible(reqId);
         LocalDate month = query.getSettleMonth() == null ? LocalDate.now() : query.getSettleMonth();
         LocalDate monthStart = month.withDayOfMonth(1);
         String settleMonthKey = YearMonth.from(monthStart).toString();
