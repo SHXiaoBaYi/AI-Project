@@ -95,6 +95,60 @@ class LinkMonitorXhsJudgeTest {
     }
 
     @Test
+    void edge404OfLiveNoteIsUnknown() {
+        LinkMonitorService.XhsJudgement j = LinkMonitorService.judgeXiaohongshuPage(
+                NOTE_URL, 404, URI.create(NOTE_URL), "404 page not found");
+        assertEquals(LinkMonitorService.XhsVerdict.UNKNOWN, j.verdict());
+    }
+
+    @Test
+    void englishLoginShellIsUnknownEvenIfScriptSaysNotFound() {
+        String html = """
+                <title>Log in - rednote - share, connect, love</title>
+                <script>var i18n = "page not found"; var zh = "笔记不存在";</script>
+                <button>Log in</button>
+                """;
+        LinkMonitorService.XhsJudgement j = LinkMonitorService.judgeXiaohongshuPage(
+                NOTE_URL, 200, URI.create(NOTE_URL), html);
+        assertEquals(LinkMonitorService.XhsVerdict.UNKNOWN, j.verdict());
+    }
+
+    @Test
+    void guestBrowserKeepsNoteWhenUrlStillHasId() {
+        String finalUrl = NOTE_URL + "&source=webshare";
+        LinkMonitorService.XhsJudgement j = LinkMonitorService.judgeByGuestPageUrl(NOTE_URL, finalUrl);
+        assertEquals(LinkMonitorService.XhsVerdict.OK, j.verdict());
+    }
+
+    @Test
+    void guestBrowserMarksDeadWhenUrlLosesNoteId() {
+        LinkMonitorService.XhsJudgement j = LinkMonitorService.judgeByGuestPageUrl(
+                NOTE_URL, "https://www.xiaohongshu.com/explore");
+        assertEquals(LinkMonitorService.XhsVerdict.DEAD, j.verdict());
+    }
+
+    @Test
+    void shortLinkIsOkWhenItLandsOnANote() {
+        LinkMonitorService.XhsJudgement j = LinkMonitorService.judgeByGuestPageUrl(
+                "https://xhslink.com/a/abcXYZ", NOTE_URL);
+        assertEquals(LinkMonitorService.XhsVerdict.OK, j.verdict());
+    }
+
+    @Test
+    void blankPageIsUnknown() {
+        LinkMonitorService.XhsJudgement j = LinkMonitorService.judgeByGuestPageUrl(NOTE_URL, "about:blank");
+        assertEquals(LinkMonitorService.XhsVerdict.UNKNOWN, j.verdict());
+    }
+
+    @Test
+    void visibleDeletedCopyIsStillDead() {
+        String html = "<title>小红书</title><div>笔记不存在</div>";
+        LinkMonitorService.XhsJudgement j = LinkMonitorService.judgeXiaohongshuPage(
+                NOTE_URL, 200, URI.create(NOTE_URL), html);
+        assertEquals(LinkMonitorService.XhsVerdict.DEAD, j.verdict());
+    }
+
+    @Test
     void alternateUrlsKeepXsecToken() {
         List<String> urls = LinkMonitorService.xhsAlternateNoteUrls(
                 NOTE_ID, "foo=1&xsec_token=abc&xsec_source=pc_share");

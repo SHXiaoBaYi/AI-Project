@@ -77,7 +77,7 @@ export default function LinkMonitorPage() {
       if (cfg.updateTime) parts.push(`更新于 ${cfg.updateTime}`);
       if (cfg.updateBy) parts.push(`by ${cfg.updateBy}`);
     } else {
-      parts.push('尚未配置。小红书默认用游客票探测，不依赖登录 Cookie');
+      parts.push('尚未配置。小红书用游客浏览器看地址栏，不使用这份 Cookie');
     }
     setCookieHint(parts.filter(Boolean).join(' · '));
     setCookieOpen(true);
@@ -210,7 +210,7 @@ export default function LinkMonitorPage() {
         actionRef={actionRef}
         rowKey='id'
         columns={columns}
-        headerTitle='链接监控（小红书按页面笔记内容判定，登录弹框不算失效；每天 09:30 探测）'
+        headerTitle='链接监控（小红书用游客浏览器打开，5 秒后地址仍含笔记 id 才算有效；每天 09:30 探测）'
         toolBarRender={() => [
           <PermissionButton
             key='cookie'
@@ -372,9 +372,9 @@ export default function LinkMonitorPage() {
         }}
       >
         <p className='mb-3 text-xs text-neutral-500'>
-          小红书探测默认自动领取游客票，看页面里有没有笔记内容；登录弹框不算失效。这里的登录 Cookie
-          只在游客页看不清时再试一次，过期也不会把笔记判成失效。从已登录浏览器复制 Cookie（DevTools → Network 请求头，或
-          Application → Cookies）。支持 Cookie 原文或 EditThisCookie JSON，不存账号密码。
+          小红书在服务器上用游客浏览器打开，等 5 秒后看地址里还有没有笔记 id，不使用这里的 Cookie。这份 Cookie
+          只给其它站点的探测用。从已登录浏览器复制（DevTools → Network 请求头，或 Application → Cookies）。支持 Cookie
+          原文或 EditThisCookie JSON，不存账号密码。
         </p>
         {cookieHint ? <p className='mb-3 text-xs text-neutral-600'>{cookieHint}</p> : null}
         <Form

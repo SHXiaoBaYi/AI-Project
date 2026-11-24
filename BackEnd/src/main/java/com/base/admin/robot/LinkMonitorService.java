@@ -1,7 +1,15 @@
 package com.base.admin.robot;
 
+import com.base.admin.config.GeoBrowserProbeProperties;
 import com.base.admin.exception.BusinessException;
 import com.base.admin.service.DingTalkCalendarClient;
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.WaitUntilState;
+import jakarta.annotation.PreDestroy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +27,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.security.MessageDigest;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
@@ -49,9 +63,20 @@ public class LinkMonitorService {
     private static final int MAX_PROBE_REDIRECTS = 6;
     /** 小红书游客票（a1/webId 等）缓存时长。不是登录态，过期后自动重领。 */
     private static final long XHS_GUEST_TTL_MS = Duration.ofHours(6).toMillis();
+    /** 游客浏览器打开后停留时间，等前端跳转落定再看地址栏。 */
+    static final int XHS_GUEST_WAIT_MS = 5_000;
     private static final String XHS_HOME = "https://www.xiaohongshu.com/";
     private final JdbcTemplate jdbc;
     private final DingTalkCalendarClient dingTalkCalendarClient;
+    private final GeoBrowserProbeProperties browserProperties;
+    /** Playwright 只能在创建它的线程里用。 */
+    private final ExecutorService xhsBrowserExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "link-monitor-xhs-browser");
+        t.setDaemon(true);
+        return t;
+    });
+    private Playwright xhsPlaywright;
+    private Browser xhsBrowser;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -618,7 +643,7 @@ public class LinkMonitorService {
         boolean cookieOnFinal = false;
         try {
             if (isXiaohongshuUrl(url)) {
-                // 小红书不把登录 Cookie 当主信号：游客票看笔记内容，登录弹框不算失效。
+                // 小红书用游客浏览器打开，等 5 秒后看地址里还有没有笔记 id。
                 XhsFetch judged = probeXiaohongshu(url, timeout);
                 status = judged.status();
                 if (judged.verdict() == XhsVerdict.OK) {
@@ -732,7 +757,13 @@ public class LinkMonitorService {
                     .GET()
                     .header("User-Agent", BROWSER_UA)
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                    .header("Cache-Control", "no-cache")
+                    .header("Upgrade-Insecure-Requests", "1")
+                    .header("Sec-Fetch-Dest", "document")
+                    .header("Sec-Fetch-Mode", "navigate")
+                    .header("Sec-Fetch-Site", "none")
+                    .header("Sec-Fetch-User", "?1");
             if (sendCookie) {
                 builder.header("Cookie", formatCookiePairs(jar));
             }
@@ -765,58 +796,177 @@ public class LinkMonitorService {
     }
 
     /**
-     * 小红书：先用游客票看 SSR 笔记内容。确认失效才告警；登录弹框、风控空壳、暂时无法浏览记为未判定。
-     * 游客页无法判断时，才用后台保存的登录 Cookie 再看一次，仍看不清也不催人更新 Cookie。
+     * 小红书：服务器上用 Playwright 起一个干净浏览器，不带登录 Cookie，打开链接并停留 5 秒。
+     * 地址栏里还看得到原笔记 id 才算有效；浏览器没起来或没打开页面则未判定，不告警。
      */
     private XhsFetch probeXiaohongshu(String url, int timeout) {
+        int budgetMs = Math.max(timeout, 30_000) + XHS_GUEST_WAIT_MS + 5_000;
         try {
-            String guest = xiaohongshuGuestCookie(timeout);
-            FetchedPage page = fetchDocument(url, guest, DEFAULT_COOKIE_HOSTS, timeout);
-            XhsJudgement judgement = judgementOf(url, page);
-            if (judgement.verdict() == XhsVerdict.UNKNOWN && guestCookieLooksStale(judgement.reason())) {
-                invalidateXhsGuestCookie();
-                guest = xiaohongshuGuestCookie(timeout);
-                page = fetchDocument(url, guest, DEFAULT_COOKIE_HOSTS, timeout);
-                judgement = judgementOf(url, page);
-            }
-            if (judgement.verdict() == XhsVerdict.UNKNOWN) {
-                String noteId = StringUtils.hasText(page.contentIdSeen())
-                        ? page.contentIdSeen()
-                        : extractContentId(normalizePath(URI.create(url.trim()).getPath()));
-                String xsec = StringUtils.hasText(page.xsecQuery()) ? page.xsecQuery() : queryOf(url);
-                for (String alt : xhsAlternateNoteUrls(noteId, xsec)) {
-                    if (sameNotePath(alt, url) || sameNotePath(alt, page.uri().toString())) {
-                        continue;
-                    }
-                    FetchedPage altPage = fetchDocument(alt, guest, DEFAULT_COOKIE_HOSTS, timeout);
-                    XhsJudgement altJudgement = judgementOf(url, altPage);
-                    if (altJudgement.verdict() != XhsVerdict.UNKNOWN) {
-                        return new XhsFetch(altJudgement.verdict(), altPage.status(), altJudgement.reason());
-                    }
-                }
-            }
-            if (judgement.verdict() == XhsVerdict.UNKNOWN) {
-                String loginCookie = resolveProbeCookieForUrl(url);
-                if (StringUtils.hasText(loginCookie)) {
-                    FetchedPage authPage = fetchDocument(url, loginCookie, getProbeCookieConfig().hostSuffixes(), timeout);
-                    XhsJudgement authJudgement = judgementOf(url, authPage);
-                    if (authJudgement.verdict() != XhsVerdict.UNKNOWN) {
-                        return new XhsFetch(authJudgement.verdict(), authPage.status(), authJudgement.reason());
-                    }
-                    return new XhsFetch(XhsVerdict.UNKNOWN, authPage.status(),
-                            unknownReason("游客页和登录 Cookie 都没有确认到笔记内容"));
-                }
-            }
-            String reason = judgement.verdict() == XhsVerdict.UNKNOWN
-                    ? unknownReason(judgement.reason()) : judgement.reason();
-            return new XhsFetch(judgement.verdict(), page.status(), reason);
+            return xhsBrowserExecutor.submit(() -> visitXiaohongshuAsGuest(url)).get(budgetMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException ex) {
+            return new XhsFetch(XhsVerdict.UNKNOWN, null, unknownReason("浏览器探测超时"));
         } catch (Exception ex) {
-            String msg = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+            String msg = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
             if (msg.length() > 200) {
                 msg = msg.substring(0, 200);
             }
             return new XhsFetch(XhsVerdict.UNKNOWN, null, unknownReason(msg));
         }
+    }
+
+    private XhsFetch visitXiaohongshuAsGuest(String url) {
+        BrowserContext context = null;
+        Page page = null;
+        try {
+            ensureXhsBrowser();
+            Browser.NewContextOptions options = new Browser.NewContextOptions()
+                    .setLocale("zh-CN")
+                    .setViewportSize(browserProperties.getViewportWidth(), browserProperties.getViewportHeight());
+            if (StringUtils.hasText(browserProperties.getUserAgent())) {
+                options.setUserAgent(browserProperties.getUserAgent());
+            }
+            context = xhsBrowser.newContext(options);
+            page = context.newPage();
+            long navTimeout = Math.max(browserProperties.getNavigationTimeoutMs(), 20_000);
+            page.setDefaultNavigationTimeout(navTimeout);
+            page.navigate(url, new Page.NavigateOptions()
+                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
+                    .setTimeout(navTimeout));
+            page.waitForTimeout(XHS_GUEST_WAIT_MS);
+            String finalUrl = page.url();
+            XhsJudgement judgement = judgeByGuestPageUrl(url, finalUrl);
+            String reason = judgement.reason();
+            if (judgement.verdict() == XhsVerdict.DEAD && StringUtils.hasText(finalUrl)) {
+                reason = reason + "：" + abbreviateUrl(finalUrl);
+            }
+            if (judgement.verdict() == XhsVerdict.UNKNOWN) {
+                reason = unknownReason(reason);
+            }
+            return new XhsFetch(judgement.verdict(), 200, reason);
+        } catch (Exception ex) {
+            if (xhsBrowser == null || !xhsBrowser.isConnected()) {
+                closeXhsBrowserQuietly();
+            }
+            String msg = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+            if (msg.length() > 200) {
+                msg = msg.substring(0, 200);
+            }
+            return new XhsFetch(XhsVerdict.UNKNOWN, null, unknownReason(msg));
+        } finally {
+            if (page != null) {
+                try {
+                    page.close();
+                } catch (Exception ignored) {
+                    // 页面关闭失败不影响本次结论
+                }
+            }
+            if (context != null) {
+                try {
+                    context.close();
+                } catch (Exception ignored) {
+                    // 上下文关闭失败不影响本次结论
+                }
+            }
+        }
+    }
+
+    /**
+     * 游客打开并停留后的地址。原链接能抽出笔记 id 时，最终地址必须还包含这个 id；
+     * 短链没有 id 时，最终地址必须落到某一条笔记上。
+     */
+    static XhsJudgement judgeByGuestPageUrl(String originalUrl, String finalUrl) {
+        if (!StringUtils.hasText(finalUrl) || finalUrl.startsWith("about:")) {
+            return XhsJudgement.unknown("浏览器没有打开目标页");
+        }
+        String noteId = noteIdOf(originalUrl);
+        if (StringUtils.hasText(noteId)) {
+            if (finalUrl.contains(noteId)) {
+                return XhsJudgement.ok();
+            }
+            return XhsJudgement.dead("笔记链接已失效（打开 5 秒后地址已不含该笔记）");
+        }
+        if (StringUtils.hasText(noteIdOf(finalUrl))) {
+            return XhsJudgement.ok();
+        }
+        return XhsJudgement.dead("笔记链接已失效（打开 5 秒后不在笔记页）");
+    }
+
+    static String noteIdOf(String url) {
+        if (!StringUtils.hasText(url)) {
+            return "";
+        }
+        try {
+            return extractContentId(normalizePath(URI.create(url.trim()).getPath()));
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private static String abbreviateUrl(String url) {
+        String text = url.trim();
+        return text.length() <= 180 ? text : text.substring(0, 180);
+    }
+
+    private void ensureXhsBrowser() {
+        if (xhsPlaywright != null && xhsBrowser != null && xhsBrowser.isConnected()) {
+            return;
+        }
+        closeXhsBrowserQuietly();
+        boolean useLocalBrowser = StringUtils.hasText(browserProperties.getExecutablePath());
+        if (useLocalBrowser) {
+            Path exe = Path.of(browserProperties.getExecutablePath());
+            if (!Files.exists(exe)) {
+                throw new IllegalStateException("浏览器可执行文件不存在：" + exe);
+            }
+            xhsPlaywright = Playwright.create(new Playwright.CreateOptions()
+                    .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+        } else {
+            xhsPlaywright = Playwright.create();
+        }
+        List<String> launchArgs = new ArrayList<>();
+        launchArgs.add("--no-sandbox");
+        launchArgs.add("--disable-dev-shm-usage");
+        launchArgs.add("--disable-blink-features=AutomationControlled");
+        BrowserType.LaunchOptions options = new BrowserType.LaunchOptions()
+                .setHeadless(browserProperties.isHeadless())
+                .setArgs(launchArgs);
+        if (useLocalBrowser) {
+            options.setExecutablePath(Path.of(browserProperties.getExecutablePath()));
+        }
+        xhsBrowser = xhsPlaywright.chromium().launch(options);
+        log.info("链接监控游客浏览器就绪（headless={}, executablePath={}）",
+                browserProperties.isHeadless(),
+                useLocalBrowser ? browserProperties.getExecutablePath() : "Playwright 内置 Chromium");
+    }
+
+    private void closeXhsBrowserQuietly() {
+        try {
+            if (xhsBrowser != null) {
+                xhsBrowser.close();
+            }
+        } catch (Exception ignored) {
+            // 关闭失败时仍丢掉引用，下次重新启动
+        }
+        try {
+            if (xhsPlaywright != null) {
+                xhsPlaywright.close();
+            }
+        } catch (Exception ignored) {
+            // 同上
+        }
+        xhsBrowser = null;
+        xhsPlaywright = null;
+    }
+
+    @PreDestroy
+    public void shutdownXhsBrowser() {
+        try {
+            xhsBrowserExecutor.submit(this::closeXhsBrowserQuietly).get(10, TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+            closeXhsBrowserQuietly();
+        }
+        xhsBrowserExecutor.shutdownNow();
     }
 
     private XhsJudgement judgementOf(String originalUrl, FetchedPage page) {
@@ -967,15 +1117,7 @@ public class LinkMonitorService {
      * 小红书页面三态。登录弹框文案忽略；只有笔记被删、跳走、note 明确为空才判失效。
      */
     static XhsJudgement judgeXiaohongshuPage(String originalUrl, int status, URI finalUri, String body) {
-        if (status == 404 || status == 410 || status == 451) {
-            return XhsJudgement.dead("笔记链接已失效（HTTP " + status + "）");
-        }
-        if (status == 403 || status == 429 || status >= 500) {
-            return XhsJudgement.unknown("访问被拦截（HTTP " + status + "）");
-        }
-        if (status < 200 || status >= 400) {
-            return XhsJudgement.unknown("HTTP " + status);
-        }
+        String page = body == null ? "" : body;
         String finalPath = finalUri == null ? "/" : normalizePath(finalUri.getPath());
         String finalPathLower = finalPath.toLowerCase(Locale.ROOT);
         String queryDecoded = "";
@@ -986,11 +1128,31 @@ public class LinkMonitorService {
                 queryDecoded = finalUri.getRawQuery();
             }
         }
+        // 已经跳到登录路径。活笔记对机房 IP 也常只给登录页，或一行 "404 page not found"，这两种都不是笔记被删。
         if (isLoginLanding(finalPathLower, queryDecoded.toLowerCase(Locale.ROOT))) {
             return XhsJudgement.unknown("落到登录页，无法确认笔记是否仍有效");
         }
+        if (status == 404 || status == 410 || status == 451) {
+            if (isBareEdgeError(page)) {
+                return XhsJudgement.unknown("站点返回了空的 HTTP " + status + "，无法确认笔记");
+            }
+            String hard = xhsVisibleDeadHint(page);
+            if (StringUtils.hasText(hard)) {
+                return XhsJudgement.dead("笔记链接已失效（" + hard + "）");
+            }
+            return XhsJudgement.unknown("HTTP " + status + "，看不到笔记正文");
+        }
+        if (status == 403 || status == 429 || status >= 500) {
+            return XhsJudgement.unknown("访问被拦截（HTTP " + status + "）");
+        }
+        if (status < 200 || status >= 400) {
+            return XhsJudgement.unknown("HTTP " + status);
+        }
         String soft = detectSoftRedirect(originalUrl, finalUri, false);
         if (StringUtils.hasText(soft)) {
+            if (soft.contains("暂时无法浏览")) {
+                return XhsJudgement.unknown("页面只提示暂时无法浏览");
+            }
             return XhsJudgement.dead(soft);
         }
         String contentId = "";
@@ -1005,7 +1167,10 @@ public class LinkMonitorService {
         if (xhsNotePayloadPresent(body, contentId)) {
             return XhsJudgement.ok();
         }
-        String hard = xhsHardDeadHint(body);
+        if (isLoginShell(page)) {
+            return XhsJudgement.unknown("页面是登录壳，无法确认笔记是否仍有效");
+        }
+        String hard = xhsVisibleDeadHint(page);
         if (StringUtils.hasText(hard)) {
             return XhsJudgement.dead("笔记链接已失效（" + hard + "）");
         }
@@ -1074,6 +1239,33 @@ public class LinkMonitorService {
             from = idInMap;
         }
         return raw.substring(from, Math.min(raw.length(), from + 12000));
+    }
+
+    /** 边缘节点对活笔记也会回这一行，不能当成笔记被删。 */
+    static boolean isBareEdgeError(String body) {
+        if (!StringUtils.hasText(body)) {
+            return true;
+        }
+        String text = body.trim();
+        return text.length() <= 80 && !text.contains("<html") && !text.contains("<HTML");
+    }
+
+    /** 标题是登录页（含英文 “Log in - rednote”），不是笔记标题。 */
+    static boolean isLoginShell(String body) {
+        return isLoginLikeTitle(htmlTitle(body));
+    }
+
+    /**
+     * 只看去掉脚本后的可见文案。登录壳的 JS 里常带 “page not found” 等词条，不能拿来判笔记失效。
+     */
+    static String xhsVisibleDeadHint(String body) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        String raw = unescapeJsonUnicode(body);
+        raw = raw.replaceAll("(?is)<script[^>]*>.*?</script>", " ")
+                .replaceAll("(?is)<style[^>]*>.*?</style>", " ");
+        return xhsHardDeadHint(raw);
     }
 
     static String xhsHardDeadHint(String body) {
@@ -1156,7 +1348,11 @@ public class LinkMonitorService {
             return false;
         }
         String t = title.toLowerCase(Locale.ROOT);
-        return t.contains("登录") || t.contains("login") || t.contains("sign in");
+        return t.contains("登录")
+                || t.contains("log in")
+                || t.contains("login")
+                || t.contains("sign in")
+                || t.contains("rednote");
     }
 
     /** 整页是验证码或登录壳。笔记正文里偶然出现「登录」按钮不算。 */
