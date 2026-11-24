@@ -3,6 +3,7 @@ package com.base.admin.robot;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -132,6 +133,21 @@ class LinkMonitorXhsJudgeTest {
         LinkMonitorService.XhsJudgement j = LinkMonitorService.judgeByGuestPageUrl(
                 "https://xhslink.com/a/abcXYZ", NOTE_URL);
         assertEquals(LinkMonitorService.XhsVerdict.OK, j.verdict());
+    }
+
+    @Test
+    void missingChromePathIsSkipped() throws Exception {
+        var present = Files.createTempFile("link-monitor-browser", ".bin");
+        try {
+            String resolved = LinkMonitorService.resolveBrowserExecutable(present.toString());
+            assertEquals(present.toString(), resolved);
+            String fallback = LinkMonitorService.resolveBrowserExecutable("/usr/bin/google-chrome-stable-not-installed");
+            assertFalse(fallback.contains("google-chrome-stable-not-installed"));
+        } finally {
+            Files.deleteIfExists(present);
+        }
+        assertTrue(LinkMonitorService.xhsHeadless(false, "Linux", ""));
+        assertFalse(LinkMonitorService.xhsHeadless(false, "Linux", ":99"));
     }
 
     @Test

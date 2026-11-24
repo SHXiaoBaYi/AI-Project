@@ -800,7 +800,9 @@ public class LinkMonitorService {
      * 地址栏里还看得到原笔记 id 才算有效；浏览器没起来或没打开页面则未判定，不告警。
      */
     private XhsFetch probeXiaohongshu(String url, int timeout) {
-        int budgetMs = Math.max(timeout, 30_000) + XHS_GUEST_WAIT_MS + 5_000;
+        boolean coldStart = xhsBrowser == null || !xhsBrowser.isConnected();
+        // 第一次要拉起浏览器；系统没装 Chrome 时还要下载 Chromium，给足时间
+        int budgetMs = (coldStart ? 180_000 : Math.max(timeout, 30_000)) + XHS_GUEST_WAIT_MS + 5_000;
         try {
             return xhsBrowserExecutor.submit(() -> visitXiaohongshuAsGuest(url)).get(budgetMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException ex) {
@@ -913,31 +915,79 @@ public class LinkMonitorService {
             return;
         }
         closeXhsBrowserQuietly();
-        boolean useLocalBrowser = StringUtils.hasText(browserProperties.getExecutablePath());
-        if (useLocalBrowser) {
-            Path exe = Path.of(browserProperties.getExecutablePath());
-            if (!Files.exists(exe)) {
-                throw new IllegalStateException("浏览器可执行文件不存在：" + exe);
-            }
-            xhsPlaywright = Playwright.create(new Playwright.CreateOptions()
-                    .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+        String executable = resolveBrowserExecutable(browserProperties.getExecutablePath());
+        boolean headless = xhsHeadless();
+        Map<String, String> env = new java.util.HashMap<>(System.getenv());
+        if (StringUtils.hasText(executable)) {
+            env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
         } else {
-            xhsPlaywright = Playwright.create();
+            // 生产 ECS 默认没装 google-chrome-stable。改走国内镜像下载 Playwright 自带 Chromium。
+            env.put("PLAYWRIGHT_DOWNLOAD_HOST", "https://npmmirror.com/mirrors/playwright");
+            log.info("未找到系统 Chrome（配置路径 {}），改为下载 Playwright Chromium",
+                    browserProperties.getExecutablePath());
         }
+        xhsPlaywright = Playwright.create(new Playwright.CreateOptions().setEnv(env));
         List<String> launchArgs = new ArrayList<>();
         launchArgs.add("--no-sandbox");
         launchArgs.add("--disable-dev-shm-usage");
         launchArgs.add("--disable-blink-features=AutomationControlled");
+        if (headless) {
+            launchArgs.add("--disable-gpu");
+        }
         BrowserType.LaunchOptions options = new BrowserType.LaunchOptions()
-                .setHeadless(browserProperties.isHeadless())
+                .setHeadless(headless)
                 .setArgs(launchArgs);
-        if (useLocalBrowser) {
-            options.setExecutablePath(Path.of(browserProperties.getExecutablePath()));
+        if (StringUtils.hasText(executable)) {
+            options.setExecutablePath(Path.of(executable));
         }
         xhsBrowser = xhsPlaywright.chromium().launch(options);
         log.info("链接监控游客浏览器就绪（headless={}, executablePath={}）",
-                browserProperties.isHeadless(),
-                useLocalBrowser ? browserProperties.getExecutablePath() : "Playwright 内置 Chromium");
+                headless,
+                StringUtils.hasText(executable) ? executable : "Playwright Chromium");
+    }
+
+    /** 配置路径不存在时继续找本机 Chrome / Chromium，都没有则返回空串。 */
+    static String resolveBrowserExecutable(String configured) {
+        List<String> candidates = new ArrayList<>();
+        if (StringUtils.hasText(configured)) {
+            candidates.add(configured.trim());
+        }
+        candidates.add("/usr/bin/google-chrome-stable");
+        candidates.add("/usr/bin/google-chrome");
+        candidates.add("/opt/google/chrome/chrome");
+        candidates.add("/usr/bin/chromium-browser");
+        candidates.add("/usr/bin/chromium");
+        candidates.add("C:/Program Files/Google/Chrome/Application/chrome.exe");
+        candidates.add("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe");
+        for (String candidate : candidates) {
+            if (!StringUtils.hasText(candidate)) {
+                continue;
+            }
+            try {
+                if (Files.exists(Path.of(candidate))) {
+                    return candidate;
+                }
+            } catch (Exception ignored) {
+                // 非法路径跳过
+            }
+        }
+        return "";
+    }
+
+    /** Linux 上没有 DISPLAY 时必须无头，否则没装 Xvfb 的 ECS 起不来。 */
+    static boolean xhsHeadless(boolean configuredHeadless, String osName, String display) {
+        if (configuredHeadless) {
+            return true;
+        }
+        String os = osName == null ? "" : osName.toLowerCase(Locale.ROOT);
+        if (os.contains("win") || os.contains("mac")) {
+            return false;
+        }
+        return !StringUtils.hasText(display);
+    }
+
+    private boolean xhsHeadless() {
+        return xhsHeadless(browserProperties.isHeadless(), System.getProperty("os.name"), System.getenv("DISPLAY"));
     }
 
     private void closeXhsBrowserQuietly() {
