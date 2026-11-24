@@ -55,6 +55,7 @@ import com.base.admin.service.GeoMonitorService;
 import com.base.admin.service.GeoPlatformService;
 import com.base.admin.service.GeoTopicService;
 import com.base.admin.util.ExcelCellUtils;
+import com.base.admin.util.GeoDailyImportLayout;
 import com.base.admin.util.GeoExcelTemplateWriter;
 import com.base.admin.util.GeoImportProgress;
 import lombok.RequiredArgsConstructor;
@@ -100,8 +101,6 @@ import java.util.stream.Collectors;
 public class GeoMonitorServiceImpl implements GeoMonitorService {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GeoMonitorServiceImpl.class);
-
-    private static final int METRIC_COUNT = 6;
 
     private final GeoMonitorDailyMapper dailyMapper;
     private final GeoTopicMapper topicMapper;
@@ -2157,7 +2156,6 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             }
             GeoTopic topic = topicService.getOrCreate(lastTopic, lastWeek);
             for (DateGroup group : block.groups) {
-                int n = group.platformCount;
                 for (int i = 0; i < group.platforms.size(); i++) {
                     int p = group.platformIndex.get(i);
                     try {
@@ -2170,19 +2168,32 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
                         dto.setTopicId(topic.getId());
                         dto.setOwnerUserId(ownerUserId);
                         dto.setOwnerName(ownerName);
-                        String mentionRaw = ExcelCellUtils.str(sheet, r, group.startCol + p);
-                        String rankRaw = ExcelCellUtils.str(sheet, r, group.startCol + n + p);
-                        String recommend = ExcelCellUtils.str(sheet, r, group.startCol + 2 * n + p);
-                        int shotCol = group.startCol + 3 * n + p;
-                        String shot = ExcelCellUtils.str(sheet, r, shotCol);
-                        String link = firstHttp(shot, ExcelCellUtils.hyperlink(sheet, r, shotCol));
-                        String negative = ExcelCellUtils.str(sheet, r, group.startCol + 4 * n + p);
-                        String competitors = ExcelCellUtils.str(sheet, r, group.startCol + 5 * n + p);
-                        XSSFPicture picture = pictures.get(pictureKey(r, shotCol));
-                        if (!hasPlatformContent(mentionRaw, rankRaw, recommend, link, negative, competitors, picture != null)) {
+                        String mentionRaw = metricCell(sheet, r, group.mentionBase, p);
+                        String rankRaw = metricCell(sheet, r, group.rankBase, p);
+                        String recommend = metricCell(sheet, r, group.recommendBase, p);
+                        int shotCol = group.shotBase < 0 ? -1 : group.shotBase + p;
+                        String shot = shotCol < 0 ? "" : ExcelCellUtils.str(sheet, r, shotCol);
+                        int linkCol = group.linkBase < 0 ? -1 : group.linkBase + p;
+                        String linkRaw = linkCol < 0 ? "" : ExcelCellUtils.str(sheet, r, linkCol);
+                        String link = linkCol < 0 ? "" : firstHttp(linkRaw, ExcelCellUtils.hyperlink(sheet, r, linkCol), extractHttp(linkRaw));
+                        if (!isHttp(link) && shotCol >= 0) {
+                            link = firstHttp(shot, ExcelCellUtils.hyperlink(sheet, r, shotCol), extractHttp(shot));
+                        }
+                        String negative = metricCell(sheet, r, group.negativeBase, p);
+                        String competitors = metricCell(sheet, r, group.competitorBase, p);
+                        XSSFPicture picture = shotCol < 0 ? null : pictures.get(pictureKey(r, shotCol));
+                        boolean badLink = linkCol >= 0
+                                && !isHttp(link)
+                                && StringUtils.hasText(linkRaw)
+                                && !isBlankPlaceholder(linkRaw);
+                        if (!hasPlatformContent(mentionRaw, rankRaw, recommend, link, negative, competitors, picture != null)
+                                && !badLink) {
                             continue;
                         }
                         result.setTotalCount(result.getTotalCount() + 1);
+                        if (badLink) {
+                            throw new BusinessException("链接须以 http:// 或 https:// 开头");
+                        }
                         dto.setMentioned(parseMentioned(mentionRaw));
                         dto.setRankNo(parseRank(rankRaw));
                         dto.setRecommendStatus(recommend);
@@ -2316,7 +2327,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         block.topicCol = topicCol;
         block.weekCol = weekCol;
         block.headerEnd = Math.max(platformRow, metricRow);
-        block.groups = parseDateGroups(sheet, dateRow, platformRow, dateStart, lastCol);
+        block.groups = parseDateGroups(sheet, dateRow, metricRow, platformRow, dateStart, lastCol);
         return block;
     }
 
@@ -2338,7 +2349,7 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         return raw == null ? "" : raw.replace(" ", "").replace("（必填）", "").replace("(必填)", "").trim();
     }
 
-    private List<DateGroup> parseDateGroups(Sheet sheet, int dateRow, int platformRow, int startCol, int lastCol) {
+    private List<DateGroup> parseDateGroups(Sheet sheet, int dateRow, int metricRow, int platformRow, int startCol, int lastCol) {
         List<Integer> dateCols = new ArrayList<>();
         LocalDate prevDate = null;
         int prevCol = -1;
@@ -2360,16 +2371,24 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         for (int i = 0; i < dateCols.size(); i++) {
             int start = dateCols.get(i);
             int end = i + 1 < dateCols.size() ? dateCols.get(i + 1) : lastCol;
-            int platformCount = (end - start) / METRIC_COUNT;
-            if (platformCount < 1) {
+            GeoDailyImportLayout.MetricBases bases = GeoDailyImportLayout.resolve(sheet, metricRow, start, end);
+            if (bases.platformCount() < 1) {
                 continue;
             }
             DateGroup group = new DateGroup();
             group.date = ExcelCellUtils.date(sheet, dateRow, start);
             group.startCol = start;
-            group.platformCount = platformCount;
-            for (int p = 0; p < platformCount; p++) {
-                String platform = normalizeHeader(ExcelCellUtils.str(sheet, platformRow, start + p));
+            group.platformCount = bases.platformCount();
+            group.mentionBase = bases.mentionBase();
+            group.rankBase = bases.rankBase();
+            group.recommendBase = bases.recommendBase();
+            group.shotBase = bases.shotBase();
+            group.linkBase = bases.linkBase();
+            group.negativeBase = bases.negativeBase();
+            group.competitorBase = bases.competitorBase();
+            int nameBase = bases.mentionBase() >= 0 ? bases.mentionBase() : start;
+            for (int p = 0; p < bases.platformCount(); p++) {
+                String platform = normalizeHeader(ExcelCellUtils.str(sheet, platformRow, nameBase + p));
                 if (!StringUtils.hasText(platform)) {
                     continue;
                 }
@@ -2415,6 +2434,44 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
             }
         }
         return "";
+    }
+
+    /** 格子里夹杂说明文字时，取出第一段 http(s) 地址 */
+    private static String extractHttp(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        int https = lower.indexOf("https://");
+        int http = lower.indexOf("http://");
+        int pos;
+        if (https < 0) {
+            pos = http;
+        } else if (http < 0) {
+            pos = https;
+        } else {
+            pos = Math.min(https, http);
+        }
+        if (pos < 0) {
+            return "";
+        }
+        String tail = raw.substring(pos).trim();
+        int end = tail.length();
+        for (int i = 0; i < tail.length(); i++) {
+            char ch = tail.charAt(i);
+            if (Character.isWhitespace(ch) || ch == '，' || ch == '。' || ch == '；' || ch == ';' || ch == ',' || ch == '、') {
+                end = i;
+                break;
+            }
+        }
+        return tail.substring(0, end);
+    }
+
+    private static String metricCell(Sheet sheet, int row, int base, int offset) {
+        if (base < 0) {
+            return "";
+        }
+        return ExcelCellUtils.str(sheet, row, base + offset);
     }
 
     private static boolean hasPlatformContent(String mention, String rank, String recommend, String link,
@@ -3124,6 +3181,13 @@ public class GeoMonitorServiceImpl implements GeoMonitorService {
         private LocalDate date;
         private int startCol;
         private int platformCount;
+        private int mentionBase = -1;
+        private int rankBase = -1;
+        private int recommendBase = -1;
+        private int shotBase = -1;
+        private int linkBase = -1;
+        private int negativeBase = -1;
+        private int competitorBase = -1;
         private final List<Integer> platformIndex = new ArrayList<>();
         private final List<String> platforms = new ArrayList<>();
     }

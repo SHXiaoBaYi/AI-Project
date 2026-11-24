@@ -52,10 +52,12 @@ public class HrInviteService {
     private final ObjectMapper objectMapper;
     private final DingTalkScheduleRuleService dingTalkScheduleRuleService;
     private final SysTaskService taskService;
+    private final HrTalentBlacklistService talentBlacklistService;
 
     @Transactional
     public HrInviteSaveVO create(HrInviteCreateDTO dto) {
         validateInterviewAt(dto.getInterviewAt());
+        talentBlacklistService.assertCanInvite(dto.getApplicationId());
         java.util.List<Long> ids = interviewerIds(dto);
         int duration = dto.getDurationMin() == null ? 60 : dto.getDurationMin();
         java.util.List<Long> inviteIds = new ArrayList<>();

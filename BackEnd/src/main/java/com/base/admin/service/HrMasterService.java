@@ -73,6 +73,7 @@ public class HrMasterService {
     private final HrStageCatalog stageCatalog;
     private final HrKpiTaskService kpiTaskService;
     private final HrRequisitionLogService requisitionLogService;
+    private final HrTalentBlacklistService talentBlacklistService;
 
     public List<Map<String, Object>> requisitions(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
@@ -1052,7 +1053,7 @@ public class HrMasterService {
                 LEFT JOIN hr_stage_def s ON s.stage_code = a.current_stage
                 LEFT JOIN hr_resume_file f ON f.application_id = a.id AND f.is_active = 1
                 WHERE a.is_active = 1
-                """);
+                """ + HrTalentBlacklistMatch.notActiveSql("c"));
         List<Object> args = new ArrayList<>();
         if (q.getCandidateName() != null && !q.getCandidateName().isBlank()) {
             sql.append(" AND c.display_name LIKE ? ");
@@ -1278,6 +1279,7 @@ public class HrMasterService {
             if (stageOk == null || stageOk == 0) {
                 throw new BusinessException("阶段不存在");
             }
+            talentBlacklistService.assertCanCreate(dto.getDisplayName(), dto.getPhone(), dto.getEmail());
             String resumeStatus = "ENTERED".equals(stage) ? "DRAFT" : "PASS";
             jdbc.update("""
                     INSERT INTO hr_candidate (display_name, phone, email, gender, age, education, candidate_no,
@@ -1307,6 +1309,7 @@ public class HrMasterService {
         if (candidateId == null) {
             throw new BusinessException("候选人不存在");
         }
+        talentBlacklistService.assertCanUpdate(candidateId, dto.getDisplayName(), dto.getPhone(), dto.getEmail());
         jdbc.update("""
                 UPDATE hr_candidate
                 SET display_name = ?, phone = ?, email = ?, gender = ?, age = ?, education = ?, candidate_no = ?,

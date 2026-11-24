@@ -414,7 +414,8 @@ const DailyPage = memo(function DailyPage() {
             下载导入模板
           </Button>
           <span className='text-sm text-neutral-400'>
-            黄底红字为必填；橙色行为模板示例，导入时会自动跳过。工作表名是负责人。单独的月份行和重复表头也会跳过。话题对得上自动关联，对不上自动建档并关联
+            黄底红字为必填；橙色行为模板示例，导入时会自动跳过。工作表名是负责人。每个 AI 平台单独一列「链接」，填
+            http(s) 后导入为第三方链接。单独的月份行和重复表头也会跳过。话题对得上自动关联，对不上自动建档并关联
           </span>
         </div>
         <Upload.Dragger

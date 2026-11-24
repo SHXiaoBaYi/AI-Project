@@ -76,7 +76,7 @@ public class HrPipelineService {
                 LEFT JOIN hr_offer off ON off.application_id = a.id AND off.is_active = 1
                 LEFT JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
                 WHERE a.is_active = 1 AND a.requisition_id = ?
-                """);
+                """ + HrTalentBlacklistMatch.notActiveSql("c"));
         List<Object> boardArgs = new ArrayList<>();
         boardArgs.add(requisitionId);
         dataScope.apply(boardSql, boardArgs, "r", null);

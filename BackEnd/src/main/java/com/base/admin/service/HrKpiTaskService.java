@@ -564,34 +564,38 @@ public class HrKpiTaskService {
 
     private List<OnboardHit> listOnboards(Long requisitionId) {
         String at = onboardAtExpr();
-        return jdbc.query("""
+        return jdbc.query(("""
                 SELECT a.id AS application_id, %s AS onboard_at
                 FROM hr_application a
                 JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
+                JOIN hr_candidate c ON c.id = a.candidate_id
                 WHERE a.requisition_id = ? AND a.is_active = 1
                   AND a.current_stage = 'ONBOARDED'
                   AND ob.onboard_date IS NOT NULL
+                """ + HrTalentBlacklistMatch.notActiveSql("c") + """
                 ORDER BY onboard_at ASC, a.id ASC
-                """.formatted(at), (rs, i) -> new OnboardHit(
+                """).formatted(at), (rs, i) -> new OnboardHit(
                 rs.getLong("application_id"),
                 rs.getTimestamp("onboard_at").toLocalDateTime()), requisitionId);
     }
 
     private List<LocalDateTime> listQualifiedAts(Long requisitionId) {
         // 已入职人选走入职记分，其合格简历不再计入简历达标，避免重复
-        return jdbc.query("""
+        return jdbc.query(("""
                 SELECT MIN(%s) AS hit_at
                 FROM hr_interview_record rec
                 JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
+                JOIN hr_candidate c ON c.id = a.candidate_id
                 WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
                   AND a.current_stage <> 'ONBOARDED'
                   AND NOT EXISTS (
                     SELECT 1 FROM hr_onboard ob
                     WHERE ob.application_id = a.id AND ob.is_active = 1 AND ob.onboard_date IS NOT NULL
                   )
+                """ + HrTalentBlacklistMatch.notActiveSql("c") + """
                 GROUP BY rec.application_id
                 ORDER BY hit_at ASC
-                """.formatted(resumeHitAt()), (rs, i) -> rs.getTimestamp("hit_at").toLocalDateTime(), requisitionId);
+                """).formatted(resumeHitAt()), (rs, i) -> rs.getTimestamp("hit_at").toLocalDateTime(), requisitionId);
     }
 
     private static LocalDateTime endOfMonth(LocalDateTime at) {
@@ -939,7 +943,7 @@ public class HrKpiTaskService {
 
     private List<HrKpiAssessmentCandidateVO.Item> listOnboardCandidates(
             Long requisitionId, LocalDateTime from, LocalDateTime to) {
-        return jdbc.query("""
+        return jdbc.query(("""
                 SELECT x.* FROM (
                   SELECT a.id AS application_id, a.candidate_id, c.display_name, c.phone,
                          a.current_stage, a.submitter_name, %s AS hit_at
@@ -949,34 +953,37 @@ public class HrKpiTaskService {
                   WHERE a.requisition_id = ? AND a.is_active = 1
                     AND a.current_stage = 'ONBOARDED'
                     AND ob.onboard_date IS NOT NULL
+                """ + HrTalentBlacklistMatch.notActiveSql("c") + """
                 ) x
                 WHERE x.hit_at >= ? AND x.hit_at < ?
                 ORDER BY x.hit_at ASC, x.application_id ASC
-                """.formatted(onboardAtExpr()), (rs, i) -> readCandidateItem(rs), requisitionId, from, to);
+                """).formatted(onboardAtExpr()), (rs, i) -> readCandidateItem(rs), requisitionId, from, to);
     }
 
     private List<HrKpiAssessmentCandidateVO.Item> listQualifiedCandidates(
             Long requisitionId, LocalDateTime from, LocalDateTime to) {
-        return jdbc.query("""
+        return jdbc.query(("""
                 SELECT x.application_id, a.candidate_id, c.display_name, c.phone,
                        a.current_stage, a.submitter_name, x.hit_at
                 FROM (
                   SELECT rec.application_id, MIN(%s) AS hit_at
                   FROM hr_interview_record rec
                   JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
+                  JOIN hr_candidate c ON c.id = a.candidate_id
                   WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
                     AND a.current_stage <> 'ONBOARDED'
                     AND NOT EXISTS (
                       SELECT 1 FROM hr_onboard ob
                       WHERE ob.application_id = a.id AND ob.is_active = 1 AND ob.onboard_date IS NOT NULL
                     )
+                  """ + HrTalentBlacklistMatch.notActiveSql("c") + """
                   GROUP BY rec.application_id
                 ) x
                 JOIN hr_application a ON a.id = x.application_id
                 LEFT JOIN hr_candidate c ON c.id = a.candidate_id
                 WHERE x.hit_at >= ? AND x.hit_at < ?
                 ORDER BY x.hit_at ASC, x.application_id ASC
-                """.formatted(resumeHitAt()), (rs, i) -> readCandidateItem(rs), requisitionId, from, to);
+                """).formatted(resumeHitAt()), (rs, i) -> readCandidateItem(rs), requisitionId, from, to);
     }
 
     private static HrKpiAssessmentCandidateVO.Item readCandidateItem(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -1326,15 +1333,16 @@ public class HrKpiTaskService {
 
     private int countOnboardedAppsInRange(Long requisitionId, LocalDateTime from, LocalDateTime to) {
         String day = "COALESCE(DATE(" + HrStageAdjustClock.latestBusinessAt("a.id", "'ONBOARDED'") + "), ob.onboard_date)";
-        Integer n = jdbc.queryForObject("""
+        Integer n = jdbc.queryForObject(("""
                 SELECT COUNT(1) FROM hr_application a
                 JOIN hr_onboard ob ON ob.application_id = a.id AND ob.is_active = 1
+                JOIN hr_candidate c ON c.id = a.candidate_id
                 WHERE a.requisition_id = ? AND a.is_active = 1
                   AND a.current_stage = 'ONBOARDED'
                   AND ob.onboard_date IS NOT NULL
                   AND %s >= DATE(?)
                   AND %s < DATE(?)
-                """.formatted(day, day), Integer.class, requisitionId, from, to);
+                """ + HrTalentBlacklistMatch.notActiveSql("c")).formatted(day, day), Integer.class, requisitionId, from, to);
         return n == null ? 0 : n;
     }
 
@@ -1350,10 +1358,11 @@ public class HrKpiTaskService {
      * 统计合格简历份数（半开区间 [from, to)）；已入职人选排除。
      */
     private int countQualifiedResumes(Long requisitionId, LocalDateTime from, LocalDateTime to) {
-        Integer n = jdbc.queryForObject("""
+        Integer n = jdbc.queryForObject(("""
                 SELECT COUNT(DISTINCT rec.application_id)
                 FROM hr_interview_record rec
                 JOIN hr_application a ON a.id = rec.application_id AND a.is_active = 1
+                JOIN hr_candidate c ON c.id = a.candidate_id
                 WHERE a.requisition_id = ? AND rec.is_active = 1 AND rec.resume_qualified = 1
                   AND a.current_stage <> 'ONBOARDED'
                   AND NOT EXISTS (
@@ -1362,7 +1371,8 @@ public class HrKpiTaskService {
                   )
                   AND %s >= ?
                   AND %s < ?
-                """.formatted(resumeHitAt(), resumeHitAt()), Integer.class, requisitionId, from, to);
+                """ + HrTalentBlacklistMatch.notActiveSql("c")).formatted(resumeHitAt(), resumeHitAt()),
+                Integer.class, requisitionId, from, to);
         return n == null ? 0 : n;
     }
 

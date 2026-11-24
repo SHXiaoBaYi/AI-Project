@@ -836,6 +836,53 @@ export function getHrApplicationsApi(data: HrBoardQuery = {}) {
   return request.post<unknown, Record<string, unknown>[]>('/hr/application/list', data);
 }
 
+export interface HrBlacklistRow {
+  id: number;
+  keyword?: string;
+  displayName?: string;
+  phone?: string;
+  email?: string;
+  jobSummary?: string;
+  reason?: string;
+  remark?: string;
+  operatorName?: string;
+  blacklistedAt?: string;
+}
+
+export interface HrBlacklistLog {
+  id: number;
+  action?: string;
+  actionName?: string;
+  displayName?: string;
+  phone?: string;
+  email?: string;
+  reason?: string;
+  remark?: string;
+  operatorName?: string;
+  operatedAt?: string;
+}
+
+export function getHrBlacklistApi(keyword?: string) {
+  return request.post<unknown, HrBlacklistRow[]>('/hr/blacklist/list', { keyword });
+}
+
+export function moveHrBlacklistInApi(data: { applicationIds: number[]; reason: string; remark: string }) {
+  return request.post<unknown, void>('/hr/blacklist/in', data);
+}
+
+export function moveHrBlacklistOutApi(data: { ids: number[]; reason: string; remark: string }) {
+  return request.post<unknown, void>('/hr/blacklist/out', data);
+}
+
+export function getHrBlacklistLogsApi(data: {
+  keyword?: string;
+  action?: string;
+  pageNum?: number;
+  pageSize?: number;
+}) {
+  return request.post<unknown, { total: number; rows: HrBlacklistLog[] }>('/hr/blacklist/log/list', data);
+}
+
 export function saveHrApplicationApi(data: Record<string, unknown>) {
   return data.id
     ? request.put<unknown, number>('/hr/application', data)

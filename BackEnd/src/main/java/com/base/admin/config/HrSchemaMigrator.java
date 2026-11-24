@@ -56,6 +56,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         ensureCandidateProfileColumns();
         alignStageDisplayNames();
         ensureKpiAssessmentSchema();
+        ensureTalentBlacklistTables();
         log.info("招聘表结构、角色、用户和菜单已同步");
     }
 
@@ -288,6 +289,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(237, "KPI看板", 200, 4, "hr/kpi", "hr/kpi/index", "C", "hr:kpi:view", "FundProjectionScreenOutlined", "岗位分级与招聘人员绩效");
         menu(238, "KPI导出", 237, 1, "", "", "F", "hr:kpi:export", "#", "导出绩效报表");
         menu(203, "候选人", 200, 5, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "候选人与简历");
+        menu(269, "黑名单人才库", 200, 6, "hr/blacklist", "hr/blacklist/index", "C", "hr:blacklist:list", "StopOutlined", "移入黑名单的人才不可再入库、不可邀约、不计入考核得分");
         menu(220, "面试邀约记录", 200, 6, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
         // 250–260 已占用为机器人菜单，面试日历用 261，考核得分用 262
         menu(261, "HR面试日历", 200, 6, "hr/calendar", "hr/calendar/index", "C", "hr:calendar:view", "ScheduleOutlined", "按月查看面试日程，可按负责人筛选");
@@ -331,6 +333,9 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(217, "候选人删除", 203, 5, "", "", "F", "hr:application:delete", "#", "");
         menu(267, "调整阶段", 203, 6, "", "", "F", "hr:application:stage", "#", "填写原因和业务日期后改阶段");
         menu(268, "阶段调整记录", 203, 7, "", "", "F", "hr:application:stage-log", "#", "查看阶段调整的操作人和时间");
+        menu(270, "移入黑名单", 203, 8, "", "", "F", "hr:blacklist:in", "#", "候选人批量移入黑名单，原因和备注必填");
+        menu(271, "移出黑名单", 269, 1, "", "", "F", "hr:blacklist:out", "#", "移回正常人才库，原因和备注必填");
+        menu(272, "黑名单记录", 269, 2, "", "", "F", "hr:blacklist:log", "#", "查看移入移出记录");
         menu(223, "邀约修改", 220, 1, "", "", "F", "hr:invite:edit", "#", "");
         menu(224, "邀约删除", 220, 2, "", "", "F", "hr:invite:delete", "#", "");
         menu(225, "面试记录新增", 221, 1, "", "", "F", "hr:record:add", "#", "");
@@ -348,12 +353,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
             SysRbacSeedSupport.bootstrapRoleMenusIfNeverBound(jdbc, admin, 200, 201, 202, 203, 204, 205, 206, 207,
                     208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225,
                     226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246,
-                    247, 248, 249, 261, 262, 265, 266, 267, 268);
+                    247, 248, 249, 261, 262, 265, 266, 267, 268, 269, 270, 271, 272);
         }
         SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_admin", 200, 201, 202, 203, 204, 205, 206,
                 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230,
                 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261,
-                262, 265, 266, 267, 268);
+                262, 265, 266, 267, 268, 269, 270, 271, 272);
         SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_owner", 200, 201, 202, 203, 210, 218, 219,
                 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262);
         SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_exec", 200, 201, 203, 207, 209, 218, 219,
@@ -365,7 +370,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
 
     /** 新发版 HR 菜单：只补缺绑定，不恢复运营已取消的权限。 */
     private void linkHrNewMenuBindings() {
-        int[] adminAndHrAdmin = {265, 266, 267, 268};
+        int[] adminAndHrAdmin = {265, 266, 267, 268, 269, 270, 271, 272};
         SysRbacSeedSupport.linkRoleMenusIfAbsentByKey(jdbc, "admin", adminAndHrAdmin);
         SysRbacSeedSupport.linkRoleMenusIfAbsentByKey(jdbc, "hr_admin", adminAndHrAdmin);
     }
@@ -765,6 +770,62 @@ public class HrSchemaMigrator implements ApplicationRunner {
     private void ensureInviteCcEventColumn() {
         addColumnIfMissing("hr_interview_invite_cc", "dingtalk_event_id",
                 "ALTER TABLE hr_interview_invite_cc ADD COLUMN dingtalk_event_id VARCHAR(64) NULL COMMENT '抄送人钉钉日程ID' AFTER cc_user_id");
+    }
+
+    /** 黑名单人才：在库记录与移入移出日志。 */
+    private void ensureTalentBlacklistTables() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_talent_blacklist (
+                  id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  display_name    VARCHAR(64)   NOT NULL                COMMENT '姓名',
+                  phone           VARCHAR(32)   NULL                    COMMENT '手机号',
+                  email           VARCHAR(128)  NULL                    COMMENT '邮箱',
+                  phone_key       VARCHAR(32)   NOT NULL DEFAULT ''     COMMENT '归一化手机号，末11位',
+                  email_key       VARCHAR(128)  NOT NULL DEFAULT ''     COMMENT '小写邮箱',
+                  name_key        VARCHAR(64)   NOT NULL DEFAULT ''     COMMENT '无联系方式时的姓名',
+                  status          VARCHAR(8)    NOT NULL DEFAULT 'IN'   COMMENT 'IN在黑名单 OUT已移出',
+                  reason          VARCHAR(255)  NOT NULL                COMMENT '移入原因',
+                  remark          VARCHAR(500)  NOT NULL                COMMENT '移入备注',
+                  candidate_ids   TEXT          NULL                    COMMENT '关联候选人ID，逗号分隔',
+                  application_ids TEXT          NULL                    COMMENT '关联投递ID，逗号分隔',
+                  operator_id     BIGINT        NULL                    COMMENT '操作人',
+                  operator_name   VARCHAR(64)   NULL                    COMMENT '操作人姓名',
+                  blacklisted_at  DATETIME      NOT NULL                COMMENT '移入时间',
+                  released_at     DATETIME      NULL                    COMMENT '移出时间',
+                  create_by       VARCHAR(50)   DEFAULT ''              COMMENT '创建者',
+                  create_time     DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  update_by       VARCHAR(50)   DEFAULT ''              COMMENT '更新者',
+                  update_time     DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  is_active       TINYINT       NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+                  PRIMARY KEY (id),
+                  KEY idx_hr_bl_phone (phone_key, status),
+                  KEY idx_hr_bl_email (email_key, status),
+                  KEY idx_hr_bl_status (status, is_active)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='黑名单人才'
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_talent_blacklist_log (
+                  id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  blacklist_id    BIGINT        NOT NULL                COMMENT '黑名单记录',
+                  action          VARCHAR(8)    NOT NULL                COMMENT 'IN移入 OUT移出',
+                  display_name    VARCHAR(64)   NOT NULL                COMMENT '姓名',
+                  phone           VARCHAR(32)   NULL                    COMMENT '手机号',
+                  email           VARCHAR(128)  NULL                    COMMENT '邮箱',
+                  reason          VARCHAR(255)  NOT NULL                COMMENT '原因',
+                  remark          VARCHAR(500)  NOT NULL                COMMENT '备注',
+                  candidate_ids   TEXT          NULL                    COMMENT '关联候选人ID',
+                  application_ids TEXT          NULL                    COMMENT '关联投递ID',
+                  operator_id     BIGINT        NULL                    COMMENT '操作人',
+                  operator_name   VARCHAR(64)   NULL                    COMMENT '操作人姓名',
+                  operated_at     DATETIME      NOT NULL                COMMENT '操作时间',
+                  create_by       VARCHAR(50)   DEFAULT ''              COMMENT '创建者',
+                  create_time     DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  is_active       TINYINT       NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+                  PRIMARY KEY (id),
+                  KEY idx_hr_bl_log_time (operated_at),
+                  KEY idx_hr_bl_log_bl (blacklist_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='黑名单移入移出记录'
+                """);
     }
 
     private void addColumnIfMissing(String table, String column, String ddl) {

@@ -33,6 +33,7 @@ public class HrApplicationImportService {
 
     private final JdbcTemplate jdbc;
     private final HrMasterService masterService;
+    private final HrTalentBlacklistService talentBlacklistService;
 
     public void writeTemplate(HttpServletResponse response) throws IOException {
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -108,6 +109,11 @@ public class HrApplicationImportService {
                     messages.add("姓名不能为空");
                 } else if (name.length() > 64) {
                     messages.add("姓名超过 64 个字");
+                } else {
+                    String blocked = talentBlacklistService.createBlockMessage(name, phone, email);
+                    if (blocked != null) {
+                        messages.add(blocked);
+                    }
                 }
                 if (phone.length() > 32) {
                     messages.add("电话超过 32 个字");

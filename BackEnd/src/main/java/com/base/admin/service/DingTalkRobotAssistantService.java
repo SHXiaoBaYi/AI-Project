@@ -418,7 +418,7 @@ public class DingTalkRobotAssistantService {
                       SELECT 1 FROM hr_resume_file f
                       WHERE f.application_id = a.id AND f.is_active = 1
                   )
-                """;
+                """ + HrTalentBlacklistMatch.notActiveSql("c");
         List<Object> args = new ArrayList<>();
         if (StringUtils.hasText(jobName)) {
             sql += " AND r.job_name LIKE ? ";

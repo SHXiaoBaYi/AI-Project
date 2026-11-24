@@ -32,7 +32,7 @@ public final class GeoExcelTemplateWriter {
         List<String> platforms = normalizePlatforms(aiPlatforms);
         int n = platforms.size();
         int fixed = 4;
-        String[] metrics = {"提及情况", "排名情况", "是否被推荐", "截图", "负面/错误内容", "出现的竞品"};
+        String[] metrics = {"提及情况", "排名情况", "是否被推荐", "截图", "链接", "负面/错误内容", "出现的竞品"};
         try (Workbook wb = new XSSFWorkbook()) {
             Styles styles = new Styles(wb);
             Sheet sheet = wb.createSheet("张三");
@@ -47,15 +47,17 @@ public final class GeoExcelTemplateWriter {
             sheet.setColumnWidth(1, 18 * 256);
             sheet.setColumnWidth(2, 18 * 256);
             sheet.setColumnWidth(3, 42 * 256);
-            int width = n * metrics.length;
-            for (int c = fixed; c < fixed + width; c++) {
-                sheet.setColumnWidth(c, 14 * 256);
+            for (int m = 0; m < metrics.length; m++) {
+                int colWidth = "链接".equals(metrics[m]) ? 36 : 14;
+                for (int p = 0; p < n; p++) {
+                    sheet.setColumnWidth(fixed + m * n + p, colWidth * 256);
+                }
             }
 
             String joined = String.join("、", platforms);
             writeInstructions(wb, styles, "填写说明", List.of(
                     List.of("工作表名", "是", "每个工作表的名称就是负责人。一个表里的全部数据都记到这个人名下；能对上系统用户则关联，对不上仍保留表名", "张三"),
-                    List.of("巡查日期", "是", "每个日期块第1行。一个日期占「平台数 × 6」列，日期写在该块第1列，格式 yyyy-MM-dd", "2026-09-01"),
+                    List.of("巡查日期", "是", "每个日期块第1行。一个日期占「平台数 × 7」列（提及、排名、推荐、截图、链接、负面、竞品），日期写在该块第1列，格式 yyyy-MM-dd", "2026-09-01"),
                     List.of("平台名", "是", "第3行已列出当前全部 AI 平台：" + joined + "。每个指标下都有这些列，请不要改平台名", joined),
                     List.of("话题", "是", "与话题管理中的名称一致则自动关联；没有则自动建档并关联。同一话题后续行可留空，沿用上一行", "新疆特产"),
                     List.of("提问问题", "是", "不能为空。这是导入识别数据行的依据", "新疆适合寄内地的礼品有哪些"),
@@ -66,7 +68,8 @@ public final class GeoExcelTemplateWriter {
                     List.of("提及情况", "否", "填 是 / 否，或 ✅ / ❌。空视为未露出", "是"),
                     List.of("排名情况", "否", "数字；未露出可空或写 -", "3"),
                     List.of("是否被推荐", "否", "未出现 / 出现且推荐 / 出现未推荐", "出现且推荐"),
-                    List.of("截图", "否", "可以填 http 链接（记入第三方链接），也可以把图片贴在格子里（导入后存成系统截图，列表可预览）", "https://chat.deepseek.com/share/xxx"),
+                    List.of("截图", "否", "把图片贴在对应平台的格子里，导入后存成系统截图，列表可预览。若本列填了 http 链接、且同一平台的「链接」为空，仍记入第三方链接", "（在格子里贴图）"),
+                    List.of("链接", "否", "形式与截图相同：每个 AI 平台单独一列。填该平台回答页的 http 或 https 地址，导入后记入第三方链接", "https://chat.deepseek.com/share/xxx"),
                     List.of("负面/错误内容", "否", "文本，可空", ""),
                     List.of("出现的竞品", "否", "多个用顿号或换行分隔", "竞品A、竞品B"),
                     List.of("模板示例行", "—", "橙色底、文字含" + SAMPLE_MARK + "的行只供查看，导入时自动跳过。正式填写前请删除该行，并把工作表名改成负责人", SAMPLE_MARK)
@@ -115,12 +118,14 @@ public final class GeoExcelTemplateWriter {
         text(sample, 2, "新疆特产", styles.sample);
         text(sample, 3, SAMPLE_MARK + "新疆适合寄内地的礼品有哪些", styles.sample);
         for (int p = 0; p < n; p++) {
-            text(sample, fixed + p, p % 2 == 0 ? "是" : "否", styles.sample);
-            text(sample, fixed + n + p, p == 0 ? "3" : "", styles.sample);
-            text(sample, fixed + 2 * n + p, p == 0 ? "出现且推荐" : "未出现", styles.sample);
-            text(sample, fixed + 3 * n + p, p == 0 ? "https://chat.deepseek.com/share/template-demo" : "", styles.sample);
-            text(sample, fixed + 4 * n + p, "", styles.sample);
-            text(sample, fixed + 5 * n + p, p == 0 ? "竞品A" : "", styles.sample);
+            text(sample, metricCol(fixed, n, metrics, "提及情况", p), p % 2 == 0 ? "是" : "否", styles.sample);
+            text(sample, metricCol(fixed, n, metrics, "排名情况", p), p == 0 ? "3" : "", styles.sample);
+            text(sample, metricCol(fixed, n, metrics, "是否被推荐", p), p == 0 ? "出现且推荐" : "未出现", styles.sample);
+            text(sample, metricCol(fixed, n, metrics, "截图", p), "", styles.sample);
+            text(sample, metricCol(fixed, n, metrics, "链接", p),
+                    p == 0 ? "https://chat.deepseek.com/share/template-demo" : "", styles.sample);
+            text(sample, metricCol(fixed, n, metrics, "负面/错误内容", p), "", styles.sample);
+            text(sample, metricCol(fixed, n, metrics, "出现的竞品", p), p == 0 ? "竞品A" : "", styles.sample);
         }
     }
 
@@ -201,6 +206,15 @@ public final class GeoExcelTemplateWriter {
             ));
             wb.write(out);
         }
+    }
+
+    private static int metricCol(int fixed, int platformCount, String[] metrics, String metric, int platformIndex) {
+        for (int m = 0; m < metrics.length; m++) {
+            if (metric.equals(metrics[m])) {
+                return fixed + m * platformCount + platformIndex;
+            }
+        }
+        throw new IllegalArgumentException(metric);
     }
 
     private static List<String> normalizePlatforms(List<String> platforms) {

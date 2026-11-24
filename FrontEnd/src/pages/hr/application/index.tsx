@@ -14,6 +14,7 @@ import { canCreateInvite, maxRoundOf, nextInviteRound } from '@/components/hr/in
 import StageAdjustLogDrawer from '@/components/hr/StageAdjustLogDrawer';
 import StageAdjustModal from '@/components/hr/StageAdjustModal';
 import ApplicationFormModal from './components/ApplicationFormModal';
+import BlacklistReasonModal from './components/BlacklistReasonModal';
 import ImportApplicationModal from './components/ImportApplicationModal';
 import {
   deleteHrApplicationApi,
@@ -25,6 +26,7 @@ import {
   getHrStageCatalogApi,
   getHrStagesApi,
   getHrUsersApi,
+  moveHrBlacklistInApi,
 } from '@/api/hr';
 
 interface PortfolioItem {
@@ -143,6 +145,7 @@ const ApplicationPage = memo(function ApplicationPage() {
   const [invitePreset, setInvitePreset] = useState<InviteFormPreset | null>(null);
   const [stageTarget, setStageTarget] = useState<AppRow | null>(null);
   const [stageLogOpen, setStageLogOpen] = useState(false);
+  const [blacklistOpen, setBlacklistOpen] = useState(false);
   const [roundPlans, setRoundPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
   const [ccRoundPlans, setCcRoundPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
 
@@ -575,6 +578,19 @@ const ApplicationPage = memo(function ApplicationPage() {
             批量删除
           </PermissionButton>,
           <PermissionButton
+            key='blacklist'
+            perm='hr:blacklist:in'
+            onClick={() => {
+              if (selectedRowKeys.length === 0) {
+                message.warning('请先选择要移入黑名单的候选人');
+                return;
+              }
+              setBlacklistOpen(true);
+            }}
+          >
+            批量移入黑名单
+          </PermissionButton>,
+          <PermissionButton
             key='import'
             perm='hr:application:add'
             onClick={() => setImportOpen(true)}
@@ -645,6 +661,23 @@ const ApplicationPage = memo(function ApplicationPage() {
       <StageAdjustLogDrawer
         open={stageLogOpen}
         onClose={() => setStageLogOpen(false)}
+      />
+      <BlacklistReasonModal
+        open={blacklistOpen}
+        title={`移入黑名单（${selectedRowKeys.length} 人）`}
+        okText='确认移入'
+        hint='移入后，该人才不能再从任何入口新增，不能创建面试邀约，也不计入考核得分。原因和备注都必填。'
+        onClose={() => setBlacklistOpen(false)}
+        onSubmit={async (values) => {
+          await moveHrBlacklistInApi({
+            applicationIds: selectedRowKeys as number[],
+            reason: values.reason,
+            remark: values.remark,
+          });
+          message.success('已移入黑名单');
+          setSelectedRowKeys([]);
+          actionRef.current?.reload();
+        }}
       />
       <InviteFormModal
         open={invitePreset != null}
