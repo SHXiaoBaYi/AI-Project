@@ -14,6 +14,9 @@ public class HrApplicationDTO {
     @Schema(description = "投递ID，新增为空")
     private Long id;
 
+    @Schema(description = "已有人才ID。导入或新增命中手机号/邮箱时归到这个人，不再新建")
+    private Long candidateId;
+
     @NotBlank
     @Schema(description = "姓名")
     private String displayName;

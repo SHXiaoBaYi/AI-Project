@@ -54,6 +54,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         deactivateKpiScoreRuleMenus();
         backfillWorkAddressFromLocation();
         ensureCandidateProfileColumns();
+        ensureTalentPool();
         alignStageDisplayNames();
         ensureKpiAssessmentSchema();
         ensureTalentBlacklistTables();
@@ -274,7 +275,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private void seedMenus() {
-        menu(200, "招聘管理", 0, 3, "/hr", "", "M", "", "TeamOutlined", "招聘需求、候选人与基础数据");
+        menu(200, "招聘管理", 0, 3, "/hr", "", "M", "", "TeamOutlined", "招聘需求、人才库与基础数据");
         int boardParent = menuId("数据看板", "M");
         int systemParent = menuId("系统设置", "M");
         if (systemParent == 0) {
@@ -288,7 +289,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(236, "流程操作", 235, 1, "", "", "F", "hr:pipeline:edit", "#", "初筛/电话/待入职更新");
         menu(237, "KPI看板", 200, 4, "hr/kpi", "hr/kpi/index", "C", "hr:kpi:view", "FundProjectionScreenOutlined", "岗位分级与招聘人员绩效");
         menu(238, "KPI导出", 237, 1, "", "", "F", "hr:kpi:export", "#", "导出绩效报表");
-        menu(203, "候选人", 200, 5, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "候选人与简历");
+        menu(203, "人才库", 200, 5, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "按人归档，可先入库再推荐到岗位");
         menu(269, "黑名单人才库", 200, 6, "hr/blacklist", "hr/blacklist/index", "C", "hr:blacklist:list", "StopOutlined", "移入黑名单的人才不可再入库、不可邀约、不计入考核得分");
         menu(220, "面试邀约记录", 200, 6, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
         // 250–260 已占用为机器人菜单，面试日历用 261，考核得分用 262
@@ -328,12 +329,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(214, "需求删除", 202, 3, "", "", "F", "hr:requisition:delete", "#", "");
         menu(265, "需求操作日志", 202, 4, "", "", "F", "hr:requisition:log", "#", "仅招聘管理员可查看招聘需求CUD日志");
         menu(266, "月度任务要求", 202, 5, "", "", "F", "hr:requisition:task", "#", "按岗位按月配置P0/P1任务要求，仅招聘管理员");
-        menu(215, "候选人新增", 203, 3, "", "", "F", "hr:application:add", "#", "");
-        menu(216, "候选人修改", 203, 4, "", "", "F", "hr:application:edit", "#", "");
-        menu(217, "候选人删除", 203, 5, "", "", "F", "hr:application:delete", "#", "");
+        menu(215, "人才入库", 203, 3, "", "", "F", "hr:application:add", "#", "");
+        menu(216, "人才编辑", 203, 4, "", "", "F", "hr:application:edit", "#", "");
+        menu(217, "人才删除", 203, 5, "", "", "F", "hr:application:delete", "#", "");
         menu(267, "调整阶段", 203, 6, "", "", "F", "hr:application:stage", "#", "填写原因和业务日期后改阶段");
         menu(268, "阶段调整记录", 203, 7, "", "", "F", "hr:application:stage-log", "#", "查看阶段调整的操作人和时间");
-        menu(270, "移入黑名单", 203, 8, "", "", "F", "hr:blacklist:in", "#", "候选人批量移入黑名单，原因和备注必填");
+        menu(270, "移入黑名单", 203, 8, "", "", "F", "hr:blacklist:in", "#", "人才库批量移入黑名单，原因和备注必填");
         menu(271, "移出黑名单", 269, 1, "", "", "F", "hr:blacklist:out", "#", "移回正常人才库，原因和备注必填");
         menu(272, "黑名单记录", 269, 2, "", "", "F", "hr:blacklist:log", "#", "查看移入移出记录");
         menu(223, "邀约修改", 220, 1, "", "", "F", "hr:invite:edit", "#", "");
@@ -708,6 +709,55 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 SET candidate_no = CAST(14000000 + id AS CHAR)
                 WHERE is_active = 1 AND (candidate_no IS NULL OR TRIM(candidate_no) = '')
                 """);
+    }
+
+    /** 人才库：档案补全、跟进备注。菜单名只在仍是旧「候选人」时改，避免盖掉手工改过的名称。 */
+    private void ensureTalentPool() {
+        addColumnIfMissing("hr_candidate", "city",
+                "ALTER TABLE hr_candidate ADD COLUMN city VARCHAR(64) NULL COMMENT '城市' AFTER current_company");
+        addColumnIfMissing("hr_candidate", "work_years",
+                "ALTER TABLE hr_candidate ADD COLUMN work_years VARCHAR(32) NULL COMMENT '工作年限' AFTER city");
+        addColumnIfMissing("hr_candidate", "expected_salary",
+                "ALTER TABLE hr_candidate ADD COLUMN expected_salary VARCHAR(64) NULL COMMENT '期望薪资' AFTER work_years");
+        addColumnIfMissing("hr_candidate", "skill_tags",
+                "ALTER TABLE hr_candidate ADD COLUMN skill_tags VARCHAR(500) NULL COMMENT '技能标签' AFTER expected_salary");
+        addColumnIfMissing("hr_candidate", "school_name",
+                "ALTER TABLE hr_candidate ADD COLUMN school_name VARCHAR(128) NULL COMMENT '学校' AFTER skill_tags");
+        addColumnIfMissing("hr_candidate", "major",
+                "ALTER TABLE hr_candidate ADD COLUMN major VARCHAR(64) NULL COMMENT '专业' AFTER school_name");
+        addColumnIfMissing("hr_candidate", "school_tags",
+                "ALTER TABLE hr_candidate ADD COLUMN school_tags VARCHAR(128) NULL COMMENT '院校标签' AFTER major");
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS hr_talent_note (
+                  id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+                  candidate_id    BIGINT        NOT NULL                COMMENT '人才',
+                  content         VARCHAR(1000) NOT NULL                COMMENT '跟进内容',
+                  next_follow_at  DATETIME      NULL                    COMMENT '下次跟进',
+                  operator_id     BIGINT        NULL                    COMMENT '记录人',
+                  operator_name   VARCHAR(64)   NULL                    COMMENT '记录人姓名',
+                  create_by       VARCHAR(50)   DEFAULT ''              COMMENT '创建者',
+                  create_time     DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  is_active       TINYINT       NOT NULL DEFAULT 1      COMMENT '1有效 0删除',
+                  PRIMARY KEY (id),
+                  KEY idx_hr_talent_note_candidate (candidate_id, is_active)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='人才跟进'
+                """);
+        jdbc.update("""
+                UPDATE hr_candidate c
+                JOIN hr_application a ON a.candidate_id = c.id AND a.is_active = 1
+                JOIN hr_resume_parse p ON p.application_id = a.id AND p.is_active = 1
+                SET c.school_name = COALESCE(NULLIF(TRIM(c.school_name), ''), NULLIF(TRIM(p.school_name_raw), '')),
+                    c.major = COALESCE(NULLIF(TRIM(c.major), ''), NULLIF(TRIM(p.major), '')),
+                    c.school_tags = COALESCE(NULLIF(TRIM(c.school_tags), ''), NULLIF(TRIM(p.school_tags), ''))
+                WHERE c.is_active = 1
+                """);
+        jdbc.update("""
+                UPDATE sys_menu SET menu_name = '人才库', remark = '按人归档，可先入库再推荐到岗位'
+                WHERE menu_id = 203 AND menu_name = '候选人'
+                """);
+        jdbc.update("UPDATE sys_menu SET menu_name = '人才入库' WHERE menu_id = 215 AND menu_name = '候选人新增'");
+        jdbc.update("UPDATE sys_menu SET menu_name = '人才编辑' WHERE menu_id = 216 AND menu_name = '候选人修改'");
+        jdbc.update("UPDATE sys_menu SET menu_name = '人才删除' WHERE menu_id = 217 AND menu_name = '候选人删除'");
     }
 
     /** 原地点 SH/XJ 对应到工作地址：优先精确名，其次名称包含上海/新疆；新疆若缺失则补一条城市级地址 */

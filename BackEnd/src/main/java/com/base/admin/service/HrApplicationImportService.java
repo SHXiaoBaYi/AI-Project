@@ -34,6 +34,7 @@ public class HrApplicationImportService {
     private final JdbcTemplate jdbc;
     private final HrMasterService masterService;
     private final HrTalentBlacklistService talentBlacklistService;
+    private final HrTalentService talentService;
 
     public void writeTemplate(HttpServletResponse response) throws IOException {
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -137,6 +138,11 @@ public class HrApplicationImportService {
                         messages.add("岗位「" + job + "」在招聘需求中不存在");
                     }
                 }
+                Long existingCandidate = talentService.findReusableCandidateId(phone, email);
+                if (existingCandidate != null && requisitionId != null
+                        && talentService.hasOpenApplication(existingCandidate, requisitionId)) {
+                    messages.add("该人才已在此岗位流程中");
+                }
                 String channelCode = null;
                 if (!channel.isEmpty()) {
                     channelCode = channels.get(channel);
@@ -180,6 +186,7 @@ public class HrApplicationImportService {
                 item.name = name;
                 item.phone = phone;
                 item.email = email;
+                item.candidateId = existingCandidate;
                 item.requisitionId = requisitionId;
                 item.channelCode = channelCode;
                 item.stageCode = stageCode;
@@ -203,6 +210,7 @@ public class HrApplicationImportService {
         }
         for (ReadyRow item : ready) {
             HrApplicationDTO dto = new HrApplicationDTO();
+            dto.setCandidateId(item.candidateId);
             dto.setDisplayName(item.name);
             dto.setPhone(item.phone);
             dto.setEmail(item.email);
@@ -253,6 +261,7 @@ public class HrApplicationImportService {
     }
 
     private static final class ReadyRow {
+        private Long candidateId;
         private String name;
         private String phone;
         private String email;

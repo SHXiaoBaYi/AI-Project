@@ -16,8 +16,6 @@ import {
   getHrJobCardsApi,
   getHrJobCandidatesApi,
   getHrJobCommStatsApi,
-  getHrStageCatalogApi,
-  getHrStagesApi,
   getHrUsersApi,
   type HrJobCard,
   type HrJobCardQuery,
@@ -392,7 +390,6 @@ export default function HrJobBoardPage() {
   const [manualOpen, setManualOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [channels, setChannels] = useState<{ value: string; label: string }[]>([]);
-  const [stages, setStages] = useState<{ value: string; label: string }[]>([]);
   const [users, setUsers] = useState<{ value: number; label: string }[]>([]);
   const [commStats, setCommStats] = useState<HrJobCommStats | null>(null);
   const [commLoading, setCommLoading] = useState(false);
@@ -510,32 +507,6 @@ export default function HrJobBoardPage() {
         }),
       ),
     );
-    void getHrStageCatalogApi()
-      .then((catalog) => {
-        const stages = catalog?.stages ?? [];
-        if (stages.length) {
-          setStages(stages.map((item) => ({ value: String(item.code), label: String(item.name) })));
-          return;
-        }
-        return getHrStagesApi().then((rows) =>
-          setStages(
-            (rows ?? []).map((item) => ({
-              value: String(item.stageCode ?? item.stage_code),
-              label: String(item.stageName ?? item.stage_name),
-            })),
-          ),
-        );
-      })
-      .catch(() =>
-        getHrStagesApi().then((rows) =>
-          setStages(
-            (rows ?? []).map((item) => ({
-              value: String(item.stageCode ?? item.stage_code),
-              label: String(item.stageName ?? item.stage_name),
-            })),
-          ),
-        ),
-      );
     void getHrUsersApi().then((list) =>
       setUsers(
         (list ?? []).map((item) => {
@@ -846,9 +817,9 @@ export default function HrJobBoardPage() {
         editing={null}
         jobs={drawerJob ? [{ value: drawerJob.id, label: drawerJob.jobName || `岗位#${drawerJob.id}` }] : []}
         channels={channels}
-        stages={stages}
         users={users}
         presetRequisitionId={drawerJob?.id}
+        requireJob
         onOpenChange={setManualOpen}
         onSuccess={() => {
           if (drawerJob) {

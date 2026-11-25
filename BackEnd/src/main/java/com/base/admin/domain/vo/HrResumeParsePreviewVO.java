@@ -49,6 +49,27 @@ public class HrResumeParsePreviewVO {
     @Schema(description = "从文件名识别的工作年限，可能为空")
     private String yearsHint;
 
+    @Schema(description = "学校，可能为空")
+    private String schoolName;
+
+    @Schema(description = "专业，可能为空")
+    private String major;
+
+    @Schema(description = "院校标签，可能为空")
+    private String schoolTags;
+
+    @Schema(description = "城市，可能为空")
+    private String city;
+
+    @Schema(description = "工作年限，可能为空")
+    private String workYears;
+
+    @Schema(description = "期望薪资，可能为空")
+    private String expectedSalary;
+
+    @Schema(description = "技能标签，可能为空")
+    private String skillTags;
+
     @Schema(description = "是否识别到姓名")
     private Boolean nameFound;
 

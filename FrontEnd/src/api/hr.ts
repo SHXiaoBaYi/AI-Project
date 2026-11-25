@@ -836,6 +836,143 @@ export function getHrApplicationsApi(data: HrBoardQuery = {}) {
   return request.post<unknown, Record<string, unknown>[]>('/hr/application/list', data);
 }
 
+export interface HrTalentPortfolio {
+  id: number;
+  fileName: string;
+}
+
+export interface HrTalentRow {
+  candidateId: number;
+  displayName: string;
+  phone?: string;
+  email?: string;
+  gender?: string;
+  age?: number;
+  education?: string;
+  basicInfo?: string;
+  candidateNo?: string;
+  currentTitle?: string;
+  currentCompany?: string;
+  city?: string;
+  workYears?: string;
+  expectedSalary?: string;
+  skillTags?: string;
+  schoolName?: string;
+  major?: string;
+  schoolTags?: string;
+  poolStatus?: string;
+  poolStatusName?: string;
+  applicationCount?: number;
+  activeApplicationId?: number;
+  activeRequisitionId?: number;
+  activeJobName?: string;
+  activeStage?: string;
+  activeStageName?: string;
+  pending?: boolean;
+  remainingHours?: number | null;
+  lastContactAt?: string;
+  nextFollowAt?: string;
+  resumeName?: string;
+  aiScore?: number;
+  aiCount?: number;
+  applicationIds?: number[];
+  portfolios?: HrTalentPortfolio[];
+}
+
+export interface HrTalentMatch {
+  candidateId: number;
+  displayName?: string;
+  candidateNo?: string;
+  phone?: string;
+  email?: string;
+  currentCompany?: string;
+  currentTitle?: string;
+  poolStatus?: string;
+  poolStatusName?: string;
+}
+
+export interface HrTalentProfile {
+  talent: HrTalentRow;
+  applications: {
+    applicationId: number;
+    requisitionId?: number;
+    jobName?: string;
+    channelName?: string;
+    stageCode?: string;
+    stageName?: string;
+    terminal?: boolean;
+    submittedAt?: string;
+    submitterName?: string;
+    resumeName?: string;
+  }[];
+  notes: { id: number; content?: string; nextFollowAt?: string; operatorName?: string; createTime?: string }[];
+  phones: {
+    applicationId?: number;
+    jobName?: string;
+    calledAt?: string;
+    result?: string;
+    rejectReason?: string;
+    remark?: string;
+  }[];
+  interviews: {
+    applicationId?: number;
+    jobName?: string;
+    roundNo?: number;
+    conclusion?: string;
+    interviewerName?: string;
+    interviewedAt?: string;
+    comment?: string;
+  }[];
+  offers: {
+    applicationId?: number;
+    jobName?: string;
+    status?: string;
+    offeredAt?: string;
+    salaryAmount?: string;
+    rejectReason?: string;
+  }[];
+}
+
+export function pageHrTalentsApi(data: Record<string, unknown>) {
+  return request.post<unknown, { total: number; rows: HrTalentRow[] }>('/hr/talent/page', data);
+}
+
+export function matchHrTalentApi(data: { phone?: string; email?: string; excludeCandidateId?: number }) {
+  return request.post<unknown, HrTalentMatch[]>('/hr/talent/match', data);
+}
+
+export function getHrTalentProfileApi(candidateId: number) {
+  return request.get<unknown, HrTalentProfile>(`/hr/talent/${candidateId}`);
+}
+
+export function saveHrTalentApi(data: Record<string, unknown> & { editing?: boolean }) {
+  return data.editing
+    ? request.put<unknown, { candidateId: number; applicationId?: number; merged?: boolean }>('/hr/talent', data)
+    : request.post<unknown, { candidateId: number; applicationId?: number; merged?: boolean }>('/hr/talent', data);
+}
+
+export function recommendHrTalentApi(data: {
+  candidateId: number;
+  requisitionId: number;
+  channelCode?: string;
+  submitterUserId?: number;
+  submittedAt?: string;
+}) {
+  return request.post<unknown, number>('/hr/talent/recommend', data);
+}
+
+export function addHrTalentNoteApi(data: { candidateId: number; content: string; nextFollowAt?: string }) {
+  return request.post<unknown, void>('/hr/talent/note', data);
+}
+
+export function deleteHrTalentApi(id: number) {
+  return request.delete(`/hr/talent/${id}`);
+}
+
+export function deleteHrTalentBatchApi(ids: number[]) {
+  return request.delete('/hr/talent/batch', { data: ids });
+}
+
 export interface HrBlacklistRow {
   id: number;
   keyword?: string;
@@ -947,6 +1084,13 @@ export type HrResumeParsePreview = {
   cityHint?: string;
   salaryHint?: string;
   yearsHint?: string;
+  schoolName?: string;
+  major?: string;
+  schoolTags?: string;
+  city?: string;
+  workYears?: string;
+  expectedSalary?: string;
+  skillTags?: string;
   nameFound?: boolean;
   phoneFound?: boolean;
   emailFound?: boolean;

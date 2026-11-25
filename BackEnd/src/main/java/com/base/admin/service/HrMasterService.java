@@ -74,6 +74,7 @@ public class HrMasterService {
     private final HrKpiTaskService kpiTaskService;
     private final HrRequisitionLogService requisitionLogService;
     private final HrTalentBlacklistService talentBlacklistService;
+    private final HrTalentService talentService;
 
     public List<Map<String, Object>> requisitions(HrBoardQueryDTO query) {
         HrBoardQueryDTO q = query == null ? new HrBoardQueryDTO() : query;
@@ -1281,15 +1282,35 @@ public class HrMasterService {
             }
             talentBlacklistService.assertCanCreate(dto.getDisplayName(), dto.getPhone(), dto.getEmail());
             String resumeStatus = "ENTERED".equals(stage) ? "DRAFT" : "PASS";
-            jdbc.update("""
-                    INSERT INTO hr_candidate (display_name, phone, email, gender, age, education, candidate_no,
-                                              current_title, current_company, create_by, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                    """, dto.getDisplayName().trim(), emptyToNull(dto.getPhone()), emptyToNull(dto.getEmail()),
-                    emptyToNull(dto.getGender()), dto.getAge(), emptyToNull(dto.getEducation()),
-                    emptyToNull(dto.getCandidateNo()), emptyToNull(dto.getCurrentTitle()),
-                    emptyToNull(dto.getCurrentCompany()), user);
-            Long candidateId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+            Long candidateId = dto.getCandidateId() != null
+                    ? dto.getCandidateId()
+                    : talentService.findReusableCandidateId(dto.getPhone(), dto.getEmail());
+            if (candidateId != null) {
+                Integer exists = jdbc.queryForObject(
+                        "SELECT COUNT(1) FROM hr_candidate WHERE id = ? AND is_active = 1", Integer.class, candidateId);
+                if (exists == null || exists == 0) {
+                    throw new BusinessException("人才不存在");
+                }
+                if (talentService.hasOpenApplication(candidateId, dto.getRequisitionId())) {
+                    throw new BusinessException("该人才已在此岗位流程中");
+                }
+                jdbc.update("""
+                        UPDATE hr_candidate
+                        SET display_name = ?, phone = COALESCE(?, phone), email = COALESCE(?, email)
+                        WHERE id = ? AND is_active = 1
+                        """, dto.getDisplayName().trim(), emptyToNull(dto.getPhone()), emptyToNull(dto.getEmail()),
+                        candidateId);
+            } else {
+                jdbc.update("""
+                        INSERT INTO hr_candidate (display_name, phone, email, gender, age, education, candidate_no,
+                                                  current_title, current_company, create_by, is_active)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        """, dto.getDisplayName().trim(), emptyToNull(dto.getPhone()), emptyToNull(dto.getEmail()),
+                        emptyToNull(dto.getGender()), dto.getAge(), emptyToNull(dto.getEducation()),
+                        emptyToNull(dto.getCandidateNo()), emptyToNull(dto.getCurrentTitle()),
+                        emptyToNull(dto.getCurrentCompany()), user);
+                candidateId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+            }
             ensureCandidateNo(candidateId, dto.getCandidateNo());
             jdbc.update("""
                     INSERT INTO hr_application (requisition_id, candidate_id, channel_code, resume_status, submitter_user_id, submitter_name, submitted_at, current_stage, create_by, is_active)

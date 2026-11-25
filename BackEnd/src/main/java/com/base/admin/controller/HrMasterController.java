@@ -50,6 +50,7 @@ import com.base.admin.domain.dto.HrStageAdjustLogQueryDTO;
 import com.base.admin.domain.vo.HrStageAdjustLogVO;
 import com.base.admin.service.HrMasterService;
 import com.base.admin.service.HrStageAdjustService;
+import com.base.admin.service.HrTalentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -97,6 +98,7 @@ public class HrMasterController {
     private final HrRequisitionLogService requisitionLogService;
     private final HrRequisitionMonthTaskService requisitionMonthTaskService;
     private final HrStageAdjustService stageAdjustService;
+    private final HrTalentService talentService;
 
     @Operation(summary = "需求列表")
     @PostMapping("/requisition/list")
@@ -201,6 +203,84 @@ public class HrMasterController {
     public Result<Void> deleteMonthTask(@PathVariable Long id,
                                         @RequestParam(required = false) String entrySource) {
         requisitionMonthTaskService.delete(id, entrySource);
+        return Result.ok();
+    }
+
+    @Operation(summary = "人才库分页")
+    @PostMapping("/talent/page")
+    @RequiresPermission("hr:application:list")
+    public Result<PageResult<com.base.admin.domain.vo.HrTalentVO>> talentPage(
+            @RequestBody(required = false) com.base.admin.domain.dto.HrTalentQueryDTO query) {
+        return Result.ok(talentService.page(query));
+    }
+
+    @Operation(summary = "按手机号或邮箱匹配已有人才")
+    @PostMapping("/talent/match")
+    @RequiresPermission({"hr:application:add", "hr:application:edit", "hr:application:list"})
+    public Result<List<com.base.admin.domain.vo.HrTalentMatchVO>> talentMatch(
+            @RequestBody(required = false) com.base.admin.domain.dto.HrTalentMatchQueryDTO query) {
+        return Result.ok(talentService.match(query));
+    }
+
+    @Operation(summary = "人才档案")
+    @GetMapping("/talent/{id}")
+    @RequiresPermission("hr:application:list")
+    public Result<com.base.admin.domain.vo.HrTalentProfileVO> talentProfile(@PathVariable Long id) {
+        return Result.ok(talentService.profile(id));
+    }
+
+    @Operation(summary = "人才入库")
+    @PostMapping("/talent")
+    @RequiresPermission("hr:application:add")
+    @Log(title = "人才库", businessType = 1)
+    public Result<com.base.admin.domain.vo.HrTalentSaveResultVO> createTalent(
+            @Valid @RequestBody com.base.admin.domain.dto.HrTalentSaveDTO dto) {
+        dto.setEditing(false);
+        return Result.ok(talentService.save(dto));
+    }
+
+    @Operation(summary = "更新人才档案")
+    @PutMapping("/talent")
+    @RequiresPermission("hr:application:edit")
+    @Log(title = "人才库", businessType = 2)
+    public Result<com.base.admin.domain.vo.HrTalentSaveResultVO> updateTalent(
+            @Valid @RequestBody com.base.admin.domain.dto.HrTalentSaveDTO dto) {
+        dto.setEditing(true);
+        return Result.ok(talentService.save(dto));
+    }
+
+    @Operation(summary = "推荐人才到岗位")
+    @PostMapping("/talent/recommend")
+    @RequiresPermission("hr:application:add")
+    @Log(title = "人才推荐到岗位", businessType = 1)
+    public Result<Long> recommendTalent(@Valid @RequestBody com.base.admin.domain.dto.HrTalentRecommendDTO dto) {
+        return Result.ok(talentService.recommend(dto));
+    }
+
+    @Operation(summary = "记录人才跟进")
+    @PostMapping("/talent/note")
+    @RequiresPermission("hr:application:edit")
+    @Log(title = "人才跟进", businessType = 1)
+    public Result<Void> addTalentNote(@Valid @RequestBody com.base.admin.domain.dto.HrTalentNoteDTO dto) {
+        talentService.addNote(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "删除人才")
+    @DeleteMapping("/talent/{id}")
+    @RequiresPermission("hr:application:delete")
+    @Log(title = "人才库", businessType = 3)
+    public Result<Void> deleteTalent(@PathVariable Long id) {
+        talentService.delete(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除人才")
+    @DeleteMapping("/talent/batch")
+    @RequiresPermission("hr:application:delete")
+    @Log(title = "人才库-批量删除", businessType = 3)
+    public Result<Void> deleteTalentBatch(@RequestBody List<Long> ids) {
+        talentService.deleteBatch(ids);
         return Result.ok();
     }
 

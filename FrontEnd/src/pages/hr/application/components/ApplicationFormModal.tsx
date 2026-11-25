@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, App, Button, DatePicker, Form, Input, InputNumber, Select, Space, Upload } from 'antd';
+import { Alert, App, Button, DatePicker, Form, Input, InputNumber, Radio, Select, Space, Upload } from 'antd';
 import { InboxOutlined, PaperClipOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import dayjs from 'dayjs';
@@ -8,15 +8,18 @@ import {
   deleteHrPortfolioApi,
   downloadHrPortfolioApi,
   listHrPortfolioApi,
+  matchHrTalentApi,
   parseHrResumeApi,
-  saveHrApplicationApi,
+  saveHrTalentApi,
   uploadHrPortfolioApi,
   uploadHrResumeApi,
   type HrCandidatePortfolio,
+  type HrTalentMatch,
 } from '@/api/hr';
 
 export interface ApplicationFormValues {
-  id?: number;
+  candidateId?: number;
+  activeApplicationId?: number;
   displayName?: string;
   phone?: string;
   email?: string;
@@ -26,9 +29,15 @@ export interface ApplicationFormValues {
   candidateNo?: string;
   currentTitle?: string;
   currentCompany?: string;
+  city?: string;
+  workYears?: string;
+  expectedSalary?: string;
+  skillTags?: string;
+  schoolName?: string;
+  major?: string;
+  schoolTags?: string;
   requisitionId?: number;
   channelCode?: string;
-  currentStage?: string;
   submitterUserId?: number;
   submittedAt?: string;
   resumeName?: string;
@@ -58,9 +67,9 @@ export default function ApplicationFormModal({
   editing,
   jobs,
   channels,
-  stages,
   users,
   presetRequisitionId,
+  requireJob,
   onOpenChange,
   onSuccess,
 }: {
@@ -68,9 +77,10 @@ export default function ApplicationFormModal({
   editing: ApplicationFormValues | null;
   jobs: { value: number; label: string }[];
   channels: { value: string; label: string }[];
-  stages: { value: string; label: string }[];
   users: { value: number; label: string }[];
   presetRequisitionId?: number;
+  /** 从岗位看板入库时岗位必填 */
+  requireJob?: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }) {
@@ -85,6 +95,10 @@ export default function ApplicationFormModal({
   const [pendingPortfolios, setPendingPortfolios] = useState<File[]>([]);
   const pendingPortfoliosRef = useRef<File[]>([]);
   const [pendingPortfolioUi, setPendingPortfolioUi] = useState<UploadFile[]>([]);
+  const [matches, setMatches] = useState<HrTalentMatch[]>([]);
+  const [mergeMode, setMergeMode] = useState<'merge' | 'new'>('merge');
+  const phoneWatch = Form.useWatch('phone', form);
+  const emailWatch = Form.useWatch('email', form);
 
   const setResumeFileKeep = (file: File | null) => {
     resumeFileRef.current = file;
@@ -130,17 +144,38 @@ export default function ApplicationFormModal({
           }
         : {
             requisitionId: presetRequisitionId,
-            currentStage: 'ENTERED',
             submittedAt: dayjs(),
             resumeGate: undefined,
           },
     );
-    if (editing?.id) {
-      void loadPortfolios(editing.id);
+    if (editing?.activeApplicationId) {
+      void loadPortfolios(editing.activeApplicationId);
     } else {
       setPortfolioList([]);
     }
   }, [editing, form, open, presetRequisitionId]);
+
+  useEffect(() => {
+    if (!open || editing?.candidateId) {
+      setMatches([]);
+      return;
+    }
+    const phone = String(phoneWatch ?? '').trim();
+    const email = String(emailWatch ?? '').trim();
+    if (phone.length < 4 && !email.includes('@')) {
+      setMatches([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void matchHrTalentApi({ phone: phone || undefined, email: email || undefined })
+        .then((rows) => {
+          setMatches(rows ?? []);
+          setMergeMode('merge');
+        })
+        .catch(() => setMatches([]));
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [editing?.candidateId, emailWatch, open, phoneWatch]);
 
   const applyResumeFile = async (file: File) => {
     // 先落本地文件：识别只预填表单，保存时必须再上传到候选人
@@ -168,6 +203,15 @@ export default function ApplicationFormModal({
       if (preview.phone) patch.phone = preview.phone;
       if (preview.email) patch.email = preview.email;
       if (preview.channelCode) patch.channelCode = preview.channelCode;
+      if (preview.schoolName) patch.schoolName = preview.schoolName;
+      if (preview.major) patch.major = preview.major;
+      if (preview.schoolTags) patch.schoolTags = preview.schoolTags;
+      if (preview.city || preview.cityHint) patch.city = preview.city || preview.cityHint || '';
+      if (preview.workYears || preview.yearsHint) patch.workYears = preview.workYears || preview.yearsHint || '';
+      if (preview.expectedSalary || preview.salaryHint) {
+        patch.expectedSalary = preview.expectedSalary || preview.salaryHint || '';
+      }
+      if (preview.skillTags) patch.skillTags = preview.skillTags;
       if (Object.keys(patch).length) {
         form.setFieldsValue(patch);
       }
@@ -190,7 +234,7 @@ export default function ApplicationFormModal({
 
   return (
     <BaseModalForm
-      title={editing ? '编辑候选人' : '新增候选人'}
+      title={editing?.candidateId ? '编辑人才' : requireJob ? '新增候选人' : '人才入库'}
       open={open}
       form={form}
       width={1120}
@@ -202,50 +246,75 @@ export default function ApplicationFormModal({
       onFinish={async (values) => {
         const formValues = values as ApplicationFormValues;
         const fileToUpload = resumeFileRef.current ?? resumeFile;
-        const isCreate = !editing?.id;
-        if (isCreate && !fileToUpload) {
+        const isEdit = editing?.candidateId != null;
+        if (!isEdit && !fileToUpload) {
           message.error('请先上传简历');
           return false;
         }
-        const applicationId = await saveHrApplicationApi({
-          id: editing?.id,
+        const phone = formValues.phone?.trim();
+        const email = formValues.email?.trim();
+        let candidateId = isEdit ? editing?.candidateId : undefined;
+        let forceNew = false;
+        if (!isEdit) {
+          const fresh = await matchHrTalentApi({ phone: phone || undefined, email: email || undefined });
+          if (fresh.length > 0 && mergeMode === 'new') {
+            forceNew = true;
+          } else if (fresh.length > 0) {
+            candidateId = fresh[0].candidateId;
+          }
+        }
+        const saved = await saveHrTalentApi({
+          editing: isEdit,
+          candidateId,
+          forceNew,
+          ensureApplication: Boolean(fileToUpload),
           displayName: formValues.displayName,
-          phone: formValues.phone,
-          email: formValues.email,
+          phone,
+          email,
           gender: formValues.gender,
           age: formValues.age,
           education: formValues.education,
           candidateNo: formValues.candidateNo,
           currentTitle: formValues.currentTitle,
           currentCompany: formValues.currentCompany,
-          requisitionId: formValues.requisitionId,
-          channelCode: formValues.channelCode,
-          currentStage: formValues.currentStage,
-          submitterUserId: formValues.submitterUserId,
-          submittedAt: dateOf(formValues.submittedAt),
+          city: formValues.city,
+          workYears: formValues.workYears,
+          expectedSalary: formValues.expectedSalary,
+          skillTags: formValues.skillTags,
+          schoolName: formValues.schoolName,
+          major: formValues.major,
+          schoolTags: formValues.schoolTags,
+          requisitionId: isEdit ? undefined : formValues.requisitionId,
+          channelCode: isEdit ? undefined : formValues.channelCode,
+          submitterUserId: isEdit ? undefined : formValues.submitterUserId,
+          submittedAt: isEdit ? undefined : dateOf(formValues.submittedAt),
         });
-        const id = Number(applicationId);
-        if (!Number.isFinite(id) || id <= 0) {
-          message.error('保存候选人失败：未返回有效 ID');
-          return false;
-        }
+        const id = Number(saved.applicationId);
         if (fileToUpload) {
+          if (!Number.isFinite(id) || id <= 0) {
+            message.error('档案已保存，但没有可挂简历的投递');
+            onSuccess();
+            return false;
+          }
           try {
             await uploadHrResumeApi(id, fileToUpload);
           } catch (e) {
             message.error(
               e instanceof Error
-                ? `候选人已保存，但简历上传失败：${e.message}`
-                : '候选人已保存，但简历上传失败，请编辑后重新上传',
+                ? `档案已保存，但简历上传失败：${e.message}`
+                : '档案已保存，但简历上传失败，请编辑后重新上传',
             );
             onSuccess();
             return false;
           }
         }
-        for (const file of pendingPortfoliosRef.current.length ? pendingPortfoliosRef.current : pendingPortfolios) {
-          await uploadHrPortfolioApi(id, file);
+        const portfolioAppId = Number.isFinite(id) && id > 0 ? id : editing?.activeApplicationId;
+        if (portfolioAppId) {
+          for (const file of pendingPortfoliosRef.current.length ? pendingPortfoliosRef.current : pendingPortfolios) {
+            await uploadHrPortfolioApi(portfolioAppId, file);
+          }
         }
-        message.success(editing ? '已保存' : '已新增');
+        message.success(saved.merged ? '已合并到已有人才' : isEdit ? '已保存' : '已入库');
         resetLocalFiles();
         onSuccess();
         return true;
@@ -255,7 +324,7 @@ export default function ApplicationFormModal({
         <Form.Item
           label='简历'
           className='col-span-4 mb-0'
-          required={!editing?.id}
+          required={!editing?.candidateId}
           extra='先上传简历：系统 AI 识别预填字段；保存时会把同一份简历上传到候选人（新增必填）'
         >
           {editing?.resumeName ? (
@@ -300,7 +369,7 @@ export default function ApplicationFormModal({
           name='resumeGate'
           className='col-span-4'
           rules={
-            editing?.id
+            editing?.candidateId
               ? undefined
               : [
                   {
@@ -389,9 +458,73 @@ export default function ApplicationFormModal({
           />
         </Form.Item>
         <Form.Item
+          name='city'
+          label='城市'
+        >
+          <Input
+            allowClear
+            placeholder='目前工作城市'
+          />
+        </Form.Item>
+        <Form.Item
+          name='workYears'
+          label='工作年限'
+        >
+          <Input
+            allowClear
+            placeholder='如 5年 / 3-5年'
+          />
+        </Form.Item>
+        <Form.Item
+          name='expectedSalary'
+          label='期望薪资'
+        >
+          <Input
+            allowClear
+            placeholder='如 20-30K'
+          />
+        </Form.Item>
+        <Form.Item
+          name='schoolName'
+          label='学校'
+        >
+          <Input
+            allowClear
+            placeholder='最高学历学校'
+          />
+        </Form.Item>
+        <Form.Item
+          name='major'
+          label='专业'
+        >
+          <Input
+            allowClear
+            placeholder='专业'
+          />
+        </Form.Item>
+        <Form.Item
+          name='schoolTags'
+          label='院校标签'
+        >
+          <Input
+            allowClear
+            placeholder='如 985 / 211'
+          />
+        </Form.Item>
+        <Form.Item
+          name='skillTags'
+          label='技能标签'
+          className='col-span-2'
+        >
+          <Input
+            allowClear
+            placeholder='顿号或逗号分隔，如 Java、招聘、可异地'
+          />
+        </Form.Item>
+        <Form.Item
           name='phone'
           label='电话'
-          extra='可从简历 AI 识别，请核对'
+          extra='可从简历识别，请核对。已在库的手机会提示合并'
         >
           <Input
             allowClear
@@ -401,72 +534,80 @@ export default function ApplicationFormModal({
         <Form.Item
           name='email'
           label='邮箱'
-          extra='可从简历 AI 识别，请核对'
+          extra='可从简历识别，请核对'
         >
           <Input
             allowClear
             placeholder='邮箱'
           />
         </Form.Item>
+        {!editing?.candidateId && matches.length > 0 ? (
+          <div className='col-span-4 mb-3'>
+            <Alert
+              type='warning'
+              showIcon
+              message={`手机号或邮箱已对应人才「${matches[0].displayName || ''}」${matches[0].candidateNo ? `（${matches[0].candidateNo}）` : ''}`}
+              description={
+                <Radio.Group
+                  className='mt-2'
+                  value={mergeMode}
+                  onChange={(e) => setMergeMode(e.target.value)}
+                >
+                  <Radio value='merge'>合并到该人才，不新建一个人</Radio>
+                  <Radio value='new'>仍作为新人才入库</Radio>
+                </Radio.Group>
+              }
+            />
+          </div>
+        ) : null}
 
-        <Form.Item
-          name='requisitionId'
-          label='岗位'
-          rules={[{ required: true, message: '请选择招聘需求' }]}
-        >
-          <Select
-            options={jobs}
-            allowClear
-            showSearch
-            optionFilterProp='label'
-            placeholder='请选择招聘需求'
-          />
-        </Form.Item>
-        <Form.Item
-          name='channelCode'
-          label='渠道'
-        >
-          <Select
-            options={channels}
-            allowClear
-            placeholder='请选择渠道'
-          />
-        </Form.Item>
-        <Form.Item
-          name='currentStage'
-          label='阶段'
-          extra={
-            editing
-              ? '阶段不能在这里改，请用列表里的「调整阶段」。'
-              : '新建候选人从待初筛开始，后续阶段由业务动作推进。'
-          }
-          rules={[{ required: true, message: '请选择阶段' }]}
-        >
-          <Select
-            options={stages}
-            disabled
-            placeholder='待初筛'
-          />
-        </Form.Item>
-        <Form.Item
-          name='submitterUserId'
-          label='提交人'
-        >
-          <Select
-            options={users}
-            allowClear
-            showSearch
-            optionFilterProp='label'
-            placeholder='请选择提交人'
-          />
-        </Form.Item>
-        <Form.Item
-          name='submittedAt'
-          label='投递日期'
-          rules={[{ required: true, message: '请选择投递日期' }]}
-        >
-          <DatePicker className='w-full' />
-        </Form.Item>
+        {!editing?.candidateId ? (
+          <>
+            <Form.Item
+              name='requisitionId'
+              label='岗位'
+              extra={requireJob ? undefined : '可以先入库，之后再推荐到岗位'}
+              rules={requireJob ? [{ required: true, message: '请选择招聘需求' }] : undefined}
+            >
+              <Select
+                options={jobs}
+                allowClear={!requireJob}
+                showSearch
+                optionFilterProp='label'
+                placeholder={requireJob ? '请选择招聘需求' : '暂不挂岗'}
+              />
+            </Form.Item>
+            <Form.Item
+              name='channelCode'
+              label='渠道'
+            >
+              <Select
+                options={channels}
+                allowClear
+                placeholder='请选择渠道'
+              />
+            </Form.Item>
+            <Form.Item
+              name='submitterUserId'
+              label='提交人'
+            >
+              <Select
+                options={users}
+                allowClear
+                showSearch
+                optionFilterProp='label'
+                placeholder='请选择提交人'
+              />
+            </Form.Item>
+            <Form.Item
+              name='submittedAt'
+              label='入库日期'
+              rules={[{ required: true, message: '请选择日期' }]}
+            >
+              <DatePicker className='w-full' />
+            </Form.Item>
+          </>
+        ) : null}
 
         <Form.Item
           label='作品集'
@@ -503,7 +644,7 @@ export default function ApplicationFormModal({
                       onClick={async () => {
                         await deleteHrPortfolioApi(item.id);
                         message.success('已删除');
-                        if (editing?.id) await loadPortfolios(editing.id);
+                        if (editing?.activeApplicationId) await loadPortfolios(editing.activeApplicationId);
                       }}
                     >
                       删除

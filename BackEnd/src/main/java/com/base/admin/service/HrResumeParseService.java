@@ -339,6 +339,13 @@ public class HrResumeParseService {
                   "currentCompany":"目前公司或最近一份工作公司",
                   "phone":"11位手机号",
                   "email":"邮箱",
+                  "schoolName":"最高学历学校",
+                  "major":"专业",
+                  "schoolTags":"院校标签如985、211、双一流，没有则null",
+                  "city":"目前工作城市",
+                  "workYears":"工作年限，如5年或3-5年",
+                  "expectedSalary":"期望薪资",
+                  "skillTags":"技能标签，用顿号分隔，最多8个",
                   "channelCode":"渠道码",
                   "channelName":"渠道名"
                 }
@@ -364,6 +371,13 @@ public class HrResumeParseService {
         vo.setCurrentCompany(textOrNull(node, "currentCompany"));
         vo.setPhone(normalizePhoneResult(textOrNull(node, "phone")));
         vo.setEmail(normalizeEmailResult(textOrNull(node, "email")));
+        vo.setSchoolName(textOrNull(node, "schoolName"));
+        vo.setMajor(textOrNull(node, "major"));
+        vo.setSchoolTags(textOrNull(node, "schoolTags"));
+        vo.setCity(textOrNull(node, "city"));
+        vo.setWorkYears(textOrNull(node, "workYears"));
+        vo.setExpectedSalary(textOrNull(node, "expectedSalary"));
+        vo.setSkillTags(textOrNull(node, "skillTags"));
         vo.setChannelCode(textOrNull(node, "channelCode"));
         vo.setChannelName(textOrNull(node, "channelName"));
     }
@@ -417,12 +431,21 @@ public class HrResumeParseService {
         }
         if (StringUtils.hasText(fileHints.city)) {
             vo.setCityHint(fileHints.city);
+            if (!StringUtils.hasText(vo.getCity())) {
+                vo.setCity(fileHints.city);
+            }
         }
         if (StringUtils.hasText(fileHints.salary)) {
             vo.setSalaryHint(fileHints.salary);
+            if (!StringUtils.hasText(vo.getExpectedSalary())) {
+                vo.setExpectedSalary(fileHints.salary);
+            }
         }
         if (StringUtils.hasText(fileHints.years)) {
             vo.setYearsHint(fileHints.years);
+            if (!StringUtils.hasText(vo.getWorkYears())) {
+                vo.setWorkYears(fileHints.years);
+            }
         }
     }
 
