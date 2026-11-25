@@ -15,42 +15,80 @@ import StageAdjustModal from '@/components/hr/StageAdjustModal';
 import ApplicationFormModal, { type ApplicationFormValues } from './components/ApplicationFormModal';
 import BlacklistReasonModal from './components/BlacklistReasonModal';
 import ImportApplicationModal from './components/ImportApplicationModal';
-import RecommendJobModal from './components/RecommendJobModal';
 import TalentProfileDrawer from './components/TalentProfileDrawer';
 import {
-  deleteHrTalentApi,
-  deleteHrTalentBatchApi,
-  downloadHrPortfolioApi,
+  deleteHrApplicationApi,
+  deleteHrApplicationBatchApi,
+  getHrApplicationsApi,
   getHrChannelsApi,
   getHrRequisitionsApi,
   getHrStageCatalogApi,
   getHrStagesApi,
+  getHrTalentProfileApi,
   getHrUsersApi,
   moveHrBlacklistInApi,
-  pageHrTalentsApi,
-  type HrTalentRow,
 } from '@/api/hr';
 
-const POOL_OPTIONS = [
-  { value: 'POOL', label: '在库可推荐' },
-  { value: 'IN_PROCESS', label: '流程中' },
-  { value: 'REACTIVATABLE', label: '淘汰可激活' },
-  { value: 'ONBOARDED', label: '已入职' },
-];
+interface AppRow {
+  id: number;
+  candidateId?: number;
+  displayName: string;
+  pending?: boolean;
+  basicInfo?: string;
+  currentTitle?: string;
+  currentCompany?: string;
+  remainingHours?: number | null;
+  phone?: string;
+  email?: string;
+  requisitionId?: number;
+  jobName?: string;
+  channelCode?: string;
+  channelName?: string;
+  currentStage?: string;
+  stageName?: string;
+  submitterName?: string;
+  resumeName?: string;
+}
 
-const POOL_CLASS: Record<string, string> = {
-  POOL: 'text-blue-600',
-  IN_PROCESS: 'text-orange-500',
-  REACTIVATABLE: 'text-black/65',
-  ONBOARDED: 'text-green-600',
-};
+function textOf(value: unknown) {
+  return value == null || value === '' ? undefined : String(value);
+}
+
+function numberOf(value: unknown) {
+  if (value == null || value === '') return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function mapRow(raw: Record<string, unknown>): AppRow {
+  const remaining = raw.remaining_hours ?? raw.remainingHours;
+  return {
+    id: Number(raw.id),
+    candidateId: numberOf(raw.candidate_id ?? raw.candidateId),
+    displayName: String(raw.display_name ?? raw.displayName ?? ''),
+    pending: raw.pending === true || raw.pending === 1 || raw.pending === '1',
+    basicInfo: textOf(raw.basic_info ?? raw.basicInfo),
+    currentTitle: textOf(raw.current_title ?? raw.currentTitle),
+    currentCompany: textOf(raw.current_company ?? raw.currentCompany),
+    remainingHours: remaining == null || remaining === '' || Number.isNaN(Number(remaining)) ? null : Number(remaining),
+    phone: textOf(raw.phone),
+    email: textOf(raw.email),
+    requisitionId: numberOf(raw.requisition_id ?? raw.requisitionId),
+    jobName: textOf(raw.job_name ?? raw.jobName),
+    channelCode: textOf(raw.channel_code ?? raw.channelCode),
+    channelName: textOf(raw.channel_name ?? raw.channelName),
+    currentStage: textOf(raw.current_stage ?? raw.currentStage),
+    stageName: textOf(raw.stage_name ?? raw.stageName),
+    submitterName: textOf(raw.submitter_name ?? raw.submitterName),
+    resumeName: textOf(raw.file_name ?? raw.fileName ?? raw.resumeName),
+  };
+}
 
 const ApplicationPage = memo(function ApplicationPage() {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(null);
   const currentPageKeysRef = useRef<Set<number>>(new Set());
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [selectedRows, setSelectedRows] = useState<HrTalentRow[]>([]);
   const [searchParams] = useSearchParams();
   const presetRequisitionId = Number(searchParams.get('requisitionId') || '') || undefined;
   const [open, setOpen] = useState(false);
@@ -72,7 +110,6 @@ const ApplicationPage = memo(function ApplicationPage() {
   const [stageLogOpen, setStageLogOpen] = useState(false);
   const [blacklistOpen, setBlacklistOpen] = useState(false);
   const [profileId, setProfileId] = useState<number | null>(null);
-  const [recommendTarget, setRecommendTarget] = useState<HrTalentRow | null>(null);
   const [roundPlans, setRoundPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
   const [ccRoundPlans, setCcRoundPlans] = useState<Map<number, Map<number, number[]>>>(new Map());
 
@@ -164,33 +201,25 @@ const ApplicationPage = memo(function ApplicationPage() {
     );
   }, []);
 
-  const columns: ProColumnType<HrTalentRow>[] = useMemo(
+  const columns: ProColumnType<AppRow>[] = useMemo(
     () => [
       {
         title: '操作',
         valueType: 'option',
-        width: 280,
+        width: 260,
         render: (_, record) => {
-          const roundNo = nextInviteRound(record.activeStage);
-          const maxRound = maxRoundOf(roundPlans, record.activeRequisitionId);
-          const inviteable =
-            canCreateInvite(record.activeStage, maxRound) &&
-            record.activeRequisitionId != null &&
-            record.activeApplicationId != null;
+          const roundNo = nextInviteRound(record.currentStage);
+          const maxRound = maxRoundOf(roundPlans, record.requisitionId);
+          const inviteable = canCreateInvite(record.currentStage, maxRound) && record.requisitionId != null;
           return (
             <ActionButtons
-              maxVisible={4}
+              maxVisible={3}
               items={[
                 {
                   key: 'profile',
                   label: '档案',
-                  onClick: () => setProfileId(record.candidateId),
-                },
-                {
-                  key: 'recommend',
-                  label: '推荐到岗位',
-                  perm: 'hr:application:add',
-                  onClick: () => setRecommendTarget(record),
+                  disabled: record.candidateId == null,
+                  onClick: () => record.candidateId != null && setProfileId(record.candidateId),
                 },
                 ...(inviteable && roundNo != null
                   ? [
@@ -199,11 +228,11 @@ const ApplicationPage = memo(function ApplicationPage() {
                         label: '邀约',
                         perm: 'hr:invite:add',
                         onClick: () => {
-                          const reqId = record.activeRequisitionId!;
+                          const reqId = record.requisitionId!;
                           setInvitePreset({
-                            applicationId: record.activeApplicationId!,
+                            applicationId: record.id,
                             displayName: record.displayName,
-                            jobName: record.activeJobName,
+                            jobName: record.jobName,
                             roundNo,
                             interviewerUserIds: roundPlans.get(reqId)?.get(roundNo),
                             ccUserIds: ccRoundPlans.get(reqId)?.get(roundNo),
@@ -214,11 +243,36 @@ const ApplicationPage = memo(function ApplicationPage() {
                     ]
                   : []),
                 {
+                  key: 'review',
+                  label: '面试评价',
+                  onClick: () => setReviewTarget({ id: record.id, name: record.displayName }),
+                },
+                {
+                  key: 'ai',
+                  label: 'AI',
+                  onClick: () => setAiTarget({ id: record.id, name: record.displayName }),
+                },
+                {
+                  key: 'stage',
+                  label: '调整阶段',
+                  perm: 'hr:application:stage',
+                  onClick: () =>
+                    setStageTarget({
+                      id: record.id,
+                      displayName: record.displayName,
+                      jobName: record.jobName,
+                      currentStage: record.currentStage,
+                    }),
+                },
+                {
                   key: 'edit',
                   label: '编辑',
                   perm: 'hr:application:edit',
-                  onClick: () => {
-                    setEditing(record);
+                  disabled: record.candidateId == null,
+                  onClick: async () => {
+                    if (record.candidateId == null) return;
+                    const profile = await getHrTalentProfileApi(record.candidateId);
+                    setEditing({ ...profile.talent, activeApplicationId: record.id });
                     setOpen(true);
                   },
                 },
@@ -226,9 +280,9 @@ const ApplicationPage = memo(function ApplicationPage() {
                   key: 'delete',
                   label: '删除',
                   perm: 'hr:application:delete',
-                  confirmTitle: `确认删除人才「${record.displayName}」？投递记录会一并停用。`,
+                  confirmTitle: `确认删除「${record.displayName}」在「${record.jobName || '该岗位'}」的这条投递？人才档案会保留。`,
                   onClick: async () => {
-                    await deleteHrTalentApi(record.candidateId);
+                    await deleteHrApplicationApi(record.id);
                     message.success('已删除');
                     actionRef.current?.reload();
                   },
@@ -239,42 +293,47 @@ const ApplicationPage = memo(function ApplicationPage() {
         },
       },
       {
-        title: '关键词',
-        dataIndex: 'keyword',
+        title: '范围',
+        dataIndex: 'listScope',
+        valueType: 'select',
         hideInTable: true,
-        fieldProps: { allowClear: true, placeholder: '姓名、公司、学校、标签' },
+        initialValue: 'OPEN',
+        fieldProps: {
+          allowClear: false,
+          options: [
+            { value: 'OPEN', label: '流程中' },
+            { value: 'ALL', label: '全部投递' },
+          ],
+        },
+      },
+      {
+        title: '姓名',
+        dataIndex: 'candidateName',
+        hideInTable: true,
+        fieldProps: { allowClear: true },
       },
       {
         title: '手机号',
         dataIndex: 'phone',
         hideInTable: true,
-        fieldProps: { allowClear: true, maxLength: 20, placeholder: '支持片段' },
+        fieldProps: { allowClear: true, maxLength: 20, placeholder: '完整手机号' },
       },
       {
-        title: '人才',
+        title: '候选人',
         dataIndex: 'displayName',
+        search: false,
         width: 120,
         render: (_, record) => (
           <button
             type='button'
             className='inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0'
-            onClick={() => setProfileId(record.candidateId)}
+            onClick={() => record.candidateId != null && setProfileId(record.candidateId)}
           >
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${record.pending ? 'bg-red-500' : 'bg-blue-500'}`}
             />
             <span className='text-blue-600'>{record.displayName}</span>
           </button>
-        ),
-      },
-      {
-        title: '在库状态',
-        dataIndex: 'poolStatus',
-        valueType: 'select',
-        width: 120,
-        fieldProps: { options: POOL_OPTIONS, allowClear: true },
-        render: (_, record) => (
-          <span className={POOL_CLASS[record.poolStatus || ''] || ''}>{record.poolStatusName || '—'}</span>
         ),
       },
       {
@@ -286,108 +345,34 @@ const ApplicationPage = memo(function ApplicationPage() {
         render: (_, record) => record.basicInfo || '—',
       },
       {
-        title: '人选编号',
-        dataIndex: 'candidateNo',
-        search: false,
-        width: 110,
-        render: (_, record) => record.candidateNo || '—',
-      },
-      {
-        title: '目前职位',
-        dataIndex: 'title',
-        hideInTable: true,
-        fieldProps: { allowClear: true },
-      },
-      {
-        title: '目前职位',
+        title: '目前职位 / 公司',
         dataIndex: 'currentTitle',
         search: false,
-        width: 140,
+        width: 200,
         ellipsis: true,
-        render: (_, record) => record.currentTitle || '—',
+        render: (_, record) => [record.currentTitle, record.currentCompany].filter(Boolean).join(' · ') || '—',
       },
       {
-        title: '目前公司',
-        dataIndex: 'company',
-        hideInTable: true,
-        fieldProps: { allowClear: true },
-      },
-      {
-        title: '目前公司',
-        dataIndex: 'currentCompany',
-        search: false,
+        title: '岗位',
+        dataIndex: 'requisitionId',
+        valueType: 'select',
         width: 160,
         ellipsis: true,
-        render: (_, record) => record.currentCompany || '—',
-      },
-      {
-        title: '学校',
-        dataIndex: 'school',
-        hideInTable: true,
-        fieldProps: { allowClear: true, placeholder: '学校或专业' },
-      },
-      {
-        title: '学校 / 专业',
-        dataIndex: 'schoolName',
-        search: false,
-        width: 160,
-        ellipsis: true,
-        render: (_, record) => [record.schoolName, record.major].filter(Boolean).join(' · ') || '—',
-      },
-      {
-        title: '标签',
-        dataIndex: 'tags',
-        hideInTable: true,
-        fieldProps: { allowClear: true },
-      },
-      {
-        title: '标签',
-        dataIndex: 'skillTags',
-        search: false,
-        width: 160,
-        ellipsis: true,
-        render: (_, record) => record.skillTags || '—',
-      },
-      {
-        title: '投递',
-        dataIndex: 'applicationCount',
-        search: false,
-        width: 70,
-        render: (_, record) => record.applicationCount ?? 0,
-      },
-      {
-        title: '当前岗位',
-        dataIndex: 'activeJobName',
-        search: false,
-        width: 140,
-        ellipsis: true,
-        render: (_, record) => record.activeJobName || '未挂岗',
+        fieldProps: { options: jobs, allowClear: true, showSearch: true, optionFilterProp: 'label' },
+        render: (_, record) => record.jobName || '—',
       },
       {
         title: '阶段',
-        dataIndex: 'activeStageName',
-        search: false,
+        dataIndex: 'stageCode',
+        valueType: 'select',
         width: 140,
         ellipsis: true,
-        render: (_, record) => record.activeStageName || '—',
-      },
-      {
-        title: '最近联系',
-        dataIndex: 'lastContactAt',
-        search: false,
-        width: 160,
-        render: (_, record) => record.lastContactAt || '—',
-      },
-      {
-        title: '下次跟进',
-        dataIndex: 'nextFollowAt',
-        search: false,
-        width: 110,
-        render: (_, record) => record.nextFollowAt || '—',
+        fieldProps: { options: stages, allowClear: true, showSearch: true, optionFilterProp: 'label' },
+        render: (_, record) => record.stageName || '—',
       },
       {
         title: '剩余处理时间',
-        tooltip: '只对流程中、尚未处理的人才计 48 小时。已沟通、改过阶段或有面试评价后显示「—」。',
+        tooltip: '只对尚未处理的投递计 48 小时。已沟通、改过阶段或有面试评价后显示「—」。',
         dataIndex: 'remainingHours',
         search: false,
         width: 130,
@@ -396,6 +381,27 @@ const ApplicationPage = memo(function ApplicationPage() {
           if (record.remainingHours < 0) return <span className='text-red-500'>已超时</span>;
           return <span className='text-orange-500'>剩余{record.remainingHours.toFixed(2)}小时</span>;
         },
+      },
+      {
+        title: '简历',
+        dataIndex: 'resumeName',
+        search: false,
+        width: 90,
+        render: (_, record) => (
+          <ResumeViewButton
+            applicationId={record.id}
+            fileName={record.resumeName}
+          />
+        ),
+      },
+      {
+        title: '渠道',
+        dataIndex: 'channelCode',
+        valueType: 'select',
+        width: 110,
+        ellipsis: true,
+        fieldProps: { options: channels, allowClear: true },
+        render: (_, record) => record.channelName || '—',
       },
       {
         title: '招聘负责人',
@@ -410,91 +416,6 @@ const ApplicationPage = memo(function ApplicationPage() {
           showSearch: true,
           optionFilterProp: 'label',
         },
-      },
-      {
-        title: '岗位',
-        dataIndex: 'requisitionId',
-        valueType: 'select',
-        hideInTable: true,
-        fieldProps: { options: jobs, allowClear: true, showSearch: true, optionFilterProp: 'label' },
-      },
-      {
-        title: '简历',
-        dataIndex: 'resumeName',
-        search: false,
-        width: 90,
-        render: (_, record) =>
-          record.activeApplicationId ? (
-            <ResumeViewButton
-              applicationId={record.activeApplicationId}
-              fileName={record.resumeName}
-            />
-          ) : (
-            '—'
-          ),
-      },
-      {
-        title: '作品集',
-        dataIndex: 'portfolios',
-        search: false,
-        width: 180,
-        ellipsis: true,
-        render: (_, record) => {
-          if (!record.portfolios?.length) return <span className='text-black/45'>无</span>;
-          return (
-            <div className='flex max-w-[180px] flex-col gap-0.5'>
-              {record.portfolios.map((item) => (
-                <button
-                  key={item.id}
-                  type='button'
-                  title={item.fileName}
-                  className='cursor-pointer truncate border-0 bg-transparent p-0 text-left text-[#1677ff]'
-                  onClick={() => {
-                    void downloadHrPortfolioApi(item.id, item.fileName).catch((e) =>
-                      message.error(e instanceof Error ? e.message : '下载失败'),
-                    );
-                  }}
-                >
-                  {item.fileName}
-                </button>
-              ))}
-            </div>
-          );
-        },
-      },
-      {
-        title: '渠道',
-        dataIndex: 'channelCode',
-        valueType: 'select',
-        hideInTable: true,
-        fieldProps: { options: channels, allowClear: true },
-      },
-      {
-        title: '阶段',
-        dataIndex: 'stageCode',
-        valueType: 'select',
-        hideInTable: true,
-        fieldProps: { options: stages, allowClear: true, showSearch: true, optionFilterProp: 'label' },
-      },
-      {
-        title: 'AI分析',
-        dataIndex: 'aiScore',
-        search: false,
-        width: 110,
-        render: (_, record) =>
-          record.activeApplicationId ? (
-            <button
-              type='button'
-              className='cursor-pointer border-0 bg-transparent p-0 text-left text-[#1677ff]'
-              onClick={() => setAiTarget({ id: record.activeApplicationId!, name: record.displayName })}
-            >
-              {record.aiScore == null
-                ? '未分析'
-                : `${record.aiScore}分${record.aiCount && record.aiCount > 1 ? ` · ${record.aiCount}份` : ''}`}
-            </button>
-          ) : (
-            '—'
-          ),
       },
       {
         title: '提交人',
@@ -514,16 +435,14 @@ const ApplicationPage = memo(function ApplicationPage() {
     [ccRoundPlans, channels, jobs, message, roundPlans, stages, users],
   );
 
-  const blacklistApplicationIds = selectedRows.flatMap((row) => row.applicationIds ?? []);
-
   return (
     <>
-      <BaseProTable<HrTalentRow>
-        rowKey='candidateId'
+      <BaseProTable<AppRow>
+        rowKey='id'
         actionRef={actionRef}
         columns={columns}
-        headerTitle='人才库'
-        scroll={{ x: 2200 }}
+        headerTitle='候选人'
+        scroll={{ x: 1500 }}
         params={presetRequisitionId ? { requisitionId: presetRequisitionId } : undefined}
         request={async (params) => {
           const requisitionId =
@@ -531,17 +450,9 @@ const ApplicationPage = memo(function ApplicationPage() {
           const ownerUserIds = Array.isArray(params.ownerUserIds)
             ? (params.ownerUserIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0)
             : undefined;
-          const result = await pageHrTalentsApi({
-            pageNum: params.current,
-            pageSize: params.pageSize,
-            candidateName: params.displayName,
+          const rows = await getHrApplicationsApi({
+            candidateName: params.candidateName ? String(params.candidateName).trim() : undefined,
             phone: params.phone ? String(params.phone).trim() : undefined,
-            keyword: params.keyword ? String(params.keyword).trim() : undefined,
-            company: params.company ? String(params.company).trim() : undefined,
-            title: params.title ? String(params.title).trim() : undefined,
-            school: params.school ? String(params.school).trim() : undefined,
-            tags: params.tags ? String(params.tags).trim() : undefined,
-            poolStatus: params.poolStatus,
             requisitionId: Number.isFinite(requisitionId) ? requisitionId : undefined,
             channelCode: params.channelCode,
             stageCode: params.stageCode,
@@ -549,26 +460,24 @@ const ApplicationPage = memo(function ApplicationPage() {
             ownerUserIds: ownerUserIds?.length ? ownerUserIds : undefined,
             startDate: params.startDate,
             endDate: params.endDate,
+            pipelineOnly: params.listScope !== 'ALL',
           });
-          const pageRows = result.rows ?? [];
-          currentPageKeysRef.current = new Set(pageRows.map((row) => row.candidateId));
-          return { data: pageRows, success: true, total: result.total ?? 0 };
+          const mapped = (Array.isArray(rows) ? rows : []).map((row) => mapRow(row));
+          const page = Number(params.current) || 1;
+          const size = Number(params.pageSize) || 10;
+          const start = (page - 1) * size;
+          const pageRows = mapped.slice(start, start + size);
+          currentPageKeysRef.current = new Set(pageRows.map((row) => row.id));
+          return { data: pageRows, success: true, total: mapped.length };
         }}
         rowSelection={{
           selectedRowKeys,
-          onChange: (keys, rows) => {
+          onChange: (keys) => {
             setSelectedRowKeys((prev) => {
               const global = new Set(prev as number[]);
               currentPageKeysRef.current.forEach((k) => global.delete(k));
               (keys as number[]).forEach((k) => global.add(k));
               return [...global];
-            });
-            setSelectedRows((prev) => {
-              const kept = prev.filter((row) => !currentPageKeysRef.current.has(row.candidateId));
-              const incoming = (rows as HrTalentRow[]).filter((row) => (keys as number[]).includes(row.candidateId));
-              const map = new Map<number, HrTalentRow>();
-              [...kept, ...incoming].forEach((row) => map.set(row.candidateId, row));
-              return [...map.values()];
             });
           },
         }}
@@ -580,20 +489,19 @@ const ApplicationPage = memo(function ApplicationPage() {
             perm='hr:application:delete'
             onClick={() => {
               if (selectedRowKeys.length === 0) {
-                message.warning('请先选择要删除的人才');
+                message.warning('请先选择要删除的投递');
                 return;
               }
               Modal.confirm({
-                title: '批量删除人才',
-                content: `确定要删除选中的 ${selectedRowKeys.length} 位人才吗？他们的投递记录会一并停用。`,
+                title: '批量删除投递',
+                content: `确定删除选中的 ${selectedRowKeys.length} 条投递吗？人才档案会保留。`,
                 okText: '确定删除',
                 cancelText: '取消',
                 okButtonProps: { danger: true },
                 onOk: async () => {
-                  await deleteHrTalentBatchApi(selectedRowKeys as number[]);
-                  message.success(`已删除 ${selectedRowKeys.length} 位人才`);
+                  await deleteHrApplicationBatchApi(selectedRowKeys as number[]);
+                  message.success(`已删除 ${selectedRowKeys.length} 条投递`);
                   setSelectedRowKeys([]);
-                  setSelectedRows([]);
                   currentPageKeysRef.current = new Set();
                   actionRef.current?.reload();
                 },
@@ -607,11 +515,7 @@ const ApplicationPage = memo(function ApplicationPage() {
             perm='hr:blacklist:in'
             onClick={() => {
               if (selectedRowKeys.length === 0) {
-                message.warning('请先选择要移入黑名单的人才');
-                return;
-              }
-              if (blacklistApplicationIds.length === 0) {
-                message.warning('所选人才还没有投递记录，不能移入黑名单');
+                message.warning('请先选择要移入黑名单的候选人');
                 return;
               }
               setBlacklistOpen(true);
@@ -642,7 +546,7 @@ const ApplicationPage = memo(function ApplicationPage() {
               setOpen(true);
             }}
           >
-            入库
+            新增
           </PermissionButton>,
         ]}
       />
@@ -653,6 +557,7 @@ const ApplicationPage = memo(function ApplicationPage() {
         channels={channels}
         users={users}
         presetRequisitionId={presetRequisitionId}
+        requireJob
         onOpenChange={setOpen}
         onSuccess={() => actionRef.current?.reload()}
       />
@@ -669,16 +574,6 @@ const ApplicationPage = memo(function ApplicationPage() {
         onAi={(id, name) => setAiTarget({ id, name })}
         onReviews={(id, name) => setReviewTarget({ id, name })}
         onStage={(id, name, jobName, stage) => setStageTarget({ id, displayName: name, jobName, currentStage: stage })}
-      />
-      <RecommendJobModal
-        open={recommendTarget != null}
-        candidateId={recommendTarget?.candidateId}
-        candidateName={recommendTarget?.displayName}
-        jobs={jobs}
-        channels={channels}
-        users={users}
-        onClose={() => setRecommendTarget(null)}
-        onSuccess={() => actionRef.current?.reload()}
       />
       <AiAnalysisDrawer
         applicationId={aiTarget?.id || 0}
@@ -717,13 +612,12 @@ const ApplicationPage = memo(function ApplicationPage() {
         onClose={() => setBlacklistOpen(false)}
         onSubmit={async (values) => {
           await moveHrBlacklistInApi({
-            applicationIds: blacklistApplicationIds,
+            applicationIds: selectedRowKeys as number[],
             reason: values.reason,
             remark: values.remark,
           });
           message.success('已移入黑名单');
           setSelectedRowKeys([]);
-          setSelectedRows([]);
           actionRef.current?.reload();
         }}
       />

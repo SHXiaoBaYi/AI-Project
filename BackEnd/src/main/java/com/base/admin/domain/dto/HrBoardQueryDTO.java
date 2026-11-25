@@ -102,4 +102,7 @@ public class HrBoardQueryDTO {
 
     @Schema(description = "是否已评价（true=已评价 false=未评价，空=全部）")
     private Boolean reviewed;
+
+    @Schema(description = "true 只看已挂岗且阶段未结束的投递")
+    private Boolean pipelineOnly;
 }

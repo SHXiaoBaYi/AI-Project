@@ -275,7 +275,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
     }
 
     private void seedMenus() {
-        menu(200, "招聘管理", 0, 3, "/hr", "", "M", "", "TeamOutlined", "招聘需求、人才库与基础数据");
+        menu(200, "招聘管理", 0, 3, "/hr", "", "M", "", "TeamOutlined", "招聘需求、候选人、人才库与基础数据");
         int boardParent = menuId("数据看板", "M");
         int systemParent = menuId("系统设置", "M");
         if (systemParent == 0) {
@@ -289,7 +289,8 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(236, "流程操作", 235, 1, "", "", "F", "hr:pipeline:edit", "#", "初筛/电话/待入职更新");
         menu(237, "KPI看板", 200, 4, "hr/kpi", "hr/kpi/index", "C", "hr:kpi:view", "FundProjectionScreenOutlined", "岗位分级与招聘人员绩效");
         menu(238, "KPI导出", 237, 1, "", "", "F", "hr:kpi:export", "#", "导出绩效报表");
-        menu(203, "人才库", 200, 5, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "按人归档，可先入库再推荐到岗位");
+        menu(203, "候选人", 200, 5, "hr/application", "hr/application/index", "C", "hr:application:list", "IdcardOutlined", "流程中的投递");
+        menu(273, "人才库", 200, 5, "hr/talent", "hr/talent/index", "C", "hr:application:list", "ContactsOutlined", "按人归档，可先入库再推荐到岗位");
         menu(269, "黑名单人才库", 200, 6, "hr/blacklist", "hr/blacklist/index", "C", "hr:blacklist:list", "StopOutlined", "移入黑名单的人才不可再入库、不可邀约、不计入考核得分");
         menu(220, "面试邀约记录", 200, 6, "hr/invite", "hr/invite/index", "C", "hr:invite:list", "CalendarOutlined", "邀约并建钉钉日程");
         // 250–260 已占用为机器人菜单，面试日历用 261，考核得分用 262
@@ -329,12 +330,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
         menu(214, "需求删除", 202, 3, "", "", "F", "hr:requisition:delete", "#", "");
         menu(265, "需求操作日志", 202, 4, "", "", "F", "hr:requisition:log", "#", "仅招聘管理员可查看招聘需求CUD日志");
         menu(266, "月度任务要求", 202, 5, "", "", "F", "hr:requisition:task", "#", "按岗位按月配置P0/P1任务要求，仅招聘管理员");
-        menu(215, "人才入库", 203, 3, "", "", "F", "hr:application:add", "#", "");
-        menu(216, "人才编辑", 203, 4, "", "", "F", "hr:application:edit", "#", "");
-        menu(217, "人才删除", 203, 5, "", "", "F", "hr:application:delete", "#", "");
+        menu(215, "候选人新增", 203, 3, "", "", "F", "hr:application:add", "#", "");
+        menu(216, "候选人修改", 203, 4, "", "", "F", "hr:application:edit", "#", "");
+        menu(217, "候选人删除", 203, 5, "", "", "F", "hr:application:delete", "#", "");
         menu(267, "调整阶段", 203, 6, "", "", "F", "hr:application:stage", "#", "填写原因和业务日期后改阶段");
         menu(268, "阶段调整记录", 203, 7, "", "", "F", "hr:application:stage-log", "#", "查看阶段调整的操作人和时间");
-        menu(270, "移入黑名单", 203, 8, "", "", "F", "hr:blacklist:in", "#", "人才库批量移入黑名单，原因和备注必填");
+        menu(270, "移入黑名单", 203, 8, "", "", "F", "hr:blacklist:in", "#", "候选人批量移入黑名单，原因和备注必填");
         menu(271, "移出黑名单", 269, 1, "", "", "F", "hr:blacklist:out", "#", "移回正常人才库，原因和备注必填");
         menu(272, "黑名单记录", 269, 2, "", "", "F", "hr:blacklist:log", "#", "查看移入移出记录");
         menu(223, "邀约修改", 220, 1, "", "", "F", "hr:invite:edit", "#", "");
@@ -351,26 +352,31 @@ public class HrSchemaMigrator implements ApplicationRunner {
     private void seedHrRoleMenusOnce() {
         Long admin = roleIdOrNull("admin");
         if (admin != null) {
-            SysRbacSeedSupport.bootstrapRoleMenusIfNeverBound(jdbc, admin, 200, 201, 202, 203, 204, 205, 206, 207,
+            SysRbacSeedSupport.bootstrapRoleMenusIfNeverBound(jdbc, admin, 200, 201, 202, 203, 273, 204, 205, 206, 207,
                     208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225,
                     226, 227, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246,
                     247, 248, 249, 261, 262, 265, 266, 267, 268, 269, 270, 271, 272);
         }
-        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_admin", 200, 201, 202, 203, 204, 205, 206,
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_admin", 200, 201, 202, 203, 273, 204, 205, 206,
                 207, 208, 209, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 230,
                 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 261,
                 262, 265, 266, 267, 268, 269, 270, 271, 272);
-        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_owner", 200, 201, 202, 203, 210, 218, 219,
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_owner", 200, 201, 202, 203, 273, 210, 218, 219,
                 220, 221, 222, 205, 225, 232, 234, 235, 236, 237, 239, 241, 243, 245, 247, 249, 261, 262);
-        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_exec", 200, 201, 203, 207, 209, 218, 219,
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_exec", 200, 201, 203, 273, 207, 209, 218, 219,
                 220, 221, 232, 234, 235, 237, 238, 239, 241, 243, 245, 247, 249, 261, 262);
         SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_user", 200, 201, 209, 234, 235, 237, 249);
-        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_interviewer", 200, 201, 203, 211, 220, 221,
+        SysRbacSeedSupport.bootstrapRoleMenusIfNeverBoundByKey(jdbc, "hr_interviewer", 200, 201, 203, 273, 211, 220, 221,
                 222, 225, 232, 234, 235, 249, 261);
     }
 
     /** 新发版 HR 菜单：只补缺绑定，不恢复运营已取消的权限。 */
     private void linkHrNewMenuBindings() {
+        jdbc.update("""
+                INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
+                SELECT role_id, 273, 1 FROM sys_role_menu
+                WHERE menu_id = 203 AND IFNULL(is_active, 1) = 1
+                """);
         int[] adminAndHrAdmin = {265, 266, 267, 268, 269, 270, 271, 272};
         SysRbacSeedSupport.linkRoleMenusIfAbsentByKey(jdbc, "admin", adminAndHrAdmin);
         SysRbacSeedSupport.linkRoleMenusIfAbsentByKey(jdbc, "hr_admin", adminAndHrAdmin);
@@ -711,7 +717,7 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 """);
     }
 
-    /** 人才库：档案补全、跟进备注。菜单名只在仍是旧「候选人」时改，避免盖掉手工改过的名称。 */
+    /** 人才库字段与跟进备注。203 若曾被改成「人才库」，改回「候选人」；人才库页面是 273。 */
     private void ensureTalentPool() {
         addColumnIfMissing("hr_candidate", "city",
                 "ALTER TABLE hr_candidate ADD COLUMN city VARCHAR(64) NULL COMMENT '城市' AFTER current_company");
@@ -752,12 +758,12 @@ public class HrSchemaMigrator implements ApplicationRunner {
                 WHERE c.is_active = 1
                 """);
         jdbc.update("""
-                UPDATE sys_menu SET menu_name = '人才库', remark = '按人归档，可先入库再推荐到岗位'
-                WHERE menu_id = 203 AND menu_name = '候选人'
+                UPDATE sys_menu SET menu_name = '候选人', remark = '流程中的投递'
+                WHERE menu_id = 203 AND menu_name = '人才库'
                 """);
-        jdbc.update("UPDATE sys_menu SET menu_name = '人才入库' WHERE menu_id = 215 AND menu_name = '候选人新增'");
-        jdbc.update("UPDATE sys_menu SET menu_name = '人才编辑' WHERE menu_id = 216 AND menu_name = '候选人修改'");
-        jdbc.update("UPDATE sys_menu SET menu_name = '人才删除' WHERE menu_id = 217 AND menu_name = '候选人删除'");
+        jdbc.update("UPDATE sys_menu SET menu_name = '候选人新增' WHERE menu_id = 215 AND menu_name = '人才入库'");
+        jdbc.update("UPDATE sys_menu SET menu_name = '候选人修改' WHERE menu_id = 216 AND menu_name = '人才编辑'");
+        jdbc.update("UPDATE sys_menu SET menu_name = '候选人删除' WHERE menu_id = 217 AND menu_name = '人才删除'");
     }
 
     /** 原地点 SH/XJ 对应到工作地址：优先精确名，其次名称包含上海/新疆；新疆若缺失则补一条城市级地址 */

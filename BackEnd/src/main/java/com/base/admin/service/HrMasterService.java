@@ -1095,6 +1095,9 @@ public class HrMasterService {
             sql.append(" AND a.requisition_id = ? ");
             args.add(q.getRequisitionId());
         }
+        if (Boolean.TRUE.equals(q.getPipelineOnly())) {
+            sql.append(" AND a.requisition_id IS NOT NULL AND IFNULL(s.terminal, 0) = 0 ");
+        }
         HrOwnerFilters.append(sql, args, "r", q.getOwnerUserId(), q.getOwnerUserIds());
         dataScope.apply(sql, args, "r", "a");
         sql.append(" ORDER BY a.submitted_at DESC, a.id DESC");

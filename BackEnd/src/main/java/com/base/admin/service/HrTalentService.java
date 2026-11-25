@@ -72,7 +72,7 @@ public class HrTalentService {
         where.append(HrTalentBlacklistMatch.notActiveSql("c"));
         appendScope(where, args);
         appendFilters(where, args, q);
-        String poolFilter = poolStatusOf(q.getPoolStatus());
+        List<String> poolFilters = resolvePoolFilters(q);
         String from = """
                 FROM (
                   SELECT c.id candidate_id, c.display_name, c.phone, c.email, c.gender, c.age, c.education,
@@ -103,22 +103,21 @@ public class HrTalentService {
                   %s
                 ) t
                 """.formatted(POOL_STATUS_SQL, where);
-        List<Object> countArgs = new ArrayList<>(args);
-        String countSql = "SELECT COUNT(1) " + from + (poolFilter == null ? "" : " WHERE t.pool_status = ? ");
-        if (poolFilter != null) {
-            countArgs.add(poolFilter);
+        String poolSql = "";
+        if (!poolFilters.isEmpty()) {
+            poolSql = " WHERE t.pool_status IN (" + String.join(",", poolFilters.stream().map(code -> "?").toList()) + ") ";
         }
+        List<Object> countArgs = new ArrayList<>(args);
+        countArgs.addAll(poolFilters);
+        String countSql = "SELECT COUNT(1) " + from + poolSql;
         Long total = jdbc.queryForObject(countSql, Long.class, countArgs.toArray());
         long size = total == null ? 0 : total;
         if (size == 0) {
             return new PageResult<>(0, List.of());
         }
         List<Object> pageArgs = new ArrayList<>(args);
-        String pageSql = "SELECT * " + from + (poolFilter == null ? "" : " WHERE t.pool_status = ? ")
-                + " ORDER BY t.candidate_id DESC LIMIT ? OFFSET ? ";
-        if (poolFilter != null) {
-            pageArgs.add(poolFilter);
-        }
+        pageArgs.addAll(poolFilters);
+        String pageSql = "SELECT * " + from + poolSql + " ORDER BY t.candidate_id DESC LIMIT ? OFFSET ? ";
         pageArgs.add(pageSize);
         pageArgs.add((pageNum - 1) * pageSize);
         List<HrTalentVO> rows = new ArrayList<>();
@@ -898,6 +897,23 @@ public class HrTalentService {
             }
         }
         return new Operator(userId, username, nickname);
+    }
+
+    private static List<String> resolvePoolFilters(HrTalentQueryDTO query) {
+        List<String> codes = new ArrayList<>();
+        if (query.getPoolStatuses() != null) {
+            for (String raw : query.getPoolStatuses()) {
+                String code = poolStatusOf(raw);
+                if (code != null && !codes.contains(code)) {
+                    codes.add(code);
+                }
+            }
+        }
+        if (!codes.isEmpty()) {
+            return codes;
+        }
+        String one = poolStatusOf(query.getPoolStatus());
+        return one == null ? List.of() : List.of(one);
     }
 
     private static String poolStatusOf(String raw) {

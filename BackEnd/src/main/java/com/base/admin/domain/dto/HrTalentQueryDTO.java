@@ -43,6 +43,9 @@ public class HrTalentQueryDTO {
     @Schema(description = "在库状态 POOL/IN_PROCESS/ONBOARDED/REACTIVATABLE")
     private String poolStatus;
 
+    @Schema(description = "多个在库状态，任一命中。人才库默认页传 POOL 与 REACTIVATABLE")
+    private List<String> poolStatuses;
+
     @Schema(description = "曾投递或当前流程中的岗位")
     private Long requisitionId;
 

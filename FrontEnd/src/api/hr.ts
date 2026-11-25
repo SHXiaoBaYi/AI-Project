@@ -44,6 +44,8 @@ export interface HrBoardQuery {
   roundNo?: number;
   interviewerUserId?: number;
   grain?: 'day' | 'week' | 'month' | 'year';
+  /** true 只看已挂岗且阶段未结束的投递 */
+  pipelineOnly?: boolean;
 }
 
 export interface HrFunnelNode {
